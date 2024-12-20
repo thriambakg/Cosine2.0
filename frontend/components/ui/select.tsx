@@ -1,10 +1,17 @@
-import React, { useState } from "react";
+import React, { useState, ReactNode } from "react";
 
-export function Select({ onValueChange, value, children }) {
+// Define types for the props
+interface SelectProps {
+  onValueChange: (value: string) => void; // Function to handle the value change
+  value: string | null; // The current value selected
+  children: (args: { isOpen: boolean; handleToggle: () => void; handleSelect: (value: string) => void; value: string | null }) => ReactNode; // Function that renders the dropdown UI
+}
+
+export function Select({ onValueChange, value, children }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const handleToggle = () => setIsOpen((prev) => !prev);
-  const handleSelect = (value) => {
+  const handleSelect = (value: string) => {
     onValueChange(value);  // Pass the selected value to the parent
     setIsOpen(false);       // Close the dropdown after selection
   };
@@ -16,7 +23,7 @@ export function Select({ onValueChange, value, children }) {
   );
 }
 
-export function SelectTrigger({ children, onClick }) {
+export function SelectTrigger({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
@@ -27,7 +34,7 @@ export function SelectTrigger({ children, onClick }) {
   );
 }
 
-export function SelectContent({ isOpen, children }) {
+export function SelectContent({ isOpen, children }: { isOpen: boolean; children: ReactNode }) {
   if (!isOpen) return null;
 
   return (
@@ -37,7 +44,7 @@ export function SelectContent({ isOpen, children }) {
   );
 }
 
-export function SelectItem({ value, children, onSelect }) {
+export function SelectItem({ value, children, onSelect }: { value: string; children: ReactNode; onSelect: (value: string) => void }) {
   return (
     <div
       onClick={() => onSelect(value)}
@@ -48,7 +55,7 @@ export function SelectItem({ value, children, onSelect }) {
   );
 }
 
-export function SelectValue({ children }) {
+export function SelectValue({ children }: { children: ReactNode }) {
   return (
     <span className="block p-2 text-gray-700">{children}</span>
   );

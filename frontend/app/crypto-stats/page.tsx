@@ -10,17 +10,34 @@ const CRYPTO_SYMBOLS = ['BTC', 'ETH', 'XRP', 'LTC', 'DOGE', 'ADA', 'SOL'];
 // Supported time frames
 const TIME_FRAME_MAPPING = { "6mo": 182, "1y": 365, "5y": 1825 };
 
+// Type for crypto stats
+interface CryptoStats {
+  current_price: number;
+  price_change_24h: number;
+  annual_return: number;
+  volatility: number;
+}
+
+// Type for Select dropdown properties
+interface SelectProps {
+  isOpen: boolean;
+  handleToggle: () => void;
+  handleSelect: (value: string) => void;
+  value: string | null;
+}
+
 export default function CryptoStats() {
   const [selectedCrypto, setSelectedCrypto] = useState<string | null>(null);
   const [timeFrame, setTimeFrame] = useState<string | null>(null);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<CryptoStats | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // Check if both selectedCrypto and timeFrame are valid
     if (!selectedCrypto || !timeFrame || !CRYPTO_SYMBOLS.includes(selectedCrypto)) return;
   
-    const period = TIME_FRAME_MAPPING[timeFrame];
+    // Type assertion to ensure timeFrame is a valid key of TIME_FRAME_MAPPING
+    const period = TIME_FRAME_MAPPING[timeFrame as keyof typeof TIME_FRAME_MAPPING];
   
     // If the timeFrame is invalid, return
     if (!period) return;
@@ -41,12 +58,13 @@ export default function CryptoStats() {
   
         const data = await response.json();
         if (response.ok) {
-          console.log("Fetched stats:", data);
+          setStats(data); // Update stats with the fetched data
         } else {
-          console.error("Error:", data.detail);
+          setError(data.detail || "Error fetching data");
         }
       } catch (error) {
         console.error("Error fetching crypto stats:", error);
+        setError("Error fetching data");
       }
     };
   
@@ -59,7 +77,7 @@ export default function CryptoStats() {
       <div className="flex space-x-4 mb-6">
         {/* Cryptocurrency Dropdown */}
         <Select onValueChange={setSelectedCrypto} value={selectedCrypto}>
-          {({ isOpen, handleToggle, handleSelect, value }) => (
+          {({ isOpen, handleToggle, handleSelect, value }: SelectProps) => (
             <>
               <SelectTrigger onClick={handleToggle}>
                 <SelectValue>{value || "Select Cryptocurrency"}</SelectValue>
@@ -77,7 +95,7 @@ export default function CryptoStats() {
 
         {/* Time Frame Dropdown */}
         <Select onValueChange={setTimeFrame} value={timeFrame}>
-          {({ isOpen, handleToggle, handleSelect, value }) => (
+          {({ isOpen, handleToggle, handleSelect, value }: SelectProps) => (
             <>
               <SelectTrigger onClick={handleToggle}>
                 <SelectValue>{value || "Select Time Frame"}</SelectValue>
@@ -145,5 +163,5 @@ export default function CryptoStats() {
         </div>
       )}
     </div>
-  )
+  );
 }
