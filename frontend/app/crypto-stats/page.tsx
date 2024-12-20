@@ -17,32 +17,40 @@ export default function CryptoStats() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedCrypto || !timeFrame) return;
-
+    // Check if both selectedCrypto and timeFrame are valid
+    if (!selectedCrypto || !timeFrame || !CRYPTO_SYMBOLS.includes(selectedCrypto)) return;
+  
+    const period = TIME_FRAME_MAPPING[timeFrame];
+  
+    // If the timeFrame is invalid, return
+    if (!period) return;
+  
     // Simulating API response
-    const fetchCryptoStats = async () => {
+    const fetchCryptoStats = async (symbol: string, period: number) => {
       try {
-        // Simulating an API request with a dummy response
-        const response = {
-          current_price: 30000, // Example current price
-          price_change_24h: 5.2, // Example 24h return
-          annual_return: 50, // Example annual return
-          volatility: 35, // Example volatility
-        };
-
-        if (!response) {
-          throw new Error('Failed to fetch crypto statistics');
+        const response = await fetch("http://127.0.0.1:8000/get_crypto_stats", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            selected_crypto_symbol: symbol,
+            period: period,
+          }),
+        });
+  
+        const data = await response.json();
+        if (response.ok) {
+          console.log("Fetched stats:", data);
+        } else {
+          console.error("Error:", data.detail);
         }
-
-        setStats(response);
-        setError(null);
-      } catch (err) {
-        setError(err.message);
-        setStats(null);
+      } catch (error) {
+        console.error("Error fetching crypto stats:", error);
       }
     };
-
-    fetchCryptoStats();
+  
+    fetchCryptoStats(selectedCrypto, period);
   }, [selectedCrypto, timeFrame]);
 
   return (
