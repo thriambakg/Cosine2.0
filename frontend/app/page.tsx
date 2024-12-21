@@ -1,60 +1,62 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function Home() {
   return (
     <div>
-      <h1 className="text-4xl font-bold mb-6">Investment Assistant Dashboard</h1>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <h1 className="text-4xl font-bold mb-8">Cosine - Your Interactive Investment Assistant</h1>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total Portfolio Value
-            </CardTitle>
+          <CardHeader>
+            <CardTitle>Stock Volatility</CardTitle>
+            <CardDescription>Fetch volatility for various stocks</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$45,231.89</div>
-            <p className="text-xs text-muted-foreground">
-              +20.1% from last month
-            </p>
+            <p>Access real-time stock volatility data.</p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Crypto Holdings
-            </CardTitle>
+          <CardHeader>
+            <CardTitle>Cryptocurrency Statistics</CardTitle>
+            <CardDescription>Get detailed crypto information</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$12,234.56</div>
-            <p className="text-xs text-muted-foreground">
-              +4.75% from last week
-            </p>
+            <p>View current prices, returns, and volatility for popular cryptocurrencies.</p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Stock Holdings
-            </CardTitle>
+          <CardHeader>
+            <CardTitle>Portfolio Risk Calculator</CardTitle>
+            <CardDescription>Analyze your investment portfolio</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$32,997.33</div>
-            <p className="text-xs text-muted-foreground">
-              +2.5% from yesterday
-            </p>
+            <p>Calculate risk metrics for your stock portfolio.</p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Active Alerts
-            </CardTitle>
+          <CardHeader>
+            <CardTitle>Stock Alerts</CardTitle>
+            <CardDescription>Set up price alerts for stocks</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">7</div>
-            <p className="text-xs text-muted-foreground">
-              3 triggered in the last 24h
-            </p>
+            <p>Receive notifications when stocks reach your target prices.</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Option Pricing</CardTitle>
+            <CardDescription>Black-Scholes option pricing calculator</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p>Calculate option prices using the Black-Scholes model.</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Heatmap Visualization</CardTitle>
+            <CardDescription>Visualize option prices</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p>Generate heatmaps for option prices based on stock price and volatility.</p>
           </CardContent>
         </Card>
       </div>

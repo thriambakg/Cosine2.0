@@ -1,4 +1,8 @@
-import { Home, TrendingUp, DollarSign, Bell, BarChart2 } from 'lucide-react'
+"use client"
+
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { BarChart, Clock, CreditCard, DollarSign, Home, LineChart, PieChart, Settings } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -9,101 +13,47 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar"
-import Link from "next/link"
+  SidebarRail,
+} from '@/components/ui/sidebar'
+
+const navItems = [
+  { title: 'Home', icon: Home, href: '/' },
+  { title: 'Stock Volatility', icon: LineChart, href: '/stock-volatility' },
+  { title: 'Crypto Stats', icon: CreditCard, href: '/crypto-stats' },
+  { title: 'Portfolio Risk', icon: PieChart, href: '/portfolio-risk' },
+  { title: 'Stock Alerts', icon: BarChart, href: '/stock-alerts' },
+  { title: 'Option Pricing', icon: DollarSign, href: '/option-pricing' },
+  { title: 'Heatmap', icon: Settings, href: '/heatmap' },
+]
 
 export function AppSidebar() {
+  const pathname = usePathname()
+
   return (
     <Sidebar>
       <SidebarHeader>
-        <h2 className="text-2xl font-bold p-6">Investment Assistant</h2>
+        <h2 className="text-2xl font-bold">Cosine</h2>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-lg font-bold px-4 py-2">General</SidebarGroupLabel>
+          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild className="px-4 text-sm text-[#b5b3b3]">
-                  <Link href="/">
-                    <Home className="mr-2 h-4 w-4 inline-block align-text-bottom" />
-                    <span>Dashboard</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-lg font-bold px-4 py-2">Crypto</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild className="px-4 text-sm text-[#b5b3b3]">
-                  <Link href="/crypto-stats">
-                    <TrendingUp className="mr-2 h-4 w-4 inline-block align-text-bottom" />
-                    <span>Crypto Statistics</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-lg font-bold px-4 py-2">Stock Trading</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild className="px-4 text-sm text-[#b5b3b3]">
-                  <Link href="/volatility-fetcher">
-                    <BarChart2 className="mr-2 h-4 w-4 inline-block align-text-bottom" />
-                    <span>Volatility Fetcher</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild className="px-4 text-sm text-[#b5b3b3]">
-                  <Link href="/portfolio-risk">
-                    <DollarSign className="mr-2 h-4 w-4 inline-block align-text-bottom" />
-                    <span>Portfolio Risk</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild className="px-4 text-sm text-[#b5b3b3]">
-                  <Link href="/stock-alerts">
-                    <Bell className="mr-2 h-4 w-4 inline-block align-text-bottom" />
-                    <span>Stock Alerts</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-lg font-bold px-4 py-2">Options</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild className="px-4 text-sm text-[#b5b3b3]">
-                  <Link href="/option-pricing">
-                    <BarChart2 className="mr-2 h-4 w-4 inline-block align-text-bottom" />
-                    <span>Option Pricing</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild className="px-4 text-sm text-[#b5b3b3]">
-                  <Link href="/option-heatmaps">
-                    <BarChart2 className="mr-2 h-4 w-4 inline-block align-text-bottom" />
-                    <span>Option Heatmaps</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {navItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton asChild isActive={pathname === item.href}>
+                    <Link href={item.href}>
+                      <item.icon className="mr-2 h-4 w-4" />
+                      {item.title}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarRail />
     </Sidebar>
   )
 }
