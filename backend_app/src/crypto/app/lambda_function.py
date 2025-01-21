@@ -2,7 +2,7 @@ import cryptocompare
 import pandas as pd
 import numpy as np
 from datetime import datetime
-
+#1
 def lambda_handler(selected_crypto_symbol, period=365):
     """
     Fetch cryptocurrency statistics without error handling except for exceptions.
