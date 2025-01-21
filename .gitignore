@@ -6,3 +6,40 @@ backend/src/__pycache__/
 
 # Ignore Streamlit configuration files
 backend/src/.streamlit/
+
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+frontend/app/node_modules
+frontend/app/.pnp
+frontend/app/.pnp.js
+frontend/app/.yarn/install-state.gz
+
+# testing
+frontend/app/coverage
+
+# next.js
+frontend/app/.next/
+frontend/app/out/
+
+# production
+frontend/app/build
+
+# misc
+frontend/app/.DS_Store
+frontend/app/*.pem
+
+# debug
+frontend/app/npm-debug.log*
+frontend/app/yarn-debug.log*
+frontend/app/yarn-error.log*
+
+# local env files
+frontend/app/.env*.local
+
+# vercel
+frontend/app/.vercel
+
+# typescript
+frontend/app/*.tsbuildinfo
+frontend/app/next-env.d.ts
