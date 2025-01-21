@@ -1,0 +1,8 @@
+# Ignore virtual environment directory
+.venv/
+
+# Ignore Python bytecode cache
+backend/src/__pycache__/
+
+# Ignore Streamlit configuration files
+backend/src/.streamlit/
