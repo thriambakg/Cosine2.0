@@ -1,0 +1,21 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+    commands:
+      - echo "Installing dependencies for the frontend..."
+      - cd frontend
+      - npm install
+
+  build:
+    commands:
+      - echo "Building the Next.js application..."
+      - npm run build
+
+artifacts:
+  files:
+    - frontend/.next/**  # Include all built files in the `.next` folder
+    - frontend/public/** # Include static assets in the `public` folder
+  base-directory: frontend
