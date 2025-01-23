@@ -8,9 +8,15 @@ import dynamic from "next/dynamic"
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false })
 
+interface HeatmapAxisData {
+  z: number[][]; // 2D array for heatmap values
+  x: number[];   // Array for x-axis values
+  y: number[];   // Array for y-axis values
+}
+
 interface HeatmapData {
-  call: any
-  put: any
+  call: HeatmapAxisData;
+  put: HeatmapAxisData;
 }
 
 export function Heatmap() {

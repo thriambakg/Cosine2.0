@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useTimeFrame } from "@/contexts/TimeFrameContext"
+// import { useTimeFrame } from "@/contexts/TimeFrameContext"
 
 const CRYPTO_SYMBOLS = ["BTC", "ETH", "XRP", "LTC", "DOGE", "ADA", "SOL"]
 
@@ -17,7 +17,7 @@ interface CryptoStats {
 export function CryptoStatsFetcher() {
   const [selectedCrypto, setSelectedCrypto] = useState<string>("BTC")
   const [stats, setStats] = useState<CryptoStats | null>(null)
-  const { timeFrame } = useTimeFrame()
+  // const { timeFrame } = useTimeFrame()
 
   const fetchCryptoStats = async () => {
     // TODO: Implement actual API call

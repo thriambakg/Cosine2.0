@@ -6,11 +6,11 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
-const STOCK_TICKERS = [
-  "AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "META", 
-  "NFLX", "NVDA", "SPY", "VTI", "MSCI", "BA", "GE", 
-  "INTC", "IBM", "DIS", "GS", "WMT", "JPM", "BABA"
-]
+// const STOCK_TICKERS = [
+//   "AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "META", 
+//   "NFLX", "NVDA", "SPY", "VTI", "MSCI", "BA", "GE", 
+//   "INTC", "IBM", "DIS", "GS", "WMT", "JPM", "BABA"
+// ]
 
 interface Alert {
   email: string

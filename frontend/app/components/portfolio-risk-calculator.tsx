@@ -41,7 +41,7 @@ export function PortfolioRiskCalculator() {
     setEntries(entries.filter((_, i) => i !== index))
   }
 
-  const updateEntry = (index: number, field: keyofPortfolioEntry, value: string | number) => {
+  const updateEntry = (index: number, field: keyof PortfolioEntry, value: string | number) => {
     const newEntries = [...entries]
     newEntries[index] = { ...newEntries[index], [field]: value }
     setEntries(newEntries)
