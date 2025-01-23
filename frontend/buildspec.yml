@@ -16,6 +16,5 @@ phases:
 
 artifacts:
   files:
-    - .next/**    # Include all built files in the `.next` folder
-    - public/**   # Include static assets in the `public` folder
+    - '**/*'   # Include all built files in the `.next` folder
   base-directory: frontend/app
