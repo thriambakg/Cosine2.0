@@ -16,5 +16,5 @@ phases:
 
 artifacts:
   files:
-    - '**/*'   # Include all built files in the `.next` folder
+    - '.next/*'   
   base-directory: frontend/app
