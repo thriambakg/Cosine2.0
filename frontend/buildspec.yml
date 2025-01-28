@@ -13,8 +13,10 @@ phases:
     commands:
       - echo "Building the Next.js application..."
       - npm run build
+      - echo "Exporting the Next.js application to static files..."
+      - npm run export
 
 artifacts:
   files:
-    - '.next/**/*'  
+    - 'out/**/*'  # The `next export` command generates files in the `out` directory by default
   base-directory: frontend/app
