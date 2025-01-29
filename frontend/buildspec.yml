@@ -14,7 +14,6 @@ phases:
       - echo "Building the Next.js application..."
       - npm run build
       - echo "Exporting the Next.js application to static files..."
-      - npx next export
 
 artifacts:
   files:
