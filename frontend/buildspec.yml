@@ -17,5 +17,5 @@ phases:
 
 artifacts:
   files:
-    - 'out/**/*'  # The `next export` command generates files in the `out` directory by default
+    - '*'  # The `next export` command generates files in the `out` directory by default
   base-directory: frontend/app
