@@ -22,4 +22,4 @@ phases:
           --stack-name lambda-stack \
           --template-file infra/cloudformation/lambda.yaml \
           --capabilities CAPABILITY_NAMED_IAM \
-          --parameter-overrides CodeBucket=lambda_cf LambdaCodeKey=lambda-code/getVolatility.zip
+          --parameter-overrides CodeBucket=lambda-cf LambdaCodeKey=lambda-code/getVolatility.zip
