@@ -1,7 +1,7 @@
 import yfinance as yf
 import numpy as np
 
-def fetch_volatility(ticker, period="1y"):
+def lambda_handler(ticker, period="1y"):
     """
     Fetch volatility (standard deviation of returns) for a stock using yfinance.
     """
