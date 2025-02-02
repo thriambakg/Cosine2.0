@@ -23,8 +23,13 @@ phases:
   post_build:
     commands:
       - echo "Deploying Lambda stack..."
-      - aws cloudformation deploy \
-          --stack-name lambda-stack \
-          --template-file infra/cloudformation/lambda.yaml \
-          --capabilities CAPABILITY_NAMED_IAM \
-          --parameter-overrides CodeBucket=lambda-cloudform LambdaCodeKey=lambda-code/getVolatility.zip
+      - echo "Current directory: $(pwd)"
+      - echo "Checking if template file exists..."
+      - ls -R infra/cloudformation/
+      - if [ -f "infra/cloudformation/lambda.yaml" ]; then
+          echo "Template file found, proceeding with deployment.";
+          aws cloudformation deploy --stack-name lambda-stack --template-file infra/cloudformation/lambda.yaml --capabilities CAPABILITY_NAMED_IAM --parameter-overrides CodeBucket=lambda-cloudform LambdaCodeKey=lambda-code/getVolatility.zip;
+        else
+          echo "ERROR: Template file 'infra/cloudformation/lambda.yaml' not found!";
+          exit 1;
+        fi
