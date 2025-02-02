@@ -8,7 +8,7 @@ phases:
     commands:
       - echo "Zipping Lambda function..."
       - mkdir -p /tmp/lambda-package
-      - cp -r backend/src/stocks/volatility_fetch/app/* /tmp/lambda-package/
+      - cp -r backend_app/src/stocks/volatility_fetch/app/* /tmp/lambda-package/
       - cd /tmp/lambda-package && zip -r /tmp/getVolatility.zip .
       - cd -
       - echo "Creating S3 bucket if it does not exist..."
