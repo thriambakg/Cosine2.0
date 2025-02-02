@@ -18,6 +18,6 @@ phases:
       - echo "Deploying Lambda stack..."
       - aws cloudformation deploy \
           --stack-name lambda-stack \
-          --template-file infrastructure/cloudformation/lambda.yaml \
+          --template-file infra/cloudformation/lambda.yaml \
           --capabilities CAPABILITY_NAMED_IAM \
           --parameter-overrides CodeBucket=lambda_cf LambdaCodeKey=lambda-code/getVolatility.zip
