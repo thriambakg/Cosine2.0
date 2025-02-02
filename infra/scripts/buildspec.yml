@@ -1,24 +1,23 @@
-version: 0.2
-
 phases:
   install:
     runtime-versions:
-      python: 3.10
-
+      python: 3.9
   build:
     commands:
       - echo "Zipping Lambda function..."
-      - cd backend_app/src/stocks/volatility_fetch/app/
-      - zip -r9 /tmp/getVolatility.zip lambda_function.py
+      - mkdir -p /tmp/lambda-package
+      - cp -r backend/src/stocks/volatility_fetch/app/* /tmp/lambda-package/
+      - cd /tmp/lambda-package && zip -r /tmp/getVolatility.zip .
+      - cd -
+      - echo "Creating S3 bucket if it does not exist..."
+      - aws s3api head-bucket --bucket lambda_cf || aws s3 mb s3://lambda_cf
       - echo "Uploading Lambda package to S3..."
       - aws s3 cp /tmp/getVolatility.zip s3://lambda_cf/lambda-code/getVolatility.zip
-      - echo "Deploying CloudFormation stack..."
-      - aws cloudformation deploy \
-          --stack-name lambda-stack \
-          --template-file infras/cloudformation/lambda.yaml \
-          --capabilities CAPABILITY_NAMED_IAM \
-          --parameter-overrides CodeBucket=your-deployment-bucket LambdaCodeKey=lambda-code/getVolatility.zip
-
   post_build:
     commands:
-      - echo "Deployment completed successfully."
+      - echo "Deploying Lambda stack..."
+      - aws cloudformation deploy \
+          --stack-name lambda-stack \
+          --template-file infrastructure/cloudformation/lambda.yaml \
+          --capabilities CAPABILITY_NAMED_IAM \
+          --parameter-overrides CodeBucket=lambda_cf LambdaCodeKey=lambda-code/getVolatility.zip
