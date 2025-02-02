@@ -1,0 +1,24 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.10
+
+  build:
+    commands:
+      - echo "Zipping Lambda function..."
+      - cd backend/src/stocks/volatility_fetch/app/
+      - zip -r9 /tmp/getVolatility.zip lambda_function.py
+      - echo "Uploading Lambda package to S3..."
+      - aws s3 cp /tmp/getVolatility.zip s3://your-deployment-bucket/lambda-code/getVolatility.zip
+      - echo "Deploying CloudFormation stack..."
+      - aws cloudformation deploy \
+          --stack-name lambda-stack \
+          --template-file infras/cloudformation/lambda.yaml \
+          --capabilities CAPABILITY_NAMED_IAM \
+          --parameter-overrides CodeBucket=your-deployment-bucket LambdaCodeKey=lambda-code/getVolatility.zip
+
+  post_build:
+    commands:
+      - echo "Deployment completed successfully."
