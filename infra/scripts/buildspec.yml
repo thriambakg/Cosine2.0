@@ -8,7 +8,7 @@ phases:
   build:
     commands:
       - echo "Zipping Lambda function..."
-      - cd backend/src/stocks/volatility_fetch/app/
+      - cd backend_app/src/stocks/volatility_fetch/app/
       - zip -r9 /tmp/getVolatility.zip lambda_function.py
       - echo "Uploading Lambda package to S3..."
       - aws s3 cp /tmp/getVolatility.zip s3://your-deployment-bucket/lambda-code/getVolatility.zip
