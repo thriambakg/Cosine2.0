@@ -11,8 +11,13 @@ phases:
       - cp -r backend_app/src/stocks/volatility_fetch/app/* /tmp/lambda-package/
       - cd /tmp/lambda-package && zip -r /tmp/getVolatility.zip .
       - cd -
-      - echo "Creating S3 bucket if it does not exist..."
-      - aws s3api head-bucket --bucket lambda-cloudform || aws s3 mb s3://lambda-cloudform
+      - echo "Checking if S3 bucket exists..."
+      - if ! aws s3api head-bucket --bucket lambda-cloudform 2>/dev/null; then
+          echo "Creating S3 bucket...";
+          aws s3 mb s3://lambda-cloudform;
+        else
+          echo "Bucket already exists, skipping creation.";
+        fi
       - echo "Uploading Lambda package to S3..."
       - aws s3 cp /tmp/getVolatility.zip s3://lambda-cloudform/lambda-code/getVolatility.zip
   post_build:
