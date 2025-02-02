@@ -18,4 +18,4 @@ phases:
 artifacts:
   files:
     - '**/*'  # The `next export` command generates files in the `out` directory by default
-  base-directory: frontend/app/out
+  base-directory: frontend/app/
