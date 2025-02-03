@@ -33,6 +33,7 @@ phases:
             --template-file infra/cloudformation/lambda.yaml \
             --capabilities CAPABILITY_NAMED_IAM \
             --parameter-overrides CodeBucket=lambda-cloudform LambdaCodeKey=lambda-code/getVolatility.zip
+            --debug
         else
           echo "ERROR: Template file 'infra/cloudformation/lambda.yaml' not found!"
           exit 1
