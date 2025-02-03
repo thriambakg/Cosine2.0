@@ -25,6 +25,7 @@ phases:
     commands:
       - echo "Deploying Lambda stack..."
       - ls -R infra/cloudformation/
+      - |
         if [ -f "infra/cloudformation/lambda.yaml" ]; then
           echo "Template file found, proceeding with deployment."
           aws cloudformation deploy \
