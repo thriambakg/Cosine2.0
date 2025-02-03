@@ -24,8 +24,6 @@ phases:
   post_build:
     commands:
       - echo "Deploying Lambda stack..."
-      - echo "Current directory: $(pwd)"
-      - echo "Checking if template file exists..."
       - ls -R infra/cloudformation/
       - |
         if [ -f "infra/cloudformation/lambda.yaml" ]; then
