@@ -4,13 +4,31 @@ phases:
   install:
     runtime-versions:
       python: 3.9
+    commands:
+      - echo "Installing dependencies..."
+      - pip install --quiet --upgrade pip
+      - pip install --quiet --upgrade cfn-lint
+      - cfn-lint --version
+
+  pre_build:
+    commands:
+      - echo "Checking AWS credentials..."
+      - aws --version
+      - aws sts get-caller-identity
+      - env
+
   build:
     commands:
+      - set -eux  # Enable debugging and exit on failure
+      - echo "Running Python syntax check..."
+      - python -m py_compile $(find backend_app/src -type f -name '*.py')
+
       - echo "Zipping Lambda function..."
       - mkdir -p /tmp/lambda-package
       - cp -r backend_app/src/stocks/volatility_fetch/app/* /tmp/lambda-package/
       - cd /tmp/lambda-package && zip -r /tmp/getVolatility.zip .
       - cd -
+
       - echo "Checking if S3 bucket exists..."
       - |
         if ! aws s3api head-bucket --bucket lambda-cloudform 2>/dev/null; then
@@ -19,12 +37,16 @@ phases:
         else
           echo "Bucket already exists, skipping creation."
         fi
+
       - echo "Uploading Lambda package to S3..."
       - aws s3 cp /tmp/getVolatility.zip s3://lambda-cloudform/lambda-code/getVolatility.zip
+
   post_build:
     commands:
+      - echo "Validating CloudFormation template..."
+      - cfn-lint infra/cloudformation/lambda.yaml || { echo "CloudFormation linting failed!"; exit 1; }
+
       - echo "Deploying Lambda stack..."
-      - ls -R infra/cloudformation/
       - |
         if [ -f "infra/cloudformation/lambda.yaml" ]; then
           echo "Template file found, proceeding with deployment."
@@ -32,8 +54,8 @@ phases:
             --stack-name lambda-stack \
             --template-file infra/cloudformation/lambda.yaml \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides CodeBucket=lambda-cloudform LambdaCodeKey=lambda-code/getVolatility.zip
-            --debug
+            --parameter-overrides CodeBucket=lambda-cloudform LambdaCodeKey=lambda-code/getVolatility.zip \
+            --no-fail-on-empty-changeset
         else
           echo "ERROR: Template file 'infra/cloudformation/lambda.yaml' not found!"
           exit 1
