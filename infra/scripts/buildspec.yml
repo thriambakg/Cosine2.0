@@ -47,10 +47,8 @@ phases:
       - cfn-lint infra/cloudformation/lambda.yaml || { echo "CloudFormation linting failed!"; exit 1; }
 
       - echo "Deploying Lambda stack..."
-      - chmod +r infra/cloudformation/lambda.yaml
-      - cat infra/cloudformation/lambda.yaml
       - |
-        if [ -f "infra/cloudformation/lambda.yaml" ]; then
+        if [ -f "$(realpath infra/cloudformation/lambda.yaml)" ]; then
           echo "Template file found, proceeding with deployment."
           aws cloudformation deploy \
             --stack-name lambda-stack \
