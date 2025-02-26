@@ -50,7 +50,7 @@ phases:
       - |
         if [ -f "$(realpath infra/cloudformation/lambda.yaml)" ]; then
           echo "Template file found, proceeding with deployment."
-          aws cloudformation create-stack --stack-name lambda-test-stack \
+          aws cloudformation create-stack --stack-name lambda-stack \
             --template-body infra/cloudformation/lambda.yaml \
             --disable-rollback
         else
