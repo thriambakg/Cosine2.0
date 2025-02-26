@@ -51,7 +51,7 @@ phases:
         if [ -f "$(realpath infra/cloudformation/lambda.yaml)" ]; then
           echo "Template file found, proceeding with deployment."
           aws cloudformation deploy \
-            --stack-name lambda-stack \
+            --stack-name lambda-stack-v2 \
             --template-file infra/cloudformation/lambda.yaml \
             --capabilities CAPABILITY_NAMED_IAM \
             --parameter-overrides CodeBucket=my-s3-bucket LambdaCodeKey=my-lambda.zip
