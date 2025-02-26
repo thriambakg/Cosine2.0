@@ -50,12 +50,8 @@ phases:
       - |
         if [ -f "$(realpath infra/cloudformation/lambda.yaml)" ]; then
           echo "Template file found, proceeding with deployment."
-          aws cloudformation deploy \
-            --stack-name lambda-stack \
-            --template-file infra/cloudformation/lambda.yaml \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides CodeBucket=lambda-cloudform LambdaCodeKey=lambda-code/getVolatility.zip \
-            --no-fail-on-empty-changeset
+          aws cloudformation create-stack --stack-name lambda-test-stack \
+            --template-body infra/cloudformation/lambda.yaml \
             --disable-rollback
         else
           echo "ERROR: Template file 'infra/cloudformation/lambda.yaml' not found!"
