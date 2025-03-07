@@ -1,61 +1,85 @@
+# version: 0.2
+
+# phases:
+#   install:
+#     runtime-versions:
+#       python: 3.9
+#     commands:
+#       - echo "Installing dependencies..."
+#       - pip install --quiet --upgrade pip
+#       - pip install --quiet --upgrade cfn-lint
+#       - cfn-lint --version
+
+#   pre_build:
+#     commands:
+#       - echo "Checking AWS credentials..."
+#       - aws --version
+#       - aws sts get-caller-identity
+#       - env
+
+#   build:
+#     commands:
+#       - set -eux  # Enable debugging and exit on failure
+#       - echo "Running Python syntax check..."
+#       - python -m py_compile $(find backend_app/src -type f -name '*.py')
+
+#       - echo "Zipping Lambda function..."
+#       - mkdir -p /tmp/lambda-package
+#       - cp -r backend_app/src/stocks/volatility_fetch/app/* /tmp/lambda-package/
+#       - cd /tmp/lambda-package && zip -r /tmp/getVolatility.zip .
+#       - cd -
+
+#       - echo "Checking if S3 bucket exists..."
+#       - |
+#         if ! aws s3api head-bucket --bucket lambda-cloudform 2>/dev/null; then
+#           echo "Creating S3 bucket..."
+#           aws s3 mb s3://lambda-cloudform
+#         else
+#           echo "Bucket already exists, skipping creation."
+#         fi
+
+#       - echo "Uploading Lambda package to S3..."
+#       - aws s3 cp /tmp/getVolatility.zip s3://lambda-cloudform/lambda-code/getVolatility.zip
+
+#   post_build:
+#     commands:
+#       - echo "Validating CloudFormation template..."
+#       - cfn-lint infra/cloudformation/lambda.yaml || { echo "CloudFormation linting failed!"; exit 1; }
+
+#       - echo "Deploying Lambda stack..."
+#       - |
+#         if [ -f "$(realpath infra/cloudformation/lambda.yaml)" ]; then
+#           echo "Template file found, proceeding with deployment."
+#           aws cloudformation deploy \
+#             --stack-name lambda-stack-v2 \
+#             --template-file infra/cloudformation/lambda.yaml \
+#             --capabilities CAPABILITY_NAMED_IAM \
+#             --parameter-overrides CodeBucket=my-s3-bucket LambdaCodeKey=my-lambda.zip
+#         else
+#           echo "ERROR: Template file 'infra/cloudformation/lambda.yaml' not found!"
+#           exit 1
+#         fi
 version: 0.2
 
 phases:
   install:
     runtime-versions:
-      python: 3.9
+      python: 3.10
     commands:
-      - echo "Installing dependencies..."
-      - pip install --quiet --upgrade pip
-      - pip install --quiet --upgrade cfn-lint
-      - cfn-lint --version
-
-  pre_build:
-    commands:
-      - echo "Checking AWS credentials..."
-      - aws --version
-      - aws sts get-caller-identity
-      - env
-
+      - echo Installing dependencies...
+      - pip install --upgrade awscli
+  
   build:
     commands:
-      - set -eux  # Enable debugging and exit on failure
-      - echo "Running Python syntax check..."
-      - python -m py_compile $(find backend_app/src -type f -name '*.py')
-
-      - echo "Zipping Lambda function..."
-      - mkdir -p /tmp/lambda-package
-      - cp -r backend_app/src/stocks/volatility_fetch/app/* /tmp/lambda-package/
-      - cd /tmp/lambda-package && zip -r /tmp/getVolatility.zip .
-      - cd -
-
-      - echo "Checking if S3 bucket exists..."
-      - |
-        if ! aws s3api head-bucket --bucket lambda-cloudform 2>/dev/null; then
-          echo "Creating S3 bucket..."
-          aws s3 mb s3://lambda-cloudform
-        else
-          echo "Bucket already exists, skipping creation."
-        fi
-
-      - echo "Uploading Lambda package to S3..."
-      - aws s3 cp /tmp/getVolatility.zip s3://lambda-cloudform/lambda-code/getVolatility.zip
-
+      - echo Packaging CloudFormation template...
+      - aws cloudformation package --template-file infra/cloudformation/lambda.yaml --s3-bucket $CODEPIPELINE_BUCKET --output-template-file infra/cloudformation/lambda.yaml
+  
   post_build:
     commands:
-      - echo "Validating CloudFormation template..."
-      - cfn-lint infra/cloudformation/lambda.yaml || { echo "CloudFormation linting failed!"; exit 1; }
+      - echo Deploying CloudFormation stack...
+      - aws cloudformation deploy --template-file infra/cloudformation/lambda.yaml --stack-name GetVolatilityStack --capabilities CAPABILITY_NAMED_IAM --parameter-overrides CodeBucket=my-s3-bucket LambdaCodeKey=lambda_package.zip
+      - echo Deployment completed successfully.
 
-      - echo "Deploying Lambda stack..."
-      - |
-        if [ -f "$(realpath infra/cloudformation/lambda.yaml)" ]; then
-          echo "Template file found, proceeding with deployment."
-          aws cloudformation deploy \
-            --stack-name lambda-stack-v2 \
-            --template-file infra/cloudformation/lambda.yaml \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides CodeBucket=my-s3-bucket LambdaCodeKey=my-lambda.zip
-        else
-          echo "ERROR: Template file 'infra/cloudformation/lambda.yaml' not found!"
-          exit 1
-        fi
+artifacts:
+  files:
+    - infra/cloudformation/lambda.yaml
