@@ -2,14 +2,20 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Deploys the GetVolatility Lambda function'
 
 Parameters:
-  CodeBucket:
-    Type: String
-    Description: 'S3 bucket where the Lambda deployment package is stored'
   LambdaCodeKey:
     Type: String
     Description: 'S3 key for the Lambda deployment package'
 
 Resources:
+  # S3 Bucket to store Lambda code
+  LambdaCodeBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: 'get-volatility-lambda-code-bucket'  # You can change this name to fit your requirements
+      VersioningConfiguration:
+        Status: Enabled  # Optional: Enable versioning for your S3 bucket
+
+  # Lambda Function
   GetVolatilityLambda:
     Type: 'AWS::Lambda::Function'
     Properties:
@@ -18,11 +24,12 @@ Resources:
       FunctionName: 'GetVolatilityFunction'
       Runtime: 'python3.10'  # Ensure this matches your runtime
       Code:
-        S3Bucket: !Ref CodeBucket
+        S3Bucket: !Ref LambdaCodeBucket
         S3Key: !Ref LambdaCodeKey
       MemorySize: 128
       Timeout: 5
 
+  # IAM Role for Lambda Execution
   LambdaExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -49,3 +56,7 @@ Outputs:
   LambdaFunctionArn:
     Description: 'ARN of the GetVolatility Lambda function'
     Value: !GetAtt GetVolatilityLambda.Arn
+
+  LambdaCodeBucketName:
+    Description: 'The name of the S3 bucket where Lambda code is stored'
+    Value: !Ref LambdaCodeBucket
