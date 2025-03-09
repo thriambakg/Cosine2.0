@@ -66,14 +66,15 @@ phases:
     runtime-versions:
       python: 3.10
     commands:
-      - echo Installing dependencies...
+      - echo "Installing dependencies..."
       - pip install --upgrade awscli
-  
+
   build:
     commands:
       - export LAMBDA_PACKAGE_PATH="lambda-code/getVolatility.zip"
+      - echo "Using S3 bucket: $CODEPIPELINE_BUCKET"
 
-      - echo Packaging CloudFormation template...
+      - echo "Packaging CloudFormation template..."
       - aws cloudformation package --template-file infra/cloudformation/lambda.yaml --s3-bucket $CODEPIPELINE_BUCKET --output-template-file infra/cloudformation/lambda.yaml
 
       - echo "Zipping Lambda function..."
@@ -82,15 +83,19 @@ phases:
       - cd /tmp/lambda-package && zip -r /tmp/getVolatility.zip .
       - cd -
 
+      - echo "Verifying ZIP file..."
+      - ls -lh /tmp/getVolatility.zip || { echo "Error: Lambda package not found!"; exit 1; }
+
       - echo "Uploading Lambda package to S3..."
-      - aws s3 cp /tmp/getVolatility.zip s3://$CODEPIPELINE_BUCKET/$LAMBDA_PACKAGE_PATH  # Upload Lambda package to the S3 bucket
+      - aws s3 cp /tmp/getVolatility.zip s3://$CODEPIPELINE_BUCKET/$LAMBDA_PACKAGE_PATH || { echo "Error: Failed to upload to S3!"; exit 1; }
 
   post_build:
     commands:
-      - echo Deploying CloudFormation stack...
+      - echo "Deploying CloudFormation stack..."
       - aws cloudformation deploy --template-file infra/cloudformation/lambda.yaml --stack-name GetVolatilityStack --capabilities CAPABILITY_NAMED_IAM --parameter-overrides LambdaCodeKey=$LAMBDA_PACKAGE_PATH
-      - echo Deployment completed successfully.
+      - echo "Deployment completed successfully."
 
 artifacts:
   files:
     - infra/cloudformation/lambda.yaml
+
