@@ -71,6 +71,8 @@ phases:
   
   build:
     commands:
+      - export LAMBDA_PACKAGE_PATH="lambda-code/getVolatility.zip"
+
       - echo Packaging CloudFormation template...
       - aws cloudformation package --template-file infra/cloudformation/lambda.yaml --s3-bucket $CODEPIPELINE_BUCKET --output-template-file infra/cloudformation/lambda.yaml
 
@@ -79,14 +81,14 @@ phases:
       - cp -r backend_app/src/stocks/volatility_fetch/app/* /tmp/lambda-package/
       - cd /tmp/lambda-package && zip -r /tmp/getVolatility.zip .
       - cd -
-  
-      - echo Uploading Lambda package to S3...
-      - aws s3 cp /tmp/getVolatility.zip s3://$CODEPIPELINE_BUCKET/lambda-code/getVolatility.zip  # Upload Lambda package to the S3 bucket
+
+      - echo "Uploading Lambda package to S3..."
+      - aws s3 cp /tmp/getVolatility.zip s3://$CODEPIPELINE_BUCKET/$LAMBDA_PACKAGE_PATH  # Upload Lambda package to the S3 bucket
 
   post_build:
     commands:
       - echo Deploying CloudFormation stack...
-      - aws cloudformation deploy --template-file infra/cloudformation/lambda.yaml --stack-name GetVolatilityStack --capabilities CAPABILITY_NAMED_IAM --parameter-overrides LambdaCodeKey=lambda_package.zip
+      - aws cloudformation deploy --template-file infra/cloudformation/lambda.yaml --stack-name GetVolatilityStack --capabilities CAPABILITY_NAMED_IAM --parameter-overrides LambdaCodeKey=$LAMBDA_PACKAGE_PATH
       - echo Deployment completed successfully.
 
 artifacts:
