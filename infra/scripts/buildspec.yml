@@ -79,6 +79,7 @@ phases:
       - cp -r backend_app/src/stocks/volatility_fetch/app/* /tmp/lambda-package/
       - cd /tmp/lambda-package && zip -r /tmp/getVolatility.zip .
       - cd -
+  
       - echo Uploading Lambda package to S3...
       - aws s3 cp /tmp/getVolatility.zip s3://$CODEPIPELINE_BUCKET/lambda-code/getVolatility.zip  # Upload Lambda package to the S3 bucket
 
