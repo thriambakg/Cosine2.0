@@ -19,7 +19,7 @@ def calculate_correlation(tickers, period="1y"):
     pd.DataFrame: A correlation matrix of stock returns.
     """
     # Fetch historical data for the given tickers
-    stock_data = yf.download(tickers, period=period)['Adj Close']
+    stock_data = yf.download(tickers, period=period)['Close']
     
     # Ensure that the data is not empty
     if stock_data.empty:
@@ -82,7 +82,7 @@ def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.05):
     
     # Download historical stock data
     try:
-        stock_data = yf.download(stock_tickers, period=period)['Adj Close']
+        stock_data = yf.download(stock_tickers, period=period)['Close']
         logger.info(f"Successfully downloaded data for {stock_tickers}")
     except Exception as e:
         logger.error(f"Error downloading stock data: {e}")
