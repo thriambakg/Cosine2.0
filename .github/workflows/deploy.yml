@@ -1,228 +1,73 @@
-name: Deploy to AWS
+name: Terraform CI/CD
 
 on:
   push:
-    branches: [main, develop]
+    branches:
+      - staging
   pull_request:
-    branches: [main]
-
-env:
-  AWS_REGION: us-east-1  # Change to your preferred region
-  NODE_VERSION: '18'
-  PYTHON_VERSION: '3.10'
+    branches:
+      - staging
 
 jobs:
-  # Lint and test code
-  test:
+  terraform:
+    name: 'Terraform Lint, Security Check, and Deploy'
     runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: 'us-east-1'
+      TF_VERSION: '1.4.0'
+      TFLINT_VERSION: '0.46.1'  # Updated to a more recent version
+      TFSEC_VERSION: '1.28.1'   # Updated to a more recent version
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - name: 'Checkout GitHub repository'
+      uses: actions/checkout@v2
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: 'frontend/app/package-lock.json'
-
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Install Python dependencies
-      run: |
-        pip install -r requirements.txt
-        pip install pytest flake8
-
-    - name: Install frontend dependencies
-      run: |
-        cd frontend/app
-        npm ci
-
-    - name: Lint Python code
-      run: flake8 backend_app/ --count --select=E9,F63,F7,F82 --show-source --statistics
-
-    - name: Run Python tests
-      run: |
-        cd local_dev/tests
-        python -m pytest test_simple.py -v
-
-    - name: Build frontend
-      run: |
-        cd frontend/app
-        npm run build
-
-  # Plan Terraform changes
-  terraform-plan:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'pull_request'
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.6.0
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
+    - name: 'Configure AWS credentials'
+      uses: aws-actions/configure-aws-credentials@v1
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
-    - name: Terraform Init
-      run: |
-        cd infra/environments/staging
-        terraform init
-
-    - name: Terraform Format Check
-      run: |
-        cd infra/environments/staging
-        terraform fmt -check
-
-    - name: Terraform Plan
-      run: |
-        cd infra/environments/staging
-        terraform plan -no-color
-      continue-on-error: true
-
-  # Deploy infrastructure and application
-  deploy:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
-    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
+    - name: 'Set up Terraform'
+      uses: hashicorp/setup-terraform@v1
       with:
-        terraform_version: 1.6.0
+        terraform_version: ${{ env.TF_VERSION }}
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: 'frontend/app/package-lock.json'
-
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    # Build application artifacts
-    - name: Build frontend
+    - name: 'Install TFLint'
       run: |
-        cd frontend/app
-        npm ci
-        npm run build
+        curl -sLo tflint.zip https://github.com/terraform-linters/tflint/releases/download/v${{ env.TFLINT_VERSION }}/tflint_linux_amd64.zip
+        unzip tflint.zip -d /usr/local/bin/
+        tflint --version
 
-    - name: Package Lambda functions
+    - name: 'Install tfsec'
       run: |
-        # Install Python dependencies for Lambda
-        pip install -r requirements.txt -t backend_app/src/
-        
-        # Create Lambda deployment packages
-        cd backend_app/src
-        zip -r ../../lambda-deployment.zip . -x "*.pyc" "*/__pycache__/*"
+        curl -sLo tfsec https://github.com/aquasecurity/tfsec/releases/download/v${{ env.TFSEC_VERSION }}/tfsec-linux-amd64
+        chmod +x tfsec
+        mv tfsec /usr/local/bin/
+        tfsec --version
 
-    # Deploy infrastructure
-    - name: Terraform Init
+    - name: 'Terraform Init'
+      run: terraform init
+
+    - name: 'Terraform Format'
+      run: terraform fmt
+
+    - name: 'Terraform Validate'
+      run: terraform validate
+
+    - name: 'TFLint'
       run: |
-        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-        terraform init
+        tflint --init
+        tflint
 
-    - name: Terraform Plan
-      run: |
-        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-        terraform plan
+    - name: 'tfsec'
+      run: tfsec .
 
-    - name: Terraform Apply
-      run: |
-        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-        terraform apply -auto-approve
+    - name: 'Terraform Plan'
+      run: terraform plan -out=tfplan
 
-    # Deploy application code
-    - name: Deploy Lambda functions
-      run: |
-        # Get Lambda function names from Terraform output
-        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-        LAMBDA_FUNCTIONS=$(terraform output -json lambda_function_names | jq -r '.[]')
-        
-        cd ../../../
-        for func in $LAMBDA_FUNCTIONS; do
-          echo "Updating Lambda function: $func"
-          aws lambda update-function-code \
-            --function-name $func \
-            --zip-file fileb://lambda-deployment.zip
-        done
-
-    - name: Deploy frontend to S3
-      run: |
-        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-        # Note: This step will be added when S3/CloudFront is implemented
-        echo "Frontend deployment placeholder - S3 bucket not yet implemented"
-        
-        # Example of what this will look like:
-        # S3_BUCKET=$(terraform output -raw frontend_bucket_name)
-        # CLOUDFRONT_ID=$(terraform output -raw cloudfront_distribution_id)
-        # 
-        # cd ../../../frontend/app
-        # aws s3 sync out/ s3://$S3_BUCKET --delete
-        # 
-        # # Invalidate CloudFront cache
-        # aws cloudfront create-invalidation \
-        #   --distribution-id $CLOUDFRONT_ID \
-        #   --paths "/*"
-
-    - name: Run post-deployment tests
-      run: |
-        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-        API_ENDPOINT=$(terraform output -raw api_gateway_url)
-        
-        # Test health endpoint (when implemented)
-        echo "API Endpoint: $API_ENDPOINT"
-        echo "✅ Deployment completed successfully"
-
-  # Cleanup on PR close
-  cleanup:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.6.0
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Cleanup preview environment
-      run: |
-        cd infra/environments/staging
-        terraform init
-        terraform destroy -auto-approve
-      continue-on-error: true
+    - name: 'Terraform Apply'
+      if: github.ref == 'refs/heads/main'
+      run: terraform apply -auto-approve tfplan
