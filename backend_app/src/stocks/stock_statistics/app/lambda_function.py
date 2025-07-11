@@ -2,7 +2,7 @@ import yfinance as yf
 import numpy as np
 import pandas as pd
 import logging
-import fetch_volatility as fv
+import volatility_fetcher as fv
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.05):
         # Calculate individual stock metrics
         stock_returns = returns[ticker]
         avg_annual_return = stock_returns.mean() * 252  # Annualized return
-        annual_volatility = fv(ticker, period=period)
+        annual_volatility = fv.fetch_volatility(ticker, period=period)
         
         # Calculate portfolio weight
         stock_value = shares * current_price
