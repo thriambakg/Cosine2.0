@@ -93,7 +93,7 @@ main branch (production)
 6. **Merge to `main`:**
    → Triggers deployment to production (with manual approval)
 
-### Manual Infrastructure Operations
+### Manual Infrastructure Operations TEstinut
 
 Use the Terraform workflow for manual operations:
 
@@ -178,12 +178,111 @@ If your setup is different, update the deploy workflow accordingly.
    - Ensure AWS credentials have necessary permissions
    - Check environment protection rules aren't blocking deployment
 
+### Troubleshooting: No Workflows Appearing
+
+If you don't see any workflow runs in the Actions tab:
+
+#### 1. **Verify Branch Triggers**
+Check that you're pushing to the correct branches:
+- `develop` branch → Triggers CI and Deploy workflows
+- `main` branch → Triggers CI and Deploy workflows  
+- `feature/*` → Triggers CI workflow only
+
+#### 2. **Ensure Workflows Are Committed**
+```bash
+# Check if workflow files are committed and pushed
+git status
+git ls-tree HEAD .github/workflows/
+
+# If not committed, add and push them
+git add .github/workflows/
+git commit -m "feat: add GitHub Actions workflows"
+git push origin develop
+```
+
+#### 3. **Force Trigger a Test**
+```bash
+# Make a small change to trigger workflows
+echo "# Test" >> README.md
+git add README.md  
+git commit -m "test: trigger workflows"
+git push origin develop
+```
+
+#### 4. **Check Repository Settings**
+- Go to Settings → Actions → General
+- Ensure "Allow all actions and reusable workflows" is selected
+- Verify Actions are enabled for your repository
+
+#### 5. **Manual Workflow Trigger**
+- Go to Actions tab → "Terraform Infrastructure"
+- Click "Run workflow" to manually trigger
+- This helps verify your setup is working
+
 ### Monitoring Deployments
 
 - **GitHub Actions logs:** Real-time deployment progress
 - **AWS CloudWatch:** Lambda function logs and metrics
 - **AWS S3:** Frontend deployment status
 - **AWS CloudFront:** CDN invalidation status
+
+## 📊 Monitoring Your Pipeline
+
+### Real-Time Progress Tracking
+
+After pushing to your repository, you can monitor your pipeline in several ways:
+
+#### 1. **GitHub Actions Tab** (Primary Method)
+1. Go to your repository on GitHub
+2. Click the **"Actions"** tab
+3. Find your latest workflow run (should be at the top)
+4. Click on the run to see:
+   - ✅ Live status of each job
+   - 📝 Real-time logs
+   - ⏱️ Step-by-step progress
+   - 🔍 Detailed error messages if any fail
+
+#### 2. **Repository Homepage Status**
+- Look for status indicators next to your latest commit:
+  - 🟡 **Yellow dot** = Currently running
+  - ✅ **Green checkmark** = Successfully completed
+  - ❌ **Red X** = Failed
+  - 🔵 **Blue dot** = Pending/queued
+
+#### 3. **Branch Status**
+- On your branch page, you'll see workflow status
+- Click the status to jump to the workflow details
+
+### Setting Up Notifications
+
+Configure notifications to get alerts when workflows complete:
+
+1. **GitHub Notifications:**
+   - Go to Settings → Notifications
+   - Enable "Actions" under "Participating and @mentions"
+
+2. **Email Notifications:**
+   - Automatically sent for failed workflows
+   - Can be configured for successful ones too
+
+3. **Slack Integration** (Optional):
+   ```yaml
+   # Add to your workflow file
+   - name: Slack Notification
+     if: always()
+     uses: 8398a7/action-slack@v3
+     with:
+       status: ${{ job.status }}
+       webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+   ```
+
+### What to Look For
+
+When monitoring your pipeline:
+- **Environment Detection**: Verify it's deploying to the correct environment (staging/production)
+- **Terraform Steps**: Watch for plan/apply success
+- **Build Steps**: Frontend build and Lambda packaging
+- **Deployment Steps**: Infrastructure updates and code deployment
 
 ## 📈 Next Steps
 
