@@ -56,28 +56,28 @@ jobs:
 
     - name: 'Terraform Format'
       run: |
-        cd ./${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        cd ./terraform
         terraform fmt
 
     - name: 'Terraform Validate'
       run: |
-        cd ./${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        cd ./terraform
         terraform validate
 
     - name: 'TFLint'
       run: |
-        cd ./${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        cd ./terraform
         tflint --init
         tflint
 
     - name: 'tfsec'
       run: |
-        cd ./${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        cd ./terraform
         tfsec .
 
     - name: 'Terraform Plan'
       run: |
-        cd ./${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        cd ./terraform
         terraform plan -out=tfplan
 
     - name: 'Terraform Apply'
