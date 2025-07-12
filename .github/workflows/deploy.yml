@@ -50,7 +50,8 @@ jobs:
 
     - name: 'Terraform Init'
       run: |
-        cd ./${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        ls
+        cd ./
         terraform init
 
     - name: 'Terraform Format'
