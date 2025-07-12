@@ -49,25 +49,38 @@ jobs:
         tfsec --version
 
     - name: 'Terraform Init'
-      run: terraform init
+      run: |
+        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        terraform init
 
     - name: 'Terraform Format'
-      run: terraform fmt
+      run: |
+        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        terraform fmt
 
     - name: 'Terraform Validate'
-      run: terraform validate
+      run: |
+        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        terraform validate
 
     - name: 'TFLint'
       run: |
+        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
         tflint --init
         tflint
 
     - name: 'tfsec'
-      run: tfsec .
+      run: |
+        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        tfsec .
 
     - name: 'Terraform Plan'
-      run: terraform plan -out=tfplan
+      run: |
+        cd infra/environments/${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        terraform plan -out=tfplan
 
     - name: 'Terraform Apply'
       if: github.ref == 'refs/heads/main'
-      run: terraform apply -auto-approve tfplan
+      run: |
+        cd infra/environments/production
+        terraform apply -auto-approve tfplan
