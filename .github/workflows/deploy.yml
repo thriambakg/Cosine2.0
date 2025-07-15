@@ -92,10 +92,10 @@ jobs:
     - name: 'Terraform Plan'
       run: |
         cd terraform
-        terraform plan -out=tfplan
+        terraform plan -input=false -var-file="terraform.tfvars" -out=tfplan
 
     - name: 'Terraform Apply'
       if: github.ref == 'refs/heads/staging'
       run: |
         cd terraform
-        terraform apply -auto-approve tfplan
+        terraform apply -input=false -auto-approve tfplan
