@@ -1,0 +1,254 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "TerraformStateManagement",
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListBucket",
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+                "s3:GetBucketLocation",
+                "s3:GetBucketVersioning",
+                "s3:PutBucketVersioning",
+                "s3:GetEncryptionConfiguration",
+                "s3:PutEncryptionConfiguration",
+                "s3:GetBucketPublicAccessBlock",
+                "s3:PutBucketPublicAccessBlock",
+                "s3:GetBucketTagging",
+                "s3:PutBucketTagging"
+            ],
+            "Resource": [
+                "arn:aws:s3:::cosine-terraform-state-bucket",
+                "arn:aws:s3:::cosine-terraform-state-bucket/*"
+            ]
+        },
+        {
+            "Sid": "TerraformStateLocking",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:DescribeTable",
+                "dynamodb:CreateTable",
+                "dynamodb:DeleteTable",
+                "dynamodb:UpdateTable",
+                "dynamodb:TagResource",
+                "dynamodb:UntagResource",
+                "dynamodb:ListTagsOfResource"
+            ],
+            "Resource": "arn:aws:dynamodb:*:*:table/cosine-terraform-locks"
+        },
+        {
+            "Sid": "KMSManagement",
+            "Effect": "Allow",
+            "Action": [
+                "kms:CreateKey",
+                "kms:DescribeKey",
+                "kms:GetKeyPolicy",
+                "kms:PutKeyPolicy",
+                "kms:EnableKeyRotation",
+                "kms:DisableKeyRotation",
+                "kms:GetKeyRotationStatus",
+                "kms:ScheduleKeyDeletion",
+                "kms:CancelKeyDeletion",
+                "kms:TagResource",
+                "kms:UntagResource",
+                "kms:ListResourceTags",
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:ReEncrypt*",
+                "kms:GenerateDataKey*",
+                "kms:CreateGrant",
+                "kms:RetireGrant",
+                "kms:RevokeGrant"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "LambdaManagement",
+            "Effect": "Allow",
+            "Action": [
+                "lambda:CreateFunction",
+                "lambda:DeleteFunction",
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration",
+                "lambda:UpdateFunctionCode",
+                "lambda:UpdateFunctionConfiguration",
+                "lambda:ListFunctions",
+                "lambda:ListTags",
+                "lambda:TagResource",
+                "lambda:UntagResource",
+                "lambda:AddPermission",
+                "lambda:RemovePermission",
+                "lambda:GetPolicy"
+            ],
+            "Resource": [
+                "arn:aws:lambda:*:*:function:cosine-*-staging",
+                "arn:aws:lambda:*:*:function:cosine-*-production"
+            ]
+        },
+        {
+            "Sid": "IAMRoleManagement",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:GetRole",
+                "iam:ListRolePolicies",
+                "iam:ListAttachedRolePolicies",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:PutRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:GetRolePolicy",
+                "iam:PassRole",
+                "iam:TagRole",
+                "iam:UntagRole",
+                "iam:ListInstanceProfilesForRole"
+            ],
+            "Resource": [
+                "arn:aws:iam::*:role/cosine-*-staging",
+                "arn:aws:iam::*:role/cosine-*-production"
+            ]
+        },
+        {
+            "Sid": "APIGatewayManagement",
+            "Effect": "Allow",
+            "Action": [
+                "apigateway:GET",
+                "apigateway:POST",
+                "apigateway:PUT",
+                "apigateway:DELETE",
+                "apigateway:PATCH"
+            ],
+            "Resource": [
+                "arn:aws:apigateway:*::/restapis",
+                "arn:aws:apigateway:*::/restapis/*"
+            ],
+            "Condition": {
+                "StringLike": {
+                    "aws:RequestedRegion": [
+                        "us-east-1",
+                        "us-west-2"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "CloudWatchLogsManagement",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:DeleteLogGroup",
+                "logs:DescribeLogGroups",
+                "logs:PutRetentionPolicy",
+                "logs:TagLogGroup",
+                "logs:UntagLogGroup"
+            ],
+            "Resource": [
+                "arn:aws:logs:*:*:log-group:/aws/lambda/cosine-*-staging",
+                "arn:aws:logs:*:*:log-group:/aws/lambda/cosine-*-production"
+            ]
+        },
+        {
+            "Sid": "S3FrontendDeployment",
+            "Effect": "Allow",
+            "Action": [
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+                "s3:GetBucketLocation",
+                "s3:GetBucketPolicy",
+                "s3:PutBucketPolicy",
+                "s3:DeleteBucketPolicy",
+                "s3:GetBucketWebsite",
+                "s3:PutBucketWebsite",
+                "s3:DeleteBucketWebsite",
+                "s3:GetBucketVersioning",
+                "s3:PutBucketVersioning",
+                "s3:GetBucketPublicAccessBlock",
+                "s3:PutBucketPublicAccessBlock",
+                "s3:GetBucketTagging",
+                "s3:PutBucketTagging",
+                "s3:GetEncryptionConfiguration",
+                "s3:PutEncryptionConfiguration",
+                "s3:GetBucketAcl",
+                "s3:PutBucketAcl",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::cosine-frontend-*-staging",
+                "arn:aws:s3:::cosine-frontend-*-production"
+            ]
+        },
+        {
+            "Sid": "S3FrontendObjects",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:GetObjectAcl",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": [
+                "arn:aws:s3:::cosine-frontend-*-staging/*",
+                "arn:aws:s3:::cosine-frontend-*-production/*"
+            ]
+        },
+        {
+            "Sid": "CloudFrontManagement",
+            "Effect": "Allow",
+            "Action": [
+                "cloudfront:CreateDistribution",
+                "cloudfront:GetDistribution",
+                "cloudfront:GetDistributionConfig",
+                "cloudfront:UpdateDistribution",
+                "cloudfront:DeleteDistribution",
+                "cloudfront:ListDistributions",
+                "cloudfront:CreateInvalidation",
+                "cloudfront:GetInvalidation",
+                "cloudfront:ListInvalidations",
+                "cloudfront:TagResource",
+                "cloudfront:UntagResource",
+                "cloudfront:ListTagsForResource"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringLike": {
+                    "aws:RequestTag/Project": "cosine*"
+                }
+            }
+        },
+        {
+            "Sid": "GeneralReadOnlyAccess",
+            "Effect": "Allow",
+            "Action": [
+                "sts:GetCallerIdentity",
+                "ec2:DescribeRegions",
+                "ec2:DescribeAvailabilityZones"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "TerraformPlanOnlyAccess",
+            "Effect": "Allow",
+            "Action": [
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "iam:ListPolicyVersions",
+                "lambda:ListVersionsByFunction",
+                "apigateway:GET",
+                "logs:DescribeLogStreams",
+                "s3:GetBucketCors",
+                "s3:GetBucketNotification",
+                "cloudfront:GetCloudFrontOriginAccessIdentity"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
