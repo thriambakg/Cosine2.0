@@ -63,10 +63,38 @@ jobs:
         rm -rf .terraform
         rm -f .terraform.lock.hcl
 
-    - name: 'Terraform Init'
+    - name: 'Bootstrap Backend Infrastructure (if needed)'
+      run: |
+        cd terraform/bootstrap
+        echo "🚀 Checking if backend infrastructure exists..."
+        
+        # Try to describe the S3 bucket
+        if aws s3api head-bucket --bucket cosine-terraform-state-bucket 2>/dev/null; then
+          echo "✅ Backend infrastructure already exists"
+        else
+          echo "📦 Creating backend infrastructure..."
+          terraform init
+          terraform plan
+          terraform apply -auto-approve
+          echo "✅ Backend infrastructure created successfully"
+        fi
+
+    - name: 'Terraform Init with Backend'
       run: |
         cd terraform
-        terraform init
+        # Initialize with environment-specific state file
+        echo "🔧 Initializing Terraform with remote backend..."
+        
+        # Check if we're migrating from local state
+        if [ -f terraform.tfstate ]; then
+          echo "📦 Local state file found - migrating to remote backend..."
+          terraform init -backend-config="key=environments/${{ github.ref_name }}/terraform.tfstate" -migrate-state -force-copy
+          # Remove local state file after migration
+          rm -f terraform.tfstate terraform.tfstate.backup
+        else
+          echo "🚀 Initializing with remote backend..."
+          terraform init -backend-config="key=environments/${{ github.ref_name }}/terraform.tfstate"
+        fi
 
     - name: 'Terraform Format'
       run: |
@@ -76,7 +104,13 @@ jobs:
     - name: 'Terraform Validate'
       run: |
         cd terraform
+        echo "🔍 Validating Terraform configuration..."
         terraform validate
+        echo "📋 Backend configuration info:"
+        echo "  Branch: ${{ github.ref_name }}"
+        echo "  State file: environments/${{ github.ref_name }}/terraform.tfstate"
+        echo "  S3 Bucket: cosine-terraform-state-bucket"
+        echo "  DynamoDB Table: cosine-terraform-locks"
 
     - name: 'TFLint'
       run: |
@@ -96,10 +130,17 @@ jobs:
         ls -la
         echo "Content of terraform.auto.tfvars:"
         cat terraform.auto.tfvars
+        echo "🔍 Current Terraform workspace:"
+        terraform workspace show
+        echo "📋 Planning infrastructure changes..."
         terraform plan -input=false -out=tfplan
 
     - name: 'Terraform Apply'
       if: github.ref == 'refs/heads/staging'
       run: |
         cd terraform
+        echo "🚀 Applying infrastructure changes..."
         terraform apply -input=false -auto-approve tfplan
+        echo "✅ Infrastructure deployment completed!"
+        echo "📊 Current state summary:"
+        terraform state list
