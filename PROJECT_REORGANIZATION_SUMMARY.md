@@ -140,6 +140,41 @@ python local_dev\tests\test_robinhood.py
 4. **Maintainability**: Changes to local dev don't affect production code
 5. **Documentation**: Self-contained documentation within local_dev/
 
+## ✅ UPDATED: Local Development File Cleanup (Latest)
+
+### Files Removed from Root Directory (Duplicates)
+- [x] ✅ **Removed**: `test_simple.py` (duplicate - kept in `local_dev/tests/`)
+- [x] ✅ **Removed**: `test_robinhood.py` (duplicate - kept in `local_dev/tests/`)
+- [x] ✅ **Removed**: `test_portfolio.py` (duplicate - kept in `local_dev/tests/`)
+- [x] ✅ **Removed**: `setup_simple.ps1` (duplicate - kept in `local_dev/scripts/`)
+- [x] ✅ **Removed**: `setup_frontend_simple.ps1` (duplicate - kept in `local_dev/scripts/`)
+- [x] ✅ **Removed**: `setup_full_local.ps1` (duplicate - kept in `local_dev/scripts/`)
+- [x] ✅ **Removed**: `start_local_dev.ps1` (duplicate - kept in `local_dev/scripts/`)
+- [x] ✅ **Removed**: `setup_local.ps1` (empty file)
+- [x] ✅ **Removed**: `LOCAL_DEVELOPMENT_GUIDE.md` (duplicate - kept more complete version in `local_dev/`)
+
+### Current Clean Root Directory Structure
+```
+Cosine2.0/
+├── .github/workflows/         # GitHub Actions
+├── backend_app/              # Production backend code
+├── frontend/                 # Production frontend code
+├── local_dev/               # 🎯 ALL local development files
+│   ├── backend/            # Local backend server
+│   ├── scripts/            # Setup scripts (.ps1 files)
+│   ├── tests/              # Test files (test_*.py)
+│   └── LOCAL_DEVELOPMENT_GUIDE.md
+├── terraform/               # Infrastructure as code
+├── *.md                    # Documentation files
+└── requirements.txt        # Production dependencies
+```
+
+### Benefits of Cleanup
+- ✅ **No more duplicates**: Single source of truth for each file
+- ✅ **Clear separation**: Production vs development files
+- ✅ **Easier maintenance**: All local dev tools in one place
+- ✅ **Cleaner repository**: Root directory only contains production/deployment code
+
 ## 📚 Next Steps
 
 1. **Use the new structure** for all local development
