@@ -92,7 +92,11 @@ jobs:
     - name: 'Terraform Plan'
       run: |
         cd terraform
-        terraform plan -input=false -var-file="terraform.tfvars" -out=tfplan
+        echo "Files in terraform directory:"
+        ls -la
+        echo "Content of terraform.tfvars:"
+        cat terraform.tfvars
+        terraform plan -input=false -out=tfplan
 
     - name: 'Terraform Apply'
       if: github.ref == 'refs/heads/staging'
