@@ -15,7 +15,7 @@ provider "aws" {
 
 #tfsec:ignore:aws-s3-enable-bucket-logging
 resource "aws_s3_bucket" "example" {
-  bucket = "my-tf-example-bucket-999"
+  bucket = "${var.project_name}-${var.test_root_bucket_name}-${var.bucketname}-${var.environment}"
 }
 
 resource "aws_s3_bucket_ownership_controls" "example" {
