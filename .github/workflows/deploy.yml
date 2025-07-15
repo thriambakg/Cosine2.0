@@ -48,40 +48,54 @@ jobs:
         mv tfsec /usr/local/bin/
         tfsec --version
 
+    - name: 'Debug Directory Structure'
+      run: |
+        echo "Current directory:"
+        pwd
+        echo "Repository structure:"
+        ls -la
+        echo "Terraform directory:"
+        ls -la terraform/
+
+    - name: 'Clean Terraform Cache'
+      run: |
+        cd terraform
+        rm -rf .terraform
+        rm -f .terraform.lock.hcl
+
     - name: 'Terraform Init'
       run: |
-        ls
-        cd ./
+        cd terraform
         terraform init
 
     - name: 'Terraform Format'
       run: |
-        cd ./terraform
+        cd terraform
         terraform fmt
 
     - name: 'Terraform Validate'
       run: |
-        cd ./terraform
+        cd terraform
         terraform validate
 
     - name: 'TFLint'
       run: |
-        cd ./terraform
+        cd terraform
         tflint --init
         tflint
 
     - name: 'tfsec'
       run: |
-        cd ./terraform
+        cd terraform
         tfsec .
 
     - name: 'Terraform Plan'
       run: |
-        cd ./terraform
+        cd terraform
         terraform plan -out=tfplan
 
     - name: 'Terraform Apply'
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/staging'
       run: |
-        cd ./production
+        cd terraform
         terraform apply -auto-approve tfplan
