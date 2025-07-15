@@ -94,8 +94,8 @@ jobs:
         cd terraform
         echo "Files in terraform directory:"
         ls -la
-        echo "Content of terraform.tfvars:"
-        cat terraform.tfvars
+        echo "Content of terraform.auto.tfvars:"
+        cat terraform.auto.tfvars
         terraform plan -input=false -out=tfplan
 
     - name: 'Terraform Apply'
