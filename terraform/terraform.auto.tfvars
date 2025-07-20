@@ -9,9 +9,6 @@ aws_region   = "us-east-1"
 enable_s3_bucket   = false
 enable_cloudfront  = false  # Disabled as requested
 
-# CloudFront configuration (for future use)
-cloudfront_aliases = []
-# acm_certificate_arn = "arn:aws:acm:us-east-1:ACCOUNT:certificate/CERTIFICATE_ID"
 
 # Common tags for all resources
 common_tags = {
