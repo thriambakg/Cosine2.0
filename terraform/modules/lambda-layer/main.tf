@@ -15,13 +15,12 @@ resource "aws_lambda_layer_version" "shared_dependencies" {
 resource "null_resource" "pip_install" {
   triggers = {
     requirements = filemd5("${path.module}/requirements.txt")
+    script      = filemd5("${path.module}/install-layer-deps.ps1")
   }
 
   provisioner "local-exec" {
-    command = <<EOF
-      mkdir -p ${path.module}/layer/python
-      pip install -r ${path.module}/requirements.txt -t ${path.module}/layer/python/
-    EOF
+    command     = "powershell -ExecutionPolicy Bypass -File \"${path.module}/install-layer-deps.ps1\" -ModulePath \"${path.module}\" -RequirementsFile \"${path.module}/requirements.txt\""
+    interpreter = ["cmd", "/C"]
   }
 }
 
