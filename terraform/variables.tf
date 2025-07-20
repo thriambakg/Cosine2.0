@@ -34,18 +34,6 @@ variable "enable_cloudfront" {
   default     = true
 }
 
-variable "cloudfront_aliases" {
-  description = "Custom domain aliases for CloudFront"
-  type        = list(string)
-  default     = []
-}
-
-variable "acm_certificate_arn" {
-  description = "ARN of ACM certificate for HTTPS"
-  type        = string
-  default     = null
-}
-
 variable "enable_s3_bucket" {
   description = "Whether to create S3 bucket for frontend"
   type        = bool
