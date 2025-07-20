@@ -36,73 +36,66 @@ resource "aws_kms_key" "main" {
   enable_key_rotation     = true
   deletion_window_in_days = 7
 
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableIAMUserPermissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowCloudWatchLogs"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-*"
+          }
+        }
+      }
+    ]
+  })
+
   tags = merge(var.common_tags, {
     Name = "${var.project_name}-kms-key-${var.environment}"
   })
 }
+
+# Data sources for account and region info
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 resource "aws_kms_alias" "main" {
   name          = "alias/${var.project_name}-${var.environment}"
   target_key_id = aws_kms_key.main.key_id
 }
 
-# S3 Bucket for Frontend (conditional)
-resource "aws_s3_bucket" "frontend" {
+# S3 Buckets Module (conditional)
+module "s3_buckets" {
   count  = var.enable_s3_bucket ? 1 : 0
-  bucket = local.bucket_name
-
-  tags = merge(var.common_tags, {
-    Name = local.bucket_name
-    Type = "frontend"
-  })
-}
-
-resource "aws_s3_bucket_ownership_controls" "frontend" {
-  count  = var.enable_s3_bucket ? 1 : 0
-  bucket = aws_s3_bucket.frontend[0].id
+  source = "./modules/s3"
   
-  rule {
-    object_ownership = "BucketOwnerPreferred"
-  }
-}
-
-resource "aws_s3_bucket_acl" "frontend" {
-  count      = var.enable_s3_bucket ? 1 : 0
-  depends_on = [aws_s3_bucket_ownership_controls.frontend]
-  bucket     = aws_s3_bucket.frontend[0].id
-  acl        = "private"
-}
-
-resource "aws_s3_bucket_public_access_block" "frontend" {
-  count  = var.enable_s3_bucket ? 1 : 0
-  bucket = aws_s3_bucket.frontend[0].id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_versioning" "frontend" {
-  count  = var.enable_s3_bucket ? 1 : 0
-  bucket = aws_s3_bucket.frontend[0].id
+  bucket_name       = local.bucket_name
+  kms_key_arn       = aws_kms_key.main.arn
+  enable_versioning = true
+  log_prefix        = "access-logs/"
   
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
-  count  = var.enable_s3_bucket ? 1 : 0
-  bucket = aws_s3_bucket.frontend[0].id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.main.arn
-      sse_algorithm     = "aws:kms"
-    }
-    bucket_key_enabled = true
-  }
+  tags = var.common_tags
 }
 
 # Lambda Layer for shared dependencies

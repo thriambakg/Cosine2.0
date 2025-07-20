@@ -63,11 +63,17 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
       {
         Effect = "Allow"
         Action = [
-          "logs:CreateLogGroup",
+          "logs:CreateLogGroup"
+        ]
+        Resource = "arn:aws:logs:*:*:log-group:/aws/lambda/${local.function_name}*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Resource = "arn:aws:logs:*:*:*"
+        Resource = "arn:aws:logs:*:*:log-group:/aws/lambda/${local.function_name}*:*"
       },
       {
         Effect = "Allow"
@@ -92,6 +98,7 @@ resource "aws_iam_role_policy_attachment" "additional_policies" {
 resource "aws_cloudwatch_log_group" "lambda_log_group" {
   name              = "/aws/lambda/${local.function_name}"
   retention_in_days = 14
+  kms_key_id        = var.kms_key_arn
 
   tags = merge(var.tags, {
     Name        = "${local.function_name}-logs"

@@ -4,17 +4,27 @@
 # S3 Bucket Outputs
 output "s3_bucket_name" {
   description = "Name of the S3 bucket"
-  value       = var.enable_s3_bucket ? aws_s3_bucket.frontend[0].bucket : null
+  value       = var.enable_s3_bucket ? module.s3_buckets[0].frontend_bucket_id : null
 }
 
 output "s3_bucket_arn" {
   description = "ARN of the S3 bucket"
-  value       = var.enable_s3_bucket ? aws_s3_bucket.frontend[0].arn : null
+  value       = var.enable_s3_bucket ? module.s3_buckets[0].frontend_bucket_arn : null
 }
 
 output "s3_bucket_domain_name" {
   description = "Domain name of the S3 bucket"
-  value       = var.enable_s3_bucket ? aws_s3_bucket.frontend[0].bucket_regional_domain_name : null
+  value       = var.enable_s3_bucket ? module.s3_buckets[0].frontend_bucket_regional_domain_name : null
+}
+
+output "s3_logs_bucket_name" {
+  description = "Name of the S3 logs bucket"
+  value       = var.enable_s3_bucket ? module.s3_buckets[0].logs_bucket_id : null
+}
+
+output "s3_logs_bucket_arn" {
+  description = "ARN of the S3 logs bucket"
+  value       = var.enable_s3_bucket ? module.s3_buckets[0].logs_bucket_arn : null
 }
 
 # KMS Outputs
