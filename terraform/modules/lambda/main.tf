@@ -16,12 +16,16 @@ resource "null_resource" "install_dependencies" {
   count = fileexists("${var.source_dir}/requirements.txt") ? 1 : 0
   
   triggers = {
-    source_hash    = data.archive_file.lambda_zip.output_sha
+    # Use source directory hash instead of archive hash to avoid circular dependency
+    source_files   = sha1(join("", [for f in fileset(var.source_dir, "**") : filesha1("${var.source_dir}/${f}")]))
     requirements   = filemd5("${var.source_dir}/requirements.txt")
   }
 
   provisioner "local-exec" {
     command = <<EOF
+      if (Test-Path "${path.module}/../../temp/${local.function_name}") { 
+        Remove-Item -Recurse -Force "${path.module}/../../temp/${local.function_name}" 
+      }
       New-Item -ItemType Directory -Force -Path "${path.module}/../../temp/${local.function_name}"
       Copy-Item -Recurse "${var.source_dir}/*" "${path.module}/../../temp/${local.function_name}/"
       if (Test-Path "${var.source_dir}/requirements.txt") {
