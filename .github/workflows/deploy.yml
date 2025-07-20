@@ -123,6 +123,65 @@ jobs:
         cd terraform
         tfsec .
 
+    - name: 'Handle Existing Resources'
+      run: |
+        cd terraform
+        echo "🔍 Checking for existing AWS resources..."
+        
+        # Function to check and import S3 bucket
+        check_and_import_bucket() {
+          local bucket_name="$1"
+          local resource_name="$2"
+          
+          echo "Checking bucket: $bucket_name"
+          if aws s3api head-bucket --bucket "$bucket_name" 2>/dev/null; then
+            echo "✅ Bucket $bucket_name exists"
+            if ! terraform state show "$resource_name" 2>/dev/null; then
+              echo "📦 Importing bucket $bucket_name into Terraform state..."
+              terraform import "$resource_name" "$bucket_name"
+              
+              # Import related bucket resources if they exist
+              echo "🔧 Importing related bucket configuration..."
+              
+              # Try to import bucket ACL (may fail if not set, that's ok)
+              terraform import "${resource_name/aws_s3_bucket/aws_s3_bucket_acl}" "$bucket_name" 2>/dev/null || echo "   ⚠️  No custom ACL to import"
+              
+              # Try to import bucket versioning
+              terraform import "${resource_name/aws_s3_bucket/aws_s3_bucket_versioning}" "$bucket_name" 2>/dev/null || echo "   ⚠️  No versioning config to import"
+              
+              # Try to import bucket encryption
+              terraform import "${resource_name/aws_s3_bucket/aws_s3_bucket_server_side_encryption_configuration}" "$bucket_name" 2>/dev/null || echo "   ⚠️  No encryption config to import"
+              
+              # Try to import bucket public access block
+              terraform import "${resource_name/aws_s3_bucket/aws_s3_bucket_public_access_block}" "$bucket_name" 2>/dev/null || echo "   ⚠️  No public access block to import"
+              
+              # Try to import bucket ownership controls
+              terraform import "${resource_name/aws_s3_bucket/aws_s3_bucket_ownership_controls}" "$bucket_name" 2>/dev/null || echo "   ⚠️  No ownership controls to import"
+              
+              echo "✅ Import completed for $bucket_name"
+            else
+              echo "✅ Bucket $bucket_name already managed by Terraform"
+            fi
+          else
+            echo "ℹ️  Bucket $bucket_name does not exist - will be created"
+          fi
+        }
+        
+        # Get the expected bucket name from variables
+        PROJECT_NAME=$(grep 'project_name' terraform.auto.tfvars | cut -d'"' -f2)
+        TEST_ROOT_BUCKET_NAME=$(grep 'test_root_bucket_name' terraform.auto.tfvars | cut -d'"' -f2)
+        ENVIRONMENT=$(grep 'environment' terraform.auto.tfvars | cut -d'"' -f2)
+        BUCKETNAME=$(grep 'bucketname' terraform.auto.tfvars | cut -d'"' -f2)
+        
+        EXPECTED_BUCKET_NAME="${PROJECT_NAME}-${TEST_ROOT_BUCKET_NAME}-${BUCKETNAME}-${ENVIRONMENT}"
+        
+        echo "📋 Expected bucket name: $EXPECTED_BUCKET_NAME"
+        
+        # Check and import the main S3 bucket
+        check_and_import_bucket "$EXPECTED_BUCKET_NAME" "aws_s3_bucket.example"
+        
+        echo "🎯 Resource check completed!"
+
     - name: 'Terraform Plan'
       run: |
         cd terraform
