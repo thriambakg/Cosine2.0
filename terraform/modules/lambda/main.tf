@@ -7,6 +7,10 @@ locals {
   role_name     = "${var.project_name}-${var.function_name}-role-${var.environment}"
 }
 
+# Data sources for account and region info
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
 # Create ZIP file from source directory
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -65,7 +69,7 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
         Action = [
           "logs:CreateLogGroup"
         ]
-        Resource = "arn:aws:logs:*:*:log-group:/aws/lambda/${local.function_name}*"
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.function_name}"
       },
       {
         Effect = "Allow"
@@ -73,7 +77,7 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Resource = "arn:aws:logs:*:*:log-group:/aws/lambda/${local.function_name}*:*"
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.function_name}:*"
       },
       {
         Effect = "Allow"

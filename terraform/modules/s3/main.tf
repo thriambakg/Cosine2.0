@@ -98,6 +98,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
   }
 }
 
+resource "aws_s3_bucket_versioning" "logs" {
+  bucket = aws_s3_bucket.logs.id
+  
+  versioning_configuration {
+    status = var.enable_versioning ? "Enabled" : "Suspended"
+  }
+}
+
 # S3 Bucket Logging Configuration
 resource "aws_s3_bucket_logging" "frontend" {
   bucket = aws_s3_bucket.frontend.id

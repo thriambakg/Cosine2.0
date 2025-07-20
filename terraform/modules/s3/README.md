@@ -5,7 +5,7 @@ This module creates S3 buckets for frontend hosting and access logging with secu
 ## Features
 
 - Frontend S3 bucket with versioning and encryption
-- Dedicated access logs bucket
+- Dedicated access logs bucket with versioning and encryption
 - KMS encryption for all buckets
 - Public access blocking
 - Access logging configuration
@@ -52,6 +52,7 @@ module "s3_buckets" {
 | aws_s3_bucket_server_side_encryption_configuration.frontend | resource |
 | aws_s3_bucket_server_side_encryption_configuration.logs | resource |
 | aws_s3_bucket_versioning.frontend | resource |
+| aws_s3_bucket_versioning.logs | resource |
 
 ## Inputs
 
