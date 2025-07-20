@@ -1,9 +1,0 @@
-# Essential dependencies for stock volatility Lambda function
-# Using compatible versions that should work with both Python 3.11 and 3.12
-yfinance==0.2.28
-numpy
-requests
-beautifulsoup4
-lxml
-multitasking
-frozendict

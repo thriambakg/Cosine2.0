@@ -1,0 +1,4 @@
+# Lambda function dependencies
+yfinance
+numpy
+requests

@@ -55,15 +55,6 @@ output "stock_volatility_lambda" {
   }
 }
 
-# Lambda Layer Outputs
-output "shared_layer" {
-  description = "Information about the shared Lambda layer"
-  value = {
-    layer_arn     = module.shared_layer.layer_arn
-    layer_version = module.shared_layer.layer_version
-  }
-}
-
 # CloudFront Outputs (disabled)
 # output "cloudfront_distribution_id" {
 #   description = "ID of the CloudFront distribution"

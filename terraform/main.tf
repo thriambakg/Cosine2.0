@@ -98,14 +98,6 @@ module "s3_buckets" {
   tags = var.common_tags
 }
 
-# Lambda Layer for shared dependencies
-module "shared_layer" {
-  source = "./modules/lambda-layer"
-  
-  project_name = var.project_name
-  environment  = var.environment
-}
-
 # Stock Volatility Lambda Function
 module "stock_volatility_lambda" {
   source = "./modules/lambda"
@@ -122,12 +114,9 @@ module "stock_volatility_lambda" {
   }
   create_api_gateway_permission = true
   kms_key_arn                  = aws_kms_key.main.arn
-  layers                       = [module.shared_layer.layer_arn]
   project_name                 = var.project_name
   environment                  = var.environment
   
   tags = var.common_tags
-  
-  depends_on = [module.shared_layer]
 }
 

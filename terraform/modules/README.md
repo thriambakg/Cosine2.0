@@ -15,11 +15,6 @@ This directory contains reusable Terraform modules for the Cosine2.0 project.
 - X-Ray tracing support
 - API Gateway integration permissions
 
-### Lambda Layer Module (`./lambda-layer`)
-- Shared Lambda layer for Python dependencies
-- Automated pip installation and packaging
-- Supports yfinance, numpy, pandas, and other common libraries
-
 ### S3 Module (`./s3`)
 - Frontend S3 bucket with versioning and encryption
 - Dedicated access logs bucket

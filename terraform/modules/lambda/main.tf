@@ -11,11 +11,34 @@ locals {
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-# Create ZIP file from source directory
+# Install dependencies if requirements.txt exists
+resource "null_resource" "install_dependencies" {
+  count = fileexists("${var.source_dir}/requirements.txt") ? 1 : 0
+  
+  triggers = {
+    source_hash    = data.archive_file.lambda_zip.output_sha
+    requirements   = filemd5("${var.source_dir}/requirements.txt")
+  }
+
+  provisioner "local-exec" {
+    command = <<EOF
+      New-Item -ItemType Directory -Force -Path "${path.module}/../../temp/${local.function_name}"
+      Copy-Item -Recurse "${var.source_dir}/*" "${path.module}/../../temp/${local.function_name}/"
+      if (Test-Path "${var.source_dir}/requirements.txt") {
+        python -m pip install -r "${var.source_dir}/requirements.txt" -t "${path.module}/../../temp/${local.function_name}/" --upgrade
+      }
+    EOF
+    interpreter = ["powershell", "-Command"]
+  }
+}
+
+# Create ZIP file from source directory or temp directory with dependencies
 data "archive_file" "lambda_zip" {
   type        = "zip"
-  source_dir  = var.source_dir
+  source_dir  = fileexists("${var.source_dir}/requirements.txt") ? "${path.module}/../../temp/${local.function_name}" : var.source_dir
   output_path = "${path.module}/../../temp/${local.function_name}.zip"
+  
+  depends_on = [null_resource.install_dependencies]
 }
 
 # IAM role for Lambda execution
