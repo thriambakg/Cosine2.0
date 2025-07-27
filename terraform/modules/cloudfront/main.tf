@@ -3,7 +3,7 @@
 
 locals {
   distribution_name = "${var.project_name}-cloudfront-${var.environment}"
-  oac_name         = "${var.project_name}-oac-${var.environment}"
+  oac_name          = "${var.project_name}-oac-${var.environment}"
 }
 
 # Origin Access Control for S3
@@ -34,13 +34,13 @@ resource "aws_cloudfront_distribution" "distribution" {
 
   # Default Cache Behavior
   default_cache_behavior {
-    allowed_methods            = var.default_cache_behavior_settings.allowed_methods
-    cached_methods             = var.default_cache_behavior_settings.cached_methods
-    target_origin_id           = var.default_cache_behavior_settings.target_origin_id
-    compress                   = var.default_cache_behavior_settings.compress
-    viewer_protocol_policy     = var.default_cache_behavior_settings.viewer_protocol_policy
-    cache_policy_id           = aws_cloudfront_cache_policy.default.id
-    origin_request_policy_id  = aws_cloudfront_origin_request_policy.default.id
+    allowed_methods          = var.default_cache_behavior_settings.allowed_methods
+    cached_methods           = var.default_cache_behavior_settings.cached_methods
+    target_origin_id         = var.default_cache_behavior_settings.target_origin_id
+    compress                 = var.default_cache_behavior_settings.compress
+    viewer_protocol_policy   = var.default_cache_behavior_settings.viewer_protocol_policy
+    cache_policy_id          = aws_cloudfront_cache_policy.default.id
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.default.id
 
     min_ttl     = var.default_cache_behavior_settings.min_ttl
     default_ttl = var.default_cache_behavior_settings.default_ttl

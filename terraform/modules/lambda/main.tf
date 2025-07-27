@@ -21,7 +21,7 @@ data "archive_file" "lambda_zip" {
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_role" {
   name = local.role_name
-  
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -114,21 +114,21 @@ resource "aws_cloudwatch_log_group" "lambda_log_group" {
 
 # Lambda function
 resource "aws_lambda_function" "lambda" {
-  filename         = data.archive_file.lambda_zip.output_path
-  function_name    = local.function_name
-  role            = aws_iam_role.lambda_role.arn
-  handler         = var.handler
-  runtime         = var.runtime
-  description     = var.description
-  timeout         = var.timeout
-  memory_size     = var.memory_size
-  publish         = var.publish
-  layers          = var.layers
-  
+  filename      = data.archive_file.lambda_zip.output_path
+  function_name = local.function_name
+  role          = aws_iam_role.lambda_role.arn
+  handler       = var.handler
+  runtime       = var.runtime
+  description   = var.description
+  timeout       = var.timeout
+  memory_size   = var.memory_size
+  publish       = var.publish
+  layers        = var.layers
+
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  
+
   reserved_concurrent_executions = var.reserved_concurrent_executions != -1 ? var.reserved_concurrent_executions : null
-  kms_key_arn                   = var.kms_key_arn
+  kms_key_arn                    = var.kms_key_arn
 
   dynamic "environment" {
     for_each = length(var.environment_variables) > 0 ? [1] : []

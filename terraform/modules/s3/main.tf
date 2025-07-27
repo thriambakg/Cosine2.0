@@ -12,7 +12,7 @@ resource "aws_s3_bucket" "frontend" {
 
 resource "aws_s3_bucket_ownership_controls" "frontend" {
   bucket = aws_s3_bucket.frontend.id
-  
+
   rule {
     object_ownership = "BucketOwnerPreferred"
   }
@@ -35,7 +35,7 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
 
 resource "aws_s3_bucket_versioning" "frontend" {
   bucket = aws_s3_bucket.frontend.id
-  
+
   versioning_configuration {
     status = var.enable_versioning ? "Enabled" : "Suspended"
   }
@@ -65,7 +65,7 @@ resource "aws_s3_bucket" "logs" {
 
 resource "aws_s3_bucket_ownership_controls" "logs" {
   bucket = aws_s3_bucket.logs.id
-  
+
   rule {
     object_ownership = "BucketOwnerPreferred"
   }
@@ -100,7 +100,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
 
 resource "aws_s3_bucket_versioning" "logs" {
   bucket = aws_s3_bucket.logs.id
-  
+
   versioning_configuration {
     status = var.enable_versioning ? "Enabled" : "Suspended"
   }

@@ -1,6 +1,6 @@
 terraform {
   required_version = ">= 1.0"
-  
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -19,7 +19,7 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
-  
+
   default_tags {
     tags = var.common_tags
   }
@@ -89,34 +89,34 @@ resource "aws_kms_alias" "main" {
 module "s3_buckets" {
   count  = var.enable_s3_bucket ? 1 : 0
   source = "./modules/s3"
-  
+
   bucket_name       = local.bucket_name
   kms_key_arn       = aws_kms_key.main.arn
   enable_versioning = true
   log_prefix        = "access-logs/"
-  
+
   tags = var.common_tags
 }
 
 # Stock Volatility Lambda Function
 module "stock_volatility_lambda" {
   source = "./modules/lambda"
-  
-  function_name                 = "stock-volatility"
-  description                  = "Lambda function for stock volatility calculation using yfinance"
-  runtime                      = "python3.11"
-  handler                      = "lambda_function.lambda_handler"
-  source_dir                   = "../backend_app/src/stocks/volatility_fetch/app"
-  timeout                      = 60
-  memory_size                  = 512
-  environment_variables        = {
+
+  function_name = "stock-volatility"
+  description   = "Lambda function for stock volatility calculation using yfinance"
+  runtime       = "python3.11"
+  handler       = "lambda_function.lambda_handler"
+  source_dir    = "../backend_app/src/stocks/volatility_fetch/app"
+  timeout       = 60
+  memory_size   = 512
+  environment_variables = {
     ENVIRONMENT = var.environment
   }
   create_api_gateway_permission = true
-  kms_key_arn                  = aws_kms_key.main.arn
-  project_name                 = var.project_name
-  environment                  = var.environment
-  
+  kms_key_arn                   = aws_kms_key.main.arn
+  project_name                  = var.project_name
+  environment                   = var.environment
+
   tags = var.common_tags
 }
 
