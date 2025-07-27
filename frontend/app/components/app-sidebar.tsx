@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart, CreditCard, DollarSign, Home, LineChart, PieChart, Settings, Menu, Wallet } from "lucide-react";
+import { BarChart, CreditCard, DollarSign, Home, LineChart, PieChart, Settings, Menu, Wallet, MessageCircle } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
   { title: "Home", icon: Home, href: "/" },
+  { title: "AI Chat", icon: MessageCircle, href: "/chat" },
   { title: "Robinhood Connect", icon: Wallet, href: "/robinhood" },
   { title: "Stock Volatility", icon: LineChart, href: "/stock-volatility" },
   { title: "Crypto Stats", icon: CreditCard, href: "/crypto-stats" },
