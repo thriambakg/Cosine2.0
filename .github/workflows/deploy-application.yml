@@ -61,7 +61,7 @@ jobs:
   deploy-application:
     name: 'Deploy Application'
     needs: determine-environment
-    uses: .github/workflows/reusable/terraform-pipeline.yml
+    uses: .github/workflows/reusable/terraform-pipeline.yml@main
     with:
       terraform_directory: 'terraform'
       infrastructure_type: 'application'
