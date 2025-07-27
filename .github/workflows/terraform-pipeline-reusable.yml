@@ -80,7 +80,7 @@ jobs:
           echo "🔍 Checking base infrastructure dependencies..."
           
           BASE_INFRA_BUCKET="cosine-terraform-state-bucket"
-          BASE_INFRA_KEY="base-infra/${{ inputs.environment }}/terraform.tfstate"
+          BASE_INFRA_KEY="base-infrastructure/${{ inputs.environment }}/terraform.tfstate"
           
           if aws s3api head-object --bucket "$BASE_INFRA_BUCKET" --key "$BASE_INFRA_KEY" 2>/dev/null; then
             echo "✅ Base infrastructure state found for ${{ inputs.environment }}"
