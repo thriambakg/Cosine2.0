@@ -180,31 +180,23 @@ jobs:
           sarif_file: reports/checkov-results.sarif
         continue-on-error: true
       
-      - name: Handle Existing Resources
-        if: inputs.infrastructure_type == 'application'
+      - name: Validate Remote State Access
         run: |
-          echo "🔍 Checking for existing AWS resources..."
+          echo "🔍 Validating remote state access..."
           
-          # Function to check and import S3 bucket
-          check_and_import_bucket() {
-            local bucket_name="$1"
-            local resource_name="$2"
-            
-            echo "Checking bucket: $bucket_name"
-            if aws s3api head-bucket --bucket "$bucket_name" 2>/dev/null; then
-              echo "✅ Bucket $bucket_name exists"
-              if ! terraform state show "$resource_name" 2>/dev/null; then
-                echo "📦 Importing bucket $bucket_name into Terraform state..."
-                terraform import "$resource_name" "$bucket_name" || echo "⚠️ Import failed, resource may not exist in current configuration"
-              else
-                echo "✅ Bucket $bucket_name already managed by Terraform"
-              fi
-            else
-              echo "ℹ️ Bucket $bucket_name does not exist - will be created"
-            fi
-          }
+          # Check if we can access the remote state
+          terraform state list > /dev/null 2>&1 || echo "ℹ️ State is empty or this is first deployment"
           
-          echo "🎯 Resource check completed!"
+          # Log current state info for debugging
+          STATE_RESOURCES=$(terraform state list | wc -l)
+          echo "📊 Current state contains $STATE_RESOURCES resources"
+          
+          if [ $STATE_RESOURCES -gt 0 ]; then
+            echo "✅ Remote state accessible with existing resources"
+            terraform state list | head -10
+          else
+            echo "ℹ️ Empty state - proceeding with fresh deployment"
+          fi
       
       - name: Terraform Plan
         id: plan
@@ -223,20 +215,29 @@ jobs:
             echo "⚠️ No variable files found, using defaults"
           fi
           
-          # Execute plan
-          terraform plan $PLAN_ARGS -out="${{ inputs.environment }}.tfplan" -detailed-exitcode
-          
-          # Check if plan file exists and has changes
-          if [ -f "${{ inputs.environment }}.tfplan" ]; then
-            echo "tf-plan-exists=true" >> $GITHUB_OUTPUT
+          # Execute plan with detailed output
+          echo "🚀 Executing terraform plan..."
+          if terraform plan $PLAN_ARGS -out="${{ inputs.environment }}.tfplan" -detailed-exitcode; then
+            PLAN_EXIT_CODE=$?
+            echo "Plan completed with exit code: $PLAN_EXIT_CODE"
             
-            # Generate plan summary
-            PLAN_SUMMARY=$(terraform show -no-color ${{ inputs.environment }}.tfplan | head -50)
-            echo "plan-summary<<EOF" >> $GITHUB_OUTPUT
-            echo "$PLAN_SUMMARY" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            # Exit code 0 = no changes, 1 = error, 2 = changes present
+            if [ $PLAN_EXIT_CODE -eq 0 ]; then
+              echo "tf-plan-exists=false" >> $GITHUB_OUTPUT
+              echo "ℹ️ No changes detected in plan"
+            elif [ $PLAN_EXIT_CODE -eq 2 ]; then
+              echo "tf-plan-exists=true" >> $GITHUB_OUTPUT
+              echo "✅ Changes detected, plan file created"
+              
+              # Generate plan summary
+              PLAN_SUMMARY=$(terraform show -no-color ${{ inputs.environment }}.tfplan | head -50)
+              echo "plan-summary<<EOF" >> $GITHUB_OUTPUT
+              echo "$PLAN_SUMMARY" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "tf-plan-exists=false" >> $GITHUB_OUTPUT
+            echo "❌ Terraform plan failed"
+            exit 1
           fi
       
       - name: Upload Terraform Plan
@@ -295,12 +296,76 @@ jobs:
               -upgrade
           fi
       
+      - name: Handle Resource Conflicts
+        if: inputs.destroy != true
+        run: |
+          echo "🔍 Pre-flight check for potential resource conflicts..."
+          
+          # This step provides guidance for manual intervention if needed
+          echo "ℹ️ If the apply step fails due to existing resources, consider:"
+          echo "   1. Import existing resources: terraform import <resource_type.name> <resource_id>"
+          echo "   2. Use terraform import blocks in your configuration"
+          echo "   3. Check resource naming conflicts"
+          echo "   4. Verify AWS permissions and quotas"
+          echo ""
+          echo "📋 Common import commands for this infrastructure type:"
+          
+          if [ "${{ inputs.infrastructure_type }}" == "application" ]; then
+            echo "   # KMS Key:"
+            echo "   terraform import aws_kms_key.example 1234abcd-12ab-34cd-56ef-1234567890ab"
+            echo "   # KMS Alias:"
+            echo "   terraform import aws_kms_alias.example alias/example-alias"
+            echo "   # IAM Role:"
+            echo "   terraform import aws_iam_role.example role-name"
+            echo "   # CloudWatch Log Group:"
+            echo "   terraform import aws_cloudwatch_log_group.example log-group-name"
+            echo "   # S3 Bucket:"
+            echo "   terraform import aws_s3_bucket.example bucket-name"
+          elif [ "${{ inputs.infrastructure_type }}" == "base-infra" ]; then
+            echo "   # Cognito User Pool:"
+            echo "   terraform import aws_cognito_user_pool.example us-east-1_abcdefghi"
+            echo "   # Lambda Layer:"
+            echo "   terraform import aws_lambda_layer_version.example layer-name:1"
+          fi
+          
+          echo ""
+          echo "🎯 Proceeding with deployment..."
+      
       - name: Terraform Apply
         if: inputs.destroy != true
         run: |
-          terraform apply \
-            -auto-approve \
-            "${{ inputs.environment }}.tfplan"
+          echo "🚀 Applying infrastructure changes..."
+          
+          # Apply with enhanced error handling
+          if terraform apply -auto-approve "${{ inputs.environment }}.tfplan"; then
+            echo "✅ Terraform apply completed successfully"
+            
+            # Show final state summary
+            RESOURCE_COUNT=$(terraform state list | wc -l)
+            echo "📊 Infrastructure now manages $RESOURCE_COUNT resources"
+            
+            # List outputs if any exist
+            if terraform output > /dev/null 2>&1; then
+              echo "📋 Available outputs:"
+              terraform output
+            fi
+          else
+            echo "❌ Terraform apply failed"
+            
+            # Show state for debugging
+            echo "🔍 Current state resources:"
+            terraform state list || echo "No resources in state"
+            
+            # Check for common issues
+            echo "🔧 Checking for common deployment issues..."
+            echo "This may be due to:"
+            echo "  - Resource conflicts with existing AWS resources"
+            echo "  - Permission issues"
+            echo "  - Resource dependencies not met"
+            echo "  - Quota limits reached"
+            
+            exit 1
+          fi
       
       - name: Terraform Destroy
         if: inputs.destroy == true
@@ -318,9 +383,17 @@ jobs:
           terraform destroy $DESTROY_ARGS -auto-approve
       
       - name: Generate Deployment Summary
-        if: inputs.destroy != true
+        if: inputs.destroy != true && success()
         run: |
           echo "## 🚀 Deployment Complete - ${{ inputs.infrastructure_type }} (${{ inputs.environment }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Show state information
+          RESOURCE_COUNT=$(terraform state list | wc -l)
+          echo "### 📊 Remote State Information:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Resources Managed:** $RESOURCE_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **State Backend:** S3 Remote State" >> $GITHUB_STEP_SUMMARY
+          echo "- **State Key:** ${{ inputs.infrastructure_type }}/${{ inputs.environment }}/terraform.tfstate" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           # Infrastructure-specific outputs
@@ -360,11 +433,38 @@ jobs:
               echo "- **CloudFront Distribution ID:** $(terraform output -raw cloudfront_distribution_id)" >> $GITHUB_STEP_SUMMARY
             fi
           fi
-          
+      
+      - name: Generate Deployment Failure Summary
+        if: inputs.destroy != true && failure()
+        run: |
+          echo "## ❌ Deployment Failed - ${{ inputs.infrastructure_type }} (${{ inputs.environment }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📊 State Information:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Resources Managed:** $(terraform state list | wc -l)" >> $GITHUB_STEP_SUMMARY
-          echo "- **State Location:** ${{ inputs.infrastructure_type }}/${{ inputs.environment }}/terraform.tfstate" >> $GITHUB_STEP_SUMMARY
+          echo "### � Failure Analysis:" >> $GITHUB_STEP_SUMMARY
+          
+          # Show current state
+          RESOURCE_COUNT=$(terraform state list | wc -l || echo "0")
+          echo "- **Current State Resources:** $RESOURCE_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **State Backend:** S3 Remote State" >> $GITHUB_STEP_SUMMARY
+          echo "- **State Key:** ${{ inputs.infrastructure_type }}/${{ inputs.environment }}/terraform.tfstate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🛠️ Troubleshooting Steps:" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Check AWS Console** for existing resources that may conflict" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Review Terraform Plan** for resource naming conflicts" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Import Existing Resources** using terraform import commands" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Verify AWS Permissions** for the deployment role" >> $GITHUB_STEP_SUMMARY
+          echo "5. **Check Resource Quotas** in the target AWS region" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.infrastructure_type }}" == "application" ]; then
+            echo "### 📋 Common Import Commands:" >> $GITHUB_STEP_SUMMARY
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo "# For existing KMS resources:" >> $GITHUB_STEP_SUMMARY
+            echo "terraform import aws_kms_alias.example alias/your-alias-name" >> $GITHUB_STEP_SUMMARY
+            echo "terraform import aws_iam_role.example your-role-name" >> $GITHUB_STEP_SUMMARY
+            echo "terraform import aws_cloudwatch_log_group.example /aws/lambda/your-function" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
       
       - name: Generate Destroy Summary
         if: inputs.destroy == true
