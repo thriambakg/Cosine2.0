@@ -215,8 +215,6 @@ jobs:
           ls -la
           echo "🔍 DEBUG: Terraform state list (first 10 resources):"
           terraform state list | head -10 || echo "No state found"
-          echo "🔍 DEBUG: Backend configuration:"
-          cat backend.tf
           
           # Determine which variable files to use
           PLAN_ARGS="-var=environment=${{ inputs.environment }}"
@@ -234,40 +232,23 @@ jobs:
             echo "⚠️ No variable files found, using defaults"
           fi
           
-          # Execute plan with detailed exit code handling
+          # Execute plan (using simple logic like base infra)
           echo "🚀 Executing terraform plan with args: $PLAN_ARGS"
-          set +e  # Disable immediate exit on error
           terraform plan $PLAN_ARGS -out="${{ inputs.environment }}.tfplan" -detailed-exitcode
-          PLAN_EXIT_CODE=$?
-          set -e  # Re-enable immediate exit on error
           
-          echo "Plan completed with exit code: $PLAN_EXIT_CODE"
-          echo "🔍 DEBUG: Checking plan file existence:"
-          ls -la *.tfplan || echo "No plan files found"
-          
-          # Handle different exit codes
-          if [ $PLAN_EXIT_CODE -eq 0 ]; then
-            echo "tf-plan-exists=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ No changes detected in plan"
-            echo "🔍 DEBUG: Setting tf-plan-exists=false"
-          elif [ $PLAN_EXIT_CODE -eq 2 ]; then
+          # Check if plan file exists and has changes (matching base infra logic)
+          if [ -f "${{ inputs.environment }}.tfplan" ]; then
             echo "tf-plan-exists=true" >> $GITHUB_OUTPUT
-            echo "✅ Changes detected, plan file created"
-            echo "🔍 DEBUG: Setting tf-plan-exists=true"
+            echo "🔍 DEBUG: Setting tf-plan-exists=true (plan file exists)"
             
             # Generate plan summary
             PLAN_SUMMARY=$(terraform show -no-color ${{ inputs.environment }}.tfplan | head -50)
             echo "plan-summary<<EOF" >> $GITHUB_OUTPUT
             echo "$PLAN_SUMMARY" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
-          elif [ $PLAN_EXIT_CODE -eq 1 ]; then
-            echo "❌ Terraform plan failed with errors"
-            echo "🔍 DEBUG: Plan failed with exit code 1"
-            exit 1
           else
-            echo "⚠️ Unexpected exit code: $PLAN_EXIT_CODE"
-            echo "🔍 DEBUG: Unexpected exit code: $PLAN_EXIT_CODE"
-            exit 1
+            echo "tf-plan-exists=false" >> $GITHUB_OUTPUT
+            echo "🔍 DEBUG: Setting tf-plan-exists=false (no plan file)"
           fi
       
       - name: Upload Terraform Plan
