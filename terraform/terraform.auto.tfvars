@@ -17,4 +17,5 @@ common_tags = {
   Owner       = "team"
   ManagedBy   = "terraform"
   Repository  = "Cosine2.0"
+  LastUpdated = "2025-07-28T12:00:00Z"
 }

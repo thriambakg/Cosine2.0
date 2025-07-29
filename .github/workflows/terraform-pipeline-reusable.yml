@@ -24,6 +24,11 @@ on:
         required: false
         default: false
         type: boolean
+      force_apply:
+        description: 'Force terraform apply even if no changes detected'
+        required: false
+        default: false
+        type: boolean
       base_infra_dependency:
         description: 'Whether this requires base infrastructure to be deployed first'
         required: false
@@ -203,34 +208,52 @@ jobs:
         run: |
           echo "🔍 Planning infrastructure changes..."
           
+          # Debug: Show current state and environment
+          echo "🔍 DEBUG: Current working directory: $(pwd)"
+          echo "🔍 DEBUG: Environment: ${{ inputs.environment }}"
+          echo "🔍 DEBUG: Files in current directory:"
+          ls -la
+          echo "🔍 DEBUG: Terraform state list (first 10 resources):"
+          terraform state list | head -10 || echo "No state found"
+          echo "🔍 DEBUG: Backend configuration:"
+          cat backend.tf
+          
           # Determine which variable files to use
           PLAN_ARGS="-var=environment=${{ inputs.environment }}"
           
           if [ -f "terraform.auto.tfvars" ]; then
             echo "✅ Using terraform.auto.tfvars for variables"
+            echo "🔍 DEBUG: Content of terraform.auto.tfvars:"
+            cat terraform.auto.tfvars
           elif [ -f "environments/${{ inputs.environment }}.tfvars" ]; then
             echo "✅ Using environment-specific tfvars file"
             PLAN_ARGS="$PLAN_ARGS -var-file=environments/${{ inputs.environment }}.tfvars"
+            echo "🔍 DEBUG: Content of environments/${{ inputs.environment }}.tfvars:"
+            cat "environments/${{ inputs.environment }}.tfvars"
           else
             echo "⚠️ No variable files found, using defaults"
           fi
           
           # Execute plan with detailed exit code handling
-          echo "🚀 Executing terraform plan..."
+          echo "🚀 Executing terraform plan with args: $PLAN_ARGS"
           set +e  # Disable immediate exit on error
           terraform plan $PLAN_ARGS -out="${{ inputs.environment }}.tfplan" -detailed-exitcode
           PLAN_EXIT_CODE=$?
           set -e  # Re-enable immediate exit on error
           
           echo "Plan completed with exit code: $PLAN_EXIT_CODE"
+          echo "🔍 DEBUG: Checking plan file existence:"
+          ls -la *.tfplan || echo "No plan files found"
           
           # Handle different exit codes
           if [ $PLAN_EXIT_CODE -eq 0 ]; then
             echo "tf-plan-exists=false" >> $GITHUB_OUTPUT
             echo "ℹ️ No changes detected in plan"
+            echo "🔍 DEBUG: Setting tf-plan-exists=false"
           elif [ $PLAN_EXIT_CODE -eq 2 ]; then
             echo "tf-plan-exists=true" >> $GITHUB_OUTPUT
             echo "✅ Changes detected, plan file created"
+            echo "🔍 DEBUG: Setting tf-plan-exists=true"
             
             # Generate plan summary
             PLAN_SUMMARY=$(terraform show -no-color ${{ inputs.environment }}.tfplan | head -50)
@@ -239,9 +262,11 @@ jobs:
             echo "EOF" >> $GITHUB_OUTPUT
           elif [ $PLAN_EXIT_CODE -eq 1 ]; then
             echo "❌ Terraform plan failed with errors"
+            echo "🔍 DEBUG: Plan failed with exit code 1"
             exit 1
           else
             echo "⚠️ Unexpected exit code: $PLAN_EXIT_CODE"
+            echo "🔍 DEBUG: Unexpected exit code: $PLAN_EXIT_CODE"
             exit 1
           fi
       
@@ -257,7 +282,7 @@ jobs:
     name: 'Terraform Apply'
     runs-on: ubuntu-latest
     needs: terraform-plan
-    if: needs.terraform-plan.outputs.tf-plan-exists == 'true'
+    if: needs.terraform-plan.outputs.tf-plan-exists == 'true' || inputs.force_apply == true
     
     environment: 
       name: ${{ inputs.environment }}
@@ -287,6 +312,17 @@ jobs:
         with:
           name: tf-plan-${{ inputs.infrastructure_type }}-${{ inputs.environment }}
           path: ${{ inputs.terraform_directory }}/
+      
+      - name: Debug Apply Job
+        run: |
+          echo "🔍 DEBUG APPLY JOB: Starting terraform apply"
+          echo "🔍 DEBUG: tf-plan-exists = '${{ needs.terraform-plan.outputs.tf-plan-exists }}'"
+          echo "🔍 DEBUG: force_apply = '${{ inputs.force_apply }}'"
+          echo "🔍 DEBUG: Condition result: ${{ needs.terraform-plan.outputs.tf-plan-exists == 'true' || inputs.force_apply == true }}"
+          echo "🔍 DEBUG: Downloaded files:"
+          ls -la
+          echo "🔍 DEBUG: Plan files:"
+          ls -la *.tfplan || echo "No plan files found"
       
       - name: Terraform Init
         run: |
