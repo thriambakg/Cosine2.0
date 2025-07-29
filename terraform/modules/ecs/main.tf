@@ -87,50 +87,68 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Custom policy document for ECR and CloudWatch Logs access
+data "aws_iam_policy_document" "ecs_task_execution_custom" {
+  # ECR Authorization Token - must use wildcard per AWS requirements
+  # tfsec:ignore:aws-iam-no-policy-wildcards - ECR GetAuthorizationToken requires wildcard resource per AWS documentation
+  statement {
+    effect = "Allow"
+    actions = [
+      "ecr:GetAuthorizationToken"
+    ]
+    resources = ["*"]
+  }
+
+  # ECR Repository Access - specific repository
+  statement {
+    effect = "Allow"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage"
+    ]
+    resources = [var.ecr_repository_arn]
+  }
+
+  # CloudWatch Logs - log group access
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup"
+    ]
+    resources = [data.aws_cloudwatch_log_group.frontend.arn]
+  }
+
+  # CloudWatch Logs - log stream access
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = [data.aws_cloudwatch_log_group.frontend.arn]
+    condition {
+      test     = "StringEquals"
+      variable = "logs:log-group"
+      values   = [data.aws_cloudwatch_log_group.frontend.name]
+    }
+  }
+
+  # KMS Decrypt access
+  statement {
+    effect = "Allow"
+    actions = [
+      "kms:Decrypt"
+    ]
+    resources = [var.kms_key_arn]
+  }
+}
+
 # Custom policy for ECR access
 resource "aws_iam_role_policy" "ecs_task_execution_custom" {
   name = "${var.project_name}-ecs-execution-custom-${var.environment}"
   role = aws_iam_role.ecs_task_execution_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ecr:GetAuthorizationToken"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:BatchGetImage"
-        ]
-        Resource = var.ecr_repository_arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = [
-          data.aws_cloudwatch_log_group.frontend.arn,
-          "${data.aws_cloudwatch_log_group.frontend.arn}:log-stream:*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt"
-        ]
-        Resource = var.kms_key_arn
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.ecs_task_execution_custom.json
 }
 
 # ECS Task Definition

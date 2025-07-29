@@ -174,27 +174,37 @@ resource "aws_iam_role" "flow_log" {
   })
 }
 
+# IAM Policy Document for VPC Flow Logs
+data "aws_iam_policy_document" "flow_log" {
+  # CloudWatch Logs - log group access
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams"
+    ]
+    resources = [aws_cloudwatch_log_group.vpc_flow_log.arn]
+  }
+
+  # CloudWatch Logs - log stream operations
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = [aws_cloudwatch_log_group.vpc_flow_log.arn]
+    condition {
+      test     = "StringEquals"
+      variable = "logs:log-group"
+      values   = [aws_cloudwatch_log_group.vpc_flow_log.name]
+    }
+  }
+}
+
 # IAM Policy for VPC Flow Logs
 resource "aws_iam_role_policy" "flow_log" {
   name = "${var.project_name}-flow-log-policy-${var.environment}"
   role = aws_iam_role.flow_log.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "logs:DescribeLogGroups",
-          "logs:DescribeLogStreams"
-        ]
-        Effect = "Allow"
-        Resource = [
-          aws_cloudwatch_log_group.vpc_flow_log.arn,
-          "${aws_cloudwatch_log_group.vpc_flow_log.arn}:log-stream:*"
-        ]
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.flow_log.json
 }
