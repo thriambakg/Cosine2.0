@@ -146,8 +146,8 @@ data "aws_iam_policy_document" "ecs_task_execution_custom" {
 
 # Custom policy for ECR access
 resource "aws_iam_role_policy" "ecs_task_execution_custom" {
-  name = "${var.project_name}-ecs-execution-custom-${var.environment}"
-  role = aws_iam_role.ecs_task_execution_role.id
+  name   = "${var.project_name}-ecs-execution-custom-${var.environment}"
+  role   = aws_iam_role.ecs_task_execution_role.id
   policy = data.aws_iam_policy_document.ecs_task_execution_custom.json
 }
 

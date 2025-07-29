@@ -204,7 +204,7 @@ data "aws_iam_policy_document" "flow_log" {
 
 # IAM Policy for VPC Flow Logs
 resource "aws_iam_role_policy" "flow_log" {
-  name = "${var.project_name}-flow-log-policy-${var.environment}"
-  role = aws_iam_role.flow_log.id
+  name   = "${var.project_name}-flow-log-policy-${var.environment}"
+  role   = aws_iam_role.flow_log.id
   policy = data.aws_iam_policy_document.flow_log.json
 }
