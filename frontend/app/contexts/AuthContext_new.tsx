@@ -45,7 +45,7 @@ export interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string, mfaCode?: string) => Promise<{ success: boolean; error?: string; requiresMfa?: boolean }>;
-  loginWithProvider: (provider: 'Google' | 'Microsoft') => Promise<void>;
+  loginWithProvider: (provider: 'Google' | 'Apple' | 'Facebook') => Promise<void>;
   register: (userData: RegisterData) => Promise<{ success: boolean; error?: string; verificationRequired?: boolean }>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
@@ -129,15 +129,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       
-      // Check if we have valid Cognito configuration
-      const userPoolId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID;
-      if (!userPoolId || userPoolId.includes('TEMP')) {
-        console.warn('⚠️ Cognito not configured - running in demo mode');
-        setUser(null);
-        setIsLoading(false);
-        return;
-      }
-      
       // Check if user is authenticated with Cognito
       const cognitoUser = await getCurrentUser();
       
@@ -163,16 +154,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string, mfaCode?: string) => {
     try {
       setIsLoading(true);
-      
-      // Check if we have valid Cognito configuration
-      const userPoolId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID;
-      if (!userPoolId || userPoolId.includes('TEMP')) {
-        console.warn('⚠️ Demo mode: Cognito not configured');
-        return { 
-          success: false, 
-          error: 'Authentication requires AWS Cognito configuration. Please deploy to AWS or configure Cognito credentials.' 
-        };
-      }
       
       const result = await signIn({ 
         username: email.toLowerCase().trim(), 
@@ -220,16 +201,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loginWithProvider = async (provider: 'Google' | 'Microsoft') => {
+  const loginWithProvider = async (provider: 'Google' | 'Apple' | 'Facebook') => {
     try {
       setIsLoading(true);
-      
-      // Check if we have valid Cognito configuration
-      const userPoolId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID;
-      if (!userPoolId || userPoolId.includes('TEMP')) {
-        throw new Error('Federated authentication requires AWS Cognito configuration. Please deploy to AWS or configure Cognito credentials.');
-      }
-      
       await signInWithRedirect({ provider });
     } catch (error: any) {
       console.error(`${provider} login error:`, error);

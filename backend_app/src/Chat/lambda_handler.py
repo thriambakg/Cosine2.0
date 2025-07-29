@@ -1,0 +1,371 @@
+"""
+AWS Lambda handler for Cosine Financial Analysis Agent
+Focused on API Gateway integration and business logic only
+Resource configuration handled by Terraform
+"""
+
+import json
+import os
+import logging
+from typing import Dict, Any
+
+# Configure logging for Lambda
+logger = logging.getLogger()
+logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
+
+# Import the financial agent functionality
+from agent import financial_agent, analyze_stock, FinancialTools
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Main AWS Lambda handler function for API Gateway integration
+    Routes requests to appropriate handlers based on the action parameter
+    
+    Args:
+        event: AWS Lambda event object from API Gateway
+        context: AWS Lambda context object
+        
+    Returns:
+        HTTP response with CORS headers for API Gateway
+    """
+    
+    # CORS headers for API Gateway responses
+    cors_headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        # Handle OPTIONS request for CORS preflight
+        if event.get('httpMethod') == 'OPTIONS':
+            return {
+                'statusCode': 200,
+                'headers': cors_headers,
+                'body': json.dumps({'message': 'CORS preflight successful'})
+            }
+        
+        # Parse request body
+        try:
+            if 'body' in event and event['body']:
+                if isinstance(event['body'], str):
+                    event_body = json.loads(event['body'])
+                else:
+                    event_body = event['body']
+            else:
+                event_body = {}
+        except json.JSONDecodeError:
+            return {
+                'statusCode': 400,
+                'headers': cors_headers,
+                'body': json.dumps({
+                    'error': 'Invalid JSON in request body',
+                    'message': 'Please provide valid JSON in the request body'
+                })
+            }
+        
+        # Extract action from request
+        action = event_body.get('action', event.get('pathParameters', {}).get('action', 'chat'))
+        
+        logger.info(f"Processing action: {action}")
+        
+        # Route to appropriate handler
+        if action == 'analyze_stock':
+            result = handle_stock_analysis(event_body)
+        elif action == 'chat':
+            result = handle_chat_message(event_body)
+        elif action == 'analyze_portfolio':
+            result = handle_portfolio_analysis(event_body)
+        elif action == 'calculate_correlation':
+            result = handle_correlation_analysis(event_body)
+        elif action == 'health':
+            result = {
+                'statusCode': 200,
+                'body': {
+                    'status': 'healthy',
+                    'service': 'Cosine Financial Analysis Agent',
+                    'version': '1.0.0',
+                    'timestamp': FinancialTools.get_current_timestamp()
+                }
+            }
+        else:
+            result = {
+                'statusCode': 400,
+                'body': {
+                    'error': 'Invalid action',
+                    'message': f'Action "{action}" is not supported. Available actions: analyze_stock, chat, analyze_portfolio, calculate_correlation, health'
+                }
+            }
+        
+        # Format response for API Gateway
+        return {
+            'statusCode': result['statusCode'],
+            'headers': cors_headers,
+            'body': json.dumps(result['body'])
+        }
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in lambda_handler: {str(e)}")
+        return {
+            'statusCode': 500,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'error': 'Internal server error',
+                'message': 'An unexpected error occurred while processing your request'
+            })
+        }
+
+def handle_stock_analysis(event_body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle stock analysis requests
+    
+    Args:
+        event_body: Request body containing stock symbol and optional question
+        
+    Returns:
+        Analysis results with proper error handling
+    """
+    try:
+        stock_symbol = event_body.get('symbol', '').upper()
+        user_question = event_body.get('question', '')
+        
+        if not stock_symbol:
+            return {
+                'statusCode': 400,
+                'body': {
+                    'error': 'Stock symbol is required',
+                    'message': 'Please provide a valid stock symbol in the request body'
+                }
+            }
+        
+        # Validate stock symbol format
+        if not stock_symbol.isalpha() or len(stock_symbol) > 5:
+            return {
+                'statusCode': 400,
+                'body': {
+                    'error': 'Invalid stock symbol format',
+                    'message': 'Stock symbol must be 1-5 alphabetic characters'
+                }
+            }
+        
+        # Perform stock analysis using the existing agent
+        logger.info(f"Analyzing stock: {stock_symbol}")
+        analysis_result = analyze_stock(stock_symbol, user_question)
+        
+        return {
+            'statusCode': 200,
+            'body': {
+                'symbol': stock_symbol,
+                'analysis': analysis_result,
+                'question': user_question if user_question else None,
+                'timestamp': FinancialTools.get_current_timestamp()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in stock analysis: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': {
+                'error': 'Analysis failed',
+                'message': str(e)
+            }
+        }
+
+def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle general chat messages with the financial agent
+    
+    Args:
+        event_body: Request body containing the user message
+        
+    Returns:
+        Agent response with proper formatting
+    """
+    try:
+        user_message = event_body.get('message', '').strip()
+        session_id = event_body.get('session_id', 'default')
+        
+        if not user_message:
+            return {
+                'statusCode': 400,
+                'body': {
+                    'error': 'Message is required',
+                    'message': 'Please provide a message in the request body'
+                }
+            }
+        
+        # Process message with the existing financial agent
+        logger.info(f"Processing chat message for session: {session_id}")
+        agent_response = financial_agent(user_message)
+        
+        return {
+            'statusCode': 200,
+            'body': {
+                'response': agent_response,
+                'session_id': session_id,
+                'timestamp': FinancialTools.get_current_timestamp()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in chat processing: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': {
+                'error': 'Chat processing failed',
+                'message': str(e)
+            }
+        }
+
+def handle_portfolio_analysis(event_body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle portfolio analysis requests
+    
+    Args:
+        event_body: Request body containing portfolio data
+        
+    Returns:
+        Portfolio analysis results
+    """
+    try:
+        portfolio_data = event_body.get('portfolio', [])
+        period = event_body.get('period', '1y')
+        
+        if not portfolio_data:
+            return {
+                'statusCode': 400,
+                'body': {
+                    'error': 'Portfolio data is required',
+                    'message': 'Please provide portfolio data in the format: [{"ticker": "AAPL", "shares": 100, "price": 150.0}]'
+                }
+            }
+        
+        # Validate portfolio data structure
+        for holding in portfolio_data:
+            if not all(key in holding for key in ['ticker', 'shares', 'price']):
+                return {
+                    'statusCode': 400,
+                    'body': {
+                        'error': 'Invalid portfolio data format',
+                        'message': 'Each holding must have ticker, shares, and price fields'
+                    }
+                }
+        
+        # Perform portfolio analysis using existing tools
+        logger.info(f"Analyzing portfolio with {len(portfolio_data)} holdings")
+        portfolio_metrics = FinancialTools.calculate_portfolio_metrics(
+            json.dumps(portfolio_data), period
+        )
+        
+        return {
+            'statusCode': 200,
+            'body': {
+                'portfolio_analysis': portfolio_metrics,
+                'period': period,
+                'timestamp': FinancialTools.get_current_timestamp()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in portfolio analysis: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': {
+                'error': 'Portfolio analysis failed',
+                'message': str(e)
+            }
+        }
+
+def handle_correlation_analysis(event_body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle stock correlation analysis requests
+    
+    Args:
+        event_body: Request body containing list of stock tickers
+        
+    Returns:
+        Correlation analysis results
+    """
+    try:
+        tickers = event_body.get('tickers', [])
+        period = event_body.get('period', '1y')
+        
+        if not tickers or len(tickers) < 2:
+            return {
+                'statusCode': 400,
+                'body': {
+                    'error': 'At least 2 stock tickers are required',
+                    'message': 'Please provide an array of stock tickers for correlation analysis'
+                }
+            }
+        
+        # Validate ticker format
+        for ticker in tickers:
+            if not isinstance(ticker, str) or not ticker.isalpha():
+                return {
+                    'statusCode': 400,
+                    'body': {
+                        'error': 'Invalid ticker format',
+                        'message': 'All tickers must be alphabetic strings'
+                    }
+                }
+        
+        # Perform correlation analysis using existing tools
+        logger.info(f"Calculating correlation for tickers: {tickers}")
+        correlation_result = FinancialTools.calculate_correlation(tickers, period)
+        
+        return {
+            'statusCode': 200,
+            'body': {
+                'correlation_analysis': correlation_result,
+                'tickers': tickers,
+                'period': period,
+                'timestamp': FinancialTools.get_current_timestamp()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in correlation analysis: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': {
+                'error': 'Correlation analysis failed',
+                'message': str(e)
+            }
+        }
+
+# Local testing utility
+def test_lambda_locally():
+    """Test function for local development"""
+    test_events = [
+        {
+            'body': json.dumps({
+                'action': 'analyze_stock',
+                'symbol': 'AAPL',
+                'question': 'Should I buy this stock?'
+            })
+        },
+        {
+            'body': json.dumps({
+                'action': 'chat',
+                'message': 'What are the best tech stocks to invest in?'
+            })
+        },
+        {
+            'body': json.dumps({
+                'action': 'health'
+            })
+        }
+    ]
+    
+    print("🧪 Testing Lambda handler locally...")
+    for i, test_event in enumerate(test_events, 1):
+        print(f"\n--- Test {i} ---")
+        result = lambda_handler(test_event, None)
+        print(f"Status: {result['statusCode']}")
+        print(f"Response: {result['body']}")
+
+if __name__ == "__main__":
+    test_lambda_locally()

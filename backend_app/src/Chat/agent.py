@@ -28,24 +28,72 @@ import financial_calculator
 
 # Financial Analysis Tools
 class FinancialTools:
-    """Enhance    print("🔧 Available Capabilities:")
-    print("  📊 Real-time stock data and metrics (via yfinance)")
-    print("  📰 Financial news search and analysis")
-    print("  📈 Technical indicators (RSI, MACD, Moving Averages)")
-    print("  📊 Portfolio analysis with live correlation data")
-    print("  🌊 Volatility surface analysis and implied volatility")
-    print("  🧮 Quantitative analysis (correlations, cointegration)")
-    print("  🔍 Web research for additional context")
+    """Enhanced financial analysis tools for the Cosine agent"""
     
-    print("\n💡 Example Questions:")
-    print("  - 'Analyze AAPL with full technical analysis'")
-    print("  - 'Should I buy Tesla stock? Include recent news'")
-    print("  - 'Compare NVDA and AMD for AI investment'")
-    print("  - 'Calculate correlation between MSFT and GOOGL'")
-    print("  - 'Get S&P 500 volatility surface analysis'")
-    print("  - 'Analyze my portfolio: [{"ticker": "AAPL", "shares": 100, "price": 180}]'")
-    print("  - 'What are the technical indicators for SPY?'")
-    print("  - 'Find recent news about cryptocurrency stocks'")alysis tools for the Cosine agent"""
+    @staticmethod
+    def get_current_timestamp() -> str:
+        """Get current timestamp in ISO format"""
+        return datetime.now().isoformat()
+    
+    @staticmethod
+    def calculate_portfolio_metrics(portfolio_json: str, period: str = "1y") -> Dict[str, Any]:
+        """
+        Calculate portfolio metrics including returns, volatility, and correlations
+        """
+        try:
+            portfolio = json.loads(portfolio_json)
+            
+            # Extract tickers and weights
+            tickers = [holding['ticker'] for holding in portfolio]
+            shares = [holding['shares'] for holding in portfolio]
+            prices = [holding['price'] for holding in portfolio]
+            
+            # Calculate portfolio values
+            values = [s * p for s, p in zip(shares, prices)]
+            total_value = sum(values)
+            weights = [v / total_value for v in values]
+            
+            # Download historical data
+            stock_data = yf.download(tickers, period=period)['Close']
+            if len(tickers) == 1:
+                stock_data = stock_data.to_frame(tickers[0])
+            
+            # Calculate returns
+            returns = stock_data.pct_change().dropna()
+            
+            # Portfolio return calculation
+            portfolio_returns = returns.dot(weights)
+            
+            # Risk metrics
+            portfolio_volatility = portfolio_returns.std() * np.sqrt(252) * 100
+            portfolio_return = portfolio_returns.mean() * 252 * 100
+            sharpe_ratio = portfolio_return / portfolio_volatility if portfolio_volatility > 0 else 0
+            
+            # Correlation matrix
+            correlation_matrix = returns.corr()
+            
+            # Individual stock metrics
+            individual_metrics = {}
+            for ticker in tickers:
+                stock_returns = returns[ticker]
+                individual_metrics[ticker] = {
+                    'return_annual': stock_returns.mean() * 252 * 100,
+                    'volatility_annual': stock_returns.std() * np.sqrt(252) * 100,
+                    'weight': weights[tickers.index(ticker)]
+                }
+            
+            return {
+                'portfolio_return_annual': round(portfolio_return, 2),
+                'portfolio_volatility_annual': round(portfolio_volatility, 2),
+                'sharpe_ratio': round(sharpe_ratio, 2),
+                'total_value': round(total_value, 2),
+                'individual_stocks': individual_metrics,
+                'correlation_matrix': correlation_matrix.round(3).to_dict(),
+                'status': 'success'
+            }
+            
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
     
     @staticmethod
     def get_stock_data(symbol: str) -> Dict[str, Any]:

@@ -1,33 +1,42 @@
-# Terraform Remote State Setup
+# Terraform Infrastructure
 
-This directory contains the Terraform configuration with remote state backend for team collaboration and persistent state management.
+This directory contains the main Terraform configuration for the Cosine application infrastructure. It uses remote state management provided by the **Cosine-Base-Infra** repository.
 
-## Problem Solved
+## Prerequisites
 
-- **State Persistence**: Terraform state is stored remotely in S3, preventing "fresh run" issues in CI/CD
-- **Team Collaboration**: Multiple developers can work on the same infrastructure safely
-- **Branch Isolation**: Each branch gets its own state file for independent development
-- **State Locking**: DynamoDB prevents concurrent modifications that could corrupt state
+Before deploying this infrastructure, ensure that:
+
+1. **Base Infrastructure is deployed**: The shared infrastructure from `Cosine-Base-Infra` repository must be deployed first
+   - S3 bucket for state storage: `cosine-terraform-state-bucket`
+   - DynamoDB table for state locking: `cosine-terraform-locks`
+   - Authentication and shared resources (Cognito, KMS, etc.)
+
+2. **AWS CLI configured** with appropriate permissions
+
+3. **Terraform >= 1.0** installed
 
 ## Directory Structure
 
 ```
 terraform/
 ├── main.tf              # Main infrastructure configuration
-├── variables.tf         # Variable declarations
+├── variables.tf         # Variable declarations  
 ├── terraform.auto.tfvars # Variable values (committed to git)
 ├── backend.tf           # Remote state backend configuration
 ├── outputs.tf           # Output definitions
-├── bootstrap/           # Backend infrastructure setup
-│   └── main.tf         # Creates S3 bucket and DynamoDB table
-├── setup-backend.sh    # Bootstrap script (Linux/Mac)
-├── setup-backend.ps1   # Bootstrap script (Windows)
+├── backend-configs/     # Environment-specific backend configs
+├── modules/             # Application-specific modules
 └── README.md           # This file
 ```
 
-# Terraform Remote State Setup
+## Dependencies
 
-This directory contains the Terraform configuration with remote state backend for team collaboration and persistent state management.
+This infrastructure depends on resources created by `Cosine-Base-Infra`:
+- **Authentication**: Cognito User Pool and Client
+- **Data Storage**: DynamoDB tables for users and sessions
+- **Encryption**: KMS keys for application data
+- **Monitoring**: CloudWatch log groups and dashboards
+- **State Management**: S3 bucket and DynamoDB table for Terraform state
 
 ## Problem Solved
 

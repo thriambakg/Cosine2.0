@@ -5,6 +5,7 @@ import { TrendingUp, Bot, BarChart3, PieChart, Activity, MessageSquare, Upload, 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
+import AuthStatusBanner from '@/components/AuthStatusBanner';
 import Link from 'next/link';
 
 export default function HomePage() {
@@ -13,6 +14,9 @@ export default function HomePage() {
 
   return (
     <div className="space-y-8">
+      {/* Authentication Status Banner */}
+      <AuthStatusBanner />
+      
       {/* Welcome Section */}
       <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl p-8 text-white">
         <div className="flex items-center justify-between">

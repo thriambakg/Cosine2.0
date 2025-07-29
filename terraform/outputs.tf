@@ -1,7 +1,67 @@
 # outputs.tf
 # Output values from the Terraform configuration
 
-# S3 Bucket Outputs
+# VPC Outputs
+output "vpc_id" {
+  description = "ID of the VPC"
+  value       = module.vpc.vpc_id
+}
+
+output "public_subnet_ids" {
+  description = "IDs of the public subnets"
+  value       = module.vpc.public_subnet_ids
+}
+
+output "private_subnet_ids" {
+  description = "IDs of the private subnets"
+  value       = module.vpc.private_subnet_ids
+}
+
+# ECR Outputs
+output "ecr_repository_url" {
+  description = "URL of the ECR repository"
+  value       = module.ecr.repository_url
+}
+
+output "ecr_repository_name" {
+  description = "Name of the ECR repository"
+  value       = module.ecr.repository_name
+}
+
+# ALB Outputs
+output "alb_dns_name" {
+  description = "DNS name of the Application Load Balancer"
+  value       = module.alb.alb_dns_name
+}
+
+output "alb_zone_id" {
+  description = "Zone ID of the Application Load Balancer"
+  value       = module.alb.alb_zone_id
+}
+
+output "waf_arn" {
+  description = "ARN of the WAF Web ACL"
+  value       = module.alb.waf_arn
+}
+
+# ECS Outputs
+output "ecs_cluster_id" {
+  description = "ID of the ECS cluster"
+  value       = module.ecs.cluster_id
+}
+
+output "ecs_service_name" {
+  description = "Name of the ECS service"
+  value       = module.ecs.service_name
+}
+
+# Frontend URL
+output "frontend_url" {
+  description = "URL to access the frontend application"
+  value       = var.certificate_arn != "" ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}"
+}
+
+# S3 Bucket Outputs (existing)
 output "s3_bucket_name" {
   description = "Name of the S3 bucket"
   value       = var.enable_s3_bucket ? module.s3_buckets[0].frontend_bucket_id : null

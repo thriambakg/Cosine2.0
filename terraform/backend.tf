@@ -7,6 +7,9 @@ terraform {
     # S3 bucket for storing Terraform state
     bucket = "cosine-terraform-state-bucket"
 
+    # Path to the state file in the bucket
+    key = "cosine2.0/terraform.tfstate"
+
     # AWS region where the bucket is located
     region = "us-east-1"
 
@@ -15,8 +18,5 @@ terraform {
 
     # Enable versioning and encryption
     encrypt = true
-
-    # Note: The 'key' parameter will be provided during terraform init
-    # This allows for environment-specific state files
   }
 }
