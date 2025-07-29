@@ -27,7 +27,7 @@ variable "az_count" {
   description = "Number of Availability Zones to use"
   type        = number
   default     = 2
-  
+
   validation {
     condition     = var.az_count >= 2
     error_message = "At least 2 availability zones are required for high availability."

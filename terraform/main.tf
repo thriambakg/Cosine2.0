@@ -148,16 +148,16 @@ module "ecr" {
 module "alb" {
   source = "./modules/alb"
 
-  project_name          = var.project_name
-  environment           = var.environment
-  vpc_id               = module.vpc.vpc_id
-  public_subnet_ids    = module.vpc.public_subnet_ids
-  certificate_arn      = var.certificate_arn
-  enable_access_logs   = var.enable_alb_access_logs
-  access_logs_bucket   = var.alb_access_logs_bucket
-  kms_key_arn         = aws_kms_key.main.arn
-  rate_limit          = var.waf_rate_limit
-  blocked_countries   = var.waf_blocked_countries
+  project_name       = var.project_name
+  environment        = var.environment
+  vpc_id             = module.vpc.vpc_id
+  public_subnet_ids  = module.vpc.public_subnet_ids
+  certificate_arn    = var.certificate_arn
+  enable_access_logs = var.enable_alb_access_logs
+  access_logs_bucket = var.alb_access_logs_bucket
+  kms_key_arn        = aws_kms_key.main.arn
+  rate_limit         = var.waf_rate_limit
+  blocked_countries  = var.waf_blocked_countries
 
   tags = var.common_tags
 }
@@ -166,16 +166,16 @@ module "alb" {
 module "ecs" {
   source = "./modules/ecs"
 
-  project_name           = var.project_name
-  environment            = var.environment
+  project_name          = var.project_name
+  environment           = var.environment
   aws_region            = var.aws_region
   vpc_id                = module.vpc.vpc_id
   private_subnet_ids    = module.vpc.private_subnet_ids
   alb_security_group_id = module.alb.security_group_id
   target_group_arn      = module.alb.target_group_arn
   ecr_repository_url    = module.ecr.repository_url
-  kms_key_arn          = aws_kms_key.main.arn
-  
+  kms_key_arn           = aws_kms_key.main.arn
+
   # Cognito configuration - get from existing infrastructure
   cognito_user_pool_id = var.cognito_user_pool_id
   cognito_client_id    = var.cognito_client_id
@@ -184,11 +184,11 @@ module "ecs" {
 
   # ECS configuration
   task_cpu                 = var.ecs_task_cpu
-  task_memory             = var.ecs_task_memory
-  task_memory_reservation = var.ecs_task_memory_reservation
-  desired_count           = var.ecs_desired_count
+  task_memory              = var.ecs_task_memory
+  task_memory_reservation  = var.ecs_task_memory_reservation
+  desired_count            = var.ecs_desired_count
   enable_service_discovery = var.enable_service_discovery
-  enable_execute_command  = var.enable_ecs_execute_command
+  enable_execute_command   = var.enable_ecs_execute_command
 
   tags = var.common_tags
 

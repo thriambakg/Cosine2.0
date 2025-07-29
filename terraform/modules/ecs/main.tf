@@ -144,15 +144,15 @@ resource "aws_ecs_task_definition" "frontend" {
   cpu                      = var.task_cpu
   memory                   = var.task_memory
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
-  task_role_arn           = aws_iam_role.ecs_task_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
 
   container_definitions = jsonencode([
     {
       name  = "frontend"
       image = "${var.ecr_repository_url}:latest"
-      
+
       essential = true
-      
+
       portMappings = [
         {
           containerPort = 3000
@@ -209,8 +209,8 @@ resource "aws_ecs_task_definition" "frontend" {
 
       # Security options
       readonlyRootFilesystem = false
-      privileged            = false
-      
+      privileged             = false
+
       # Resource limits
       memoryReservation = var.task_memory_reservation
     }

@@ -59,7 +59,7 @@ resource "aws_subnet" "private" {
 resource "aws_eip" "nat" {
   count = var.az_count
 
-  domain = "vpc"
+  domain     = "vpc"
   depends_on = [aws_internet_gateway.main]
 
   tags = merge(var.tags, {

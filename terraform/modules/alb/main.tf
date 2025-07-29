@@ -63,10 +63,10 @@ resource "aws_lb" "main" {
 
 # Target Group for Frontend
 resource "aws_lb_target_group" "frontend" {
-  name     = "${var.project_name}-frontend-tg-${var.environment}"
-  port     = 3000
-  protocol = "HTTP"
-  vpc_id   = var.vpc_id
+  name        = "${var.project_name}-frontend-tg-${var.environment}"
+  port        = 3000
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
   target_type = "ip"
 
   health_check {
