@@ -22,6 +22,16 @@ variable "kms_key_arn" {
   type        = string
 }
 
+variable "ecs_log_group_name" {
+  description = "Name of the CloudWatch log group for ECS cluster"
+  type        = string
+}
+
+variable "frontend_log_group_name" {
+  description = "Name of the CloudWatch log group for frontend application"
+  type        = string
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string

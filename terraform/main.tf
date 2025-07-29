@@ -85,6 +85,27 @@ resource "aws_kms_alias" "main" {
   target_key_id = aws_kms_key.main.key_id
 }
 
+# CloudWatch Log Groups for ECS
+resource "aws_cloudwatch_log_group" "ecs" {
+  name              = "/ecs/${var.project_name}-${var.environment}"
+  retention_in_days = 30
+  kms_key_id        = aws_kms_key.main.arn
+
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-ecs-logs-${var.environment}"
+  })
+}
+
+resource "aws_cloudwatch_log_group" "frontend" {
+  name              = "/ecs/${var.project_name}-frontend-${var.environment}"
+  retention_in_days = 30
+  kms_key_id        = aws_kms_key.main.arn
+
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-frontend-logs-${var.environment}"
+  })
+}
+
 # S3 Buckets Module (conditional)
 module "s3_buckets" {
   count  = var.enable_s3_bucket ? 1 : 0
@@ -177,6 +198,10 @@ module "ecs" {
   ecr_repository_arn    = module.ecr.repository_arn
   kms_key_arn           = aws_kms_key.main.arn
 
+  # CloudWatch Log Groups
+  ecs_log_group_name      = aws_cloudwatch_log_group.ecs.name
+  frontend_log_group_name = aws_cloudwatch_log_group.frontend.name
+
   # Cognito configuration - get from existing infrastructure
   cognito_user_pool_id = var.cognito_user_pool_id
   cognito_client_id    = var.cognito_client_id
@@ -193,6 +218,6 @@ module "ecs" {
 
   tags = var.common_tags
 
-  depends_on = [module.alb]
+  depends_on = [module.alb, aws_cloudwatch_log_group.ecs, aws_cloudwatch_log_group.frontend]
 }
 

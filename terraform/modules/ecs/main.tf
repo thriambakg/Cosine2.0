@@ -1,6 +1,16 @@
 # ECS Container Service Module
 # modules/ecs/main.tf
 
+# Data source for ECS CloudWatch Log Group
+data "aws_cloudwatch_log_group" "ecs" {
+  name = var.ecs_log_group_name
+}
+
+# Data source for Frontend CloudWatch Log Group
+data "aws_cloudwatch_log_group" "frontend" {
+  name = var.frontend_log_group_name
+}
+
 # ECS Cluster
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-cluster-${var.environment}"
@@ -12,7 +22,7 @@ resource "aws_ecs_cluster" "main" {
 
       log_configuration {
         cloud_watch_encryption_enabled = true
-        cloud_watch_log_group_name     = aws_cloudwatch_log_group.ecs.name
+        cloud_watch_log_group_name     = data.aws_cloudwatch_log_group.ecs.name
       }
     }
   }
@@ -24,28 +34,6 @@ resource "aws_ecs_cluster" "main" {
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-ecs-cluster-${var.environment}"
-  })
-}
-
-# CloudWatch Log Group for ECS
-resource "aws_cloudwatch_log_group" "ecs" {
-  name              = "/ecs/${var.project_name}-${var.environment}"
-  retention_in_days = 30
-  kms_key_id        = var.kms_key_arn
-
-  tags = merge(var.tags, {
-    Name = "${var.project_name}-ecs-logs-${var.environment}"
-  })
-}
-
-# CloudWatch Log Group for Frontend Application
-resource "aws_cloudwatch_log_group" "frontend" {
-  name              = "/ecs/${var.project_name}-frontend-${var.environment}"
-  retention_in_days = 30
-  kms_key_id        = var.kms_key_arn
-
-  tags = merge(var.tags, {
-    Name = "${var.project_name}-frontend-logs-${var.environment}"
   })
 }
 
@@ -130,8 +118,8 @@ resource "aws_iam_role_policy" "ecs_task_execution_custom" {
           "logs:PutLogEvents"
         ]
         Resource = [
-          aws_cloudwatch_log_group.frontend.arn,
-          "${aws_cloudwatch_log_group.frontend.arn}:log-stream:*"
+          data.aws_cloudwatch_log_group.frontend.arn,
+          "${data.aws_cloudwatch_log_group.frontend.arn}:log-stream:*"
         ]
       },
       {
@@ -199,7 +187,7 @@ resource "aws_ecs_task_definition" "frontend" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.frontend.name
+          "awslogs-group"         = data.aws_cloudwatch_log_group.frontend.name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "ecs"
         }
