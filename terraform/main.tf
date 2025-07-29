@@ -174,6 +174,7 @@ module "ecs" {
   alb_security_group_id = module.alb.security_group_id
   target_group_arn      = module.alb.target_group_arn
   ecr_repository_url    = module.ecr.repository_url
+  ecr_repository_arn    = module.ecr.repository_arn
   kms_key_arn           = aws_kms_key.main.arn
 
   # Cognito configuration - get from existing infrastructure

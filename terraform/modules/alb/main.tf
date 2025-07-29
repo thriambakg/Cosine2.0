@@ -7,6 +7,7 @@ resource "aws_security_group" "alb" {
   description = "Security group for Application Load Balancer"
   vpc_id      = var.vpc_id
 
+  # tfsec:ignore:aws-ec2-no-public-ingress-sgr - ALB needs public HTTP access
   ingress {
     from_port   = 80
     to_port     = 80
@@ -15,6 +16,7 @@ resource "aws_security_group" "alb" {
     description = "Allow HTTP traffic"
   }
 
+  # tfsec:ignore:aws-ec2-no-public-ingress-sgr - ALB needs public HTTPS access
   ingress {
     from_port   = 443
     to_port     = 443
@@ -23,6 +25,7 @@ resource "aws_security_group" "alb" {
     description = "Allow HTTPS traffic"
   }
 
+  # tfsec:ignore:aws-ec2-no-public-egress-sgr - ALB needs outbound access to targets
   egress {
     from_port   = 0
     to_port     = 0
@@ -37,6 +40,7 @@ resource "aws_security_group" "alb" {
 }
 
 # Application Load Balancer
+# tfsec:ignore:aws-elb-alb-not-public - Public ALB is intentional for web frontend
 resource "aws_lb" "main" {
   name               = "${var.project_name}-alb-${var.environment}"
   internal           = false
@@ -112,24 +116,12 @@ resource "aws_lb_listener" "http" {
   protocol          = "HTTP"
 
   default_action {
-    type = var.certificate_arn != "" ? "redirect" : "forward"
+    type = "redirect"
 
-    dynamic "redirect" {
-      for_each = var.certificate_arn != "" ? [1] : []
-      content {
-        port        = "443"
-        protocol    = "HTTPS"
-        status_code = "HTTP_301"
-      }
-    }
-
-    dynamic "forward" {
-      for_each = var.certificate_arn == "" ? [1] : []
-      content {
-        target_group {
-          arn = aws_lb_target_group.frontend.arn
-        }
-      }
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
     }
   }
 }

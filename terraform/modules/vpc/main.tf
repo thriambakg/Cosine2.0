@@ -27,6 +27,8 @@ resource "aws_internet_gateway" "main" {
 }
 
 # Public Subnets
+# Public Subnets
+# tfsec:ignore:aws-ec2-no-public-ip-subnet - Public subnets intentionally assign public IPs
 resource "aws_subnet" "public" {
   count = var.az_count
 
@@ -182,14 +184,13 @@ resource "aws_iam_role_policy" "flow_log" {
     Statement = [
       {
         Action = [
-          "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents",
           "logs:DescribeLogGroups",
           "logs:DescribeLogStreams"
         ]
         Effect   = "Allow"
-        Resource = "*"
+        Resource = "${aws_cloudwatch_log_group.vpc_flow_log.arn}:*"
       }
     ]
   })

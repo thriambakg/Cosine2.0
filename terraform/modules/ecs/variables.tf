@@ -52,6 +52,11 @@ variable "ecr_repository_url" {
   type        = string
 }
 
+variable "ecr_repository_arn" {
+  description = "ARN of the ECR repository"
+  type        = string
+}
+
 variable "cognito_user_pool_id" {
   description = "Cognito User Pool ID"
   type        = string
