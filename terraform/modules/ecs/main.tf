@@ -129,7 +129,10 @@ resource "aws_iam_role_policy" "ecs_task_execution_custom" {
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Resource = "${aws_cloudwatch_log_group.frontend.arn}:*"
+        Resource = [
+          aws_cloudwatch_log_group.frontend.arn,
+          "${aws_cloudwatch_log_group.frontend.arn}:log-stream:*"
+        ]
       },
       {
         Effect = "Allow"
@@ -297,6 +300,7 @@ resource "aws_security_group" "ecs_tasks" {
     description     = "Allow traffic from ALB"
   }
 
+  # tfsec:ignore:aws-ec2-no-public-egress-sgr - HTTPS egress required for API calls and package downloads
   egress {
     from_port   = 443
     to_port     = 443
@@ -305,6 +309,7 @@ resource "aws_security_group" "ecs_tasks" {
     description = "Allow HTTPS outbound for package downloads"
   }
 
+  # tfsec:ignore:aws-ec2-no-public-egress-sgr - HTTP egress required for package downloads and health checks
   egress {
     from_port   = 80
     to_port     = 80
@@ -313,6 +318,7 @@ resource "aws_security_group" "ecs_tasks" {
     description = "Allow HTTP outbound for package downloads"
   }
 
+  # tfsec:ignore:aws-ec2-no-public-egress-sgr - DNS egress required for domain resolution
   egress {
     from_port   = 53
     to_port     = 53
