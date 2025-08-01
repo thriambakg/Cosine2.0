@@ -124,24 +124,46 @@ module "s3_buckets" {
   tags = var.common_tags
 }
 
-# Stock Volatility Lambda Function
+# Stock Volatility Lambda Function (CI/CD Pipeline Deployment)
 module "stock_volatility_lambda" {
   source = "./modules/lambda"
 
+  # Basic configuration
+  project_name  = var.project_name
   function_name = "stock-volatility"
+  environment   = var.environment
   description   = "Lambda function for stock volatility calculation using yfinance"
-  runtime       = "python3.11"
-  handler       = "lambda_function.lambda_handler"
-  source_dir    = "../backend_app/src/stocks/volatility_fetch/app"
-  timeout       = 60
-  memory_size   = 512
+  purpose       = "StockAnalysis"
+
+  # Runtime configuration
+  runtime     = "python3.11"
+  handler     = "lambda_function.lambda_handler"
+  timeout     = 60
+  memory_size = 512
+
+  # Deployment package (CI/CD pipeline will create this)
+  deployment_package = {
+    filename         = "../backend_app/src/stocks/volatility_fetch/app/deployment.zip"
+    source_code_hash = fileexists("../backend_app/src/stocks/volatility_fetch/app/deployment.zip") ? filebase64sha256("../backend_app/src/stocks/volatility_fetch/app/deployment.zip") : "placeholder"
+  }
+
+  # Security compliance
+  kms_key_id = aws_kms_key.main.arn
+
+  # Environment variables
   environment_variables = {
     ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
-  create_api_gateway_permission = true
-  kms_key_arn                   = aws_kms_key.main.arn
-  project_name                  = var.project_name
-  environment                   = var.environment
+
+  # API Gateway integration (if you have an API Gateway)
+  api_gateway_integration = var.api_gateway_execution_arn != null ? {
+    execution_arn = var.api_gateway_execution_arn
+  } : null
+
+  # Monitoring
+  enable_monitoring  = true
+  log_retention_days = var.environment == "production" ? 30 : 7
 
   tags = var.common_tags
 }
