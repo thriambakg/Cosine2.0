@@ -4,6 +4,9 @@
 # Data sources
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
+data "aws_vpc" "main" {
+  id = var.vpc_id
+}
 
 # Try to find existing security group first
 data "aws_security_groups" "existing_alb_sg" {
@@ -56,13 +59,13 @@ resource "aws_security_group_rule" "alb_https_ingress" {
   security_group_id = aws_security_group.alb.id
 }
 
-resource "aws_security_group_rule" "alb_egress" {
+resource "aws_security_group_rule" "alb_egress_to_targets" {
   type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
-  description       = "Allow all outbound traffic"
+  from_port         = 3000
+  to_port           = 3000
+  protocol          = "tcp"
+  cidr_blocks       = [data.aws_vpc.main.cidr_block]
+  description       = "Allow ALB to communicate with ECS targets on port 3000"
   security_group_id = aws_security_group.alb.id
 }
 
@@ -91,7 +94,7 @@ resource "aws_lb" "main" {
     aws_security_group.alb,
     aws_security_group_rule.alb_http_ingress,
     aws_security_group_rule.alb_https_ingress,
-    aws_security_group_rule.alb_egress
+    aws_security_group_rule.alb_egress_to_targets
   ]
 
   lifecycle {
