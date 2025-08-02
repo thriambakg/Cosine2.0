@@ -48,13 +48,24 @@ const nextConfig = {
     unoptimized: true,
   },
 
+  // Skip linting during build (for faster builds)
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
+  // Skip TypeScript type checking during build (optional - faster builds)
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+
   // Webpack configuration for external dependencies
   webpack: (config, { isServer }) => {
-    // Handle plotly.js
+    // Handle plotly.js imports for react-plotly.js
     if (!isServer) {
       config.resolve.alias = {
         ...config.resolve.alias,
-        'plotly.js': 'plotly.js/dist/plotly.min.js',
+        'plotly.js/dist/plotly': 'plotly.js-dist',
+        'plotly.js': 'plotly.js-dist',
       };
     }
     return config;

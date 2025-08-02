@@ -43,7 +43,23 @@ ENV NEXT_PUBLIC_COGNITO_DOMAIN=${NEXT_PUBLIC_COGNITO_DOMAIN}
 ENV NEXT_PUBLIC_API_GATEWAY_URL=${NEXT_PUBLIC_API_GATEWAY_URL}
 
 # Build the application
-RUN npm run build
+RUN echo "=== Starting Next.js build ===" && \
+    echo "Environment variables:" && \
+    env | grep NEXT_PUBLIC || true && \
+    echo "Running npm run build with detailed output..." && \
+    npm run build || (echo "=== BUILD FAILED - Debugging ===" && \
+                      echo "Package.json scripts:" && \
+                      cat package.json | grep -A 10 '"scripts"' && \
+                      echo "=== Checking for common issues ===" && \
+                      echo "Next.js config:" && \
+                      cat next.config.js && \
+                      echo "=== TypeScript config ===" && \
+                      cat tsconfig.json && \
+                      echo "=== Directory structure ===" && \
+                      find . -name "*.tsx" -o -name "*.ts" | head -20 && \
+                      echo "=== Checking imports in layout.tsx ===" && \
+                      head -15 app/layout.tsx && \
+                      false)
 
 # Production image, copy all the files and run next
 FROM base AS runner
