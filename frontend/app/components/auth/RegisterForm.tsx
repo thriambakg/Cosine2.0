@@ -5,6 +5,7 @@ import { Eye, EyeOff, Mail, Lock, User, Phone, Shield, Loader2, AlertCircle, Che
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
+import SocialAuthButtons from './SocialAuthButtons';
 
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
@@ -153,6 +154,12 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
         <h2 className="text-2xl font-bold text-gray-900">Create Account</h2>
         <p className="text-gray-600">Join Cosine and start trading smarter</p>
       </div>
+
+      {/* Social Authentication */}
+      <SocialAuthButtons 
+        mode="register" 
+        isDisabled={isSubmitting} 
+      />
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Name Fields */}

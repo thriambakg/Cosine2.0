@@ -5,6 +5,7 @@ import { Eye, EyeOff, Mail, Lock, Shield, Loader2, AlertCircle } from 'lucide-re
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
+import SocialAuthButtons from './SocialAuthButtons';
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;
@@ -125,6 +126,14 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
           </div>
         )}
       </div>
+
+      {/* Social Authentication - only show if not in MFA mode */}
+      {!requiresMfa && (
+        <SocialAuthButtons 
+          mode="login" 
+          isDisabled={isSubmitting || isAccountLocked} 
+        />
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Email Field */}
