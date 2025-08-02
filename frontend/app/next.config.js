@@ -1,3 +1,5 @@
+const path = require('path');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Enable standalone output for Docker containerization
@@ -66,6 +68,10 @@ const nextConfig = {
         ...config.resolve.alias,
         'plotly.js/dist/plotly': 'plotly.js-dist',
         'plotly.js': 'plotly.js-dist',
+        // Fix path resolution for lib directory
+        '@/lib': path.resolve(__dirname, './lib'),
+        '@/components': path.resolve(__dirname, './components'),
+        '@/contexts': path.resolve(__dirname, './contexts'),
       };
     }
     return config;
