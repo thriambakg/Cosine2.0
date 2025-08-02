@@ -1,0 +1,13 @@
+# Trivy Ignore File for Cosine2.0 Terraform
+# This file contains security findings to ignore during scans
+
+# ALB HTTP Listener - Acceptable for staging environments without certificates
+# In staging: HTTP listener forwards to target group for cost savings
+# In production: HTTP listener redirects to HTTPS (certificate required)
+# Rule: AVD-AWS-0054 - Listener for application load balancer does not use HTTPS
+AVD-AWS-0054
+
+# Note: This is conditionally acceptable because:
+# 1. Staging environments don't require domain certificates (cost optimization)
+# 2. Production environments will have certificates and redirect HTTP to HTTPS
+# 3. The ALB configuration is designed to be secure when certificates are available

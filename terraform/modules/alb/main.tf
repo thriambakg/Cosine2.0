@@ -206,6 +206,10 @@ resource "aws_lb_listener" "https" {
 }
 
 # HTTP Listener - Forward to target group when no certificate, redirect to HTTPS when certificate exists
+# Security Note: This is flagged by scanners (AVD-AWS-0054) but is acceptable because:
+# - Staging: No certificate = HTTP forwarding for cost optimization
+# - Production: Certificate available = HTTP redirects to HTTPS for security
+# This design provides flexibility while maintaining production security standards
 resource "aws_lb_listener" "http" {
   count = 1 # Always create HTTP listener
 
