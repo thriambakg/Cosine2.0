@@ -175,8 +175,16 @@ jobs:
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
             ./frontend/app
           
-          # Push to ECR with both commit-specific tag and latest
+          # Push commit-specific tag first
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+          # Delete existing latest tag if it exists (ignore failures)
+          aws ecr batch-delete-image \
+            --repository-name $ECR_REPOSITORY \
+            --region $AWS_REGION \
+            --image-ids imageTag=latest || true
+          
+          # Push new latest tag
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
