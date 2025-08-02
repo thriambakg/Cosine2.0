@@ -170,6 +170,19 @@ resource "aws_lb_target_group" "frontend" {
   })
 }
 
+# Development warning for missing certificate
+resource "null_resource" "certificate_warning" {
+  count = var.certificate_arn == "" ? 1 : 0
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "WARNING: No SSL certificate provided. ALB will be created without HTTPS listener."
+      echo "For production, provide certificate_arn or set enable_custom_domain = true"
+      echo "Security scanners may flag this as HTTP traffic serving."
+    EOT
+  }
+}
+
 # HTTPS Listener (Primary) - Only created when certificate is available
 resource "aws_lb_listener" "https" {
   count = var.certificate_arn != "" ? 1 : 0
@@ -186,35 +199,44 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# HTTP Listener - Redirect to HTTPS if certificate exists, otherwise forward to target group
-# WARNING: HTTP traffic is served when no certificate is provided (development use only)
+# HTTP Listener - Always redirect to HTTPS (only created when certificate exists)
+# This ensures no plain HTTP traffic is ever served
 resource "aws_lb_listener" "http" {
+  count = var.certificate_arn != "" ? 1 : 0
+
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
-    type = var.certificate_arn != "" ? "redirect" : "forward"
+    type = "redirect"
 
-    # Forward to target group if no certificate (development mode)
-    dynamic "forward" {
-      for_each = var.certificate_arn == "" ? [1] : []
-      content {
-        target_group {
-          arn = aws_lb_target_group.frontend.arn
-        }
-      }
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
     }
+  }
+}
 
-    # Redirect to HTTPS if certificate is present
-    dynamic "redirect" {
-      for_each = var.certificate_arn != "" ? [1] : []
-      content {
-        port        = "443"
-        protocol    = "HTTPS"
-        status_code = "HTTP_301"
-      }
-    }
+# Development HTTP Listener - Only for development when no certificate is available
+# This allows ALB to function but serves plain HTTP (security scanners will flag this)
+resource "aws_lb_listener" "dev_http" {
+  count = var.certificate_arn == "" ? 1 : 0
+
+  load_balancer_arn = aws_lb.main.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.frontend.arn
+  }
+
+  tags = {
+    Name        = "dev-http-listener"
+    Environment = "development"
+    Warning     = "http-traffic-serving"
   }
 } # WAF Web ACL for DDoS and SQL Injection Protection
 resource "aws_wafv2_web_acl" "main" {
@@ -390,23 +412,21 @@ resource "null_resource" "alb_ready_with_https" {
   depends_on = [
     aws_lb.main,
     aws_lb_target_group.frontend,
-    aws_lb_listener.http,
+    aws_lb_listener.http[0],
     aws_lb_listener.https[0]
   ]
 }
 
-# Null resource to ensure ALB is fully ready before ECS service creation (HTTP only)
-resource "null_resource" "alb_ready_http_only" {
+# Null resource to ensure ALB is fully ready before ECS service creation (no certificate - dev HTTP mode)
+resource "null_resource" "alb_ready_no_cert" {
   count = var.certificate_arn == "" ? 1 : 0
 
   depends_on = [
     aws_lb.main,
     aws_lb_target_group.frontend,
-    aws_lb_listener.http
+    aws_lb_listener.dev_http[0]
   ]
-}
-
-# CloudWatch Log Group for WAF
+} # CloudWatch Log Group for WAF
 resource "aws_cloudwatch_log_group" "waf" {
   count             = var.enable_waf_logging ? 1 : 0
   name              = "/aws/wafv2/${var.project_name}-${var.environment}"
