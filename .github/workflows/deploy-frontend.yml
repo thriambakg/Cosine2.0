@@ -1,0 +1,274 @@
+# Frontend Application Deployment Pipeline
+# Builds and deploys frontend container to ECS
+
+name: Deploy Frontend Application
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  pull_request:
+    branches:
+      - main
+      - staging
+    paths:
+      - 'frontend/**'
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: string
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: cosine-frontend
+  ECS_CLUSTER: cosine-cluster
+  ECS_SERVICE: cosine-frontend-service
+
+jobs:
+  # Determine environment based on branch or input
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      ecr_repository: ${{ steps.env.outputs.ecr_repository }}
+      ecs_cluster: ${{ steps.env.outputs.ecs_cluster }}
+      ecs_service: ${{ steps.env.outputs.ecs_service }}
+    steps:
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_call" ]; then
+            ENVIRONMENT="${{ inputs.environment }}"
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            ENVIRONMENT="production"
+          else
+            ENVIRONMENT="staging"
+          fi
+          
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "ecr_repository=${ECR_REPOSITORY}-${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "ecs_cluster=${ECS_CLUSTER}-${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "ecs_service=${ECS_SERVICE}-${ENVIRONMENT}" >> $GITHUB_OUTPUT
+
+  # Build and deploy frontend
+  check-infrastructure:
+    needs: setup
+    runs-on: ubuntu-latest
+    environment: ${{ needs.setup.outputs.environment }}
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check if infrastructure exists
+        env:
+          ECR_REPOSITORY: ${{ needs.setup.outputs.ecr_repository }}
+          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+        run: |
+          echo "🔍 Checking if infrastructure is ready..."
+          
+          # Check ECR repository
+          if aws ecr describe-repositories --repository-names $ECR_REPOSITORY --region $AWS_REGION > /dev/null 2>&1; then
+            echo "✅ ECR Repository '$ECR_REPOSITORY' exists"
+          else
+            echo "❌ ECR Repository '$ECR_REPOSITORY' not found"
+            echo "🚨 Please run terraform apply first to create infrastructure"
+            exit 1
+          fi
+          
+          # Check ECS cluster
+          if aws ecs describe-clusters --clusters $ECS_CLUSTER --region $AWS_REGION --query 'clusters[0].status' --output text | grep -q ACTIVE; then
+            echo "✅ ECS Cluster '$ECS_CLUSTER' is active"
+          else
+            echo "❌ ECS Cluster '$ECS_CLUSTER' not found or not active"
+            echo "🚨 Please run terraform apply first to create infrastructure"
+            exit 1
+          fi
+          
+          # Check ECS service
+          if aws ecs describe-services --cluster $ECS_CLUSTER --services $ECS_SERVICE --region $AWS_REGION --query 'services[0].status' --output text | grep -q ACTIVE; then
+            echo "✅ ECS Service '$ECS_SERVICE' is active"
+          else
+            echo "❌ ECS Service '$ECS_SERVICE' not found or not active"
+            echo "🚨 Please run terraform apply first to create infrastructure"
+            exit 1
+          fi
+          
+          echo "🎉 All infrastructure components are ready!"
+
+  # Build and deploy frontend
+  deploy-frontend:
+    needs: [setup, check-infrastructure]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.setup.outputs.environment }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get commit SHA (short)
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ needs.setup.outputs.ecr_repository }}
+          IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
+        run: |
+          # Build Docker image
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./frontend/app
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          # Push to ECR
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Amazon ECS
+        env:
+          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+        run: |
+          # Force new deployment to pull latest image
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+      - name: Wait for deployment to complete
+        env:
+          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+        run: |
+          echo "Waiting for service to reach stable state..."
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE \
+            --region $AWS_REGION
+          
+          echo "✅ Deployment completed successfully!"
+
+      - name: Get service status
+        env:
+          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+        run: |
+          echo "📊 Service Status:"
+          aws ecs describe-services \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE \
+            --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount}' \
+            --output table \
+            --region $AWS_REGION
+
+  # Verify deployment
+  verify-deployment:
+    needs: [setup, deploy-frontend]
+    runs-on: ubuntu-latest
+    if: always() && needs.deploy-frontend.result == 'success'
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get ALB URL
+        id: get-url
+        env:
+          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+        run: |
+          # Get ALB ARN from ECS service
+          ALB_ARN=$(aws ecs describe-services \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE \
+            --query 'services[0].loadBalancers[0].targetGroupArn' \
+            --output text \
+            --region $AWS_REGION)
+          
+          if [ "$ALB_ARN" != "None" ] && [ "$ALB_ARN" != "" ]; then
+            # Extract ALB name from target group
+            ALB_NAME=$(aws elbv2 describe-target-groups \
+              --target-group-arns $ALB_ARN \
+              --query 'TargetGroups[0].LoadBalancerArns[0]' \
+              --output text \
+              --region $AWS_REGION | sed 's/.*\///')
+            
+            # Get ALB DNS name
+            ALB_URL=$(aws elbv2 describe-load-balancers \
+              --names $ALB_NAME \
+              --query 'LoadBalancers[0].DNSName' \
+              --output text \
+              --region $AWS_REGION)
+            
+            echo "url=http://$ALB_URL" >> $GITHUB_OUTPUT
+            echo "🌐 Frontend URL: http://$ALB_URL"
+          else
+            echo "❌ Could not determine ALB URL"
+          fi
+
+      - name: Health check
+        if: steps.get-url.outputs.url
+        run: |
+          echo "🔍 Performing health check..."
+          URL="${{ steps.get-url.outputs.url }}"
+          
+          # Wait for service to be ready
+          for i in {1..10}; do
+            if curl -f -s "$URL" > /dev/null; then
+              echo "✅ Frontend is responding at $URL"
+              exit 0
+            else
+              echo "⏳ Attempt $i/10: Waiting for frontend to respond..."
+              sleep 30
+            fi
+          done
+          
+          echo "❌ Frontend health check failed after 5 minutes"
+          exit 1
