@@ -55,10 +55,40 @@ output "ecs_service_name" {
   value       = module.ecs.service_name
 }
 
-# Frontend URL
+# ============================================================================
+# WEBSITE URL OUTPUTS
+# URLs for accessing the live website in staging and production
+# ============================================================================
+
+# ALB DNS URL (always available)
+output "alb_dns_url" {
+  description = "Direct ALB DNS URL for the frontend application"
+  value       = var.certificate_arn != "" || var.enable_custom_domain ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}"
+}
+
+# Custom domain URL (if custom domain is enabled)
+output "custom_domain_url" {
+  description = "Custom domain URL for the frontend application"
+  value       = var.enable_custom_domain ? module.domain[0].website_url : null
+}
+
+# Primary frontend URL (prefers custom domain, falls back to ALB DNS)
 output "frontend_url" {
-  description = "URL to access the frontend application"
-  value       = var.certificate_arn != "" ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}"
+  description = "Primary URL to access the frontend application"
+  value       = var.enable_custom_domain ? module.domain[0].website_url : (var.certificate_arn != "" ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}")
+}
+
+# Environment-specific URL message
+output "website_access_info" {
+  description = "Information about accessing the website"
+  value = var.enable_custom_domain ? (
+    "🌐 Your website will be live at: ${module.domain[0].website_url}\n" +
+    "⚙️  DNS Setup Required: Update your domain's nameservers to: ${join(", ", module.domain[0].hosted_zone_name_servers)}\n" +
+    "🔗 Temporary ALB URL: ${var.certificate_arn != "" || var.enable_custom_domain ? "https" : "http"}://${module.alb.alb_dns_name}"
+    ) : (
+    "🌐 Your website is live at: ${var.certificate_arn != "" ? "https" : "http"}://${module.alb.alb_dns_name}\n" +
+    "💡 To set up a custom domain, set enable_custom_domain = true and provide domain_name"
+  )
 }
 
 # S3 Bucket Outputs (existing)
@@ -147,5 +177,97 @@ output "deployment_summary" {
     cloudfront_enabled = var.enable_cloudfront
     lambda_functions   = ["stock-volatility"]
     frontend_url       = var.enable_s3_bucket ? "S3 bucket created (CloudFront disabled)" : null
+  }
+}
+
+# ============================================================================
+# AUTHENTICATION & DATABASE INTEGRATION OUTPUTS
+# ============================================================================
+
+# Authentication Configuration from Base Infrastructure
+output "authentication_config" {
+  description = "Authentication configuration for frontend integration"
+  value = {
+    cognito_user_pool_id = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_id, var.cognito_user_pool_id)
+    cognito_client_id    = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, var.cognito_client_id)
+    cognito_domain       = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, var.cognito_domain)
+    region               = var.aws_region
+  }
+}
+
+# Database Configuration from Base Infrastructure  
+output "database_config" {
+  description = "DynamoDB table configuration for frontend integration"
+  value = {
+    user_profiles_table   = try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, var.user_profiles_table_name)
+    security_events_table = try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, var.security_events_table_name)
+    user_sessions_table   = try(data.terraform_remote_state.base_infra.outputs.user_sessions_table_name, var.user_sessions_table_name)
+    region                = var.aws_region
+  }
+}
+
+# Frontend Application Integration Guide
+output "integration_guide" {
+  description = "Integration guide for frontend developers"
+  value = {
+    message = <<-EOT
+      ========================================================================================
+      🚀 FRONTEND INTEGRATION READY!
+      ========================================================================================
+      
+      Your frontend application is now configured with:
+      
+      ✅ AWS Cognito Authentication:
+         - User Pool ID: ${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_id, var.cognito_user_pool_id)}
+         - Client ID: ${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, var.cognito_client_id)}
+         - Domain: ${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, var.cognito_domain)}
+         - Supports: Username/Password + Google OAuth + Microsoft OAuth
+      
+      ✅ DynamoDB User Data Storage:
+         - User Profiles: ${try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, var.user_profiles_table_name)}
+         - Security Events: ${try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, var.security_events_table_name)}
+         - User Sessions: ${try(data.terraform_remote_state.base_infra.outputs.user_sessions_table_name, var.user_sessions_table_name)}
+      
+      ✅ ECS Container Deployment:
+         - Frontend URL: ${var.certificate_arn != "" ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}"}
+         - Container Image: ${module.ecr.repository_url}:latest
+      
+      🔧 Next Steps:
+      1. Build & push your frontend container to ECR: ${module.ecr.repository_url}
+      2. Your app will have access to DynamoDB tables via environment variables
+      3. Use the Cognito configuration for user authentication
+      4. Implement sign-in UI with federated provider options
+      
+      📚 Environment Variables Available in Container:
+         - NEXT_PUBLIC_COGNITO_USER_POOL_ID
+         - NEXT_PUBLIC_COGNITO_CLIENT_ID
+         - NEXT_PUBLIC_COGNITO_DOMAIN
+         - USER_PROFILES_TABLE_NAME
+         - SECURITY_EVENTS_TABLE_NAME
+         - USER_SESSIONS_TABLE_NAME
+      ========================================================================================
+    EOT
+  }
+}
+
+# ============================================================================
+# DOMAIN CONFIGURATION OUTPUTS
+# Information about custom domain setup and DNS configuration
+# ============================================================================
+
+output "domain_configuration" {
+  description = "Domain configuration information"
+  value = var.enable_custom_domain ? {
+    enabled                = true
+    domain_name            = module.domain[0].domain_name
+    website_url            = module.domain[0].website_url
+    hosted_zone_id         = module.domain[0].hosted_zone_id
+    certificate_arn        = module.domain[0].certificate_arn
+    name_servers           = module.domain[0].hosted_zone_name_servers
+    dns_setup_required     = true
+    dns_setup_instructions = "Update your domain registrar to use these nameservers: ${join(", ", module.domain[0].hosted_zone_name_servers)}"
+    } : {
+    enabled = false
+    message = "Custom domain not enabled. Set enable_custom_domain = true and provide domain_name to enable."
   }
 }

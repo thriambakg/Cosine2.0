@@ -151,6 +151,54 @@ resource "aws_iam_role_policy" "ecs_task_execution_custom" {
   policy = data.aws_iam_policy_document.ecs_task_execution_custom.json
 }
 
+# DynamoDB access policy for ECS task role
+data "aws_iam_policy_document" "ecs_task_dynamodb" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:Query",
+      "dynamodb:Scan"
+    ]
+    resources = [
+      # Allow access to DynamoDB tables when table names are provided
+      for table in compact([
+        var.user_profiles_table_name,
+        var.security_events_table_name,
+        var.user_sessions_table_name
+      ]) : "arn:aws:dynamodb:${var.aws_region}:*:table/${table}"
+      if table != ""
+    ]
+  }
+
+  # Allow access to table indexes
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:Query"
+    ]
+    resources = [
+      for table in compact([
+        var.user_profiles_table_name,
+        var.security_events_table_name,
+        var.user_sessions_table_name
+      ]) : "arn:aws:dynamodb:${var.aws_region}:*:table/${table}/index/*"
+      if table != ""
+    ]
+  }
+}
+
+# Custom policy for DynamoDB access
+resource "aws_iam_role_policy" "ecs_task_dynamodb" {
+  count  = length(compact([var.user_profiles_table_name, var.security_events_table_name, var.user_sessions_table_name])) > 0 ? 1 : 0
+  name   = "${var.project_name}-ecs-task-dynamodb-${var.environment}"
+  role   = aws_iam_role.ecs_task_role.id
+  policy = data.aws_iam_policy_document.ecs_task_dynamodb.json
+}
+
 # ECS Task Definition
 resource "aws_ecs_task_definition" "frontend" {
   family                   = "${var.project_name}-frontend-${var.environment}"
@@ -199,6 +247,18 @@ resource "aws_ecs_task_definition" "frontend" {
         {
           name  = "NEXT_PUBLIC_API_GATEWAY_URL"
           value = var.api_gateway_url
+        },
+        {
+          name  = "USER_PROFILES_TABLE_NAME"
+          value = var.user_profiles_table_name
+        },
+        {
+          name  = "SECURITY_EVENTS_TABLE_NAME"
+          value = var.security_events_table_name
+        },
+        {
+          name  = "USER_SESSIONS_TABLE_NAME"
+          value = var.user_sessions_table_name
         }
       ]
 

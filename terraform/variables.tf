@@ -114,6 +114,25 @@ variable "cognito_domain" {
   default     = ""
 }
 
+# DynamoDB Configuration (from base infrastructure)
+variable "user_profiles_table_name" {
+  description = "DynamoDB table name for user profiles from base infrastructure"
+  type        = string
+  default     = ""
+}
+
+variable "security_events_table_name" {
+  description = "DynamoDB table name for security events from base infrastructure"
+  type        = string
+  default     = ""
+}
+
+variable "user_sessions_table_name" {
+  description = "DynamoDB table name for user sessions from base infrastructure"
+  type        = string
+  default     = ""
+}
+
 variable "api_gateway_url" {
   description = "API Gateway URL for backend services"
   type        = string
@@ -155,4 +174,33 @@ variable "enable_ecs_execute_command" {
   description = "Enable execute command for ECS debugging"
   type        = bool
   default     = false
+}
+
+# =============================================================================
+# CUSTOM DOMAIN CONFIGURATION
+# Variables for custom domain setup with Route53 and SSL certificates
+# =============================================================================
+
+variable "enable_custom_domain" {
+  description = "Enable custom domain configuration with Route53 and SSL certificate"
+  type        = bool
+  default     = false
+}
+
+variable "domain_name" {
+  description = "The domain name for the application (e.g., mycompany.com)"
+  type        = string
+  default     = ""
+}
+
+variable "staging_subdomain" {
+  description = "Subdomain for staging environment (e.g., staging)"
+  type        = string
+  default     = "staging"
+}
+
+variable "production_subdomain" {
+  description = "Subdomain for production environment (e.g., app or leave empty for root domain)"
+  type        = string
+  default     = ""
 }

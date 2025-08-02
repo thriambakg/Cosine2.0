@@ -25,6 +25,24 @@ provider "aws" {
   }
 }
 
+# ============================================================================
+# DATA SOURCES - Reference Base Infrastructure Resources
+# ============================================================================
+
+# Data sources for base infrastructure outputs (DynamoDB tables, Cognito)
+data "terraform_remote_state" "base_infra" {
+  backend = "s3"
+  config = {
+    bucket = "cosine-terraform-state-${var.aws_region}"
+    key    = "base-infrastructure/${var.environment}/terraform.tfstate"
+    region = var.aws_region
+  }
+}
+
+# Data sources for account and region info
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
 # Local values for resource naming
 locals {
   bucket_name = "${var.project_name}-frontend-${var.environment}"
@@ -80,10 +98,6 @@ resource "aws_kms_key" "main" {
     Name = "${var.project_name}-kms-key-${var.environment}"
   })
 }
-
-# Data sources for account and region info
-data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
 
 resource "aws_kms_alias" "main" {
   name          = "alias/${var.project_name}-${var.environment}"
@@ -217,7 +231,7 @@ module "alb" {
   environment        = var.environment
   vpc_id             = module.vpc.vpc_id
   public_subnet_ids  = module.vpc.public_subnet_ids
-  certificate_arn    = var.certificate_arn
+  certificate_arn    = var.enable_custom_domain ? module.domain[0].certificate_arn : var.certificate_arn
   enable_access_logs = var.enable_alb_access_logs
   access_logs_bucket = var.alb_access_logs_bucket
   kms_key_arn        = aws_kms_key.main.arn
@@ -227,7 +241,32 @@ module "alb" {
   tags = var.common_tags
 }
 
-# ECS Service for frontend
+# ============================================================================
+# CUSTOM DOMAIN CONFIGURATION
+# Route53 hosted zone and SSL certificate for custom domain
+# ============================================================================
+
+module "domain" {
+  count  = var.enable_custom_domain ? 1 : 0
+  source = "./modules/domain"
+
+  enable_custom_domain = var.enable_custom_domain
+  domain_name          = var.domain_name
+  subdomain            = var.environment == "production" ? var.production_subdomain : var.staging_subdomain
+  alb_dns_name         = module.alb.alb_dns_name
+  alb_zone_id          = module.alb.alb_zone_id
+  project_name         = var.project_name
+  environment          = var.environment
+  common_tags          = var.common_tags
+
+  depends_on = [module.alb]
+}
+
+# ============================================================================
+# FRONTEND APPLICATION DEPLOYMENT - ECS Service with Cognito & DynamoDB
+# ============================================================================
+
+# ECS Service for frontend with authentication and database integration
 module "ecs" {
   source = "./modules/ecs"
 
@@ -246,11 +285,16 @@ module "ecs" {
   ecs_log_group_name      = aws_cloudwatch_log_group.ecs.name
   frontend_log_group_name = aws_cloudwatch_log_group.frontend.name
 
-  # Cognito configuration - get from existing infrastructure
-  cognito_user_pool_id = var.cognito_user_pool_id
-  cognito_client_id    = var.cognito_client_id
-  cognito_domain       = var.cognito_domain
+  # Cognito configuration - get from base infrastructure
+  cognito_user_pool_id = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_id, var.cognito_user_pool_id)
+  cognito_client_id    = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, var.cognito_client_id)
+  cognito_domain       = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, var.cognito_domain)
   api_gateway_url      = var.api_gateway_url
+
+  # DynamoDB configuration - get from base infrastructure
+  user_profiles_table_name   = try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, var.user_profiles_table_name)
+  security_events_table_name = try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, var.security_events_table_name)
+  user_sessions_table_name   = try(data.terraform_remote_state.base_infra.outputs.user_sessions_table_name, var.user_sessions_table_name)
 
   # ECS configuration
   task_cpu                 = var.ecs_task_cpu

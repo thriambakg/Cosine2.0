@@ -122,3 +122,22 @@ variable "enable_execute_command" {
   type        = bool
   default     = false
 }
+
+# DynamoDB Configuration (from base infrastructure)
+variable "user_profiles_table_name" {
+  description = "DynamoDB table name for user profiles"
+  type        = string
+  default     = ""
+}
+
+variable "security_events_table_name" {
+  description = "DynamoDB table name for security events"
+  type        = string
+  default     = ""
+}
+
+variable "user_sessions_table_name" {
+  description = "DynamoDB table name for user sessions"
+  type        = string
+  default     = ""
+}
