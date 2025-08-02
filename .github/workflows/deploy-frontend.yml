@@ -170,6 +170,12 @@ jobs:
           COGNITO_CLIENT_ID=$(terraform output -raw authentication_config | jq -r '.cognito_client_id // empty')
           COGNITO_DOMAIN=$(terraform output -raw authentication_config | jq -r '.cognito_domain // empty')
           
+          # If cognito_domain is empty, construct it from the staging domain name
+          if [ -z "$COGNITO_DOMAIN" ] || [ "$COGNITO_DOMAIN" = "null" ]; then
+            COGNITO_DOMAIN="cosine-auth-staging.auth.us-east-1.amazoncognito.com"
+            echo "⚠️  Cognito domain not found in Terraform outputs, using constructed domain: $COGNITO_DOMAIN"
+          fi
+          
           # Set outputs for next step
           echo "cognito_user_pool_id=${COGNITO_USER_POOL_ID}" >> $GITHUB_OUTPUT
           echo "cognito_client_id=${COGNITO_CLIENT_ID}" >> $GITHUB_OUTPUT
