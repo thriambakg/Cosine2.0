@@ -261,9 +261,18 @@ output "domain_configuration" {
     name_servers           = module.domain[0].hosted_zone_name_servers
     dns_setup_required     = true
     dns_setup_instructions = "Update your domain registrar to use these nameservers: ${join(", ", module.domain[0].hosted_zone_name_servers)}"
+    message                = "Custom domain configured successfully"
     } : {
-    enabled = false
-    message = "Custom domain not enabled. Set enable_custom_domain = true and provide domain_name to enable."
+    enabled                = false
+    domain_name            = null
+    full_domain_name       = null
+    website_url            = null
+    hosted_zone_id         = null
+    certificate_arn        = null
+    name_servers           = []
+    dns_setup_required     = false
+    dns_setup_instructions = null
+    message                = "Custom domain not enabled. Set enable_custom_domain = true and provide domain_name to enable."
   }
 }
 

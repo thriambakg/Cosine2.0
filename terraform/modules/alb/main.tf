@@ -181,7 +181,9 @@ resource "null_resource" "certificate_warning" {
       echo "Security scanners may flag this as HTTP traffic serving."
     EOT
   }
-} # HTTPS Listener (Primary) - Only created when HTTPS is enabled
+}
+
+# HTTPS Listener (Primary) - Only created when HTTPS is enabled
 resource "aws_lb_listener" "https" {
   count = var.enable_https ? 1 : 0
 
