@@ -33,7 +33,7 @@ provider "aws" {
 data "terraform_remote_state" "base_infra" {
   backend = "s3"
   config = {
-    bucket = "cosine-terraform-state-${var.aws_region}"
+    bucket = "cosine-terraform-state-bucket"
     key    = "base-infrastructure/${var.environment}/terraform.tfstate"
     region = var.aws_region
   }

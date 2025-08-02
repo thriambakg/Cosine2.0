@@ -78,19 +78,6 @@ output "frontend_url" {
   value       = var.enable_custom_domain ? module.domain_records[0].website_url : (var.certificate_arn != "" ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}")
 }
 
-# Environment-specific URL message
-output "website_access_info" {
-  description = "Information about accessing the website"
-  value = var.enable_custom_domain ? (
-    "🌐 Your website will be live at: ${module.domain_records[0].website_url}\n" +
-    "⚙️  DNS Setup Required: Update your domain's nameservers to: ${join(", ", module.domain[0].hosted_zone_name_servers)}\n" +
-    "🔗 Temporary ALB URL: ${var.certificate_arn != "" || var.enable_custom_domain ? "https" : "http"}://${module.alb.alb_dns_name}"
-    ) : (
-    "🌐 Your website is live at: ${var.certificate_arn != "" ? "https" : "http"}://${module.alb.alb_dns_name}\n" +
-    "💡 To set up a custom domain, set enable_custom_domain = true and provide domain_name"
-  )
-}
-
 # S3 Bucket Outputs (existing)
 output "s3_bucket_name" {
   description = "Name of the S3 bucket"
@@ -271,4 +258,17 @@ output "domain_configuration" {
     enabled = false
     message = "Custom domain not enabled. Set enable_custom_domain = true and provide domain_name to enable."
   }
+}
+
+# Website Access Information
+output "website_access_info" {
+  description = "Information about accessing the deployed website"
+  value = var.enable_custom_domain ? join("\n", [
+    "🌐 Your website will be live at: ${module.domain_records[0].website_url}",
+    "⚙️  DNS Setup Required: Update your domain's nameservers to: ${join(", ", module.domain[0].hosted_zone_name_servers)}",
+    "🔗 Temporary ALB URL: ${var.certificate_arn != "" || var.enable_custom_domain ? "https" : "http"}://${module.alb.alb_dns_name}"
+    ]) : join("\n", [
+    "🌐 Your website is live at: ${var.certificate_arn != "" ? "https" : "http"}://${module.alb.alb_dns_name}",
+    "💡 To set up a custom domain, set enable_custom_domain = true and provide domain_name"
+  ])
 }
