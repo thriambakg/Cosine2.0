@@ -51,17 +51,21 @@ api_gateway_url = ""
 # ============================================================================
 
 # Enable custom domain (set to true to use your own domain)
-enable_custom_domain = false
+enable_custom_domain = true
 
 # Your domain name (e.g., "mycompany.com" or "cosineapp.com")
 # Uncomment and set your domain when ready to use custom domain
-# domain_name = "your-domain.com"
+domain_name = "cosinedev.com" # Replace with your actual domain
 
 # Staging subdomain (will create staging.your-domain.com)
 staging_subdomain = "staging"
 
 # Production subdomain (empty string = root domain, or set to "app", "www", etc.)
 production_subdomain = ""
+
+# Alternative: Provide existing certificate ARN directly (if you don't want to use custom domain)
+# Uncomment and set the ARN of an existing certificate from AWS Certificate Manager
+# certificate_arn = "arn:aws:acm:region:account:certificate/certificate-id"
 
 # Note: When enabling custom domain:
 # 1. Set enable_custom_domain = true
