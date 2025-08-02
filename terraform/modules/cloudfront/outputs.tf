@@ -45,3 +45,23 @@ output "distribution_etag" {
   description = "Current version of the distribution's information"
   value       = aws_cloudfront_distribution.distribution.etag
 }
+
+output "web_acl_arn" {
+  description = "ARN of the WAF WebACL"
+  value       = var.create_waf ? aws_wafv2_web_acl.cloudfront_waf[0].arn : null
+}
+
+output "web_acl_id" {
+  description = "ID of the WAF WebACL"
+  value       = var.create_waf ? aws_wafv2_web_acl.cloudfront_waf[0].id : null
+}
+
+output "logging_bucket_name" {
+  description = "Name of the CloudFront logging bucket"
+  value       = var.enable_logging && var.logging_bucket == null ? aws_s3_bucket.cloudfront_logs[0].id : var.logging_bucket
+}
+
+output "logging_bucket_domain_name" {
+  description = "Domain name of the CloudFront logging bucket"
+  value       = var.enable_logging && var.logging_bucket == null ? aws_s3_bucket.cloudfront_logs[0].bucket_domain_name : null
+}

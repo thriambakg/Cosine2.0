@@ -15,6 +15,190 @@ resource "aws_cloudfront_origin_access_control" "s3_oac" {
   signing_protocol                  = "sigv4"
 }
 
+# WAF WebACL for CloudFront
+resource "aws_wafv2_web_acl" "cloudfront_waf" {
+  count = var.create_waf ? 1 : 0
+
+  name  = "${var.project_name}-cloudfront-waf-${var.environment}"
+  scope = "CLOUDFRONT"
+
+  default_action {
+    allow {}
+  }
+
+  # Rate limiting rule
+  rule {
+    name     = "RateLimitRule"
+    priority = 1
+
+    action {
+      block {}
+    }
+
+    statement {
+      rate_based_statement {
+        limit              = var.waf_rate_limit
+        aggregate_key_type = "IP"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project_name}RateLimitRule${var.environment}"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # Geographic blocking rule
+  dynamic "rule" {
+    for_each = length(var.waf_blocked_countries) > 0 ? [1] : []
+    content {
+      name     = "GeoBlockRule"
+      priority = 2
+
+      action {
+        block {}
+      }
+
+      statement {
+        geo_match_statement {
+          country_codes = var.waf_blocked_countries
+        }
+      }
+
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        metric_name                = "${var.project_name}GeoBlockRule${var.environment}"
+        sampled_requests_enabled   = true
+      }
+    }
+  }
+
+  # AWS Core Rule Set
+  rule {
+    name     = "AWSManagedRulesCommonRuleSet"
+    priority = 10
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project_name}CommonRuleSet${var.environment}"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # AWS Known Bad Inputs Rule Set
+  rule {
+    name     = "AWSManagedRulesKnownBadInputsRuleSet"
+    priority = 20
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project_name}KnownBadInputs${var.environment}"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${var.project_name}CloudFrontWAF${var.environment}"
+    sampled_requests_enabled   = true
+  }
+
+  tags = merge(var.tags, {
+    Name        = "${var.project_name}-cloudfront-waf-${var.environment}"
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  })
+}
+
+# S3 Bucket for CloudFront Access Logs
+resource "aws_s3_bucket" "cloudfront_logs" {
+  count  = var.enable_logging && var.logging_bucket == null ? 1 : 0
+  bucket = "${var.project_name}-cloudfront-logs-${var.environment}"
+
+  tags = merge(var.tags, {
+    Name        = "${var.project_name}-cloudfront-logs-${var.environment}"
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Purpose     = "CloudFront Access Logs"
+  })
+}
+
+resource "aws_s3_bucket_versioning" "cloudfront_logs" {
+  count  = var.enable_logging && var.logging_bucket == null ? 1 : 0
+  bucket = aws_s3_bucket.cloudfront_logs[0].id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "cloudfront_logs" {
+  count  = var.enable_logging && var.logging_bucket == null ? 1 : 0
+  bucket = aws_s3_bucket.cloudfront_logs[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "cloudfront_logs" {
+  count  = var.enable_logging && var.logging_bucket == null ? 1 : 0
+  bucket = aws_s3_bucket.cloudfront_logs[0].id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "cloudfront_logs" {
+  count  = var.enable_logging && var.logging_bucket == null ? 1 : 0
+  bucket = aws_s3_bucket.cloudfront_logs[0].id
+
+  rule {
+    id     = "delete_old_logs"
+    status = "Enabled"
+
+    filter {
+      prefix = var.logging_prefix
+    }
+
+    expiration {
+      days = 90
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+}
+
 # CloudFront Distribution
 resource "aws_cloudfront_distribution" "distribution" {
   enabled             = true
@@ -22,6 +206,7 @@ resource "aws_cloudfront_distribution" "distribution" {
   default_root_object = var.default_root_object
   price_class         = var.price_class
   aliases             = var.aliases
+  web_acl_id          = var.create_waf ? aws_wafv2_web_acl.cloudfront_waf[0].arn : var.web_acl_arn
 
   # S3 Origin Configuration
   origin {
@@ -102,9 +287,9 @@ resource "aws_cloudfront_distribution" "distribution" {
 
   # Logging Configuration
   dynamic "logging_config" {
-    for_each = var.enable_logging && var.logging_bucket != null ? [1] : []
+    for_each = var.enable_logging ? [1] : []
     content {
-      bucket          = var.logging_bucket
+      bucket          = var.logging_bucket != null ? var.logging_bucket : aws_s3_bucket.cloudfront_logs[0].bucket_domain_name
       prefix          = var.logging_prefix
       include_cookies = false
     }

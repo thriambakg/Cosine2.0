@@ -140,7 +140,7 @@ variable "geo_restriction_locations" {
 variable "enable_logging" {
   description = "Whether to enable CloudFront logging"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "logging_bucket" {
@@ -159,6 +159,30 @@ variable "enable_ipv6" {
   description = "Whether to enable IPv6 for the distribution"
   type        = bool
   default     = true
+}
+
+variable "web_acl_arn" {
+  description = "ARN of the WAF WebACL to associate with CloudFront distribution"
+  type        = string
+  default     = null
+}
+
+variable "create_waf" {
+  description = "Whether to create a WAF WebACL for the CloudFront distribution"
+  type        = bool
+  default     = true
+}
+
+variable "waf_rate_limit" {
+  description = "Rate limit for WAF rule (requests per 5-minute period)"
+  type        = number
+  default     = 10000
+}
+
+variable "waf_blocked_countries" {
+  description = "List of country codes to block in WAF"
+  type        = list(string)
+  default     = []
 }
 
 variable "tags" {
