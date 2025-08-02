@@ -35,3 +35,8 @@ output "waf_id" {
   description = "ID of the WAF Web ACL"
   value       = aws_wafv2_web_acl.main.id
 }
+
+output "listener_arn" {
+  description = "ARN of the ALB listener"
+  value       = var.certificate_arn != "" ? aws_lb_listener.https[0].arn : aws_lb_listener.http.arn
+}

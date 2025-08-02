@@ -330,8 +330,8 @@ module "ecs" {
 
   tags = var.common_tags
 
-  # Pass the ALB as a dependency to ensure it's fully created before the ECS service
-  alb_dependency = module.alb
+  # Pass the ALB listener as a dependency to ensure it's fully created before the ECS service
+  alb_dependency = module.alb.listener_arn
 
   depends_on = [module.alb, aws_cloudwatch_log_group.ecs, aws_cloudwatch_log_group.frontend]
 }
