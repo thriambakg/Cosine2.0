@@ -33,6 +33,12 @@ variable "certificate_arn" {
   default     = ""
 }
 
+variable "enable_https" {
+  description = "Enable HTTPS listeners (requires certificate_arn when true)"
+  type        = bool
+  default     = false
+}
+
 variable "enable_deletion_protection" {
   description = "Enable deletion protection for ALB"
   type        = bool

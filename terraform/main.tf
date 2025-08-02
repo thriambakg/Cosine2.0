@@ -46,6 +46,9 @@ data "aws_region" "current" {}
 # Local values for resource naming
 locals {
   bucket_name = "${var.project_name}-frontend-${var.environment}"
+
+  # Determine if we have a certificate available
+  has_certificate = var.enable_custom_domain || var.certificate_arn != ""
 }
 
 # KMS Key for encryption
@@ -238,6 +241,7 @@ module "alb" {
   vpc_id             = module.vpc.vpc_id
   public_subnet_ids  = module.vpc.public_subnet_ids
   certificate_arn    = var.enable_custom_domain ? module.domain[0].certificate_arn : var.certificate_arn
+  enable_https       = local.has_certificate
   enable_access_logs = var.enable_alb_access_logs
   access_logs_bucket = var.alb_access_logs_bucket
   kms_key_arn        = aws_kms_key.main.arn

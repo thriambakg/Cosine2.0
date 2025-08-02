@@ -172,7 +172,7 @@ resource "aws_lb_target_group" "frontend" {
 
 # Development warning for missing certificate
 resource "null_resource" "certificate_warning" {
-  count = var.certificate_arn == "" ? 1 : 0
+  count = var.enable_https == false ? 1 : 0
 
   provisioner "local-exec" {
     command = <<-EOT
@@ -181,11 +181,9 @@ resource "null_resource" "certificate_warning" {
       echo "Security scanners may flag this as HTTP traffic serving."
     EOT
   }
-}
-
-# HTTPS Listener (Primary) - Only created when certificate is available
+} # HTTPS Listener (Primary) - Only created when HTTPS is enabled
 resource "aws_lb_listener" "https" {
-  count = var.certificate_arn != "" ? 1 : 0
+  count = var.enable_https ? 1 : 0
 
   load_balancer_arn = aws_lb.main.arn
   port              = "443"
@@ -199,10 +197,10 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# HTTP Listener - Always redirect to HTTPS (only created when certificate exists)
+# HTTP Listener - Always redirect to HTTPS (only created when HTTPS is enabled)
 # This ensures no plain HTTP traffic is ever served
 resource "aws_lb_listener" "http" {
-  count = var.certificate_arn != "" ? 1 : 0
+  count = var.enable_https ? 1 : 0
 
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
@@ -219,10 +217,10 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-# Development HTTP Listener - Only for development when no certificate is available
+# Development HTTP Listener - Only for development when HTTPS is disabled
 # This allows ALB to function but serves plain HTTP (security scanners will flag this)
 resource "aws_lb_listener" "dev_http" {
-  count = var.certificate_arn == "" ? 1 : 0
+  count = var.enable_https == false ? 1 : 0
 
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
@@ -407,7 +405,7 @@ resource "aws_wafv2_web_acl_association" "main" {
 
 # Null resource to ensure ALB is fully ready before ECS service creation (with HTTPS)
 resource "null_resource" "alb_ready_with_https" {
-  count = var.certificate_arn != "" ? 1 : 0
+  count = var.enable_https ? 1 : 0
 
   depends_on = [
     aws_lb.main,
@@ -419,7 +417,7 @@ resource "null_resource" "alb_ready_with_https" {
 
 # Null resource to ensure ALB is fully ready before ECS service creation (no certificate - dev HTTP mode)
 resource "null_resource" "alb_ready_no_cert" {
-  count = var.certificate_arn == "" ? 1 : 0
+  count = var.enable_https == false ? 1 : 0
 
   depends_on = [
     aws_lb.main,
