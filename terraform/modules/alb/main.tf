@@ -51,6 +51,10 @@ resource "aws_security_group_rule" "alb_http_ingress" {
   cidr_blocks       = ["0.0.0.0/0"]
   description       = "Allow HTTP traffic"
   security_group_id = aws_security_group.alb.id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_security_group_rule" "alb_https_ingress" {
@@ -61,6 +65,10 @@ resource "aws_security_group_rule" "alb_https_ingress" {
   cidr_blocks       = ["0.0.0.0/0"]
   description       = "Allow HTTPS traffic"
   security_group_id = aws_security_group.alb.id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_security_group_rule" "alb_egress_to_targets" {
@@ -71,6 +79,10 @@ resource "aws_security_group_rule" "alb_egress_to_targets" {
   cidr_blocks       = [data.aws_vpc.main.cidr_block]
   description       = "Allow ALB to communicate with ECS targets on port 3000"
   security_group_id = aws_security_group.alb.id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Application Load Balancer
