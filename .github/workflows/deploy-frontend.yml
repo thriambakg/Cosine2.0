@@ -240,33 +240,50 @@ jobs:
           ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
           ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
         run: |
-          # Get ALB ARN from ECS service
-          ALB_ARN=$(aws ecs describe-services \
+          echo "🔍 Getting ALB URL from ECS service..."
+          
+          # Get target group ARN from ECS service
+          TARGET_GROUP_ARN=$(aws ecs describe-services \
             --cluster $ECS_CLUSTER \
             --services $ECS_SERVICE \
             --query 'services[0].loadBalancers[0].targetGroupArn' \
             --output text \
             --region $AWS_REGION)
           
-          if [ "$ALB_ARN" != "None" ] && [ "$ALB_ARN" != "" ]; then
-            # Extract ALB name from target group
-            ALB_NAME=$(aws elbv2 describe-target-groups \
-              --target-group-arns $ALB_ARN \
+          echo "Target Group ARN: $TARGET_GROUP_ARN"
+          
+          if [ "$TARGET_GROUP_ARN" != "None" ] && [ "$TARGET_GROUP_ARN" != "" ] && [ "$TARGET_GROUP_ARN" != "null" ]; then
+            # Get load balancer ARN from target group
+            LB_ARN=$(aws elbv2 describe-target-groups \
+              --target-group-arns $TARGET_GROUP_ARN \
               --query 'TargetGroups[0].LoadBalancerArns[0]' \
-              --output text \
-              --region $AWS_REGION | sed 's/.*\///')
-            
-            # Get ALB DNS name
-            ALB_URL=$(aws elbv2 describe-load-balancers \
-              --names $ALB_NAME \
-              --query 'LoadBalancers[0].DNSName' \
               --output text \
               --region $AWS_REGION)
             
-            echo "url=http://$ALB_URL" >> $GITHUB_OUTPUT
-            echo "🌐 Frontend URL: http://$ALB_URL"
+            echo "Load Balancer ARN: $LB_ARN"
+            
+            if [ "$LB_ARN" != "None" ] && [ "$LB_ARN" != "" ] && [ "$LB_ARN" != "null" ]; then
+              # Get ALB DNS name directly from ARN
+              ALB_URL=$(aws elbv2 describe-load-balancers \
+                --load-balancer-arns $LB_ARN \
+                --query 'LoadBalancers[0].DNSName' \
+                --output text \
+                --region $AWS_REGION)
+              
+              echo "ALB DNS Name: $ALB_URL"
+              
+              if [ "$ALB_URL" != "None" ] && [ "$ALB_URL" != "" ] && [ "$ALB_URL" != "null" ]; then
+                echo "url=http://$ALB_URL" >> $GITHUB_OUTPUT
+                echo "🌐 Frontend URL: http://$ALB_URL"
+              else
+                echo "❌ Could not get ALB DNS name"
+              fi
+            else
+              echo "❌ Could not get load balancer ARN from target group"
+            fi
           else
-            echo "❌ Could not determine ALB URL"
+            echo "❌ No target group found for ECS service"
+            echo "ℹ️  This might be expected if the service doesn't use a load balancer"
           fi
 
       - name: Health check
