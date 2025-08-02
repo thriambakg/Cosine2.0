@@ -12,6 +12,8 @@ on:
     paths:
       - 'terraform/**'
       - '.github/workflows/**'
+      - 'frontend/**'
+      - 'backend_app/**'
   pull_request:
     branches:
       - main
@@ -19,6 +21,8 @@ on:
       - staging
     paths:
       - 'terraform/**'
+      - 'frontend/**'
+      - 'backend_app/**'
   workflow_dispatch:
     inputs:
       environment:
