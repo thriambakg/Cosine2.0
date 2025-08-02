@@ -8,6 +8,46 @@ data "aws_vpc" "main" {
   id = var.vpc_id
 }
 
+# Self-signed certificate for staging environment (when no custom domain)
+# This ensures HTTPS is always available and resolves security scanner warnings
+resource "tls_private_key" "default" {
+  count     = var.certificate_arn == "" ? 1 : 0
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_self_signed_cert" "default" {
+  count           = var.certificate_arn == "" ? 1 : 0
+  private_key_pem = tls_private_key.default[0].private_key_pem
+
+  subject {
+    common_name  = "localhost"
+    organization = var.project_name
+  }
+
+  validity_period_hours = 8760 # 1 year
+
+  allowed_uses = [
+    "key_encipherment",
+    "digital_signature",
+    "server_auth",
+  ]
+}
+
+resource "aws_acm_certificate" "default" {
+  count            = var.certificate_arn == "" ? 1 : 0
+  private_key      = tls_private_key.default[0].private_key_pem
+  certificate_body = tls_self_signed_cert.default[0].cert_pem
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-default-cert-${var.environment}"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 # Try to find existing security group first
 data "aws_security_groups" "existing_alb_sg" {
   filter {
@@ -183,15 +223,17 @@ resource "null_resource" "certificate_warning" {
   }
 }
 
-# HTTPS Listener (Primary) - Only created when HTTPS is enabled
+# HTTPS Listener (Primary) - Always created for security compliance
 resource "aws_lb_listener" "https" {
-  count = var.enable_https ? 1 : 0
+  count = 1 # Always create HTTPS listener
 
   load_balancer_arn = aws_lb.main.arn
   port              = "443"
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS-1-2-2017-01"
-  certificate_arn   = var.certificate_arn
+
+  # Use provided certificate if available, otherwise use self-signed certificate
+  certificate_arn = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate.default[0].arn
 
   default_action {
     type             = "forward"
@@ -199,10 +241,9 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# HTTP Listener - Always redirect to HTTPS (only created when HTTPS is enabled)
-# This ensures no plain HTTP traffic is ever served
+# HTTP Listener - Always redirect to HTTPS for security
 resource "aws_lb_listener" "http" {
-  count = var.enable_https ? 1 : 0
+  count = 1 # Always create HTTP redirect
 
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
@@ -219,26 +260,7 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-# Development HTTP Listener - Only for development when HTTPS is disabled
-# This allows ALB to function but serves plain HTTP (security scanners will flag this)
-resource "aws_lb_listener" "dev_http" {
-  count = var.enable_https == false ? 1 : 0
-
-  load_balancer_arn = aws_lb.main.arn
-  port              = "80"
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.frontend.arn
-  }
-
-  tags = {
-    Name        = "dev-http-listener"
-    Environment = "development"
-    Warning     = "http-traffic-serving"
-  }
-} # WAF Web ACL for DDoS and SQL Injection Protection
+# WAF Web ACL for DDoS and SQL Injection Protection
 resource "aws_wafv2_web_acl" "main" {
   name  = "${var.project_name}-waf-${var.environment}"
   scope = "REGIONAL"
@@ -405,9 +427,9 @@ resource "aws_wafv2_web_acl_association" "main" {
   web_acl_arn  = aws_wafv2_web_acl.main.arn
 }
 
-# Null resource to ensure ALB is fully ready before ECS service creation (with HTTPS)
+# Null resource to ensure ALB is fully ready before ECS service creation (always HTTPS)
 resource "null_resource" "alb_ready_with_https" {
-  count = var.enable_https ? 1 : 0
+  count = 1 # Always create since we always have HTTPS
 
   depends_on = [
     aws_lb.main,
@@ -417,16 +439,7 @@ resource "null_resource" "alb_ready_with_https" {
   ]
 }
 
-# Null resource to ensure ALB is fully ready before ECS service creation (no certificate - dev HTTP mode)
-resource "null_resource" "alb_ready_no_cert" {
-  count = var.enable_https == false ? 1 : 0
-
-  depends_on = [
-    aws_lb.main,
-    aws_lb_target_group.frontend,
-    aws_lb_listener.dev_http[0]
-  ]
-} # CloudWatch Log Group for WAF
+# CloudWatch Log Group for WAF
 resource "aws_cloudwatch_log_group" "waf" {
   count             = var.enable_waf_logging ? 1 : 0
   name              = "/aws/wafv2/${var.project_name}-${var.environment}"
