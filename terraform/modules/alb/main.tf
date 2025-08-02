@@ -60,6 +60,10 @@ resource "aws_lb" "main" {
   # Drop invalid header fields for security
   drop_invalid_header_fields = true
 
+  lifecycle {
+    ignore_changes = [tags["Environment"], tags["Repository"]]
+  }
+
   tags = merge(var.tags, {
     Name = "${var.project_name}-alb-${var.environment}"
   })
@@ -87,6 +91,10 @@ resource "aws_lb_target_group" "frontend" {
 
   # Deregistration delay
   deregistration_delay = 30
+
+  lifecycle {
+    ignore_changes = [tags["Environment"], tags["Repository"]]
+  }
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-frontend-tg-${var.environment}"
@@ -307,7 +315,7 @@ resource "aws_cloudwatch_log_group" "waf" {
 # WAF Logging Configuration
 resource "aws_wafv2_web_acl_logging_configuration" "main" {
   resource_arn            = aws_wafv2_web_acl.main.arn
-  log_destination_configs = ["${aws_cloudwatch_log_group.waf.arn}:*"]
+  log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
 
   redacted_fields {
     single_header {

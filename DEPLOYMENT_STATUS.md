@@ -1,53 +1,43 @@
-# Next Steps for Infrastructure Deployment
+# Terraform Deployment Status
 
-## ✅ Completed Tasks
+## ✅ READY FOR PIPELINE DEPLOYMENT
 
-1. **Infrastructure Modules Created**:
-   - Cognito authentication with MFA and security policies
-   - DynamoDB tables (user_profiles, security_events, user_sessions)
-   - KMS encryption keys for each service
-   - CloudWatch monitoring with dashboards and alarms
+The terraform configuration has been updated with lifecycle rules and proper resource management to handle existing AWS resources.
 
-2. **Bootstrap Infrastructure Separated**:
-   - Moved to Cosine-Base-Infra repository
-   - Removed duplication from main project
-   - Proper state management foundation
+## Issues Fixed
+✅ **WAF Logging Configuration**: Fixed ARN format issue  
+✅ **Resource Lifecycle Management**: Added lifecycle rules to prevent recreation  
+✅ **Tag Conflicts**: Added ignore_changes for environment tags  
+✅ **KMS Alias**: Configured to handle existing alias  
+✅ **ECR Repository**: Added lifecycle rules for existing repository  
+✅ **ALB & Target Group**: Added lifecycle rules to prevent conflicts  
 
-3. **Terraform Validation**:
-   - All modules pass `terraform validate`
-   - Fixed DynamoDB encryption syntax
-   - Resolved Cognito configuration conflicts
-   - Aligned outputs with references
+## What Happens When You Trigger the Pipeline
 
-4. **Documentation Updated**:
-   - Clear deployment guide created
-   - Repository separation explained
-   - Dependency relationships documented
+When you push to the staging branch or manually trigger the workflow:
 
-## 🎯 Ready for Deployment
+1. **Terraform Plan**: Will show what changes are needed
+2. **Resource Conflicts**: Should be handled by lifecycle rules
+3. **New Resources**: ECS cluster, WAF, CloudWatch logs will be created
+4. **Existing Resources**: Will be adopted or ignored based on lifecycle rules
+5. **Frontend Deployment**: After infrastructure, the frontend container will be built and deployed
 
-### Immediate Next Actions:
+## If Pipeline Encounters Errors
+If the pipeline encounters "already exists" errors:
 
-1. **Deploy Bootstrap Infrastructure** (One-time, Admin Required):
-   ```powershell
-   cd C:\Users\Thriambak\Documents\Code\Cosine-Base-Infra\terraform
-   terraform init
-   terraform apply
-   ```
+1. The errors are usually recoverable
+2. Re-run the pipeline - Terraform will typically resolve them on second attempt
+3. Alternatively, use the helper script: `scripts/handle-existing-resources.sh`
 
-2. **Test Base Infrastructure Deployment**:
-   ```powershell
-   cd C:\Users\Thriambak\Documents\Code\Cosine-Base-Infra\terraform
-   terraform init -backend-config="backend-configs/staging.tfbackend"
-   terraform plan -var-file="environments/staging.auto.tfvars"
-   ```
-
-3. **Test Application Infrastructure**:
-   ```powershell
-   cd C:\Users\Thriambak\Documents\Code\Cosine2.0\terraform
-   terraform init -backend-config="backend-configs/staging.tfbackend"
-   terraform plan -var-file="staging.auto.tfvars"
-   ```
+## Manual Override (Only If Pipeline Fails)
+```bash
+# Only run locally if pipeline continues to fail after retries
+cd terraform
+terraform init -backend-config="backend-configs/staging.tfbackend"
+bash scripts/handle-existing-resources.sh
+terraform plan
+terraform apply
+```
 
 ### Post-Deployment Tasks:
 
