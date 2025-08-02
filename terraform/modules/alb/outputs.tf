@@ -37,8 +37,8 @@ output "waf_id" {
 }
 
 output "listener_arn" {
-  description = "ARN of the ALB listener"
-  value       = aws_lb_listener.http.arn
+  description = "ARN of the ALB HTTPS listener"
+  value       = aws_lb_listener.https.arn
 }
 
 output "alb_ready" {

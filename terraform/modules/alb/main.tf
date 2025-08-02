@@ -170,15 +170,48 @@ resource "aws_lb_target_group" "frontend" {
   })
 }
 
+# Self-signed certificate for when no certificate is provided
+resource "tls_private_key" "default" {
+  count     = var.certificate_arn == "" ? 1 : 0
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_self_signed_cert" "default" {
+  count           = var.certificate_arn == "" ? 1 : 0
+  private_key_pem = tls_private_key.default[0].private_key_pem
+
+  subject {
+    common_name  = "localhost"
+    organization = var.project_name
+  }
+
+  validity_period_hours = 8760 # 1 year
+
+  allowed_uses = [
+    "key_encipherment",
+    "digital_signature",
+    "server_auth",
+  ]
+}
+
+resource "aws_acm_certificate" "default" {
+  count            = var.certificate_arn == "" ? 1 : 0
+  private_key      = tls_private_key.default[0].private_key_pem
+  certificate_body = tls_self_signed_cert.default[0].cert_pem
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-default-cert-${var.environment}"
+  })
+}
+
 # HTTPS Listener (Primary)
 resource "aws_lb_listener" "https" {
-  count = var.certificate_arn != "" ? 1 : 0
-
   load_balancer_arn = aws_lb.main.arn
   port              = "443"
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS-1-2-2017-01"
-  certificate_arn   = var.certificate_arn
+  certificate_arn   = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate.default[0].arn
 
   default_action {
     type             = "forward"
@@ -186,38 +219,22 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# HTTP Listener (Redirect to HTTPS or Forward if no certificate)
+# HTTP Listener (Always redirect to HTTPS for security)
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
-    type = var.certificate_arn != "" ? "redirect" : "forward"
+    type = "redirect"
 
-    # Forward to target group if no certificate
-    dynamic "forward" {
-      for_each = var.certificate_arn == "" ? [1] : []
-      content {
-        target_group {
-          arn = aws_lb_target_group.frontend.arn
-        }
-      }
-    }
-
-    # Redirect to HTTPS if certificate is present
-    dynamic "redirect" {
-      for_each = var.certificate_arn != "" ? [1] : []
-      content {
-        port        = "443"
-        protocol    = "HTTPS"
-        status_code = "HTTP_301"
-      }
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
     }
   }
-}
-
-# WAF Web ACL for DDoS and SQL Injection Protection
+} # WAF Web ACL for DDoS and SQL Injection Protection
 resource "aws_wafv2_web_acl" "main" {
   name  = "${var.project_name}-waf-${var.environment}"
   scope = "REGIONAL"
