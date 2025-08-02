@@ -1,6 +1,10 @@
 # Application Load Balancer Module with Security
 # modules/alb/main.tf
 
+# Data sources
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
 # Security Group for ALB
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-${var.environment}"
@@ -37,6 +41,11 @@ resource "aws_security_group" "alb" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-alb-sg-${var.environment}"
   })
+
+  lifecycle {
+    create_before_destroy = true
+    ignore_changes        = [tags["Environment"], tags["Repository"]]
+  }
 }
 
 # Application Load Balancer
@@ -303,6 +312,7 @@ resource "aws_wafv2_web_acl_association" "main" {
 
 # CloudWatch Log Group for WAF
 resource "aws_cloudwatch_log_group" "waf" {
+  count             = var.enable_waf_logging ? 1 : 0
   name              = "/aws/wafv2/${var.project_name}-${var.environment}"
   retention_in_days = 30
   kms_key_id        = var.kms_key_arn
@@ -312,10 +322,47 @@ resource "aws_cloudwatch_log_group" "waf" {
   })
 }
 
+# CloudWatch Log Group Resource Policy for WAF
+resource "aws_cloudwatch_log_resource_policy" "waf" {
+  count       = var.enable_waf_logging ? 1 : 0
+  policy_name = "${var.project_name}-waf-logs-policy-${var.environment}"
+
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "wafv2.amazonaws.com"
+        }
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/wafv2/${var.project_name}-${var.environment}:*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }
+    ]
+  })
+}
+
 # WAF Logging Configuration
 resource "aws_wafv2_web_acl_logging_configuration" "main" {
-  resource_arn            = aws_wafv2_web_acl.main.arn
-  log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
+  count        = var.enable_waf_logging ? 1 : 0
+  resource_arn = aws_wafv2_web_acl.main.arn
+  log_destination_configs = [
+    "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/wafv2/${var.project_name}-${var.environment}"
+  ]
+
+  depends_on = [
+    aws_cloudwatch_log_group.waf,
+    aws_cloudwatch_log_resource_policy.waf
+  ]
 
   redacted_fields {
     single_header {

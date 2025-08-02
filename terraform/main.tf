@@ -243,8 +243,11 @@ module "alb" {
   kms_key_arn        = aws_kms_key.main.arn
   rate_limit         = var.waf_rate_limit
   blocked_countries  = var.waf_blocked_countries
+  enable_waf_logging = var.enable_waf_logging
 
   tags = var.common_tags
+
+  depends_on = [module.vpc]
 }
 
 # ============================================================================

@@ -67,3 +67,9 @@ variable "blocked_countries" {
   type        = list(string)
   default     = []
 }
+
+variable "enable_waf_logging" {
+  description = "Enable WAF logging to CloudWatch"
+  type        = bool
+  default     = true
+}

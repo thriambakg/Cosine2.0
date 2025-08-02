@@ -10,6 +10,11 @@ aws_region   = "us-east-1"
 enable_s3_bucket  = true # Enable for pre-production testing
 enable_cloudfront = true # Enable for performance testing
 
+# WAF Configuration
+enable_waf_logging    = false # Temporarily disabled to avoid deployment issues
+waf_rate_limit        = 2000  # Rate limit for staging environment
+waf_blocked_countries = []    # No blocked countries for staging testing
+
 # Common tags
 common_tags = {
   Project     = "cosine"

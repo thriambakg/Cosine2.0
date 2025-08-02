@@ -4,13 +4,21 @@
 
 The terraform configuration has been updated with lifecycle rules and proper resource management to handle existing AWS resources.
 
-## Issues Fixed
-✅ **WAF Logging Configuration**: Fixed ARN format issue  
+## Issues Fixed (Updated)
+✅ **WAF Logging Configuration**: Fixed ARN format + added conditional deployment  
 ✅ **Resource Lifecycle Management**: Added lifecycle rules to prevent recreation  
 ✅ **Tag Conflicts**: Added ignore_changes for environment tags  
 ✅ **KMS Alias**: Configured to handle existing alias  
 ✅ **ECR Repository**: Added lifecycle rules for existing repository  
 ✅ **ALB & Target Group**: Added lifecycle rules to prevent conflicts  
+✅ **Security Group Dependencies**: Added proper dependency ordering  
+✅ **CloudWatch Log Permissions**: Added resource policy for WAF logging  
+
+## Latest Fixes (Security Group & WAF Issues)
+✅ **ALB Security Group**: Added create_before_destroy lifecycle rule  
+✅ **WAF Logging**: Made conditional (disabled by default to prevent deployment issues)  
+✅ **Module Dependencies**: Added explicit dependency on VPC completion  
+✅ **Log Group Permissions**: Added CloudWatch resource policy for WAF service  
 
 ## What Happens When You Trigger the Pipeline
 
@@ -38,6 +46,16 @@ bash scripts/handle-existing-resources.sh
 terraform plan
 terraform apply
 ```
+
+## Post-Deployment: Enable WAF Logging
+Once the core infrastructure is deployed successfully, you can enable WAF logging:
+
+1. In `environments/staging.auto.tfvars`, change:
+   ```
+   enable_waf_logging = true
+   ```
+2. Commit and push to trigger the pipeline again
+3. WAF logs will be available in CloudWatch: `/aws/wafv2/cosine-staging`
 
 ### Post-Deployment Tasks:
 
