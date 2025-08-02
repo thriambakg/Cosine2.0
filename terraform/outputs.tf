@@ -107,11 +107,11 @@ output "kms_alias_name" {
 output "stock_volatility_lambda" {
   description = "Information about the stock volatility Lambda function"
   value = {
-    function_name  = module.stock_volatility_lambda.function_name
-    function_arn   = module.stock_volatility_lambda.function_arn
-    invoke_arn     = module.stock_volatility_lambda.function_invoke_arn
-    role_arn       = module.stock_volatility_lambda.role_arn
-    log_group_name = module.stock_volatility_lambda.log_group_name
+    function_name = module.stock_volatility_lambda.function_name
+    function_arn  = module.stock_volatility_lambda.function_arn
+    invoke_arn    = module.stock_volatility_lambda.invoke_arn
+    role_arn      = module.stock_volatility_lambda.execution_role_arn
+    role_name     = module.stock_volatility_lambda.execution_role_name
   }
 }
 

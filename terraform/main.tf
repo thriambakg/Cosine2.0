@@ -124,31 +124,52 @@ module "s3_buckets" {
   tags = var.common_tags
 }
 
-# Stock Volatility Lambda Function (CI/CD Pipeline Deployment)
+# Custom IAM policy for stock volatility Lambda
+resource "aws_iam_policy" "stock_volatility_lambda_policy" {
+  name        = "${var.project_name}-stock-volatility-policy-${var.environment}"
+  description = "Custom policy for stock volatility Lambda function"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.project_name}-*/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Stock Volatility Lambda Function
 module "stock_volatility_lambda" {
   source = "./modules/lambda"
 
-  # Basic configuration
-  project_name  = var.project_name
-  function_name = "stock-volatility"
-  environment   = var.environment
+  function_name = "${var.project_name}-stock-volatility-${var.environment}"
   description   = "Lambda function for stock volatility calculation using yfinance"
-  purpose       = "StockAnalysis"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 512
 
-  # Runtime configuration
-  runtime     = "python3.11"
-  handler     = "lambda_function.lambda_handler"
-  timeout     = 60
-  memory_size = 512
-
-  # Deployment package (CI/CD pipeline will create this)
-  deployment_package = {
-    filename         = "../backend_app/src/stocks/volatility_fetch/app/deployment.zip"
-    source_code_hash = fileexists("../backend_app/src/stocks/volatility_fetch/app/deployment.zip") ? filebase64sha256("../backend_app/src/stocks/volatility_fetch/app/deployment.zip") : "placeholder"
-  }
-
-  # Security compliance
-  kms_key_id = aws_kms_key.main.arn
+  # Source directory
+  source_dir = "../backend_app/src/stocks/volatility_fetch/app"
 
   # Environment variables
   environment_variables = {
@@ -156,14 +177,10 @@ module "stock_volatility_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
-  # API Gateway integration (if you have an API Gateway)
-  api_gateway_integration = var.api_gateway_execution_arn != null ? {
-    execution_arn = var.api_gateway_execution_arn
-  } : null
-
-  # Monitoring
-  enable_monitoring  = true
-  log_retention_days = var.environment == "production" ? 30 : 7
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.stock_volatility_lambda_policy.arn
+  ]
 
   tags = var.common_tags
 }
