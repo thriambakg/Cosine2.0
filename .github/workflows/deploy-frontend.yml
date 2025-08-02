@@ -157,6 +157,29 @@ jobs:
         id: vars
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Get authentication config from Terraform
+        id: get-auth-config
+        run: |
+          echo "🔍 Getting authentication configuration from Terraform outputs..."
+          
+          # Navigate to terraform directory and get outputs
+          cd terraform
+          
+          # Get authentication config
+          COGNITO_USER_POOL_ID=$(terraform output -raw authentication_config | jq -r '.cognito_user_pool_id // empty')
+          COGNITO_CLIENT_ID=$(terraform output -raw authentication_config | jq -r '.cognito_client_id // empty')
+          COGNITO_DOMAIN=$(terraform output -raw authentication_config | jq -r '.cognito_domain // empty')
+          
+          # Set outputs for next step
+          echo "cognito_user_pool_id=${COGNITO_USER_POOL_ID}" >> $GITHUB_OUTPUT
+          echo "cognito_client_id=${COGNITO_CLIENT_ID}" >> $GITHUB_OUTPUT
+          echo "cognito_domain=${COGNITO_DOMAIN}" >> $GITHUB_OUTPUT
+          
+          echo "✅ Authentication config retrieved:"
+          echo "  - User Pool ID: ${COGNITO_USER_POOL_ID}"
+          echo "  - Client ID: ${COGNITO_CLIENT_ID}"
+          echo "  - Domain: ${COGNITO_DOMAIN}"
+
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
         env:
@@ -167,9 +190,9 @@ jobs:
           # Build Docker image with build args for environment variables
           docker build \
             --build-arg NEXT_PUBLIC_AWS_REGION=us-east-1 \
-            --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_ID="" \
-            --build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID="" \
-            --build-arg NEXT_PUBLIC_COGNITO_DOMAIN="" \
+            --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_ID="${{ steps.get-auth-config.outputs.cognito_user_pool_id }}" \
+            --build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID="${{ steps.get-auth-config.outputs.cognito_client_id }}" \
+            --build-arg NEXT_PUBLIC_COGNITO_DOMAIN="${{ steps.get-auth-config.outputs.cognito_domain }}" \
             --build-arg NEXT_PUBLIC_API_GATEWAY_URL="" \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
