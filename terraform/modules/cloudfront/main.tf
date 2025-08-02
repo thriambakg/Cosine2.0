@@ -134,6 +134,62 @@ resource "aws_wafv2_web_acl" "cloudfront_waf" {
   })
 }
 
+# KMS Key for CloudFront Logs Encryption
+resource "aws_kms_key" "cloudfront_logs" {
+  count = var.enable_logging && var.logging_bucket == null && var.kms_key_arn == null ? 1 : 0
+
+  description             = "KMS key for ${var.project_name} CloudFront logs encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableIAMUserPermissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowCloudFrontLogsService"
+        Effect = "Allow"
+        Principal = {
+          Service = "s3.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name        = "${var.project_name}-cloudfront-logs-kms-${var.environment}"
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Purpose     = "CloudFront Logs Encryption"
+  })
+}
+
+resource "aws_kms_alias" "cloudfront_logs" {
+  count         = var.enable_logging && var.logging_bucket == null && var.kms_key_arn == null ? 1 : 0
+  name          = "alias/${var.project_name}-cloudfront-logs-${var.environment}"
+  target_key_id = aws_kms_key.cloudfront_logs[0].key_id
+}
+
+# Data source for current AWS account
+data "aws_caller_identity" "current" {}
+
 # S3 Bucket for CloudFront Access Logs
 resource "aws_s3_bucket" "cloudfront_logs" {
   count  = var.enable_logging && var.logging_bucket == null ? 1 : 0
@@ -162,8 +218,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "cloudfront_logs" 
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = var.kms_key_arn != null ? var.kms_key_arn : aws_kms_key.cloudfront_logs[0].arn
     }
+    bucket_key_enabled = true
   }
 }
 

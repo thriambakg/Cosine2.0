@@ -185,6 +185,12 @@ variable "waf_blocked_countries" {
   default     = []
 }
 
+variable "kms_key_arn" {
+  description = "ARN of the KMS key for encrypting CloudFront logs S3 bucket"
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   description = "Tags to apply to the CloudFront distribution"
   type        = map(string)

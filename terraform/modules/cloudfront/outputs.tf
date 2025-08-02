@@ -65,3 +65,13 @@ output "logging_bucket_domain_name" {
   description = "Domain name of the CloudFront logging bucket"
   value       = var.enable_logging && var.logging_bucket == null ? aws_s3_bucket.cloudfront_logs[0].bucket_domain_name : null
 }
+
+output "kms_key_arn" {
+  description = "ARN of the KMS key used for CloudFront logs encryption"
+  value       = var.enable_logging && var.logging_bucket == null && var.kms_key_arn == null ? aws_kms_key.cloudfront_logs[0].arn : var.kms_key_arn
+}
+
+output "kms_key_id" {
+  description = "ID of the KMS key used for CloudFront logs encryption"
+  value       = var.enable_logging && var.logging_bucket == null && var.kms_key_arn == null ? aws_kms_key.cloudfront_logs[0].key_id : null
+}
