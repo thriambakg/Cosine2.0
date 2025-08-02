@@ -51,7 +51,8 @@ api_gateway_url = ""
 # ============================================================================
 
 # Enable custom domain (set to true to use your own domain)
-enable_custom_domain = true
+# DISABLED FOR STAGING TO SAVE COSTS - Enable in production only
+enable_custom_domain = false
 
 # Your domain name (e.g., "mycompany.com" or "cosineapp.com")
 # Uncomment and set your domain when ready to use custom domain
