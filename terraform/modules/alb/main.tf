@@ -20,9 +20,9 @@ data "aws_security_groups" "existing_alb_sg" {
   }
 }
 
-# Security Group for ALB
+# Security Group for ALB - ensure unique naming to avoid conflicts
 resource "aws_security_group" "alb" {
-  name        = "${var.project_name}-alb-${var.environment}"
+  name_prefix = "${var.project_name}-alb-${var.environment}-"
   description = "Security group for Application Load Balancer"
   vpc_id      = var.vpc_id
 
@@ -37,26 +37,12 @@ resource "aws_security_group" "alb" {
   lifecycle {
     create_before_destroy = true
     ignore_changes        = [tags["Environment"], tags["Repository"], ingress, egress]
-    # Handle existing security groups gracefully
-    replace_triggered_by = []
   }
 }
 
 # Local value to ensure we use the correct security group ID
 locals {
   security_group_id = aws_security_group.alb.id
-}
-
-# Data source to validate security group exists and is ready
-data "aws_security_group" "alb_validation" {
-  id = local.security_group_id
-
-  depends_on = [
-    aws_security_group.alb,
-    aws_security_group_rule.alb_http_ingress,
-    aws_security_group_rule.alb_https_ingress,
-    aws_security_group_rule.alb_egress_to_targets
-  ]
 }
 
 # Security Group Rules (managed separately for better lifecycle control)
@@ -129,13 +115,12 @@ resource "aws_lb" "main" {
   # Drop invalid header fields for security
   drop_invalid_header_fields = true
 
-  # Ensure security group and all rules are created and validated first
+  # Ensure security group and all rules are created first
   depends_on = [
     aws_security_group.alb,
     aws_security_group_rule.alb_http_ingress,
     aws_security_group_rule.alb_https_ingress,
-    aws_security_group_rule.alb_egress_to_targets,
-    data.aws_security_group.alb_validation
+    aws_security_group_rule.alb_egress_to_targets
   ]
 
   lifecycle {
