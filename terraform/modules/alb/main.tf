@@ -20,13 +20,14 @@ data "aws_security_groups" "existing_alb_sg" {
   }
 }
 
-# Security Group for ALB - ensure unique naming to avoid conflicts
+# Security Group for ALB - use fixed name for stability (v2 to force recreation without inline rules)
 resource "aws_security_group" "alb" {
-  name_prefix = "${var.project_name}-alb-${var.environment}-"
+  name        = "${var.project_name}-alb-sg-v2-${var.environment}"
   description = "Security group for Application Load Balancer"
   vpc_id      = var.vpc_id
 
   # No inline rules - managed separately as aws_security_group_rule resources
+  # Explicitly empty to ensure no conflicts with separate rules
   ingress = []
   egress  = []
 
@@ -36,7 +37,8 @@ resource "aws_security_group" "alb" {
 
   lifecycle {
     create_before_destroy = true
-    ignore_changes        = [tags["Environment"], tags["Repository"], ingress, egress]
+    ignore_changes        = [tags["Environment"], tags["Repository"]]
+    # Do not ignore ingress/egress changes - we want them to stay empty
   }
 }
 
@@ -127,7 +129,7 @@ resource "aws_lb" "main" {
     ignore_changes = [tags["Environment"], tags["Repository"]]
     # Prevent destruction if ALB is being used
     prevent_destroy = false
-    # Create new ALB before destroying old one if security group changes
+    # Create new ALB before destroying old one when name_prefix changes
     create_before_destroy = true
   }
 
