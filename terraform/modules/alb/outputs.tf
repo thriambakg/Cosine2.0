@@ -37,8 +37,8 @@ output "waf_id" {
 }
 
 output "listener_arn" {
-  description = "ARN of the ALB HTTPS listener (always available)"
-  value       = aws_lb_listener.https[0].arn
+  description = "ARN of the ALB listener (HTTPS if certificate available, HTTP otherwise)"
+  value       = var.certificate_arn != "" ? aws_lb_listener.https[0].arn : aws_lb_listener.http[0].arn
 }
 
 output "alb_ready" {

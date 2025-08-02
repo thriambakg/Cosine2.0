@@ -8,45 +8,9 @@ data "aws_vpc" "main" {
   id = var.vpc_id
 }
 
-# Self-signed certificate for staging environment (when no custom domain)
-# This ensures HTTPS is always available and resolves security scanner warnings
-resource "tls_private_key" "default" {
-  count     = var.certificate_arn == "" ? 1 : 0
-  algorithm = "RSA"
-  rsa_bits  = 2048
-}
-
-resource "tls_self_signed_cert" "default" {
-  count           = var.certificate_arn == "" ? 1 : 0
-  private_key_pem = tls_private_key.default[0].private_key_pem
-
-  subject {
-    common_name  = "localhost"
-    organization = var.project_name
-  }
-
-  validity_period_hours = 8760 # 1 year
-
-  allowed_uses = [
-    "key_encipherment",
-    "digital_signature",
-    "server_auth",
-  ]
-}
-
-resource "aws_acm_certificate" "default" {
-  count            = var.certificate_arn == "" ? 1 : 0
-  private_key      = tls_private_key.default[0].private_key_pem
-  certificate_body = tls_self_signed_cert.default[0].cert_pem
-
-  tags = merge(var.tags, {
-    Name = "${var.project_name}-default-cert-${var.environment}"
-  })
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
+# Note: Self-signed certificates are not supported by AWS ALB
+# ALB requires certificates with valid FQDNs. For staging environments without
+# custom domains, HTTP-only access is used. Production should use valid certificates.
 
 # Try to find existing security group first
 data "aws_security_groups" "existing_alb_sg" {
@@ -212,28 +176,28 @@ resource "aws_lb_target_group" "frontend" {
 
 # Development warning for missing certificate
 resource "null_resource" "certificate_warning" {
-  count = var.enable_https == false ? 1 : 0
+  count = var.certificate_arn == "" ? 1 : 0
 
   provisioner "local-exec" {
     command = <<-EOT
-      echo "WARNING: No SSL certificate provided. ALB will be created without HTTPS listener."
-      echo "For production, provide certificate_arn or set enable_custom_domain = true"
-      echo "Security scanners may flag this as HTTP traffic serving."
+      echo "⚠️  SECURITY NOTICE: ALB created with HTTP-only access"
+      echo "🔒 No SSL certificate provided - HTTPS listener not created"
+      echo "📋 For production, provide certificate_arn or enable custom domain"
+      echo "🛡️  Security scanners may flag this as HTTP traffic serving (AVD-AWS-0054)"
+      echo "💡 To resolve: Set enable_custom_domain = true and provide domain_name"
     EOT
   }
 }
 
-# HTTPS Listener (Primary) - Always created for security compliance
+# HTTPS Listener (only when valid certificate is available)
 resource "aws_lb_listener" "https" {
-  count = 1 # Always create HTTPS listener
+  count = var.certificate_arn != "" ? 1 : 0
 
   load_balancer_arn = aws_lb.main.arn
   port              = "443"
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS-1-2-2017-01"
-
-  # Use provided certificate if available, otherwise use self-signed certificate
-  certificate_arn = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate.default[0].arn
+  certificate_arn   = var.certificate_arn
 
   default_action {
     type             = "forward"
@@ -427,15 +391,15 @@ resource "aws_wafv2_web_acl_association" "main" {
   web_acl_arn  = aws_wafv2_web_acl.main.arn
 }
 
-# Null resource to ensure ALB is fully ready before ECS service creation (always HTTPS)
+# Null resource to ensure ALB is fully ready before ECS service creation
 resource "null_resource" "alb_ready_with_https" {
-  count = 1 # Always create since we always have HTTPS
+  count = 1
 
   depends_on = [
     aws_lb.main,
     aws_lb_target_group.frontend,
     aws_lb_listener.http[0],
-    aws_lb_listener.https[0]
+    aws_lb_listener.https # HTTPS listener only if certificate exists
   ]
 }
 
