@@ -99,7 +99,7 @@ resource "aws_security_group_rule" "alb_egress_to_targets" {
 # Application Load Balancer
 # tfsec:ignore:aws-elb-alb-not-public - Public ALB is intentional for web frontend
 resource "aws_lb" "main" {
-  name               = "${var.project_name}-alb-${var.environment}"
+  name               = "${var.project_name}-alb-v2-${var.environment}"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [local.security_group_id]
@@ -140,7 +140,7 @@ resource "aws_lb" "main" {
 
 # Target Group for Frontend
 resource "aws_lb_target_group" "frontend" {
-  name        = "${var.project_name}-frontend-tg-${var.environment}"
+  name        = "${var.project_name}-frontend-tg-v2-${var.environment}"
   port        = 3000
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
