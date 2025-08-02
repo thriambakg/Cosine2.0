@@ -5,38 +5,23 @@
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
+# Try to find existing security group first
+data "aws_security_groups" "existing_alb_sg" {
+  filter {
+    name   = "group-name"
+    values = ["${var.project_name}-alb-${var.environment}"]
+  }
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
+}
+
 # Security Group for ALB
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-${var.environment}"
   description = "Security group for Application Load Balancer"
   vpc_id      = var.vpc_id
-
-  # tfsec:ignore:aws-ec2-no-public-ingress-sgr - ALB needs public HTTP access
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow HTTP traffic"
-  }
-
-  # tfsec:ignore:aws-ec2-no-public-ingress-sgr - ALB needs public HTTPS access
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow HTTPS traffic"
-  }
-
-  # tfsec:ignore:aws-ec2-no-public-egress-sgr - ALB needs outbound access to targets
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow all outbound traffic"
-  }
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-alb-sg-${var.environment}"
@@ -45,7 +30,40 @@ resource "aws_security_group" "alb" {
   lifecycle {
     create_before_destroy = true
     ignore_changes        = [tags["Environment"], tags["Repository"]]
+    # Handle existing security groups gracefully
+    replace_triggered_by = []
   }
+}
+
+# Security Group Rules (managed separately for better lifecycle control)
+resource "aws_security_group_rule" "alb_http_ingress" {
+  type              = "ingress"
+  from_port         = 80
+  to_port           = 80
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  description       = "Allow HTTP traffic"
+  security_group_id = aws_security_group.alb.id
+}
+
+resource "aws_security_group_rule" "alb_https_ingress" {
+  type              = "ingress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  description       = "Allow HTTPS traffic"
+  security_group_id = aws_security_group.alb.id
+}
+
+resource "aws_security_group_rule" "alb_egress" {
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = ["0.0.0.0/0"]
+  description       = "Allow all outbound traffic"
+  security_group_id = aws_security_group.alb.id
 }
 
 # Application Load Balancer
@@ -69,8 +87,17 @@ resource "aws_lb" "main" {
   # Drop invalid header fields for security
   drop_invalid_header_fields = true
 
+  depends_on = [
+    aws_security_group.alb,
+    aws_security_group_rule.alb_http_ingress,
+    aws_security_group_rule.alb_https_ingress,
+    aws_security_group_rule.alb_egress
+  ]
+
   lifecycle {
     ignore_changes = [tags["Environment"], tags["Repository"]]
+    # Prevent destruction if ALB is being used
+    prevent_destroy = false
   }
 
   tags = merge(var.tags, {

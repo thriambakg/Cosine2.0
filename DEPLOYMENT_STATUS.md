@@ -16,9 +16,12 @@ The terraform configuration has been updated with lifecycle rules and proper res
 
 ## Latest Fixes (Security Group & WAF Issues)
 ✅ **ALB Security Group**: Added create_before_destroy lifecycle rule  
+✅ **Security Group Rules**: Separated into individual resources for better lifecycle control  
+✅ **ALB Dependencies**: Added explicit dependencies on security group and all rules  
 ✅ **WAF Logging**: Made conditional (disabled by default to prevent deployment issues)  
 ✅ **Module Dependencies**: Added explicit dependency on VPC completion  
 ✅ **Log Group Permissions**: Added CloudWatch resource policy for WAF service  
+✅ **Import Script**: Created script to handle existing ALB/security group conflicts    
 
 ## What Happens When You Trigger the Pipeline
 
@@ -31,8 +34,19 @@ When you push to the staging branch or manually trigger the workflow:
 5. **Frontend Deployment**: After infrastructure, the frontend container will be built and deployed
 
 ## If Pipeline Encounters Errors
-If the pipeline encounters "already exists" errors:
+If the pipeline encounters specific errors:
 
+### ALB Security Group Error
+If you see: `One or more security groups are invalid`
+```bash
+# Run the ALB security group fix script
+cd terraform
+bash ../scripts/fix-alb-security-groups.sh
+terraform plan
+terraform apply
+```
+
+### Other "Already Exists" Errors
 1. The errors are usually recoverable
 2. Re-run the pipeline - Terraform will typically resolve them on second attempt
 3. Alternatively, use the helper script: `scripts/handle-existing-resources.sh`
