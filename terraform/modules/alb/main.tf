@@ -42,6 +42,23 @@ resource "aws_security_group" "alb" {
   }
 }
 
+# Local value to ensure we use the correct security group ID
+locals {
+  security_group_id = aws_security_group.alb.id
+}
+
+# Data source to validate security group exists and is ready
+data "aws_security_group" "alb_validation" {
+  id = local.security_group_id
+
+  depends_on = [
+    aws_security_group.alb,
+    aws_security_group_rule.alb_http_ingress,
+    aws_security_group_rule.alb_https_ingress,
+    aws_security_group_rule.alb_egress_to_targets
+  ]
+}
+
 # Security Group Rules (managed separately for better lifecycle control)
 resource "aws_security_group_rule" "alb_http_ingress" {
   type              = "ingress"
@@ -50,11 +67,13 @@ resource "aws_security_group_rule" "alb_http_ingress" {
   protocol          = "tcp"
   cidr_blocks       = ["0.0.0.0/0"]
   description       = "Allow HTTP traffic"
-  security_group_id = aws_security_group.alb.id
+  security_group_id = local.security_group_id
 
   lifecycle {
     create_before_destroy = true
   }
+
+  depends_on = [aws_security_group.alb]
 }
 
 resource "aws_security_group_rule" "alb_https_ingress" {
@@ -64,11 +83,13 @@ resource "aws_security_group_rule" "alb_https_ingress" {
   protocol          = "tcp"
   cidr_blocks       = ["0.0.0.0/0"]
   description       = "Allow HTTPS traffic"
-  security_group_id = aws_security_group.alb.id
+  security_group_id = local.security_group_id
 
   lifecycle {
     create_before_destroy = true
   }
+
+  depends_on = [aws_security_group.alb]
 }
 
 resource "aws_security_group_rule" "alb_egress_to_targets" {
@@ -78,11 +99,13 @@ resource "aws_security_group_rule" "alb_egress_to_targets" {
   protocol          = "tcp"
   cidr_blocks       = [data.aws_vpc.main.cidr_block]
   description       = "Allow ALB to communicate with ECS targets on port 3000"
-  security_group_id = aws_security_group.alb.id
+  security_group_id = local.security_group_id
 
   lifecycle {
     create_before_destroy = true
   }
+
+  depends_on = [aws_security_group.alb]
 }
 
 # Application Load Balancer
@@ -91,7 +114,7 @@ resource "aws_lb" "main" {
   name               = "${var.project_name}-alb-${var.environment}"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb.id]
+  security_groups    = [local.security_group_id]
   subnets            = var.public_subnet_ids
 
   enable_deletion_protection = var.enable_deletion_protection
@@ -106,17 +129,21 @@ resource "aws_lb" "main" {
   # Drop invalid header fields for security
   drop_invalid_header_fields = true
 
+  # Ensure security group and all rules are created and validated first
   depends_on = [
     aws_security_group.alb,
     aws_security_group_rule.alb_http_ingress,
     aws_security_group_rule.alb_https_ingress,
-    aws_security_group_rule.alb_egress_to_targets
+    aws_security_group_rule.alb_egress_to_targets,
+    data.aws_security_group.alb_validation
   ]
 
   lifecycle {
     ignore_changes = [tags["Environment"], tags["Repository"]]
     # Prevent destruction if ALB is being used
     prevent_destroy = false
+    # Create new ALB before destroying old one if security group changes
+    create_before_destroy = true
   }
 
   tags = merge(var.tags, {
