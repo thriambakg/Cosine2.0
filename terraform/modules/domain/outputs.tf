@@ -1,5 +1,5 @@
 # =============================================================================
-# DOMAIN MODULE OUTPUTS
+# DOMAIN MODULE OUTPUTS - CERTIFICATE ONLY
 # Outputs for custom domain configuration and SSL certificate information
 # =============================================================================
 
@@ -19,11 +19,11 @@ output "certificate_arn" {
 }
 
 output "domain_name" {
-  description = "Full domain name for the application"
-  value       = var.enable_custom_domain ? (var.subdomain != "" ? "${var.subdomain}.${var.domain_name}" : var.domain_name) : null
+  description = "Base domain name"
+  value       = var.enable_custom_domain ? var.domain_name : null
 }
 
-output "website_url" {
-  description = "Complete URL for the website"
-  value       = var.enable_custom_domain ? "https://${var.subdomain != "" ? "${var.subdomain}.${var.domain_name}" : var.domain_name}" : null
+output "full_domain_name" {
+  description = "Full domain name for the application including subdomain"
+  value       = var.enable_custom_domain ? (var.subdomain != "" ? "${var.subdomain}.${var.domain_name}" : var.domain_name) : null
 }

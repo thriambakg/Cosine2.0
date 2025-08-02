@@ -69,20 +69,20 @@ output "alb_dns_url" {
 # Custom domain URL (if custom domain is enabled)
 output "custom_domain_url" {
   description = "Custom domain URL for the frontend application"
-  value       = var.enable_custom_domain ? module.domain[0].website_url : null
+  value       = var.enable_custom_domain ? module.domain_records[0].website_url : null
 }
 
 # Primary frontend URL (prefers custom domain, falls back to ALB DNS)
 output "frontend_url" {
   description = "Primary URL to access the frontend application"
-  value       = var.enable_custom_domain ? module.domain[0].website_url : (var.certificate_arn != "" ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}")
+  value       = var.enable_custom_domain ? module.domain_records[0].website_url : (var.certificate_arn != "" ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}")
 }
 
 # Environment-specific URL message
 output "website_access_info" {
   description = "Information about accessing the website"
   value = var.enable_custom_domain ? (
-    "🌐 Your website will be live at: ${module.domain[0].website_url}\n" +
+    "🌐 Your website will be live at: ${module.domain_records[0].website_url}\n" +
     "⚙️  DNS Setup Required: Update your domain's nameservers to: ${join(", ", module.domain[0].hosted_zone_name_servers)}\n" +
     "🔗 Temporary ALB URL: ${var.certificate_arn != "" || var.enable_custom_domain ? "https" : "http"}://${module.alb.alb_dns_name}"
     ) : (
@@ -260,7 +260,8 @@ output "domain_configuration" {
   value = var.enable_custom_domain ? {
     enabled                = true
     domain_name            = module.domain[0].domain_name
-    website_url            = module.domain[0].website_url
+    full_domain_name       = module.domain_records[0].full_domain_name
+    website_url            = module.domain_records[0].website_url
     hosted_zone_id         = module.domain[0].hosted_zone_id
     certificate_arn        = module.domain[0].certificate_arn
     name_servers           = module.domain[0].hosted_zone_name_servers

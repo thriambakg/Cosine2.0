@@ -1,10 +1,10 @@
 # =============================================================================
-# DOMAIN MODULE VARIABLES - CERTIFICATE ONLY
-# Variables for custom domain configuration and SSL certificate setup
+# DOMAIN RECORDS MODULE VARIABLES
+# Variables for DNS records pointing to ALB
 # =============================================================================
 
 variable "enable_custom_domain" {
-  description = "Enable custom domain configuration with Route53 and SSL certificate"
+  description = "Enable custom domain configuration"
   type        = bool
   default     = false
 }
@@ -12,7 +12,6 @@ variable "enable_custom_domain" {
 variable "domain_name" {
   description = "The domain name for the application (e.g., example.com)"
   type        = string
-  default     = ""
 }
 
 variable "subdomain" {
@@ -21,18 +20,17 @@ variable "subdomain" {
   default     = ""
 }
 
-variable "project_name" {
-  description = "Name of the project"
+variable "hosted_zone_id" {
+  description = "Route53 hosted zone ID"
   type        = string
 }
 
-variable "environment" {
-  description = "Environment name (dev, staging, prod)"
+variable "alb_dns_name" {
+  description = "DNS name of the Application Load Balancer"
   type        = string
 }
 
-variable "common_tags" {
-  description = "Common tags to apply to all resources"
-  type        = map(string)
-  default     = {}
+variable "alb_zone_id" {
+  description = "Zone ID of the Application Load Balancer"
+  type        = string
 }

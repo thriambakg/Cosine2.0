@@ -1,6 +1,6 @@
 # =============================================================================
-# CUSTOM DOMAIN MODULE
-# Configures Route53 hosted zone and SSL certificate for custom domain
+# CUSTOM DOMAIN MODULE - CERTIFICATE ONLY 
+# Configures Route53 hosted zone and SSL certificate (no ALB dependency)
 # =============================================================================
 
 # Route 53 Hosted Zone (if custom domain is enabled)
@@ -52,28 +52,4 @@ resource "aws_acm_certificate_validation" "main" {
   count                   = var.enable_custom_domain ? 1 : 0
   certificate_arn         = aws_acm_certificate.main[0].arn
   validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
-}
-
-# A record pointing to ALB
-resource "aws_route53_record" "frontend" {
-  count   = var.enable_custom_domain ? 1 : 0
-  zone_id = aws_route53_zone.main[0].zone_id
-  name    = var.subdomain != "" ? "${var.subdomain}.${var.domain_name}" : var.domain_name
-  type    = "A"
-
-  alias {
-    name                   = var.alb_dns_name
-    zone_id                = var.alb_zone_id
-    evaluate_target_health = true
-  }
-}
-
-# CNAME record for www (if subdomain is not www)
-resource "aws_route53_record" "www" {
-  count   = var.enable_custom_domain && var.subdomain != "www" ? 1 : 0
-  zone_id = aws_route53_zone.main[0].zone_id
-  name    = "www.${var.domain_name}"
-  type    = "CNAME"
-  ttl     = 300
-  records = [var.subdomain != "" ? "${var.subdomain}.${var.domain_name}" : var.domain_name]
 }

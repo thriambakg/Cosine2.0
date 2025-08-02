@@ -242,8 +242,8 @@ module "alb" {
 }
 
 # ============================================================================
-# CUSTOM DOMAIN CONFIGURATION
-# Route53 hosted zone and SSL certificate for custom domain
+# CUSTOM DOMAIN CONFIGURATION - PHASE 1: CERTIFICATE CREATION
+# Route53 hosted zone and SSL certificate (independent of ALB)
 # ============================================================================
 
 module "domain" {
@@ -253,13 +253,28 @@ module "domain" {
   enable_custom_domain = var.enable_custom_domain
   domain_name          = var.domain_name
   subdomain            = var.environment == "production" ? var.production_subdomain : var.staging_subdomain
-  alb_dns_name         = module.alb.alb_dns_name
-  alb_zone_id          = module.alb.alb_zone_id
   project_name         = var.project_name
   environment          = var.environment
   common_tags          = var.common_tags
+}
 
-  depends_on = [module.alb]
+# ============================================================================
+# CUSTOM DOMAIN CONFIGURATION - PHASE 2: DNS RECORDS
+# A records pointing to ALB (depends on ALB being created)
+# ============================================================================
+
+module "domain_records" {
+  count  = var.enable_custom_domain ? 1 : 0
+  source = "./modules/domain-records"
+
+  enable_custom_domain = var.enable_custom_domain
+  domain_name          = var.domain_name
+  subdomain            = var.environment == "production" ? var.production_subdomain : var.staging_subdomain
+  hosted_zone_id       = module.domain[0].hosted_zone_id
+  alb_dns_name         = module.alb.alb_dns_name
+  alb_zone_id          = module.alb.alb_zone_id
+
+  depends_on = [module.alb, module.domain]
 }
 
 # ============================================================================
