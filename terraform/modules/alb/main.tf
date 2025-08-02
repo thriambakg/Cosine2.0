@@ -186,19 +186,33 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# HTTP Listener (Redirect to HTTPS)
+# HTTP Listener (Redirect to HTTPS or Forward if no certificate)
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
-    type = "redirect"
+    type = var.certificate_arn != "" ? "redirect" : "forward"
 
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
+    # Forward to target group if no certificate
+    dynamic "forward" {
+      for_each = var.certificate_arn == "" ? [1] : []
+      content {
+        target_group {
+          arn = aws_lb_target_group.frontend.arn
+        }
+      }
+    }
+
+    # Redirect to HTTPS if certificate is present
+    dynamic "redirect" {
+      for_each = var.certificate_arn != "" ? [1] : []
+      content {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
     }
   }
 }
@@ -368,6 +382,16 @@ resource "aws_wafv2_web_acl" "main" {
 resource "aws_wafv2_web_acl_association" "main" {
   resource_arn = aws_lb.main.arn
   web_acl_arn  = aws_wafv2_web_acl.main.arn
+}
+
+# Null resource to ensure ALB is fully ready before ECS service creation
+resource "null_resource" "alb_ready" {
+  depends_on = [
+    aws_lb.main,
+    aws_lb_target_group.frontend,
+    aws_lb_listener.http,
+    aws_lb_listener.https
+  ]
 }
 
 # CloudWatch Log Group for WAF
