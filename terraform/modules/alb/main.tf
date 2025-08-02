@@ -383,16 +383,27 @@ resource "aws_wafv2_web_acl_association" "main" {
   web_acl_arn  = aws_wafv2_web_acl.main.arn
 }
 
-# Null resource to ensure ALB is fully ready before ECS service creation
-resource "null_resource" "alb_ready" {
-  depends_on = concat(
-    [
-      aws_lb.main,
-      aws_lb_target_group.frontend,
-      aws_lb_listener.http
-    ],
-    var.certificate_arn != "" ? [aws_lb_listener.https[0]] : []
-  )
+# Null resource to ensure ALB is fully ready before ECS service creation (with HTTPS)
+resource "null_resource" "alb_ready_with_https" {
+  count = var.certificate_arn != "" ? 1 : 0
+
+  depends_on = [
+    aws_lb.main,
+    aws_lb_target_group.frontend,
+    aws_lb_listener.http,
+    aws_lb_listener.https[0]
+  ]
+}
+
+# Null resource to ensure ALB is fully ready before ECS service creation (HTTP only)
+resource "null_resource" "alb_ready_http_only" {
+  count = var.certificate_arn == "" ? 1 : 0
+
+  depends_on = [
+    aws_lb.main,
+    aws_lb_target_group.frontend,
+    aws_lb_listener.http
+  ]
 }
 
 # CloudWatch Log Group for WAF

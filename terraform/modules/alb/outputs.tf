@@ -43,5 +43,5 @@ output "listener_arn" {
 
 output "alb_ready" {
   description = "Null resource indicating ALB is fully ready"
-  value       = null_resource.alb_ready.id
+  value       = var.certificate_arn != "" ? null_resource.alb_ready_with_https[0].id : null_resource.alb_ready_http_only[0].id
 }
