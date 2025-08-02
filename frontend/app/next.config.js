@@ -47,6 +47,18 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+
+  // Webpack configuration for external dependencies
+  webpack: (config, { isServer }) => {
+    // Handle plotly.js
+    if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        'plotly.js': 'plotly.js/dist/plotly.min.js',
+      };
+    }
+    return config;
+  },
 }
 
 module.exports = nextConfig

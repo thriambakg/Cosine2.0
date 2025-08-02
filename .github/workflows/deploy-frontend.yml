@@ -1,28 +1,27 @@
 # Frontend Application Deployment Pipeline
 # Builds and deploys frontend container to ECS
+#
+# USAGE:
+# - Automatically called by deploy-application.yml (main pipeline)
+# - Can be manually triggered for frontend-only deployments
+# - No longer runs on push/PR to avoid duplicate executions
 
 name: Deploy Frontend Application
 
 on:
-  push:
-    branches:
-      - main
-      - staging
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/deploy-frontend.yml'
-  pull_request:
-    branches:
-      - main
-      - staging
-    paths:
-      - 'frontend/**'
+  # Only trigger for workflow_call (when called by other workflows) 
+  # and workflow_dispatch (manual trigger)
   workflow_call:
     inputs:
       environment:
         description: 'Environment to deploy to'
         required: true
         type: string
+      frontend_only:
+        description: 'Skip infrastructure checks for faster deployment'
+        required: false
+        default: false
+        type: boolean
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -38,6 +37,11 @@ on:
         options:
           - staging
           - production
+      frontend_only:
+        description: 'Deploy frontend only (skip infrastructure checks)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   AWS_REGION: us-east-1
@@ -78,6 +82,8 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     environment: ${{ needs.setup.outputs.environment }}
+    # Skip infrastructure check if this is a frontend-only deployment
+    if: ${{ !(github.event.inputs.frontend_only == 'true' || inputs.frontend_only == true) }}
     
     steps:
       - name: Configure AWS credentials
@@ -129,6 +135,8 @@ jobs:
     needs: [setup, check-infrastructure]
     runs-on: ubuntu-latest
     environment: ${{ needs.setup.outputs.environment }}
+    # Always run if check-infrastructure was skipped, otherwise wait for it
+    if: ${{ always() && (needs.check-infrastructure.result == 'success' || needs.check-infrastructure.result == 'skipped') }}
     
     steps:
       - name: Checkout code
