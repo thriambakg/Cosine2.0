@@ -46,9 +46,6 @@ data "aws_region" "current" {}
 # Local values for resource naming
 locals {
   bucket_name = "${var.project_name}-frontend-${var.environment}"
-
-  # Determine if we have a certificate available
-  has_certificate = var.enable_custom_domain || var.certificate_arn != ""
 }
 
 # KMS Key for encryption
