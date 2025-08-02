@@ -17,6 +17,10 @@ resource "aws_ecr_repository" "frontend" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-frontend-ecr-${var.environment}"
   })
+
+  lifecycle {
+    ignore_changes = [name]
+  }
 }
 
 # ECR Lifecycle Policy

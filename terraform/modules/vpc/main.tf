@@ -169,6 +169,10 @@ resource "aws_iam_role" "flow_log" {
     ]
   })
 
+  lifecycle {
+    ignore_changes = [name]
+  }
+
   tags = merge(var.tags, {
     Name = "${var.project_name}-flow-log-role-${var.environment}"
   })

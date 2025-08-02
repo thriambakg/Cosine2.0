@@ -81,27 +81,27 @@ output "frontend_url" {
 # S3 Bucket Outputs (existing)
 output "s3_bucket_name" {
   description = "Name of the S3 bucket"
-  value       = var.enable_s3_bucket ? module.s3_buckets[0].frontend_bucket_id : null
+  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].frontend_bucket_id : null
 }
 
 output "s3_bucket_arn" {
   description = "ARN of the S3 bucket"
-  value       = var.enable_s3_bucket ? module.s3_buckets[0].frontend_bucket_arn : null
+  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].frontend_bucket_arn : null
 }
 
 output "s3_bucket_domain_name" {
   description = "Domain name of the S3 bucket"
-  value       = var.enable_s3_bucket ? module.s3_buckets[0].frontend_bucket_regional_domain_name : null
+  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].frontend_bucket_regional_domain_name : null
 }
 
 output "s3_logs_bucket_name" {
   description = "Name of the S3 logs bucket"
-  value       = var.enable_s3_bucket ? module.s3_buckets[0].logs_bucket_id : null
+  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].logs_bucket_id : null
 }
 
 output "s3_logs_bucket_arn" {
   description = "ARN of the S3 logs bucket"
-  value       = var.enable_s3_bucket ? module.s3_buckets[0].logs_bucket_arn : null
+  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].logs_bucket_arn : null
 }
 
 # KMS Outputs
@@ -123,12 +123,19 @@ output "kms_alias_name" {
 # Lambda Function Outputs
 output "stock_volatility_lambda" {
   description = "Information about the stock volatility Lambda function"
-  value = {
-    function_name = module.stock_volatility_lambda.function_name
-    function_arn  = module.stock_volatility_lambda.function_arn
-    invoke_arn    = module.stock_volatility_lambda.invoke_arn
-    role_arn      = module.stock_volatility_lambda.execution_role_arn
-    role_name     = module.stock_volatility_lambda.execution_role_name
+  value = length(module.stock_volatility_lambda) > 0 ? {
+    function_name = module.stock_volatility_lambda[0].function_name
+    function_arn  = module.stock_volatility_lambda[0].function_arn
+    invoke_arn    = module.stock_volatility_lambda[0].invoke_arn
+    role_arn      = module.stock_volatility_lambda[0].execution_role_arn
+    role_name     = module.stock_volatility_lambda[0].execution_role_name
+    } : {
+    function_name = null
+    function_arn  = null
+    invoke_arn    = null
+    role_arn      = null
+    role_name     = null
+    status        = "Disabled - IAM permissions required"
   }
 }
 

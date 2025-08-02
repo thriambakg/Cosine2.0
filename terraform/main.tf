@@ -102,6 +102,10 @@ resource "aws_kms_key" "main" {
 resource "aws_kms_alias" "main" {
   name          = "alias/${var.project_name}-${var.environment}"
   target_key_id = aws_kms_key.main.key_id
+
+  lifecycle {
+    ignore_changes = [target_key_id]
+  }
 }
 
 # CloudWatch Log Groups for ECS
@@ -125,9 +129,9 @@ resource "aws_cloudwatch_log_group" "frontend" {
   })
 }
 
-# S3 Buckets Module (conditional)
+# S3 Buckets Module (temporarily disabled until S3 permissions are granted)
 module "s3_buckets" {
-  count  = var.enable_s3_bucket ? 1 : 0
+  count  = 0 # Temporarily disabled - requires s3:CreateBucket permission
   source = "./modules/s3"
 
   bucket_name       = local.bucket_name
@@ -138,8 +142,9 @@ module "s3_buckets" {
   tags = var.common_tags
 }
 
-# Custom IAM policy for stock volatility Lambda
+# Custom IAM policy for stock volatility Lambda (temporarily disabled until IAM permissions are granted)
 resource "aws_iam_policy" "stock_volatility_lambda_policy" {
+  count       = 0 # Temporarily disabled - requires iam:CreatePolicy permission
   name        = "${var.project_name}-stock-volatility-policy-${var.environment}"
   description = "Custom policy for stock volatility Lambda function"
 
@@ -171,8 +176,9 @@ resource "aws_iam_policy" "stock_volatility_lambda_policy" {
   tags = var.common_tags
 }
 
-# Stock Volatility Lambda Function
+# Stock Volatility Lambda Function (temporarily disabled until IAM permissions are granted)
 module "stock_volatility_lambda" {
+  count  = 0 # Temporarily disabled - requires iam:CreateRole permission  
   source = "./modules/lambda"
 
   function_name = "${var.project_name}-stock-volatility-${var.environment}"
@@ -191,9 +197,9 @@ module "stock_volatility_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
-  # Additional IAM policies
+  # Additional IAM policies (temporarily empty until permissions are granted)
   additional_policy_arns = [
-    aws_iam_policy.stock_volatility_lambda_policy.arn
+    # aws_iam_policy.stock_volatility_lambda_policy.arn # Disabled until IAM permissions granted
   ]
 
   tags = var.common_tags
