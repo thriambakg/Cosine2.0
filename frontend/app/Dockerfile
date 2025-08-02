@@ -22,6 +22,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Ensure public directory exists
+RUN mkdir -p ./public
+
 # Accept build arguments
 ARG NEXT_PUBLIC_AWS_REGION=us-east-1
 ARG NEXT_PUBLIC_COGNITO_USER_POOL_ID=us-east-1_TEMP12345
