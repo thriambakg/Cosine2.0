@@ -205,21 +205,29 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# HTTP Listener - Always redirect to HTTPS for security
+# HTTP Listener - Forward to target group when no certificate, redirect to HTTPS when certificate exists
 resource "aws_lb_listener" "http" {
-  count = 1 # Always create HTTP redirect
+  count = 1 # Always create HTTP listener
 
   load_balancer_arn = aws_lb.main.arn
   port              = "80"
   protocol          = "HTTP"
 
+  # Conditional action based on certificate availability
   default_action {
-    type = "redirect"
+    type = var.certificate_arn != "" ? "redirect" : "forward"
 
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
+    # Forward to target group when no certificate
+    target_group_arn = var.certificate_arn == "" ? aws_lb_target_group.frontend.arn : null
+
+    # Redirect to HTTPS when certificate is available
+    dynamic "redirect" {
+      for_each = var.certificate_arn != "" ? [1] : []
+      content {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
     }
   }
 }
