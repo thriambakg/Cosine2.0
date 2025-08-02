@@ -156,10 +156,3 @@ variable "enable_ecs_execute_command" {
   type        = bool
   default     = false
 }
-
-# Lambda Configuration
-variable "api_gateway_execution_arn" {
-  description = "API Gateway execution ARN for Lambda integration"
-  type        = string
-  default     = null
-}
