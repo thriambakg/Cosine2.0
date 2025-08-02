@@ -1,3 +1,7 @@
+# ECS Service-Linked Role for ECS (required for ECS service creation)
+resource "aws_iam_service_linked_role" "ecs" {
+  aws_service_name = "ecs.amazonaws.com"
+}
 # ECS Container Service Module
 # modules/ecs/main.tf
 
@@ -345,7 +349,10 @@ resource "aws_ecs_service" "frontend" {
   # Enable execute command for debugging
   enable_execute_command = var.enable_execute_command
 
-  depends_on = [aws_iam_role_policy_attachment.ecs_task_execution_role_policy]
+  depends_on = [
+    aws_iam_role_policy_attachment.ecs_task_execution_role_policy,
+    aws_iam_service_linked_role.ecs
+  ]
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-frontend-service-${var.environment}"
