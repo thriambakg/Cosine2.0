@@ -26,13 +26,17 @@ resource "aws_security_group" "alb" {
   description = "Security group for Application Load Balancer"
   vpc_id      = var.vpc_id
 
+  # No inline rules - managed separately as aws_security_group_rule resources
+  ingress = []
+  egress  = []
+
   tags = merge(var.tags, {
     Name = "${var.project_name}-alb-sg-${var.environment}"
   })
 
   lifecycle {
     create_before_destroy = true
-    ignore_changes        = [tags["Environment"], tags["Repository"]]
+    ignore_changes        = [tags["Environment"], tags["Repository"], ingress, egress]
     # Handle existing security groups gracefully
     replace_triggered_by = []
   }
