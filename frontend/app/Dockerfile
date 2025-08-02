@@ -73,6 +73,11 @@ RUN apk add --no-cache curl
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+# Disable Next.js startup logs that contain Unicode characters
+ENV NEXT_DISABLE_SWC_WASM=true
+# Set locale to handle Unicode properly
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
 
 # Create a non-root user for security
 RUN addgroup --system --gid 1001 nodejs
@@ -99,4 +104,5 @@ ENV HOSTNAME="0.0.0.0"
 
 # server.js is created by next build from the standalone output
 # https://nextjs.org/docs/pages/api-reference/next-config-js/output
-CMD ["node", "server.js"]
+# Redirect stderr to stdout to avoid encoding issues
+CMD ["sh", "-c", "node server.js 2>&1"]
