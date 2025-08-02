@@ -36,9 +36,9 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
 
 # Attach additional IAM policies
 resource "aws_iam_role_policy_attachment" "additional_policies" {
-  for_each   = toset(var.additional_policy_arns)
+  count      = length(var.additional_policy_arns)
   role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = each.value
+  policy_arn = var.additional_policy_arns[count.index]
 }
 
 # Lambda Function
