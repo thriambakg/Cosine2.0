@@ -156,8 +156,16 @@ jobs:
           ECR_REPOSITORY: ${{ needs.setup.outputs.ecr_repository }}
           IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
         run: |
-          # Build Docker image
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./frontend/app
+          # Build Docker image with build args for environment variables
+          docker build \
+            --build-arg NEXT_PUBLIC_AWS_REGION=us-east-1 \
+            --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_ID="" \
+            --build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID="" \
+            --build-arg NEXT_PUBLIC_COGNITO_DOMAIN="" \
+            --build-arg NEXT_PUBLIC_API_GATEWAY_URL="" \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            ./frontend/app
+          
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
           # Push to ECR
