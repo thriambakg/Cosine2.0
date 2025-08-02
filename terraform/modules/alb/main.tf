@@ -218,19 +218,20 @@ resource "aws_lb_listener" "http" {
   protocol          = "HTTP"
 
   # Conditional action based on certificate availability
-  default_action {
-    type = var.certificate_arn != "" ? "redirect" : "forward"
+  dynamic "default_action" {
+    for_each = [1]
+    content {
+      type             = var.certificate_arn != "" ? "redirect" : "forward"
+      target_group_arn = var.certificate_arn == "" ? aws_lb_target_group.frontend.arn : null
 
-    # Forward to target group when no certificate
-    target_group_arn = var.certificate_arn == "" ? aws_lb_target_group.frontend.arn : null
-
-    # Redirect to HTTPS when certificate is available
-    dynamic "redirect" {
-      for_each = var.certificate_arn != "" ? [1] : []
-      content {
-        port        = "443"
-        protocol    = "HTTPS"
-        status_code = "HTTP_301"
+      # Redirect to HTTPS when certificate is available
+      dynamic "redirect" {
+        for_each = var.certificate_arn != "" ? [1] : []
+        content {
+          port        = "443"
+          protocol    = "HTTPS"
+          status_code = "HTTP_301"
+        }
       }
     }
   }
