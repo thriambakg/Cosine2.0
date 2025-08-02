@@ -351,7 +351,8 @@ resource "aws_ecs_service" "frontend" {
 
   depends_on = [
     aws_iam_role_policy_attachment.ecs_task_execution_role_policy,
-    aws_iam_service_linked_role.ecs
+    aws_iam_service_linked_role.ecs,
+    var.alb_dependency
   ]
 
   tags = merge(var.tags, {

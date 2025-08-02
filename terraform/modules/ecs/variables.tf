@@ -1,6 +1,8 @@
 # ECS Module Variables
 # modules/ecs/variables.tf
 
+
+
 variable "project_name" {
   description = "Name of the project"
   type        = string
@@ -140,4 +142,10 @@ variable "user_sessions_table_name" {
   description = "DynamoDB table name for user sessions"
   type        = string
   default     = ""
+}
+
+variable "alb_dependency" {
+  description = "Resource(s) to depend on to ensure ALB and target group are ready before creating the ECS service"
+  type        = any
+  default     = null
 }
