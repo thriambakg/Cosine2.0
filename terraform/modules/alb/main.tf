@@ -153,13 +153,13 @@ resource "aws_lb_target_group" "frontend" {
   health_check {
     enabled             = true
     healthy_threshold   = 2             # Need 2 consecutive successes
-    interval            = 15            # Check every 15 seconds (faster than 30)
+    interval            = 30            # Check every 30 seconds (more time between checks)
     matcher             = "200"         # Only accept 200 (remove 404 to catch real issues)
     path                = "/api/health" # Use dedicated health endpoint
     port                = "traffic-port"
     protocol            = "HTTP"
-    timeout             = 10 # 10 second timeout per check
-    unhealthy_threshold = 5  # 5 failures before marking unhealthy (more lenient)
+    timeout             = 20            # 20 second timeout per check (more time for Next.js)
+    unhealthy_threshold = 3             # 3 failures before marking unhealthy (faster detection but more tolerant)
   }
 
   # Deregistration delay

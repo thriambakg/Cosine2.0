@@ -75,11 +75,16 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 # Disable Next.js startup logs that contain Unicode characters
 ENV NEXT_DISABLE_SWC_WASM=true
-# Set locale to handle Unicode properly
+# Set locale to handle Unicode properly  
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 # Disable verbose Next.js output
 ENV NEXT_PRIVATE_DEBUG_OUTPUT=false
+# Force UTF-8 encoding for Node.js
+ENV NODE_OPTIONS="--max-old-space-size=512"
+# Disable emoji and unicode in npm/node output
+ENV NO_COLOR=1
+ENV CI=true
 
 # Create a non-root user for security
 RUN addgroup --system --gid 1001 nodejs
