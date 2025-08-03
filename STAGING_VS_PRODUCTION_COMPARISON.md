@@ -90,4 +90,8 @@ Your production configuration is **correctly set up** and will resolve:
 3. **Professional domain setup**
 4. **Enterprise security compliance**
 
+### **Branch Strategy:**
+- **Base Infrastructure**: Use `prod` branch → `environments/production.auto.tfvars`
+- **Application Infrastructure**: Use `prod` branch → `environments/production.auto.tfvars`
+
 **Next Step**: Deploy to production using the checklist in `PRODUCTION_DEPLOYMENT_CHECKLIST.md`

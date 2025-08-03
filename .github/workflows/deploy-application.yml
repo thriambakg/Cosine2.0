@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+      - prod
       - develop
       - staging
     paths:
@@ -16,6 +17,7 @@ on:
   pull_request:
     branches:
       - main
+      - prod
       - develop
       - staging
     paths:
@@ -56,6 +58,8 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" == "refs/heads/prod" ]; then
             echo "environment=production" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref }}" == "refs/heads/develop" ]; then
             echo "environment=staging" >> $GITHUB_OUTPUT

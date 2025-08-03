@@ -20,6 +20,7 @@
 - ✅ **Security**: MFA enabled, advanced security enforced
 - ✅ **Token Validity**: 30 minutes (more secure)
 - ✅ **Monitoring**: Extended log retention (365 days)
+- ✅ **Secrets Manager**: Rotation configuration fixed (manual OAuth management)
 
 ### 🔄 **Key Differences: Staging vs Production**
 
@@ -39,6 +40,9 @@
 ### **Step 1: Deploy Base Infrastructure First**
 ```bash
 cd Cosine-Base-Infra/terraform
+git checkout -b prod  # Create production branch
+git push origin prod  # Push to trigger pipeline
+# OR manually trigger via GitHub Actions with environment=production
 terraform init
 terraform workspace select production  # or create if doesn't exist
 terraform plan -var-file="environments/production.auto.tfvars"
@@ -48,6 +52,9 @@ terraform apply -var-file="environments/production.auto.tfvars"
 ### **Step 2: Deploy Application Infrastructure**
 ```bash
 cd Cosine2.0/terraform
+git checkout -b prod  # Create production branch (now uses 'prod' too)
+git push origin prod  # Push to trigger pipeline
+# OR manually trigger via GitHub Actions with environment=production
 terraform init
 terraform workspace select production  # or create if doesn't exist
 terraform plan -var-file="environments/production.auto.tfvars"
@@ -117,6 +124,12 @@ NEXT_PUBLIC_COGNITO_CLIENT_ID=XXXXXXXXXXXXXXXXXX      # Will be different from s
 NEXT_PUBLIC_COGNITO_DOMAIN=cosine-production          # Production Cognito domain
 ```
 
+### **Secrets Management**
+- **OAuth Credentials**: Managed manually (automatic rotation disabled)
+- **Manual Updates**: Use AWS Console or CLI to update OAuth secrets
+- **Security**: All secrets encrypted with KMS keys
+- **Documentation**: See `Cosine-Base-Infra/SECRETS_ROTATION_GUIDE.md` for details
+
 ## 🆘 **Rollback Plan**
 
 If issues occur:
@@ -129,6 +142,50 @@ terraform apply
 # Or destroy production if needed
 terraform workspace select production
 terraform destroy -var-file="environments/production.auto.tfvars"
+```
+
+## 🔧 **Troubleshooting Common Issues**
+
+### **rotation_lambda_arn Error**
+**Issue**: `"rotation_lambda_arn" is an invalid ARN`
+**Solution**: ✅ **RESOLVED** - Automatic rotation disabled for OAuth credentials
+**Reference**: See `Cosine-Base-Infra/SECRETS_ROTATION_GUIDE.md`
+
+### **SSL Certificate Issues**
+**Issue**: Browser shows "Not Secure" warnings
+**Solution**: 
+1. Verify AWS Certificate Manager has issued certificate
+2. Check DNS validation records in Route53
+3. Wait for certificate validation (5-10 minutes)
+
+### **OAuth Login Failures**
+**Issue**: Google/Microsoft login fails
+**Causes**:
+- Self-signed certificates (staging only)
+- Incorrect callback URLs
+- Missing OAuth credentials in Secrets Manager
+**Solution**:
+1. Deploy production with trusted SSL certificates
+2. Verify callback URLs match domain
+3. Populate OAuth secrets manually
+
+### **Domain Not Resolving**
+**Issue**: `investcosine.com` doesn't load
+**Solution**:
+1. Check Route53 hosted zone created
+2. Update domain registrar nameservers
+3. Wait for DNS propagation (24-48 hours)
+
+### **Terraform State Issues**
+**Issue**: State conflicts between environments
+**Solution**:
+```bash
+# Ensure correct workspace
+terraform workspace list
+terraform workspace select production
+
+# Refresh state if needed
+terraform refresh -var-file="environments/production.auto.tfvars"
 ```
 
 ## 📋 **Success Criteria**
