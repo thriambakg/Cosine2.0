@@ -4,19 +4,12 @@
 
 terraform {
   backend "s3" {
-    # S3 bucket for storing Terraform state
-    bucket = "cosine-terraform-state-bucket"
-
-    # Path to the state file in the bucket
-    key = "cosine2.0/terraform.tfstate"
-
-    # AWS region where the bucket is located
-    region = "us-east-1"
-
-    # DynamoDB table for state locking (prevents concurrent modifications)
-    dynamodb_table = "cosine-terraform-locks"
-
-    # Enable versioning and encryption
-    encrypt = true
+    # Backend configuration will be provided via backend config files
+    # See: backend-configs/ directory for environment-specific configurations
+    # 
+    # Usage:
+    # terraform init -backend-config="backend-configs/production.tfbackend"
+    # terraform init -backend-config="backend-configs/staging.tfbackend"
+    # terraform init -backend-config="backend-configs/development.tfbackend"
   }
 }
