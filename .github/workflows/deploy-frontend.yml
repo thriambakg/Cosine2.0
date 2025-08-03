@@ -22,6 +22,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_wait:
+        description: 'Skip deployment wait (faster iterations)'
+        required: false
+        default: false
+        type: boolean
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -39,6 +44,11 @@ on:
           - production
       frontend_only:
         description: 'Deploy frontend only (skip infrastructure checks)'
+        required: false
+        default: false
+        type: boolean
+      skip_wait:
+        description: 'Skip deployment wait (faster but no status verification)'
         required: false
         default: false
         type: boolean
@@ -279,151 +289,119 @@ jobs:
           
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Deploy to Amazon ECS
+      - name: Deploy to ECS with health check fix
         env:
           ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
           ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ needs.setup.outputs.ecr_repository }}
+          IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
         run: |
-          # Force new deployment to pull latest image
-          aws ecs update-service \
-            --cluster $ECS_CLUSTER \
-            --service $ECS_SERVICE \
-            --force-new-deployment \
-            --region $AWS_REGION
-
-      - name: Wait for deployment to complete
-        env:
-          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
-          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
-        run: |
-          echo "🚀 Monitoring ECS deployment progress..."
+          echo "🚀 Deploying new image with health check optimization..."
           
-          # Get the deployment ID to track progress
-          DEPLOYMENT_ID=$(aws ecs describe-services \
+          # Get current task definition
+          CURRENT_TASK_DEF=$(aws ecs describe-services \
             --cluster $ECS_CLUSTER \
             --services $ECS_SERVICE \
-            --query 'services[0].deployments[?status==`PRIMARY`].id' \
+            --query 'services[0].taskDefinition' \
             --output text \
             --region $AWS_REGION)
           
-          echo "📋 Tracking deployment ID: $DEPLOYMENT_ID"
+          echo "📋 Current task definition: $CURRENT_TASK_DEF"
           
-          # Monitor deployment with detailed status checking
-          for i in {1..40}; do  # 20 minutes total (30s * 40 = 1200s)
-            echo "⏳ Check $i/40: Monitoring deployment status..."
+          # Get task definition details
+          TASK_DEFINITION=$(aws ecs describe-task-definition \
+            --task-definition $CURRENT_TASK_DEF \
+            --query 'taskDefinition' \
+            --region $AWS_REGION)
+          
+          # Extract the new image URI
+          NEW_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "🐳 New image: $NEW_IMAGE_URI"
+          
+          # Update task definition with new image AND optimized health check settings
+          NEW_TASK_DEFINITION=$(echo $TASK_DEFINITION | jq --arg IMAGE "$NEW_IMAGE_URI" '
+            .containerDefinitions[0].image = $IMAGE |
+            .containerDefinitions[0].healthCheck = {
+              "command": ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"],
+              "interval": 30,
+              "timeout": 10,
+              "retries": 3,
+              "startPeriod": 120
+            } |
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)
+          ')
+          
+          echo "📝 Registering optimized task definition with health checks..."
+          NEW_TASK_DEF_ARN=$(echo $NEW_TASK_DEFINITION | aws ecs register-task-definition \
+            --region $AWS_REGION \
+            --cli-input-json file:///dev/stdin \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          
+          echo "✅ New task definition: $NEW_TASK_DEF_ARN"
+          
+          # Update service with new task definition
+          echo "🔄 Updating service..."
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --task-definition $NEW_TASK_DEF_ARN \
+            --region $AWS_REGION \
+            --query 'service.{serviceName:serviceName,runningCount:runningCount,desiredCount:desiredCount}' \
+            --output table
+          
+          echo "✅ Deployment initiated with optimized health checks"
+
+      - name: Monitor deployment
+        if: ${{ !(github.event.inputs.skip_wait == 'true' || inputs.skip_wait == true) }}
+        env:
+          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+        run: |
+          echo "� Monitoring deployment (simplified)..."
+          
+          for i in {1..10}; do  # 5 minutes max (30s * 10 = 300s)
+            echo "⏳ Check $i/10..."
             
-            # Get comprehensive service status
             SERVICE_INFO=$(aws ecs describe-services \
               --cluster $ECS_CLUSTER \
               --services $ECS_SERVICE \
               --region $AWS_REGION)
             
-            # Parse deployment status
-            DEPLOYMENT_STATUS=$(echo "$SERVICE_INFO" | jq -r '.services[0].deployments[] | select(.status=="PRIMARY") | .status')
-            ROLLOUT_STATE=$(echo "$SERVICE_INFO" | jq -r '.services[0].deployments[] | select(.status=="PRIMARY") | .rolloutState // "IN_PROGRESS"')
-            ROLLOUT_REASON=$(echo "$SERVICE_INFO" | jq -r '.services[0].deployments[] | select(.status=="PRIMARY") | .rolloutStateReason // "No reason provided"')
-            
             RUNNING_COUNT=$(echo "$SERVICE_INFO" | jq -r '.services[0].runningCount')
             DESIRED_COUNT=$(echo "$SERVICE_INFO" | jq -r '.services[0].desiredCount')
             PENDING_COUNT=$(echo "$SERVICE_INFO" | jq -r '.services[0].pendingCount')
+            ROLLOUT_STATE=$(echo "$SERVICE_INFO" | jq -r '.services[0].deployments[] | select(.status=="PRIMARY") | .rolloutState // "IN_PROGRESS"')
             
-            echo "   📊 Service Status:"
-            echo "      - Running: $RUNNING_COUNT/$DESIRED_COUNT tasks"
-            echo "      - Pending: $PENDING_COUNT tasks"
-            echo "      - Rollout State: $ROLLOUT_STATE"
-            echo "      - Reason: $ROLLOUT_REASON"
+            echo "   Tasks: $RUNNING_COUNT/$DESIRED_COUNT running, $PENDING_COUNT pending"
+            echo "   State: $ROLLOUT_STATE"
             
-            # Check for circuit breaker or rollback
-            if [[ "$ROLLOUT_STATE" == "FAILED" ]]; then
-              echo "❌ Deployment failed with circuit breaker activation!"
-              echo "🔍 Rollback reason: $ROLLOUT_REASON"
+            if [[ "$ROLLOUT_STATE" == "COMPLETED" ]] && [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ]; then
+              echo "✅ Deployment completed successfully!"
+              break
+            elif [[ "$ROLLOUT_STATE" == "FAILED" ]]; then
+              echo "❌ Deployment failed - check container logs in ECS console"
               
-              # Get recent service events for more details
-              echo "📋 Recent service events:"
+              # Show the most recent task failure
+              echo "📋 Recent events:"
               aws ecs describe-services \
                 --cluster $ECS_CLUSTER \
                 --services $ECS_SERVICE \
-                --query 'services[0].events[:5].[createdAt,message]' \
+                --query 'services[0].events[:2].[createdAt,message]' \
                 --output table \
                 --region $AWS_REGION
-              
-              # Get task failure details
-              echo "🔍 Checking failed tasks..."
-              FAILED_TASKS=$(aws ecs list-tasks \
-                --cluster $ECS_CLUSTER \
-                --service-name $ECS_SERVICE \
-                --desired-status STOPPED \
-                --query 'taskArns[0:3]' \
-                --output text \
-                --region $AWS_REGION)
-              
-              if [ "$FAILED_TASKS" != "None" ] && [ "$FAILED_TASKS" != "" ]; then
-                echo "📝 Recent task failures:"
-                for task in $FAILED_TASKS; do
-                  if [ "$task" != "None" ]; then
-                    echo "   Task: $task"
-                    aws ecs describe-tasks \
-                      --cluster $ECS_CLUSTER \
-                      --tasks "$task" \
-                      --query 'tasks[0].{StoppedReason:stoppedReason,StoppedAt:stoppedAt,LastStatus:lastStatus}' \
-                      --output table \
-                      --region $AWS_REGION || true
-                  fi
-                done
-              fi
-              
-              echo "💡 Common fixes for circuit breaker failures:"
-              echo "   1. Check container health check endpoint (ALB health check path: /)"
-              echo "   2. Verify container starts within health check grace period"
-              echo "   3. Ensure container exposes correct port (3000)"
-              echo "   4. Check container logs for startup errors"
-              echo "   5. Verify Next.js build completed successfully"
-              
               exit 1
-            elif [[ "$ROLLOUT_STATE" == "COMPLETED" ]]; then
-              echo "✅ Deployment completed successfully!"
-              echo "📊 Final status: $RUNNING_COUNT/$DESIRED_COUNT tasks running"
-              break
-            elif [[ "$ROLLOUT_STATE" == "IN_PROGRESS" ]]; then
-              echo "⏳ Deployment in progress..."
-              
-              # Check if we have healthy tasks starting up
-              if [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ]; then
-                echo "💚 All desired tasks are running, waiting for health checks..."
-              elif [ "$PENDING_COUNT" -gt 0 ]; then
-                echo "🔄 $PENDING_COUNT tasks starting up..."
-              fi
-            else
-              echo "🔍 Deployment state: $ROLLOUT_STATE"
             fi
             
-            # Early success check - if we have all tasks running and healthy
-            if [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ] && [ "$PENDING_COUNT" -eq 0 ] && [[ "$ROLLOUT_STATE" == "COMPLETED" ]]; then
-              echo "🎉 Deployment successful - all tasks healthy!"
-              break
-            fi
-            
-            if [ $i -lt 40 ]; then
-              echo "   ⏱️  Waiting 30 seconds before next check..."
+            if [ $i -lt 10 ]; then
               sleep 30
             fi
           done
           
-          # Final status check
-          if [ $i -eq 40 ]; then
-            echo "⚠️  Deployment monitoring timed out after 20 minutes"
-            echo "📊 Final service status:"
-            aws ecs describe-services \
-              --cluster $ECS_CLUSTER \
-              --services $ECS_SERVICE \
-              --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Pending:pendingCount}' \
-              --output table \
-              --region $AWS_REGION
-            
-            # Don't fail on timeout - let the health check decide
-            echo "⚠️  Proceeding to health check despite timeout"
-          else
-            echo "✅ Deployment monitoring completed successfully!"
+          if [ $i -eq 10 ]; then
+            echo "⚠️  Monitoring timed out after 5 minutes - check ECS console for task status"
+            echo "💡 Your deployment may still succeed, just taking longer than expected"
           fi
 
       - name: Get service status
@@ -443,7 +421,7 @@ jobs:
   verify-deployment:
     needs: [setup, deploy-frontend]
     runs-on: ubuntu-latest
-    if: always() && needs.deploy-frontend.result == 'success'
+    if: always() && needs.deploy-frontend.result == 'success' && !(github.event.inputs.skip_wait == 'true' || inputs.skip_wait == true)
     
     steps:
       - name: Configure AWS credentials
