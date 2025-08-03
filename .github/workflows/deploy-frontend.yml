@@ -180,6 +180,8 @@ jobs:
           echo "🔍 Retrieving authentication config..."
           AUTH_CONFIG=$(terraform output -json authentication_config 2>/dev/null || echo "{}")
           
+          echo "🔍 Raw AUTH_CONFIG received: $AUTH_CONFIG"
+          
           if [ "$AUTH_CONFIG" = "{}" ] || [ "$AUTH_CONFIG" = "null" ]; then
             echo "❌ Could not retrieve authentication config from Terraform outputs"
             echo "🚨 Debugging information:"
@@ -192,13 +194,19 @@ jobs:
             exit 1
           fi
           
-          # Parse the JSON output
-          COGNITO_USER_POOL_ID=$(echo $AUTH_CONFIG | jq -r '.user_pool_id // empty')
-          COGNITO_CLIENT_ID=$(echo $AUTH_CONFIG | jq -r '.client_id // empty')
-          COGNITO_FULL_DOMAIN=$(echo $AUTH_CONFIG | jq -r '.full_domain // empty')
+          # Parse the JSON output - handle both possible field name formats
+          COGNITO_USER_POOL_ID=$(echo $AUTH_CONFIG | jq -r '.user_pool_id // .cognito_user_pool_id // empty')
+          COGNITO_CLIENT_ID=$(echo $AUTH_CONFIG | jq -r '.client_id // .cognito_client_id // empty')
+          COGNITO_FULL_DOMAIN=$(echo $AUTH_CONFIG | jq -r '.full_domain // .cognito_domain // .domain_name // empty')
           ENVIRONMENT=$(echo $AUTH_CONFIG | jq -r '.environment // "staging"')
           
           cd ..
+          
+          # If domain is empty, construct it from the environment
+          if [ -z "$COGNITO_FULL_DOMAIN" ] && [ -n "$COGNITO_USER_POOL_ID" ]; then
+            COGNITO_FULL_DOMAIN="cosine-auth-${ENVIRONMENT}.auth.us-east-1.amazoncognito.com"
+            echo "🔧 Constructed domain from naming convention: $COGNITO_FULL_DOMAIN"
+          fi
           
           # Validate all required values
           if [ -z "$COGNITO_USER_POOL_ID" ]; then
