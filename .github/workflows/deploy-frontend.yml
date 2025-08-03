@@ -162,18 +162,45 @@ jobs:
         run: |
           echo "🔍 Getting authentication configuration from Terraform outputs..."
           
-          # Navigate to terraform directory and get outputs
-          cd terraform
+          # Navigate to base infrastructure terraform directory to get proper outputs
+          cd ../Cosine-Base-Infra/terraform
           
-          # Get authentication config
-          COGNITO_USER_POOL_ID=$(terraform output -raw authentication_config | jq -r '.cognito_user_pool_id // empty')
-          COGNITO_CLIENT_ID=$(terraform output -raw authentication_config | jq -r '.cognito_client_id // empty')
-          COGNITO_DOMAIN=$(terraform output -raw authentication_config | jq -r '.cognito_domain // empty')
+          # Check if base infrastructure is properly deployed
+          if ! terraform output cognito_user_pool_id >/dev/null 2>&1; then
+            echo "❌ Base infrastructure not found or not deployed"
+            echo "🚨 Please run the base infrastructure pipeline first:"
+            echo "   cd ../Cosine-Base-Infra && terraform apply -var-file=environments/staging.auto.tfvars"
+            exit 1
+          fi
           
-          # If cognito_domain is empty, construct it from the staging domain name
+          # Get authentication config from Terraform outputs (proper infrastructure values)
+          COGNITO_USER_POOL_ID=$(terraform output -raw cognito_user_pool_id 2>/dev/null)
+          COGNITO_CLIENT_ID=$(terraform output -raw cognito_user_pool_client_id 2>/dev/null)
+          COGNITO_DOMAIN=$(terraform output -raw cognito_user_pool_domain 2>/dev/null)
+          
+          # Validate all required Terraform outputs are available
+          if [ -z "$COGNITO_USER_POOL_ID" ] || [ "$COGNITO_USER_POOL_ID" = "null" ]; then
+            echo "❌ Could not retrieve Cognito User Pool ID from Terraform outputs"
+            echo "🚨 Base infrastructure may not be deployed. Run: terraform apply -var-file=environments/staging.auto.tfvars"
+            exit 1
+          fi
+          
+          if [ -z "$COGNITO_CLIENT_ID" ] || [ "$COGNITO_CLIENT_ID" = "null" ]; then
+            echo "❌ Could not retrieve Cognito Client ID from Terraform outputs"
+            echo "🚨 Base infrastructure may not be deployed or Cognito client not created properly"
+            echo "🔧 Run: terraform apply -var-file=environments/staging.auto.tfvars"
+            exit 1
+          fi
+          
           if [ -z "$COGNITO_DOMAIN" ] || [ "$COGNITO_DOMAIN" = "null" ]; then
-            COGNITO_DOMAIN="cosine-auth-staging.auth.us-east-1.amazoncognito.com"
-            echo "⚠️  Cognito domain not found in Terraform outputs, using constructed domain: $COGNITO_DOMAIN"
+            echo "❌ Could not retrieve Cognito Domain from Terraform outputs"
+            echo "🚨 Base infrastructure may not be deployed. Run: terraform apply -var-file=environments/staging.auto.tfvars"
+            exit 1
+          fi
+          
+          # Construct full domain URL if only domain name is returned
+          if [[ "$COGNITO_DOMAIN" != *".auth."* ]]; then
+            COGNITO_DOMAIN="${COGNITO_DOMAIN}.auth.us-east-1.amazoncognito.com"
           fi
           
           # Get ALB URL for OAuth configuration
@@ -185,12 +212,12 @@ jobs:
           echo "cognito_domain=${COGNITO_DOMAIN}" >> $GITHUB_OUTPUT
           echo "alb_url=${ALB_URL}" >> $GITHUB_OUTPUT
           
-          echo "✅ Authentication config retrieved:"
+          echo "✅ Authentication config retrieved from Terraform:"
           echo "  - User Pool ID: ${COGNITO_USER_POOL_ID}"
           echo "  - Client ID: ${COGNITO_CLIENT_ID}"
           echo "  - Domain: ${COGNITO_DOMAIN}"
           echo "  - ALB URL: ${ALB_URL}"
-          echo "⚠️  Note: OAuth requires HTTPS for production. Current ALB uses HTTP only."
+          echo "� Using properly configured Cognito client with OAuth flows enabled."
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
