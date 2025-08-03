@@ -30,7 +30,7 @@ variable "public_subnet_ids" {
 variable "certificate_arn" {
   description = "ARN of SSL certificate for HTTPS"
   type        = string
-  default     = ""
+  default     = "arn:aws:acm:us-east-1:676206904242:certificate/7f8d2b7b-d9d7-4ba8-9795-ddd3c11d8361"
 }
 
 variable "enable_https" {

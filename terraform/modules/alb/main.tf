@@ -176,7 +176,7 @@ resource "aws_lb_target_group" "frontend" {
 
 # Development warning for missing certificate
 resource "null_resource" "certificate_warning" {
-  count = var.certificate_arn == "" ? 1 : 0
+  # for_each = var.certificate_arn == "" ? { "create" = true } : {}
 
   provisioner "local-exec" {
     command = <<-EOT
@@ -191,7 +191,7 @@ resource "null_resource" "certificate_warning" {
 
 # HTTPS Listener (only when valid certificate is available)
 resource "aws_lb_listener" "https" {
-  count = var.certificate_arn != "" ? 1 : 0
+  # for_each = var.certificate_arn != "" ? { "create" = true } : {}
 
   load_balancer_arn = aws_lb.main.arn
   port              = "443"
@@ -421,7 +421,7 @@ resource "aws_cloudwatch_log_group" "waf" {
   count             = var.enable_waf_logging ? 1 : 0
   name              = "/aws/wafv2/${var.project_name}-${var.environment}"
   retention_in_days = 30
-  kms_key_id        = var.kms_key_arn
+  kms_key_id        = var.kms_key_arn != "" ? var.kms_key_arn : null
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-waf-logs-${var.environment}"
@@ -481,5 +481,9 @@ resource "aws_wafv2_web_acl_logging_configuration" "main" {
       name = "cookie"
     }
   }
+}
+
+output "waf_log_group_arn" {
+  value = length(aws_cloudwatch_log_group.waf) > 0 ? aws_cloudwatch_log_group.waf[0].arn : null
 }
 
