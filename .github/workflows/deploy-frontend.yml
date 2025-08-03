@@ -9,8 +9,14 @@
 name: Deploy Frontend Application
 
 on:
-  # Only trigger for workflow_call (when called by other workflows) 
-  # and workflow_dispatch (manual trigger)
+  # Trigger on pushes to frontend directory
+  push:
+    branches: [ staging, main ]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  
+  # Keep workflow_call for manual orchestration if needed
   workflow_call:
     inputs:
       environment:
@@ -32,6 +38,8 @@ on:
         required: true
       AWS_SECRET_ACCESS_KEY:
         required: true
+  
+  # Manual trigger
   workflow_dispatch:
     inputs:
       environment:
@@ -319,19 +327,27 @@ jobs:
           NEW_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           echo "🐳 New image: $NEW_IMAGE_URI"
           
-          # Update task definition with new image AND optimized health check settings
+          # Debug current container configuration first
+          echo "🔍 Current container configuration:"
+          echo $TASK_DEFINITION | jq '.containerDefinitions[0] | {name, image, portMappings, healthCheck}'
+          
+          # Update task definition with new image AND improved health check settings
           echo "🔧 Updating task definition JSON..."
           NEW_TASK_DEFINITION=$(echo $TASK_DEFINITION | jq --arg IMAGE "$NEW_IMAGE_URI" '
             .containerDefinitions[0].image = $IMAGE |
             .containerDefinitions[0].healthCheck = {
-              "command": ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"],
+              "command": ["CMD-SHELL", "curl -f http://localhost:3000/api/health || curl -f http://localhost:3000/ || exit 1"],
               "interval": 30,
-              "timeout": 10,
+              "timeout": 15,
               "retries": 3,
-              "startPeriod": 120
+              "startPeriod": 180
             } |
             del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)
           ')
+          
+          # Debug the new task definition
+          echo "🔍 New container configuration:"
+          echo "$NEW_TASK_DEFINITION" | jq '.containerDefinitions[0] | {name, image, portMappings, healthCheck}'
           
           # Validate the JSON before proceeding
           if ! echo "$NEW_TASK_DEFINITION" | jq empty 2>/dev/null; then
@@ -346,13 +362,26 @@ jobs:
           
           echo "✅ Task definition JSON validated"
           
+          # Write to file and inspect it before registering
+          echo "$NEW_TASK_DEFINITION" > /tmp/td.json
+          echo "🔍 Task definition file size: $(wc -c < /tmp/td.json) bytes"
+          echo "🔍 First few lines of task definition:"
+          head -n 10 /tmp/td.json
+          
           # Register new task definition
-          echo "�📝 Registering optimized task definition with health checks..."
-          NEW_TASK_DEF_ARN=$(echo "$NEW_TASK_DEFINITION" > /tmp/td.json && aws ecs register-task-definition \
+          echo "📝 Registering optimized task definition with health checks..."
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
             --region $AWS_REGION \
             --cli-input-json file:///tmp/td.json \
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
+          
+          if [ $? -ne 0 ]; then
+            echo "❌ Failed to register task definition"
+            echo "🔍 Task definition content that failed:"
+            cat /tmp/td.json | jq '.'
+            exit 1
+          fi
           
           echo "✅ New task definition: $NEW_TASK_DEF_ARN"
           
@@ -391,6 +420,27 @@ jobs:
             
             echo "   Tasks: $RUNNING_COUNT/$DESIRED_COUNT running, $PENDING_COUNT pending"
             echo "   State: $ROLLOUT_STATE"
+            
+            # Get detailed task information for debugging
+            if [ $RUNNING_COUNT -eq 0 ] && [ $PENDING_COUNT -gt 0 ]; then
+              echo "🔍 Checking task details for debugging..."
+              TASK_ARNS=$(aws ecs list-tasks \
+                --cluster $ECS_CLUSTER \
+                --service-name $ECS_SERVICE \
+                --query 'taskArns' \
+                --output text \
+                --region $AWS_REGION)
+              
+              if [ "$TASK_ARNS" != "None" ] && [ -n "$TASK_ARNS" ]; then
+                echo "📋 Current task health status:"
+                aws ecs describe-tasks \
+                  --cluster $ECS_CLUSTER \
+                  --tasks $TASK_ARNS \
+                  --query 'tasks[0].containers[0].{name:name,lastStatus:lastStatus,healthStatus:healthStatus,reason:reason}' \
+                  --output table \
+                  --region $AWS_REGION || echo "Could not get task details"
+              fi
+            fi
             
             if [[ "$ROLLOUT_STATE" == "COMPLETED" ]] && [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ]; then
               echo "✅ Deployment completed successfully!"

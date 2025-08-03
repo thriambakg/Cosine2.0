@@ -12,7 +12,6 @@ on:
     paths:
       - 'terraform/**'
       - '.github/workflows/**'
-      - 'frontend/**'
       - 'backend_app/**'
   pull_request:
     branches:
@@ -21,7 +20,6 @@ on:
       - staging
     paths:
       - 'terraform/**'
-      - 'frontend/**'
       - 'backend_app/**'
   workflow_dispatch:
     inputs:
@@ -82,16 +80,6 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-  deploy-frontend:
-    name: 'Deploy Frontend Application'
-    needs: [determine-environment, deploy-application]
-    if: success() && github.event.inputs.destroy != 'true'
-    uses: ./.github/workflows/deploy-frontend.yml
-    with:
-      environment: ${{ needs.determine-environment.outputs.environment }}
-    secrets:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
   comment-pr:
     name: 'Comment on PR'
