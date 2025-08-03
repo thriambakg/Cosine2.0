@@ -5,38 +5,12 @@ import { Amplify } from 'aws-amplify';
 
 export default function AmplifyClientConfig({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    // Inline Amplify configuration to avoid import issues during Docker build
-    const amplifyConfig = {
-      Auth: {
-        Cognito: {
-          // Required: Amazon Cognito User Pool ID
-          userPoolId: process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID || 'us-east-1_TEMP12345',
-          
-          // Required: Amazon Cognito Web Client ID (App client ID)
-          userPoolClientId: process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID || 'TEMPTEMPTEMPTEMP123456',
-          
-          // Required: Amazon Cognito Identity Pool ID for AWS credentials
-          identityPoolId: process.env.NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID || 'us-east-1:12345678-1234-1234-1234-123456789012',
-          
-          // Optional: Domain for Hosted UI
-          loginWith: {
-            oauth: {
-              domain: process.env.NEXT_PUBLIC_COGNITO_DOMAIN || 'temp-domain.auth.us-east-1.amazoncognito.com',
-              scopes: ['email', 'openid', 'profile'],
-              redirectSignIn: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_IN || 'https://cosine-alb-v2-staging-1054813572.us-east-1.elb.amazonaws.com/auth/callback'],
-              redirectSignOut: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_OUT || 'https://cosine-alb-v2-staging-1054813572.us-east-1.elb.amazonaws.com/'],
-              responseType: 'code' as const,
-            },
-            email: true,
-          },
-        }
-      }
-    };
-
     // Configure Amplify with error handling
     try {
       const userPoolId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID;
       const userPoolClientId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID;
+      const identityPoolId = process.env.NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID;
+      const cognitoDomain = process.env.NEXT_PUBLIC_COGNITO_DOMAIN;
       
       if (!userPoolId || userPoolId.includes('TEMP') || !userPoolClientId || userPoolClientId.includes('TEMP')) {
         console.warn('⚠️  AWS Cognito not configured with real values. Using temporary configuration for development.');
@@ -52,9 +26,54 @@ export default function AmplifyClientConfig({ children }: { children: React.Reac
         });
         return;
       }
+
+      // Create configuration based on available credentials
+      if (identityPoolId && !identityPoolId.includes('TEMP')) {
+        // Full configuration with Identity Pool (for AWS service access)
+        console.log('🔧 Configuring Amplify with User Pool + Identity Pool');
+        Amplify.configure({
+          Auth: {
+            Cognito: {
+              userPoolId: userPoolId,
+              userPoolClientId: userPoolClientId,
+              identityPoolId: identityPoolId,
+              loginWith: {
+                oauth: {
+                  domain: cognitoDomain || 'temp-domain.auth.us-east-1.amazoncognito.com',
+                  scopes: ['email', 'openid', 'profile'],
+                  redirectSignIn: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_IN || 'https://cosine-alb-v2-staging-1054813572.us-east-1.elb.amazonaws.com/auth/callback'],
+                  redirectSignOut: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_OUT || 'https://cosine-alb-v2-staging-1054813572.us-east-1.elb.amazonaws.com/'],
+                  responseType: 'code' as const,
+                },
+                email: true,
+              },
+            }
+          }
+        });
+      } else {
+        // User Pool only configuration (for authentication only)
+        console.log('🔧 Configuring Amplify with User Pool only (OAuth authentication)');
+        Amplify.configure({
+          Auth: {
+            Cognito: {
+              userPoolId: userPoolId,
+              userPoolClientId: userPoolClientId,
+              loginWith: {
+                oauth: {
+                  domain: cognitoDomain || 'temp-domain.auth.us-east-1.amazoncognito.com',
+                  scopes: ['email', 'openid', 'profile'],
+                  redirectSignIn: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_IN || 'https://cosine-alb-v2-staging-1054813572.us-east-1.elb.amazonaws.com/auth/callback'],
+                  redirectSignOut: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_OUT || 'https://cosine-alb-v2-staging-1054813572.us-east-1.elb.amazonaws.com/'],
+                  responseType: 'code' as const,
+                },
+                email: true,
+              },
+            }
+          }
+        });
+      }
       
-      Amplify.configure(amplifyConfig);
-      console.log('✅ AWS Amplify configured successfully');
+      console.log('✅ AWS Amplify configured successfully for OAuth authentication');
     } catch (error) {
       console.error('❌ Failed to configure AWS Amplify:', error);
       console.warn('🔄 Continuing with basic configuration...');
