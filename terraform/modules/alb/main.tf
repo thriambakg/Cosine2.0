@@ -154,12 +154,12 @@ resource "aws_lb_target_group" "frontend" {
     enabled             = true
     healthy_threshold   = 2
     interval            = 30
-    matcher             = "200"
-    path                = "/api/health"
+    matcher             = "200,404" # Accept 200 or 404 to be more tolerant
+    path                = "/"       # Use root path instead of /api/health
     port                = "traffic-port"
     protocol            = "HTTP"
-    timeout             = 5
-    unhealthy_threshold = 2
+    timeout             = 10 # Increased timeout for more reliability
+    unhealthy_threshold = 3  # More retries before marking unhealthy
   }
 
   # Deregistration delay

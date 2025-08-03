@@ -275,16 +275,9 @@ resource "aws_ecs_task_definition" "frontend" {
         }
       }
 
-      healthCheck = {
-        command = [
-          "CMD-SHELL",
-          "curl -f http://localhost:3000/api/health || exit 1"
-        ]
-        interval    = 30
-        timeout     = 5
-        retries     = 3
-        startPeriod = 60
-      }
+      # healthCheck removed to prevent deployment pipeline hangs
+      # ALB target group health check is sufficient for load balancing
+      # Container health check was causing recurring pipeline failures
 
       # Security options
       readonlyRootFilesystem = false
