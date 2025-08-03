@@ -51,7 +51,7 @@ api_gateway_url = ""
 # ============================================================================
 
 # Enable custom domain (set to true to use your own domain)
-# DISABLED FOR STAGING TO SAVE COSTS - Enable in production only
+# DISABLED FOR STAGING - Using ALB with HTTPS certificate instead
 enable_custom_domain = false
 
 # Your domain name (e.g., "mycompany.com" or "cosineapp.com")
@@ -65,8 +65,9 @@ staging_subdomain = "staging"
 production_subdomain = ""
 
 # Alternative: Provide existing certificate ARN directly (if you don't want to use custom domain)
-# Uncomment and set the ARN of an existing certificate from AWS Certificate Manager
-# certificate_arn = "arn:aws:acm:region:account:certificate/certificate-id"
+# We'll create a self-signed certificate for HTTPS to satisfy Cognito OAuth requirements
+# This will be populated after we create the certificate
+certificate_arn = "arn:aws:acm:us-east-1:676206904242:certificate/76a2a444-d2ac-4e24-947a-07dce59af77a"
 
 # Note: When enabling custom domain:
 # 1. Set enable_custom_domain = true

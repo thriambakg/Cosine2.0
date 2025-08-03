@@ -176,15 +176,21 @@ jobs:
             echo "⚠️  Cognito domain not found in Terraform outputs, using constructed domain: $COGNITO_DOMAIN"
           fi
           
+          # Get ALB URL for OAuth configuration
+          ALB_URL=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?contains(DNSName, 'cosine-alb-v2-staging')].DNSName | [0]" --output text 2>/dev/null || echo "")
+          
           # Set outputs for next step
           echo "cognito_user_pool_id=${COGNITO_USER_POOL_ID}" >> $GITHUB_OUTPUT
           echo "cognito_client_id=${COGNITO_CLIENT_ID}" >> $GITHUB_OUTPUT
           echo "cognito_domain=${COGNITO_DOMAIN}" >> $GITHUB_OUTPUT
+          echo "alb_url=${ALB_URL}" >> $GITHUB_OUTPUT
           
           echo "✅ Authentication config retrieved:"
           echo "  - User Pool ID: ${COGNITO_USER_POOL_ID}"
           echo "  - Client ID: ${COGNITO_CLIENT_ID}"
           echo "  - Domain: ${COGNITO_DOMAIN}"
+          echo "  - ALB URL: ${ALB_URL}"
+          echo "⚠️  Note: OAuth requires HTTPS for production. Current ALB uses HTTP only."
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image

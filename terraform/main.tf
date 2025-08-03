@@ -229,6 +229,16 @@ module "ecr" {
   tags = var.common_tags
 }
 
+# SSL Certificate for staging HTTPS (when no custom domain)
+module "ssl_certificate" {
+  count  = var.enable_custom_domain ? 0 : 1
+  source = "./modules/ssl-certificate"
+
+  project_name = var.project_name
+  environment  = var.environment
+  tags         = var.common_tags
+}
+
 # Application Load Balancer with WAF
 module "alb" {
   source = "./modules/alb"
@@ -248,7 +258,7 @@ module "alb" {
 
   tags = var.common_tags
 
-  depends_on = [module.vpc]
+  depends_on = [module.vpc, module.ssl_certificate]
 }
 
 # ============================================================================
