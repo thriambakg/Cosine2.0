@@ -10,6 +10,11 @@ aws_region   = "us-east-1"
 enable_s3_bucket  = true # Enable for production hosting
 enable_cloudfront = true # Enable for global distribution
 
+# WAF Configuration (production security)
+enable_waf_logging    = true               # Enable for production monitoring
+waf_rate_limit        = 1000               # More restrictive rate limit for production
+waf_blocked_countries = ["CN", "RU", "KP"] # Block high-risk countries for production
+
 # Common tags
 common_tags = {
   Project     = "cosine"
@@ -49,7 +54,7 @@ api_gateway_url = ""
 enable_custom_domain = true
 
 # Your domain name (e.g., "mycompany.com" or "cosineapp.com")
-domain_name = "cosinedev.com" # Replace with your actual domain
+domain_name = "investcosine.com" # Your new production domain
 
 # Staging subdomain (will create staging.your-domain.com)
 staging_subdomain = "staging"
@@ -58,7 +63,7 @@ staging_subdomain = "staging"
 production_subdomain = ""
 
 # Note: When enabling custom domain in production:
-# 1. Purchase and register your domain (cosinedev.com)
+# 1. Purchase and register your domain (investcosine.com) ✅ DONE
 # 2. After terraform apply, update your domain's nameservers to Route53
-# 3. Production URL will be: https://cosinedev.com
+# 3. Production URL will be: https://investcosine.com
 # 4. Certificate will be automatically managed by AWS ACM
