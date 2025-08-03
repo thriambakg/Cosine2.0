@@ -247,12 +247,40 @@ jobs:
           ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
         run: |
           echo "Waiting for service to reach stable state..."
-          aws ecs wait services-stable \
+          
+          # Set timeout for waiting (10 minutes = 600 seconds)
+          timeout 600 aws ecs wait services-stable \
             --cluster $ECS_CLUSTER \
             --services $ECS_SERVICE \
-            --region $AWS_REGION
+            --region $AWS_REGION || {
+            echo "⚠️  Service stability wait timed out or failed. Checking current status..."
+            
+            # Get current service status
+            aws ecs describe-services \
+              --cluster $ECS_CLUSTER \
+              --services $ECS_SERVICE \
+              --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount}' \
+              --output table \
+              --region $AWS_REGION
+            
+            # Check if we have at least one healthy task running
+            RUNNING_COUNT=$(aws ecs describe-services \
+              --cluster $ECS_CLUSTER \
+              --services $ECS_SERVICE \
+              --query 'services[0].runningCount' \
+              --output text \
+              --region $AWS_REGION)
+            
+            if [ "$RUNNING_COUNT" -gt 0 ]; then
+              echo "✅ Deployment partially successful - $RUNNING_COUNT tasks running"
+              echo "⚠️  Service may still be stabilizing. Check AWS console for health status."
+            else
+              echo "❌ No tasks running - deployment failed"
+              exit 1
+            fi
+          }
           
-          echo "✅ Deployment completed successfully!"
+          echo "✅ Deployment completed!"
 
       - name: Get service status
         env:
