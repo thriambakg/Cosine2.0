@@ -462,7 +462,7 @@ resource "aws_wafv2_web_acl_logging_configuration" "main" {
   count        = var.enable_waf_logging ? 1 : 0
   resource_arn = aws_wafv2_web_acl.main.arn
   log_destination_configs = [
-    "arn:aws:logs:us-east-1:676206904242:log-group:/aws/wafv2/${var.project_name}-${var.environment}"
+    "${aws_cloudwatch_log_group.waf[0].arn}:*"
   ]
 
   depends_on = [
