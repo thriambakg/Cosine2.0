@@ -1,7 +1,3 @@
-# ECS Service-Linked Role for ECS (required for ECS service creation)
-resource "aws_iam_service_linked_role" "ecs" {
-  aws_service_name = "ecs.amazonaws.com"
-}
 # ECS Container Service Module
 # modules/ecs/main.tf
 
@@ -358,7 +354,6 @@ resource "aws_ecs_service" "frontend" {
 
   depends_on = [
     aws_iam_role_policy_attachment.ecs_task_execution_role_policy,
-    aws_iam_service_linked_role.ecs,
     var.alb_dependency
   ]
 
