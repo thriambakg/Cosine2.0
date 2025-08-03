@@ -320,24 +320,16 @@ module "ecs" {
   ecs_log_group_name      = aws_cloudwatch_log_group.ecs.name
   frontend_log_group_name = aws_cloudwatch_log_group.frontend.name
 
-  # Cognito configuration - get from base infrastructure
-  cognito_user_pool_id = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_id, var.cognito_user_pool_id)
-  cognito_client_id    = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, var.cognito_client_id)
-  # Construct full Cognito domain URL - base infra provides domain name, we need full URL
-  cognito_domain = try(
-    data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain != "" ?
-    "${data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain}.auth.${var.aws_region}.amazoncognito.com" :
-    var.cognito_domain != "" ?
-    "${var.cognito_domain}.auth.${var.aws_region}.amazoncognito.com" :
-    "cosine-auth-staging.auth.${var.aws_region}.amazoncognito.com",
-    "cosine-auth-staging.auth.${var.aws_region}.amazoncognito.com"
-  )
-  api_gateway_url = var.api_gateway_url
+  # Cognito configuration - use computed local values for automatic discovery
+  cognito_user_pool_id = local.auth_config.user_pool_id
+  cognito_client_id    = local.auth_config.client_id
+  cognito_domain       = local.auth_config.full_domain_url
+  api_gateway_url      = var.api_gateway_url
 
-  # DynamoDB configuration - get from base infrastructure
-  user_profiles_table_name   = try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, var.user_profiles_table_name)
-  security_events_table_name = try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, var.security_events_table_name)
-  user_sessions_table_name   = try(data.terraform_remote_state.base_infra.outputs.user_sessions_table_name, var.user_sessions_table_name)
+  # DynamoDB configuration - use computed local values for automatic discovery
+  user_profiles_table_name   = local.database_config.user_profiles_table_name
+  security_events_table_name = local.database_config.security_events_table_name
+  user_sessions_table_name   = local.database_config.user_sessions_table_name
 
   # ECS configuration
   task_cpu                 = var.ecs_task_cpu

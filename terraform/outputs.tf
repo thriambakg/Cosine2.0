@@ -182,10 +182,12 @@ output "deployment_summary" {
 output "authentication_config" {
   description = "Authentication configuration for frontend integration"
   value = {
-    cognito_user_pool_id = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_id, var.cognito_user_pool_id)
-    cognito_client_id    = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, var.cognito_client_id)
-    cognito_domain       = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, var.cognito_domain)
-    region               = var.aws_region
+    user_pool_id = local.auth_config.user_pool_id
+    client_id    = local.auth_config.client_id
+    domain_name  = local.auth_config.domain_name
+    full_domain  = local.auth_config.full_domain_url
+    region       = var.aws_region
+    environment  = var.environment
   }
 }
 
@@ -193,10 +195,11 @@ output "authentication_config" {
 output "database_config" {
   description = "DynamoDB table configuration for frontend integration"
   value = {
-    user_profiles_table   = try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, var.user_profiles_table_name)
-    security_events_table = try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, var.security_events_table_name)
-    user_sessions_table   = try(data.terraform_remote_state.base_infra.outputs.user_sessions_table_name, var.user_sessions_table_name)
+    user_profiles_table   = local.database_config.user_profiles_table_name
+    security_events_table = local.database_config.security_events_table_name
+    user_sessions_table   = local.database_config.user_sessions_table_name
     region                = var.aws_region
+    environment           = var.environment
   }
 }
 
