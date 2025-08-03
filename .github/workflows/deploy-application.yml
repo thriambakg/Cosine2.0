@@ -84,7 +84,7 @@ jobs:
   comment-pr:
     name: 'Comment on PR'
     runs-on: ubuntu-latest
-    needs: [determine-environment, deploy-application, deploy-frontend]
+    needs: [determine-environment, deploy-application]
     if: always() && github.event_name == 'pull_request'
     steps:
       - name: Comment PR with Results
@@ -92,7 +92,6 @@ jobs:
         with:
           script: |
             const infraStatus = '${{ needs.deploy-application.result }}';
-            const frontendStatus = '${{ needs.deploy-frontend.result }}';
             
             const comment = `## 🚀 Application Infrastructure Plan - ${{ needs.determine-environment.outputs.environment }}
             
