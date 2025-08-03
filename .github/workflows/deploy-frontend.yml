@@ -167,11 +167,20 @@ jobs:
           
           cd terraform
           
+          # Initialize Terraform to ensure state is accessible
+          echo "🔧 Initializing Terraform..."
+          terraform init
+          
           # Get authentication configuration from terraform output
+          echo "🔍 Retrieving authentication config..."
           AUTH_CONFIG=$(terraform output -json authentication_config 2>/dev/null || echo "{}")
           
           if [ "$AUTH_CONFIG" = "{}" ] || [ "$AUTH_CONFIG" = "null" ]; then
             echo "❌ Could not retrieve authentication config from Terraform outputs"
+            echo "🚨 Debugging information:"
+            echo "   Current directory: $(pwd)"
+            echo "   Terraform version: $(terraform version)"
+            echo "   Available outputs: $(terraform output 2>/dev/null || echo 'No outputs available')"
             echo "🚨 Please ensure application infrastructure is deployed:"
             echo "   Run: terraform apply in the terraform/ directory"
             echo "   This will discover base infrastructure resources automatically"
@@ -190,18 +199,21 @@ jobs:
           if [ -z "$COGNITO_USER_POOL_ID" ]; then
             echo "❌ Missing Cognito User Pool ID in terraform outputs"
             echo "🚨 Base infrastructure may not be deployed or accessible"
+            echo "📋 Full authentication config received: $AUTH_CONFIG"
             exit 1
           fi
           
           if [ -z "$COGNITO_CLIENT_ID" ]; then
-            echo "❌ Missing Cognito Client ID in terraform outputs"
+            echo "❌ Missing Cognito Client ID in terraform outputs"  
             echo "🚨 Base infrastructure may not be deployed or accessible"
+            echo "📋 Full authentication config received: $AUTH_CONFIG"
             exit 1
           fi
           
           if [ -z "$COGNITO_FULL_DOMAIN" ]; then
             echo "❌ Missing Cognito Domain in terraform outputs"
             echo "🚨 Base infrastructure may not be deployed or accessible"
+            echo "📋 Full authentication config received: $AUTH_CONFIG"
             exit 1
           fi
           
