@@ -203,6 +203,12 @@ output "database_config" {
   }
 }
 
+# Resource Discovery Debug Information
+output "resource_discovery_debug" {
+  description = "Debug information about resource discovery"
+  value       = local.discovery_status
+}
+
 # Frontend Application Integration Guide
 output "integration_guide" {
   description = "Integration guide for frontend developers"
