@@ -365,50 +365,62 @@ jobs:
           ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
           ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
         run: |
-          echo "🔍 Getting ALB URL from ECS service..."
+          echo "🔍 Getting ALB URL from Terraform outputs..."
           
-          # Get target group ARN from ECS service
-          TARGET_GROUP_ARN=$(aws ecs describe-services \
-            --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE \
-            --query 'services[0].loadBalancers[0].targetGroupArn' \
-            --output text \
-            --region $AWS_REGION)
+          # First try to get URL from Terraform output (preferred)
+          cd terraform
+          FRONTEND_URL=$(terraform output -raw frontend_url 2>/dev/null || echo "")
+          cd ..
           
-          echo "Target Group ARN: $TARGET_GROUP_ARN"
-          
-          if [ "$TARGET_GROUP_ARN" != "None" ] && [ "$TARGET_GROUP_ARN" != "" ] && [ "$TARGET_GROUP_ARN" != "null" ]; then
-            # Get load balancer ARN from target group
-            LB_ARN=$(aws elbv2 describe-target-groups \
-              --target-group-arns $TARGET_GROUP_ARN \
-              --query 'TargetGroups[0].LoadBalancerArns[0]' \
+          if [ "$FRONTEND_URL" != "" ] && [ "$FRONTEND_URL" != "null" ]; then
+            echo "url=$FRONTEND_URL" >> $GITHUB_OUTPUT
+            echo "🌐 Frontend URL from Terraform: $FRONTEND_URL"
+          else
+            echo "📋 Terraform output not available, constructing URL from ECS service..."
+            
+            # Fallback: Get target group ARN from ECS service and construct URL
+            TARGET_GROUP_ARN=$(aws ecs describe-services \
+              --cluster $ECS_CLUSTER \
+              --services $ECS_SERVICE \
+              --query 'services[0].loadBalancers[0].targetGroupArn' \
               --output text \
               --region $AWS_REGION)
             
-            echo "Load Balancer ARN: $LB_ARN"
+            echo "Target Group ARN: $TARGET_GROUP_ARN"
             
-            if [ "$LB_ARN" != "None" ] && [ "$LB_ARN" != "" ] && [ "$LB_ARN" != "null" ]; then
-              # Get ALB DNS name directly from ARN
-              ALB_URL=$(aws elbv2 describe-load-balancers \
-                --load-balancer-arns $LB_ARN \
-                --query 'LoadBalancers[0].DNSName' \
+            if [ "$TARGET_GROUP_ARN" != "None" ] && [ "$TARGET_GROUP_ARN" != "" ] && [ "$TARGET_GROUP_ARN" != "null" ]; then
+              # Get load balancer ARN from target group
+              LB_ARN=$(aws elbv2 describe-target-groups \
+                --target-group-arns $TARGET_GROUP_ARN \
+                --query 'TargetGroups[0].LoadBalancerArns[0]' \
                 --output text \
                 --region $AWS_REGION)
               
-              echo "ALB DNS Name: $ALB_URL"
+              echo "Load Balancer ARN: $LB_ARN"
               
-              if [ "$ALB_URL" != "None" ] && [ "$ALB_URL" != "" ] && [ "$ALB_URL" != "null" ]; then
-                echo "url=http://$ALB_URL" >> $GITHUB_OUTPUT
-                echo "🌐 Frontend URL: http://$ALB_URL"
+              if [ "$LB_ARN" != "None" ] && [ "$LB_ARN" != "" ] && [ "$LB_ARN" != "null" ]; then
+                # Get ALB DNS name directly from ARN
+                ALB_URL=$(aws elbv2 describe-load-balancers \
+                  --load-balancer-arns $LB_ARN \
+                  --query 'LoadBalancers[0].DNSName' \
+                  --output text \
+                  --region $AWS_REGION)
+                
+                echo "ALB DNS Name: $ALB_URL"
+                
+                if [ "$ALB_URL" != "None" ] && [ "$ALB_URL" != "" ] && [ "$ALB_URL" != "null" ]; then
+                  echo "url=https://$ALB_URL" >> $GITHUB_OUTPUT
+                  echo "🌐 Frontend URL: https://$ALB_URL"
+                else
+                  echo "❌ Could not get ALB DNS name"
+                fi
               else
-                echo "❌ Could not get ALB DNS name"
+                echo "❌ Could not get load balancer ARN from target group"
               fi
             else
-              echo "❌ Could not get load balancer ARN from target group"
+              echo "❌ No target group found for ECS service"
+              echo "ℹ️  This might be expected if the service doesn't use a load balancer"
             fi
-          else
-            echo "❌ No target group found for ECS service"
-            echo "ℹ️  This might be expected if the service doesn't use a load balancer"
           fi
 
       - name: Health check
@@ -423,22 +435,46 @@ jobs:
           for i in {1..10}; do
             echo "⏳ Attempt $i/10: Checking frontend health..."
             
-            # First check if we can reach the URL at all
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || echo "000")
+            # Use -k flag for self-signed certificates and -L to follow redirects
+            HTTP_STATUS=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$URL" || echo "000")
             echo "   HTTP Status: $HTTP_STATUS"
+            
+            # Also check redirect chain to understand what's happening
+            REDIRECT_INFO=$(curl -k -s -I "$URL" | head -n 5 || echo "No redirect info")
+            echo "   Response headers:"
+            echo "$REDIRECT_INFO" | sed 's/^/     /'
             
             if [ "$HTTP_STATUS" = "200" ]; then
               echo "✅ Frontend is responding successfully at $URL"
               
-              # Additional check - try to get some content
-              CONTENT_LENGTH=$(curl -s "$URL" | wc -c)
+              # Additional check - try to get some content (with redirect following)
+              CONTENT_LENGTH=$(curl -k -L -s "$URL" | wc -c)
               echo "   Response content length: $CONTENT_LENGTH bytes"
               
               if [ "$CONTENT_LENGTH" -gt 100 ]; then
                 echo "✅ Frontend appears to be serving content properly"
+                
+                # Test OAuth endpoints are accessible
+                echo "🔐 Testing OAuth endpoints..."
+                OAUTH_TEST=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$URL/api/auth/signin" || echo "000")
+                echo "   OAuth signin endpoint status: $OAUTH_TEST"
+                
                 exit 0
               else
                 echo "⚠️  Frontend responding but content seems minimal"
+              fi
+            elif [ "$HTTP_STATUS" = "301" ] || [ "$HTTP_STATUS" = "302" ]; then
+              echo "   Redirect response (${HTTP_STATUS}) - this may be expected for HTTP->HTTPS"
+              # Check if we're testing HTTP when we should test HTTPS
+              if [[ "$URL" == http://* ]]; then
+                echo "   💡 URL is HTTP but ALB redirects to HTTPS - trying HTTPS directly"
+                HTTPS_URL="${URL/http:/https:}"
+                HTTPS_STATUS=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$HTTPS_URL" || echo "000")
+                echo "   HTTPS direct test status: $HTTPS_STATUS"
+                if [ "$HTTPS_STATUS" = "200" ]; then
+                  echo "✅ HTTPS endpoint is working correctly"
+                  exit 0
+                fi
               fi
             elif [ "$HTTP_STATUS" = "503" ] || [ "$HTTP_STATUS" = "502" ]; then
               echo "   Service unavailable (${HTTP_STATUS}) - container may still be starting"
@@ -457,7 +493,13 @@ jobs:
           echo "⚠️  Frontend health check completed with issues"
           echo "🔍 Final diagnostics:"
           echo "   URL: $URL"
-          echo "   Final HTTP Status: $(curl -s -o /dev/null -w "%{http_code}" "$URL" || echo "connection_failed")"
+          echo "   Final HTTP Status: $(curl -k -L -s -o /dev/null -w "%{http_code}" "$URL" || echo "connection_failed")"
+          
+          # Test both HTTP and HTTPS endpoints for debugging
+          if [[ "$URL" == https://* ]]; then
+            HTTP_URL="${URL/https:/http:}"
+            echo "   HTTP redirect test: $(curl -s -o /dev/null -w "%{http_code}" "$HTTP_URL" || echo "connection_failed")"
+          fi
           
           # Don't fail the pipeline - just warn
           echo "⚠️  Health check inconclusive but deployment may still be successful"
