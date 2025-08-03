@@ -158,8 +158,8 @@ resource "aws_lb_target_group" "frontend" {
     path                = "/api/health" # Use dedicated health endpoint
     port                = "traffic-port"
     protocol            = "HTTP"
-    timeout             = 20            # 20 second timeout per check (more time for Next.js)
-    unhealthy_threshold = 3             # 3 failures before marking unhealthy (faster detection but more tolerant)
+    timeout             = 20 # 20 second timeout per check (more time for Next.js)
+    unhealthy_threshold = 3  # 3 failures before marking unhealthy (faster detection but more tolerant)
   }
 
   # Deregistration delay
