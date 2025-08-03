@@ -247,7 +247,7 @@ module "alb" {
   environment        = var.environment
   vpc_id             = module.vpc.vpc_id
   public_subnet_ids  = module.vpc.public_subnet_ids
-  certificate_arn    = var.enable_custom_domain ? module.domain[0].certificate_arn : var.certificate_arn
+  certificate_arn    = var.enable_custom_domain ? module.domain[0].certificate_arn : (var.certificate_arn != "" ? var.certificate_arn : (length(module.ssl_certificate) > 0 ? module.ssl_certificate[0].certificate_arn : ""))
   enable_https       = true # Always use HTTPS for security (self-signed cert if no custom domain)
   enable_access_logs = var.enable_alb_access_logs
   access_logs_bucket = var.alb_access_logs_bucket
