@@ -182,6 +182,8 @@ jobs:
 
       - name: Get authentication config from Terraform outputs
         id: get-auth-config
+        env:
+          ENVIRONMENT: ${{ needs.setup.outputs.environment }}
         run: |
           echo "🔍 Getting authentication configuration from Terraform outputs..."
           
@@ -190,9 +192,9 @@ jobs:
           
           cd terraform
           
-          # Initialize Terraform to ensure state is accessible
-          echo "🔧 Initializing Terraform..."
-          terraform init
+          # Initialize Terraform with the appropriate backend configuration
+          echo "🔧 Initializing Terraform with backend config for $ENVIRONMENT..."
+          terraform init -backend-config="backend-configs/${ENVIRONMENT}.tfbackend"
           
           # Get authentication configuration from terraform output
           echo "🔍 Retrieving authentication config..."
