@@ -338,11 +338,11 @@ jobs:
           NEW_TASK_DEFINITION=$(echo $TASK_DEFINITION | jq --arg IMAGE "$NEW_IMAGE_URI" '
             .containerDefinitions[0].image = $IMAGE |
             .containerDefinitions[0].healthCheck = {
-              "command": ["CMD-SHELL", "curl -f http://localhost:3000/api/health || curl -f http://localhost:3000/ || exit 1"],
+              "command": ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"],
               "interval": 30,
-              "timeout": 15,
+              "timeout": 10,
               "retries": 3,
-              "startPeriod": 180
+              "startPeriod": 120
             } |
             del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)
           ')
@@ -491,6 +491,14 @@ jobs:
     if: always() && needs.deploy-frontend.result == 'success' && !(github.event.inputs.skip_wait == 'true' || inputs.skip_wait == true)
     
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -503,14 +511,16 @@ jobs:
         env:
           ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
           ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+          ENVIRONMENT: ${{ needs.setup.outputs.environment }}
         run: |
-          echo "🔍 Getting ALB URL from Terraform outputs..."
+          echo "🔍 Getting ALB URL from Terraform outputs for environment: $ENVIRONMENT..."
           
           # First try to get URL from Terraform output (preferred)
           if [ -d "terraform" ]; then
             cd terraform
-            # Initialize Terraform if needed
-            terraform init -backend=false > /dev/null 2>&1 || true
+            # Initialize Terraform with the correct backend for the environment
+            echo "🔧 Initializing Terraform with backend config for $ENVIRONMENT..."
+            terraform init -backend-config="backend-configs/${ENVIRONMENT}.tfbackend" > /dev/null 2>&1 || true
             FRONTEND_URL=$(terraform output -raw frontend_url 2>/dev/null || echo "")
             cd ..
           else
@@ -520,7 +530,7 @@ jobs:
           
           if [ "$FRONTEND_URL" != "" ] && [ "$FRONTEND_URL" != "null" ]; then
             echo "url=$FRONTEND_URL" >> $GITHUB_OUTPUT
-            echo "🌐 Frontend URL from Terraform: $FRONTEND_URL"
+            echo "🌐 Frontend URL from Terraform (${ENVIRONMENT}): $FRONTEND_URL"
           else
             echo "📋 Terraform output not available, constructing URL from ECS service..."
             
@@ -600,10 +610,19 @@ jobs:
               if [ "$CONTENT_LENGTH" -gt 100 ]; then
                 echo "✅ Frontend appears to be serving content properly"
                 
+                # Test health endpoint specifically
+                echo "🏥 Testing health endpoint..."
+                HEALTH_TEST=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$URL/api/health" || echo "000")
+                echo "   Health endpoint status: $HEALTH_TEST"
+                
                 # Test OAuth endpoints are accessible
                 echo "🔐 Testing OAuth endpoints..."
                 OAUTH_TEST=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$URL/api/auth/signin" || echo "000")
                 echo "   OAuth signin endpoint status: $OAUTH_TEST"
+                
+                if [ "$HEALTH_TEST" = "200" ]; then
+                  echo "✅ Health endpoint is working correctly"
+                fi
                 
                 exit 0
               else
