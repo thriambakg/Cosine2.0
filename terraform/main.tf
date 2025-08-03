@@ -241,13 +241,15 @@ module "ssl_certificate" {
 
 # Local values for certificate management
 locals {
-  # For production with custom domain, initially deploy without certificate, then update
-  use_certificate_in_alb = var.enable_custom_domain ? false : (var.certificate_arn != "" || length(module.ssl_certificate) > 0)
-  certificate_arn_for_alb = local.use_certificate_in_alb ? (
+  # Use certificate when available: either from custom domain module or provided certificate_arn
+  certificate_arn_for_alb = var.enable_custom_domain ? (
+    length(module.domain) > 0 ? module.domain[0].certificate_arn : ""
+    ) : (
     var.certificate_arn != "" ? var.certificate_arn : (
       length(module.ssl_certificate) > 0 ? module.ssl_certificate[0].certificate_arn : ""
     )
-  ) : ""
+  )
+  use_certificate_in_alb = local.certificate_arn_for_alb != ""
 }
 
 # Application Load Balancer with WAF
