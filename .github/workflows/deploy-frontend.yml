@@ -157,50 +157,55 @@ jobs:
         id: vars
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Get authentication config from Terraform
+      - name: Get authentication config from Base Infrastructure
         id: get-auth-config
         run: |
-          echo "🔍 Getting authentication configuration from Terraform outputs..."
+          echo "🔍 Getting authentication configuration from base infrastructure..."
           
-          # Navigate to base infrastructure terraform directory to get proper outputs
-          cd ../Cosine-Base-Infra/terraform
+          # Since repositories are separate, we need to get the Terraform outputs via AWS CLI
+          # The base infrastructure should output these values to AWS resources directly
           
-          # Check if base infrastructure is properly deployed
-          if ! terraform output cognito_user_pool_id >/dev/null 2>&1; then
-            echo "❌ Base infrastructure not found or not deployed"
-            echo "🚨 Please run the base infrastructure pipeline first:"
-            echo "   cd ../Cosine-Base-Infra && terraform apply -var-file=environments/staging.auto.tfvars"
+          echo "📡 Querying AWS resources directly since repositories are separate..."
+          
+          # Get Cognito User Pool ID from AWS (should match what Terraform deployed)
+          COGNITO_USER_POOL_ID=$(aws cognito-idp list-user-pools --max-items 50 --query "UserPools[?contains(Name, 'cosine-user-pool-staging')].Id | [0]" --output text 2>/dev/null)
+          
+          # Get the newest Cognito client ID from the user pool
+          if [ -n "$COGNITO_USER_POOL_ID" ] && [ "$COGNITO_USER_POOL_ID" != "None" ]; then
+            echo "✅ Found User Pool: $COGNITO_USER_POOL_ID"
+            
+            # Get the most recently created client (should be the Terraform-managed one)
+            COGNITO_CLIENT_ID=$(aws cognito-idp list-user-pool-clients --user-pool-id "$COGNITO_USER_POOL_ID" --query "UserPoolClients | sort_by(@, &CreationDate) | [-1].ClientId" --output text 2>/dev/null)
+            
+            # Get domain name
+            COGNITO_DOMAIN=$(aws cognito-idp describe-user-pool-domain --domain "cosine-auth-staging" --query "DomainDescription.Domain" --output text 2>/dev/null)
+            if [ -n "$COGNITO_DOMAIN" ] && [ "$COGNITO_DOMAIN" != "None" ]; then
+              COGNITO_DOMAIN="${COGNITO_DOMAIN}.auth.us-east-1.amazoncognito.com"
+            fi
+          fi
+          
+          # Validate all required values are available
+          if [ -z "$COGNITO_USER_POOL_ID" ] || [ "$COGNITO_USER_POOL_ID" = "None" ] || [ "$COGNITO_USER_POOL_ID" = "null" ]; then
+            echo "❌ Could not find Cognito User Pool 'cosine-user-pool-staging'"
+            echo "🚨 Base infrastructure may not be deployed. Please run base infrastructure pipeline first:"
+            echo "   Repository: thriambakg/Cosine-Base-Infra"
+            echo "   Action: Deploy Base Infrastructure -> staging environment"
             exit 1
           fi
           
-          # Get authentication config from Terraform outputs (proper infrastructure values)
-          COGNITO_USER_POOL_ID=$(terraform output -raw cognito_user_pool_id 2>/dev/null)
-          COGNITO_CLIENT_ID=$(terraform output -raw cognito_user_pool_client_id 2>/dev/null)
-          COGNITO_DOMAIN=$(terraform output -raw cognito_user_pool_domain 2>/dev/null)
-          
-          # Validate all required Terraform outputs are available
-          if [ -z "$COGNITO_USER_POOL_ID" ] || [ "$COGNITO_USER_POOL_ID" = "null" ]; then
-            echo "❌ Could not retrieve Cognito User Pool ID from Terraform outputs"
-            echo "🚨 Base infrastructure may not be deployed. Run: terraform apply -var-file=environments/staging.auto.tfvars"
+          if [ -z "$COGNITO_CLIENT_ID" ] || [ "$COGNITO_CLIENT_ID" = "None" ] || [ "$COGNITO_CLIENT_ID" = "null" ]; then
+            echo "❌ Could not find any Cognito User Pool Clients"
+            echo "🚨 Base infrastructure may not be deployed properly. Please run base infrastructure pipeline:"
+            echo "   Repository: thriambakg/Cosine-Base-Infra"
+            echo "   Action: Deploy Base Infrastructure -> staging environment"
             exit 1
           fi
           
-          if [ -z "$COGNITO_CLIENT_ID" ] || [ "$COGNITO_CLIENT_ID" = "null" ]; then
-            echo "❌ Could not retrieve Cognito Client ID from Terraform outputs"
-            echo "🚨 Base infrastructure may not be deployed or Cognito client not created properly"
-            echo "🔧 Run: terraform apply -var-file=environments/staging.auto.tfvars"
+          if [ -z "$COGNITO_DOMAIN" ] || [ "$COGNITO_DOMAIN" = "None" ] || [ "$COGNITO_DOMAIN" = "null" ]; then
+            echo "❌ Could not find Cognito Domain 'cosine-auth-staging'"
+            echo "🚨 Base infrastructure may not be deployed. Please run base infrastructure pipeline:"
+            echo "   Repository: thriambakg/Cosine-Base-Infra"
             exit 1
-          fi
-          
-          if [ -z "$COGNITO_DOMAIN" ] || [ "$COGNITO_DOMAIN" = "null" ]; then
-            echo "❌ Could not retrieve Cognito Domain from Terraform outputs"
-            echo "🚨 Base infrastructure may not be deployed. Run: terraform apply -var-file=environments/staging.auto.tfvars"
-            exit 1
-          fi
-          
-          # Construct full domain URL if only domain name is returned
-          if [[ "$COGNITO_DOMAIN" != *".auth."* ]]; then
-            COGNITO_DOMAIN="${COGNITO_DOMAIN}.auth.us-east-1.amazoncognito.com"
           fi
           
           # Get ALB URL for OAuth configuration
@@ -212,12 +217,13 @@ jobs:
           echo "cognito_domain=${COGNITO_DOMAIN}" >> $GITHUB_OUTPUT
           echo "alb_url=${ALB_URL}" >> $GITHUB_OUTPUT
           
-          echo "✅ Authentication config retrieved from Terraform:"
+          echo "✅ Authentication config retrieved from AWS:"
           echo "  - User Pool ID: ${COGNITO_USER_POOL_ID}"
           echo "  - Client ID: ${COGNITO_CLIENT_ID}"
           echo "  - Domain: ${COGNITO_DOMAIN}"
           echo "  - ALB URL: ${ALB_URL}"
-          echo "� Using properly configured Cognito client with OAuth flows enabled."
+          echo "🔗 Base infrastructure repository: thriambakg/Cosine-Base-Infra"
+          echo "🔧 Using most recent Cognito client with OAuth flows (managed by base infrastructure)."
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
