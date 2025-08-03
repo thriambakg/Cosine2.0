@@ -249,10 +249,7 @@ locals {
       length(module.ssl_certificate) > 0 ? module.ssl_certificate[0].certificate_arn : ""
     )
   )
-  use_certificate_in_alb = local.certificate_arn_for_alb != ""
-}
-
-# Application Load Balancer with WAF
+} # Application Load Balancer with WAF
 module "alb" {
   source = "./modules/alb"
 
