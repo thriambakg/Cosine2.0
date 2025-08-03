@@ -249,6 +249,18 @@ resource "aws_ecs_task_definition" "frontend" {
           value = var.api_gateway_url
         },
         {
+          name  = "NEXTAUTH_URL"
+          value = "https://investcosine.com"
+        },
+        {
+          name  = "FORCE_HTTPS"
+          value = "true"
+        },
+        {
+          name  = "TRUST_PROXY"
+          value = "true"
+        },
+        {
           name  = "USER_PROFILES_TABLE_NAME"
           value = var.user_profiles_table_name
         },
