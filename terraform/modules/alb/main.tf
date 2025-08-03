@@ -152,14 +152,14 @@ resource "aws_lb_target_group" "frontend" {
 
   health_check {
     enabled             = true
-    healthy_threshold   = 2
-    interval            = 30
-    matcher             = "200,404" # Accept 200 or 404 to be more tolerant
-    path                = "/"       # Use root path instead of /api/health
+    healthy_threshold   = 2             # Need 2 consecutive successes
+    interval            = 15            # Check every 15 seconds (faster than 30)
+    matcher             = "200"         # Only accept 200 (remove 404 to catch real issues)
+    path                = "/api/health" # Use dedicated health endpoint
     port                = "traffic-port"
     protocol            = "HTTP"
-    timeout             = 10 # Increased timeout for more reliability
-    unhealthy_threshold = 3  # More retries before marking unhealthy
+    timeout             = 10 # 10 second timeout per check
+    unhealthy_threshold = 5  # 5 failures before marking unhealthy (more lenient)
   }
 
   # Deregistration delay

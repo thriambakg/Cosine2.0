@@ -296,41 +296,135 @@ jobs:
           ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
           ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
         run: |
-          echo "Waiting for service to reach stable state..."
+          echo "🚀 Monitoring ECS deployment progress..."
           
-          # Set timeout for waiting (10 minutes = 600 seconds)
-          timeout 600 aws ecs wait services-stable \
+          # Get the deployment ID to track progress
+          DEPLOYMENT_ID=$(aws ecs describe-services \
             --cluster $ECS_CLUSTER \
             --services $ECS_SERVICE \
-            --region $AWS_REGION || {
-            echo "⚠️  Service stability wait timed out or failed. Checking current status..."
+            --query 'services[0].deployments[?status==`PRIMARY`].id' \
+            --output text \
+            --region $AWS_REGION)
+          
+          echo "📋 Tracking deployment ID: $DEPLOYMENT_ID"
+          
+          # Monitor deployment with detailed status checking
+          for i in {1..40}; do  # 20 minutes total (30s * 40 = 1200s)
+            echo "⏳ Check $i/40: Monitoring deployment status..."
             
-            # Get current service status
+            # Get comprehensive service status
+            SERVICE_INFO=$(aws ecs describe-services \
+              --cluster $ECS_CLUSTER \
+              --services $ECS_SERVICE \
+              --region $AWS_REGION)
+            
+            # Parse deployment status
+            DEPLOYMENT_STATUS=$(echo "$SERVICE_INFO" | jq -r '.services[0].deployments[] | select(.status=="PRIMARY") | .status')
+            ROLLOUT_STATE=$(echo "$SERVICE_INFO" | jq -r '.services[0].deployments[] | select(.status=="PRIMARY") | .rolloutState // "IN_PROGRESS"')
+            ROLLOUT_REASON=$(echo "$SERVICE_INFO" | jq -r '.services[0].deployments[] | select(.status=="PRIMARY") | .rolloutStateReason // "No reason provided"')
+            
+            RUNNING_COUNT=$(echo "$SERVICE_INFO" | jq -r '.services[0].runningCount')
+            DESIRED_COUNT=$(echo "$SERVICE_INFO" | jq -r '.services[0].desiredCount')
+            PENDING_COUNT=$(echo "$SERVICE_INFO" | jq -r '.services[0].pendingCount')
+            
+            echo "   📊 Service Status:"
+            echo "      - Running: $RUNNING_COUNT/$DESIRED_COUNT tasks"
+            echo "      - Pending: $PENDING_COUNT tasks"
+            echo "      - Rollout State: $ROLLOUT_STATE"
+            echo "      - Reason: $ROLLOUT_REASON"
+            
+            # Check for circuit breaker or rollback
+            if [[ "$ROLLOUT_STATE" == "FAILED" ]]; then
+              echo "❌ Deployment failed with circuit breaker activation!"
+              echo "🔍 Rollback reason: $ROLLOUT_REASON"
+              
+              # Get recent service events for more details
+              echo "📋 Recent service events:"
+              aws ecs describe-services \
+                --cluster $ECS_CLUSTER \
+                --services $ECS_SERVICE \
+                --query 'services[0].events[:5].[createdAt,message]' \
+                --output table \
+                --region $AWS_REGION
+              
+              # Get task failure details
+              echo "🔍 Checking failed tasks..."
+              FAILED_TASKS=$(aws ecs list-tasks \
+                --cluster $ECS_CLUSTER \
+                --service-name $ECS_SERVICE \
+                --desired-status STOPPED \
+                --query 'taskArns[0:3]' \
+                --output text \
+                --region $AWS_REGION)
+              
+              if [ "$FAILED_TASKS" != "None" ] && [ "$FAILED_TASKS" != "" ]; then
+                echo "📝 Recent task failures:"
+                for task in $FAILED_TASKS; do
+                  if [ "$task" != "None" ]; then
+                    echo "   Task: $task"
+                    aws ecs describe-tasks \
+                      --cluster $ECS_CLUSTER \
+                      --tasks "$task" \
+                      --query 'tasks[0].{StoppedReason:stoppedReason,StoppedAt:stoppedAt,LastStatus:lastStatus}' \
+                      --output table \
+                      --region $AWS_REGION || true
+                  fi
+                done
+              fi
+              
+              echo "💡 Common fixes for circuit breaker failures:"
+              echo "   1. Check container health check endpoint (ALB health check path: /)"
+              echo "   2. Verify container starts within health check grace period"
+              echo "   3. Ensure container exposes correct port (3000)"
+              echo "   4. Check container logs for startup errors"
+              echo "   5. Verify Next.js build completed successfully"
+              
+              exit 1
+            elif [[ "$ROLLOUT_STATE" == "COMPLETED" ]]; then
+              echo "✅ Deployment completed successfully!"
+              echo "📊 Final status: $RUNNING_COUNT/$DESIRED_COUNT tasks running"
+              break
+            elif [[ "$ROLLOUT_STATE" == "IN_PROGRESS" ]]; then
+              echo "⏳ Deployment in progress..."
+              
+              # Check if we have healthy tasks starting up
+              if [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ]; then
+                echo "💚 All desired tasks are running, waiting for health checks..."
+              elif [ "$PENDING_COUNT" -gt 0 ]; then
+                echo "🔄 $PENDING_COUNT tasks starting up..."
+              fi
+            else
+              echo "🔍 Deployment state: $ROLLOUT_STATE"
+            fi
+            
+            # Early success check - if we have all tasks running and healthy
+            if [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ] && [ "$PENDING_COUNT" -eq 0 ] && [[ "$ROLLOUT_STATE" == "COMPLETED" ]]; then
+              echo "🎉 Deployment successful - all tasks healthy!"
+              break
+            fi
+            
+            if [ $i -lt 40 ]; then
+              echo "   ⏱️  Waiting 30 seconds before next check..."
+              sleep 30
+            fi
+          done
+          
+          # Final status check
+          if [ $i -eq 40 ]; then
+            echo "⚠️  Deployment monitoring timed out after 20 minutes"
+            echo "📊 Final service status:"
             aws ecs describe-services \
               --cluster $ECS_CLUSTER \
               --services $ECS_SERVICE \
-              --query 'services[0].{status:status,runningCount:runningCount,desiredCount:desiredCount}' \
+              --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Pending:pendingCount}' \
               --output table \
               --region $AWS_REGION
             
-            # Check if we have at least one healthy task running
-            RUNNING_COUNT=$(aws ecs describe-services \
-              --cluster $ECS_CLUSTER \
-              --services $ECS_SERVICE \
-              --query 'services[0].runningCount' \
-              --output text \
-              --region $AWS_REGION)
-            
-            if [ "$RUNNING_COUNT" -gt 0 ]; then
-              echo "✅ Deployment partially successful - $RUNNING_COUNT tasks running"
-              echo "⚠️  Service may still be stabilizing. Check AWS console for health status."
-            else
-              echo "❌ No tasks running - deployment failed"
-              exit 1
-            fi
-          }
-          
-          echo "✅ Deployment completed!"
+            # Don't fail on timeout - let the health check decide
+            echo "⚠️  Proceeding to health check despite timeout"
+          else
+            echo "✅ Deployment monitoring completed successfully!"
+          fi
 
       - name: Get service status
         env:
@@ -368,9 +462,16 @@ jobs:
           echo "🔍 Getting ALB URL from Terraform outputs..."
           
           # First try to get URL from Terraform output (preferred)
-          cd terraform
-          FRONTEND_URL=$(terraform output -raw frontend_url 2>/dev/null || echo "")
-          cd ..
+          if [ -d "terraform" ]; then
+            cd terraform
+            # Initialize Terraform if needed
+            terraform init -backend=false > /dev/null 2>&1 || true
+            FRONTEND_URL=$(terraform output -raw frontend_url 2>/dev/null || echo "")
+            cd ..
+          else
+            echo "📋 Terraform directory not found in verify stage, using ECS service discovery..."
+            FRONTEND_URL=""
+          fi
           
           if [ "$FRONTEND_URL" != "" ] && [ "$FRONTEND_URL" != "null" ]; then
             echo "url=$FRONTEND_URL" >> $GITHUB_OUTPUT

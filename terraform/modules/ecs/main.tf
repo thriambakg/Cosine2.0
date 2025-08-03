@@ -275,9 +275,18 @@ resource "aws_ecs_task_definition" "frontend" {
         }
       }
 
-      # healthCheck removed to prevent deployment pipeline hangs
-      # ALB target group health check is sufficient for load balancing
-      # Container health check was causing recurring pipeline failures
+      # Container health check for ECS
+      # This is separate from ALB health check and helps ECS know when container is ready
+      healthCheck = {
+        command = [
+          "CMD-SHELL",
+          "curl -f http://localhost:3000/ || exit 1"
+        ]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60 # Wait 60 seconds before starting health checks
+      }
 
       # Security options
       readonlyRootFilesystem = false
@@ -307,9 +316,9 @@ resource "aws_ecs_service" "frontend" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
-  # Deployment configuration
-  deployment_maximum_percent         = 200
-  deployment_minimum_healthy_percent = 100
+  # Deployment configuration - Optimized for faster, more reliable deployments
+  deployment_maximum_percent         = 200 # Allow double capacity during deployment
+  deployment_minimum_healthy_percent = 50  # Reduced from 100 to allow faster rollouts
 
   # Network configuration
   network_configuration {
@@ -324,6 +333,10 @@ resource "aws_ecs_service" "frontend" {
     container_name   = "frontend"
     container_port   = 3000
   }
+
+  # Health check grace period - CRITICAL for preventing circuit breaker failures
+  # This gives the container time to start up before ALB health checks begin
+  health_check_grace_period_seconds = 300 # 5 minutes for Next.js startup
 
   # Service discovery (optional)
   dynamic "service_registries" {
