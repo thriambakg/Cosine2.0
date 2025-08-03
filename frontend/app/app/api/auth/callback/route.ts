@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
     });
 
     // Create response with redirect to dashboard
-    const response = NextResponse.redirect(new URL('/dashboard', request.url));
+    const response = NextResponse.redirect(new URL('/app', request.url));
 
     // Set secure HTTP-only cookies for tokens
     if (tokens.access_token) {

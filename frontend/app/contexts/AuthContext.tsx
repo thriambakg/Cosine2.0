@@ -230,18 +230,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('Federated authentication requires AWS Cognito configuration. Please deploy to AWS or configure Cognito credentials.');
       }
       
-      // Check if we're in production and warn about HTTPS requirement
+      // Check environment variables for HTTPS enforcement
+      const forceHttps = process.env.FORCE_HTTPS === 'true';
+      const trustProxy = process.env.TRUST_PROXY === 'true';
+      const nextAuthUrl = process.env.NEXTAUTH_URL;
+      
+      // If we're behind a proxy (ALB) and trust proxy is enabled, use NEXTAUTH_URL
       const isProduction = typeof window !== 'undefined' && 
         window.location.hostname !== 'localhost' && 
         !window.location.hostname.includes('127.0.0.1');
       
-      if (isProduction && window.location.protocol === 'http:') {
+      // Only enforce HTTPS checking if not using trusted proxy setup
+      if (isProduction && !trustProxy && window.location.protocol === 'http:') {
         throw new Error(`OAuth authentication requires HTTPS in production. Current URL: ${window.location.href}. Please configure SSL certificate on your load balancer or use HTTPS.`);
-      }
-      
-      // For now, disable OAuth in production until HTTPS is configured
-      if (isProduction) {
-        throw new Error(`OAuth authentication is not available in production without HTTPS. Please configure SSL certificate on your load balancer. For testing, use: http://localhost:3000`);
       }
       
       // Map provider names to AWS Amplify provider constants
