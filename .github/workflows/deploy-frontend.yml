@@ -348,9 +348,9 @@ jobs:
           
           # Register new task definition
           echo "�📝 Registering optimized task definition with health checks..."
-          NEW_TASK_DEF_ARN=$(echo "$NEW_TASK_DEFINITION" | aws ecs register-task-definition \
+          NEW_TASK_DEF_ARN=$(echo "$NEW_TASK_DEFINITION" > /tmp/td.json && aws ecs register-task-definition \
             --region $AWS_REGION \
-            --cli-input-json file:///dev/stdin \
+            --cli-input-json file:///tmp/td.json \
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
           
