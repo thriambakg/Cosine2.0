@@ -459,7 +459,7 @@ resource "aws_cloudwatch_log_resource_policy" "waf" {
 
 # WAF Logging Configuration
 resource "aws_wafv2_web_acl_logging_configuration" "main" {
-  count        = var.enable_waf_logging ? 1 : 0
+  count        = 0 # Disabled - logging configuration can cause ARN issues
   resource_arn = aws_wafv2_web_acl.main.arn
   log_destination_configs = [
     "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/wafv2/${var.project_name}-${var.environment}:*"
