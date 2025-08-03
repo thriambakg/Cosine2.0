@@ -32,9 +32,9 @@ common_tags = {
 
 # Cognito Configuration (retrieved from base infrastructure remote state)
 # These values will be automatically populated from the base infrastructure outputs
-cognito_user_pool_id = ""
-cognito_client_id    = ""
-cognito_domain       = ""
+cognito_user_pool_id = "us-east-1_1dOeIUrQu"
+cognito_client_id    = "4194qg8gsba2886u97slpab40o"
+cognito_domain       = "cosine-auth-staging"
 
 # DynamoDB Table Names (retrieved from base infrastructure remote state)
 # These values will be automatically populated from the base infrastructure outputs

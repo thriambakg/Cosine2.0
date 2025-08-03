@@ -23,8 +23,8 @@ export default function AmplifyClientConfig({ children }: { children: React.Reac
             oauth: {
               domain: process.env.NEXT_PUBLIC_COGNITO_DOMAIN || 'temp-domain.auth.us-east-1.amazoncognito.com',
               scopes: ['email', 'openid', 'profile'],
-              redirectSignIn: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_IN || 'http://localhost:3000/'],
-              redirectSignOut: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_OUT || 'http://localhost:3000/'],
+              redirectSignIn: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_IN || 'https://cosine-alb-v2-staging-1054813572.us-east-1.elb.amazonaws.com/auth/callback'],
+              redirectSignOut: [process.env.NEXT_PUBLIC_REDIRECT_SIGN_OUT || 'https://cosine-alb-v2-staging-1054813572.us-east-1.elb.amazonaws.com/'],
               responseType: 'code' as const,
             },
             email: true,

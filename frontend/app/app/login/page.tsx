@@ -17,6 +17,15 @@ export default function LoginPage() {
     if (isAuthenticated && user) {
       router.push('/');
     }
+    
+    // Check for authentication errors from callback
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorParam = urlParams.get('error');
+    if (errorParam === 'authentication_failed') {
+      setError('Authentication failed. Please try again.');
+    } else if (errorParam === 'callback_error') {
+      setError('There was an error completing authentication. Please try again.');
+    }
   }, [isAuthenticated, user, router]);
 
   // Traditional email/password login
