@@ -320,6 +320,7 @@ jobs:
           echo "🐳 New image: $NEW_IMAGE_URI"
           
           # Update task definition with new image AND optimized health check settings
+          echo "🔧 Updating task definition JSON..."
           NEW_TASK_DEFINITION=$(echo $TASK_DEFINITION | jq --arg IMAGE "$NEW_IMAGE_URI" '
             .containerDefinitions[0].image = $IMAGE |
             .containerDefinitions[0].healthCheck = {
@@ -332,8 +333,22 @@ jobs:
             del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)
           ')
           
-          echo "📝 Registering optimized task definition with health checks..."
-          NEW_TASK_DEF_ARN=$(echo $NEW_TASK_DEFINITION | aws ecs register-task-definition \
+          # Validate the JSON before proceeding
+          if ! echo "$NEW_TASK_DEFINITION" | jq empty 2>/dev/null; then
+            echo "❌ Generated task definition JSON is invalid"
+            echo "� Debugging task definition transformation..."
+            echo "Original task definition keys:" 
+            echo $TASK_DEFINITION | jq 'keys'
+            echo "Container definition structure:"
+            echo $TASK_DEFINITION | jq '.containerDefinitions[0] | keys'
+            exit 1
+          fi
+          
+          echo "✅ Task definition JSON validated"
+          
+          # Register new task definition
+          echo "�📝 Registering optimized task definition with health checks..."
+          NEW_TASK_DEF_ARN=$(echo "$NEW_TASK_DEFINITION" | aws ecs register-task-definition \
             --region $AWS_REGION \
             --cli-input-json file:///dev/stdin \
             --query 'taskDefinition.taskDefinitionArn' \

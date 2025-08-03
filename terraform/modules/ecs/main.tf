@@ -277,15 +277,16 @@ resource "aws_ecs_task_definition" "frontend" {
 
       # Container health check for ECS
       # This is separate from ALB health check and helps ECS know when container is ready
+      # Using /api/health endpoint to match ALB health check configuration
       healthCheck = {
         command = [
           "CMD-SHELL",
-          "curl -f http://localhost:3000/ || exit 1"
+          "curl -f http://localhost:3000/api/health || exit 1"
         ]
         interval    = 30
-        timeout     = 5
+        timeout     = 10 # Increased from 5 to match deployment script
         retries     = 3
-        startPeriod = 60 # Wait 60 seconds before starting health checks
+        startPeriod = 120 # Increased from 60 to 120 seconds for Next.js startup
       }
 
       # Security options
