@@ -266,6 +266,8 @@ module "alb" {
   blocked_countries  = var.waf_blocked_countries
   enable_waf_logging = var.enable_waf_logging
 
+  # Use existing resources in production to avoid conflicts
+
   tags = var.common_tags
 
   depends_on = [module.vpc, module.ssl_certificate]
