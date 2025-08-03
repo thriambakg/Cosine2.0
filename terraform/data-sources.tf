@@ -7,12 +7,6 @@ data "aws_cognito_user_pools" "main" {
   name = "${var.project_name}-user-pool-${var.environment}"
 }
 
-# Data source to get User Pool details once we find it
-data "aws_cognito_user_pool" "main" {
-  count        = length(data.aws_cognito_user_pools.main.ids) > 0 ? 1 : 0
-  user_pool_id = data.aws_cognito_user_pools.main.ids[0]
-}
-
 # Data source to find User Pool Clients for the discovered user pool
 data "aws_cognito_user_pool_clients" "main" {
   count        = length(data.aws_cognito_user_pools.main.ids) > 0 ? 1 : 0
