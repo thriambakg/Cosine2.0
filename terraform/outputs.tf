@@ -56,22 +56,12 @@ output "frontend_url" {
 
 output "s3_bucket_arn" {
   description = "ARN of the S3 bucket"
-  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].frontend_bucket_arn : null
+  value       = data.aws_s3_bucket.static_hosting.arn
 }
 
 output "s3_bucket_domain_name" {
   description = "Domain name of the S3 bucket"
-  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].frontend_bucket_regional_domain_name : null
-}
-
-output "s3_logs_bucket_name" {
-  description = "Name of the S3 logs bucket"
-  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].logs_bucket_id : null
-}
-
-output "s3_logs_bucket_arn" {
-  description = "ARN of the S3 logs bucket"
-  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].logs_bucket_arn : null
+  value       = data.aws_s3_bucket.static_hosting.bucket_regional_domain_name
 }
 
 # KMS Outputs
@@ -203,11 +193,11 @@ output "integration_guide" {
       
       ✅ CloudFront Static Website Deployment:
          - Frontend URL: ${var.use_cloudfront_deployment ? (length(var.cloudfront_aliases) > 0 ? "https://${var.cloudfront_aliases[0]}" : "https://${module.cloudfront[0].distribution_domain_name}") : "CloudFront deployment not enabled"}
-         - S3 Bucket: ${module.s3_buckets.frontend_bucket_id}
+         - S3 Bucket: ${data.aws_s3_bucket.static_hosting.id}
       
       🔧 Next Steps:
       1. Build your Next.js application with environment variables from build_environment_variables output
-      2. Deploy static files to S3 bucket: ${module.s3_buckets.frontend_bucket_id}
+      2. Deploy static files to S3 bucket: ${data.aws_s3_bucket.static_hosting.id}
       3. Use the Cognito configuration for user authentication
       4. Implement sign-in UI with federated provider options
       
@@ -293,12 +283,12 @@ output "cloudfront_distribution_arn" {
 # S3 bucket outputs
 output "s3_bucket_name" {
   description = "Name of the S3 bucket for static hosting"
-  value       = module.s3_buckets.frontend_bucket_id
+  value       = data.aws_s3_bucket.static_hosting.id
 }
 
 output "s3_website_endpoint" {
   description = "S3 website endpoint"
-  value       = module.s3_buckets.website_endpoint
+  value       = data.aws_s3_bucket.static_hosting.website_endpoint
 }
 
 # Environment variables for build-time injection

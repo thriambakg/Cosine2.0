@@ -43,9 +43,21 @@ data "terraform_remote_state" "base_infra" {
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+# Data source for static hosting bucket from base infrastructure
+data "aws_s3_bucket" "static_hosting" {
+  bucket = "${var.project_name}-static-hosting-${var.environment}"
+}
+
 # Local values for resource naming
 locals {
-  bucket_name = "${var.project_name}-frontend-${var.environment}"
+  # Use certificate when available: either from custom domain module or provided certificate_arn
+  certificate_arn = var.enable_custom_domain ? (
+    length(module.domain) > 0 ? module.domain[0].certificate_arn : ""
+    ) : (
+    var.certificate_arn != "" ? var.certificate_arn : (
+      length(module.ssl_certificate) > 0 ? module.ssl_certificate[0].certificate_arn : ""
+    )
+  )
 }
 
 # KMS Key for encryption
@@ -107,25 +119,10 @@ resource "aws_kms_alias" "main" {
   }
 }
 
-# S3 Buckets Module for static website hosting
-module "s3_buckets" {
-  source = "./modules/s3"
-
-  bucket_name            = local.bucket_name
-  kms_key_arn            = aws_kms_key.main.arn
-  enable_versioning      = true
-  log_prefix             = "access-logs/"
-  enable_website_hosting = true
-  index_document         = "index.html"
-  error_document         = "index.html" # SPA routing - serve index.html for all errors
-
-  tags = var.common_tags
-}
-
 # CloudFront Distribution OAC Bucket Policy (separate resource to avoid circular dependency)
 resource "aws_s3_bucket_policy" "cloudfront_oac" {
   count  = var.use_cloudfront_deployment ? 1 : 0
-  bucket = module.s3_buckets.frontend_bucket_id
+  bucket = data.aws_s3_bucket.static_hosting.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -137,7 +134,7 @@ resource "aws_s3_bucket_policy" "cloudfront_oac" {
           Service = "cloudfront.amazonaws.com"
         }
         Action   = "s3:GetObject"
-        Resource = "${module.s3_buckets.frontend_bucket_arn}/*"
+        Resource = "${data.aws_s3_bucket.static_hosting.arn}/*"
         Condition = {
           StringEquals = {
             "AWS:SourceArn" = length(module.cloudfront) > 0 ? module.cloudfront[0].distribution_arn : ""
@@ -147,7 +144,7 @@ resource "aws_s3_bucket_policy" "cloudfront_oac" {
     ]
   })
 
-  depends_on = [module.s3_buckets, module.cloudfront]
+  depends_on = [module.cloudfront]
 }
 
 # Custom IAM policy for stock volatility Lambda (temporarily disabled until IAM permissions are granted)
@@ -236,18 +233,6 @@ module "ssl_certificate" {
   tags         = var.common_tags
 }
 
-# Local values for certificate management
-locals {
-  # Use certificate when available: either from custom domain module or provided certificate_arn
-  certificate_arn = var.enable_custom_domain ? (
-    length(module.domain) > 0 ? module.domain[0].certificate_arn : ""
-    ) : (
-    var.certificate_arn != "" ? var.certificate_arn : (
-      length(module.ssl_certificate) > 0 ? module.ssl_certificate[0].certificate_arn : ""
-    )
-  )
-}
-
 # ============================================================================
 # CUSTOM DOMAIN CONFIGURATION - PHASE 1: CERTIFICATE CREATION
 # Route53 hosted zone and SSL certificate (independent of ALB)
@@ -281,9 +266,9 @@ module "cloudfront" {
 
   project_name          = var.project_name
   environment           = var.environment
-  s3_bucket_domain_name = module.s3_buckets.frontend_bucket_regional_domain_name
-  s3_bucket_id          = module.s3_buckets.frontend_bucket_id
-  s3_bucket_arn         = module.s3_buckets.frontend_bucket_arn
+  s3_bucket_domain_name = data.aws_s3_bucket.static_hosting.bucket_regional_domain_name
+  s3_bucket_id          = data.aws_s3_bucket.static_hosting.id
+  s3_bucket_arn         = data.aws_s3_bucket.static_hosting.arn
 
   # Use the same certificate as ALB if available
   acm_certificate_arn = local.certificate_arn
@@ -313,6 +298,6 @@ module "cloudfront" {
 
   tags = var.common_tags
 
-  depends_on = [module.s3_buckets]
+  depends_on = [data.aws_s3_bucket.static_hosting]
 }
 
