@@ -119,34 +119,6 @@ resource "aws_kms_alias" "main" {
   }
 }
 
-# CloudFront Distribution OAC Bucket Policy (separate resource to avoid circular dependency)
-resource "aws_s3_bucket_policy" "cloudfront_oac" {
-  count  = var.use_cloudfront_deployment ? 1 : 0
-  bucket = data.aws_s3_bucket.static_hosting.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowCloudFrontServicePrincipal"
-        Effect = "Allow"
-        Principal = {
-          Service = "cloudfront.amazonaws.com"
-        }
-        Action   = "s3:GetObject"
-        Resource = "${data.aws_s3_bucket.static_hosting.arn}/*"
-        Condition = {
-          StringEquals = {
-            "AWS:SourceArn" = length(module.cloudfront) > 0 ? module.cloudfront[0].distribution_arn : ""
-          }
-        }
-      }
-    ]
-  })
-
-  depends_on = [module.cloudfront]
-}
-
 # Custom IAM policy for stock volatility Lambda (temporarily disabled until IAM permissions are granted)
 resource "aws_iam_policy" "stock_volatility_lambda_policy" {
   count       = 0 # Temporarily disabled - requires iam:CreatePolicy permission
