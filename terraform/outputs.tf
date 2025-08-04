@@ -17,12 +17,6 @@ output "private_subnet_ids" {
   value       = module.vpc.private_subnet_ids
 }
 
-# CloudFront Outputs (for static hosting)
-output "cloudfront_distribution_id" {
-  description = "ID of the CloudFront distribution"
-  value       = var.use_cloudfront_deployment ? module.cloudfront[0].distribution_id : null
-}
-
 output "cloudfront_domain_name" {
   description = "Domain name of the CloudFront distribution"
   value       = var.use_cloudfront_deployment ? module.cloudfront[0].distribution_domain_name : null
@@ -58,12 +52,6 @@ output "frontend_url" {
     "https://${var.cloudfront_aliases[0]}" :
     "https://${module.cloudfront[0].distribution_domain_name}"
   ) : null
-}
-
-# S3 Bucket Outputs (existing)
-output "s3_bucket_name" {
-  description = "Name of the S3 bucket"
-  value       = length(module.s3_buckets) > 0 ? module.s3_buckets[0].frontend_bucket_id : null
 }
 
 output "s3_bucket_arn" {
