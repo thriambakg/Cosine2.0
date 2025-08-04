@@ -444,8 +444,11 @@ resource "aws_s3_bucket_policy" "cloudfront_oac_policy" {
         Principal = {
           Service = "cloudfront.amazonaws.com"
         }
-        Action   = "s3:GetObject"
-        Resource = "${var.s3_bucket_arn}/*"
+        Action = ["s3:GetObject", "s3:ListBucket"]
+        Resource = [
+          "${var.s3_bucket_arn}",
+          "${var.s3_bucket_arn}/*"
+        ]
         Condition = {
           StringEquals = {
             "AWS:SourceArn" = aws_cloudfront_distribution.distribution.arn
