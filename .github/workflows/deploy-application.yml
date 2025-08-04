@@ -12,7 +12,7 @@ on:
       - staging
     paths:
       - 'terraform/**'
-      - '.github/workflows/**'
+      - '.github/workflows/deploy-application.yml'
       - 'backend_app/**'
   pull_request:
     branches:

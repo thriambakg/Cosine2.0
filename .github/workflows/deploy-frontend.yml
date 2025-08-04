@@ -278,6 +278,8 @@ jobs:
             --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID="${{ steps.get-auth-config.outputs.cognito_client_id }}" \
             --build-arg NEXT_PUBLIC_COGNITO_DOMAIN="${{ steps.get-auth-config.outputs.cognito_domain }}" \
             --build-arg NEXT_PUBLIC_API_GATEWAY_URL="" \
+            --build-arg NEXT_PUBLIC_REDIRECT_SIGN_IN="https://investcosine.com/auth/callback" \
+            --build-arg NEXT_PUBLIC_REDIRECT_SIGN_OUT="https://investcosine.com" \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
             ./frontend/app
