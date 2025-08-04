@@ -338,11 +338,11 @@ jobs:
           NEW_TASK_DEFINITION=$(echo $TASK_DEFINITION | jq --arg IMAGE "$NEW_IMAGE_URI" '
             .containerDefinitions[0].image = $IMAGE |
             .containerDefinitions[0].healthCheck = {
-              "command": ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"],
-              "interval": 30,
-              "timeout": 10,
-              "retries": 3,
-              "startPeriod": 120
+              "command": ["CMD-SHELL", "curl -f --connect-timeout 5 --max-time 10 http://localhost:3000/api/health || exit 1"],
+              "interval": 60,
+              "timeout": 15,
+              "retries": 5,
+              "startPeriod": 300
             } |
             del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)
           ')
