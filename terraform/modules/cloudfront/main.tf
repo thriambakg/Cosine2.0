@@ -235,6 +235,26 @@ resource "aws_s3_bucket_public_access_block" "cloudfront_logs" {
   restrict_public_buckets = true
 }
 
+# Bucket ownership controls for CloudFront logging
+resource "aws_s3_bucket_ownership_controls" "cloudfront_logs" {
+  count  = var.enable_logging && var.logging_bucket == null ? 1 : 0
+  bucket = aws_s3_bucket.cloudfront_logs[0].id
+
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+
+  depends_on = [aws_s3_bucket_public_access_block.cloudfront_logs]
+}
+
+# Bucket ACL for CloudFront logging
+resource "aws_s3_bucket_acl" "cloudfront_logs" {
+  count      = var.enable_logging && var.logging_bucket == null ? 1 : 0
+  bucket     = aws_s3_bucket.cloudfront_logs[0].id
+  acl        = "log-delivery-write"
+  depends_on = [aws_s3_bucket_ownership_controls.cloudfront_logs]
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "cloudfront_logs" {
   count  = var.enable_logging && var.logging_bucket == null ? 1 : 0
   bucket = aws_s3_bucket.cloudfront_logs[0].id
