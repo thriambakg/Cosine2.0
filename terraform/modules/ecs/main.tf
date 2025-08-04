@@ -261,6 +261,14 @@ resource "aws_ecs_task_definition" "frontend" {
           value = "true"
         },
         {
+          name  = "NEXT_PUBLIC_REDIRECT_SIGN_IN"
+          value = "https://investcosine.com/auth/callback"
+        },
+        {
+          name  = "NEXT_PUBLIC_REDIRECT_SIGN_OUT"
+          value = "https://investcosine.com"
+        },
+        {
           name  = "USER_PROFILES_TABLE_NAME"
           value = var.user_profiles_table_name
         },

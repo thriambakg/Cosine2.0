@@ -37,6 +37,11 @@ export async function GET(request: NextRequest) {
     // Exchange authorization code for tokens
     const tokenUrl = `https://${process.env.NEXT_PUBLIC_COGNITO_DOMAIN}/oauth2/token`;
     
+    // Use NEXTAUTH_URL for redirect_uri to match Cognito configuration
+    const redirectUri = process.env.NEXTAUTH_URL 
+      ? `${process.env.NEXTAUTH_URL}/auth/callback`
+      : `${request.nextUrl.origin}/auth/callback`;
+    
     const tokenResponse = await fetch(tokenUrl, {
       method: 'POST',
       headers: {
@@ -46,7 +51,7 @@ export async function GET(request: NextRequest) {
         grant_type: 'authorization_code',
         client_id: process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID!,
         code,
-        redirect_uri: `${request.nextUrl.origin}/auth/callback`,
+        redirect_uri: redirectUri,
       }),
     });
 
