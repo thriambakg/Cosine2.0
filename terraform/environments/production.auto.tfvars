@@ -11,9 +11,12 @@ enable_s3_bucket  = true # Enable for production hosting
 enable_cloudfront = true # Enable for global distribution
 
 # WAF Configuration (production security)
-enable_waf_logging    = true               # Enable for production monitoring
 waf_rate_limit        = 1000               # More restrictive rate limit for production
 waf_blocked_countries = ["CN", "RU", "KP"] # Block high-risk countries for production
+
+# CloudFront Configuration
+cloudfront_aliases        = ["investcosine.com", "www.investcosine.com"] # Custom domains for CloudFront
+use_cloudfront_deployment = true                                         # Enable CloudFront + S3 static hosting
 
 # Common tags
 common_tags = {

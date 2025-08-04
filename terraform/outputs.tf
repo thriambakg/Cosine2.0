@@ -229,7 +229,7 @@ output "domain_configuration" {
     certificate_arn        = module.domain[0].certificate_arn
     name_servers           = module.domain[0].hosted_zone_name_servers
     dns_setup_required     = var.use_cloudfront_deployment
-    dns_setup_instructions = var.use_cloudfront_deployment ? "Create a CNAME record pointing ${var.cloudfront_aliases[0]} to ${module.cloudfront[0].distribution_domain_name}" : "Configure DNS for your hosting method"
+    dns_setup_instructions = var.use_cloudfront_deployment && length(var.cloudfront_aliases) > 0 ? "Create a CNAME record pointing ${var.cloudfront_aliases[0]} to ${module.cloudfront[0].distribution_domain_name}" : var.use_cloudfront_deployment ? "Configure DNS for CloudFront distribution: ${module.cloudfront[0].distribution_domain_name}" : "Configure DNS for your hosting method"
     message                = "Custom domain configured successfully"
     } : {
     enabled                = false
