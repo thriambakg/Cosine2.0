@@ -11,7 +11,7 @@ name: Deploy Frontend Application
 on:
   # Trigger on pushes to frontend directory
   push:
-    branches: [ staging, main ]
+    branches: [ staging, prod ]
     paths:
       - 'frontend/**'
       - '.github/workflows/deploy-frontend.yml'
