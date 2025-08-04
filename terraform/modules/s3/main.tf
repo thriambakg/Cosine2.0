@@ -27,10 +27,11 @@ resource "aws_s3_bucket_acl" "frontend" {
 resource "aws_s3_bucket_public_access_block" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
-  block_public_acls       = !var.enable_public_read
-  block_public_policy     = !var.enable_public_read
-  ignore_public_acls      = !var.enable_public_read
-  restrict_public_buckets = !var.enable_public_read
+  # Always block public access for security - CloudFront uses OAC for private access
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 resource "aws_s3_bucket_versioning" "frontend" {

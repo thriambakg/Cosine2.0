@@ -117,8 +117,7 @@ module "s3_buckets" {
   log_prefix             = "access-logs/"
   enable_website_hosting = true
   index_document         = "index.html"
-  error_document         = "index.html"                  # SPA routing - serve index.html for all errors
-  enable_public_read     = var.use_cloudfront_deployment # Only enable public read for CloudFront deployment
+  error_document         = "index.html" # SPA routing - serve index.html for all errors
 
   tags = var.common_tags
 }
