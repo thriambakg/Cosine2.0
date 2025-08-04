@@ -286,6 +286,12 @@ output "s3_bucket_name" {
   value       = data.aws_s3_bucket.static_hosting.id
 }
 
+# Legacy output name for backward compatibility with GitHub Actions
+output "frontend_s3_bucket_name" {
+  description = "Name of the S3 bucket for static hosting (legacy name for GitHub Actions compatibility)"
+  value       = data.aws_s3_bucket.static_hosting.id
+}
+
 output "s3_website_endpoint" {
   description = "S3 website endpoint"
   value       = data.aws_s3_bucket.static_hosting.website_endpoint
