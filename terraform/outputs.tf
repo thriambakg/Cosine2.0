@@ -201,23 +201,23 @@ output "integration_guide" {
          - Security Events: ${try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, var.security_events_table_name)}
          - User Sessions: ${try(data.terraform_remote_state.base_infra.outputs.user_sessions_table_name, var.user_sessions_table_name)}
       
-      ✅ ECS Container Deployment:
-         - Frontend URL: ${var.certificate_arn != "" ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}"}
-         - Container Image: ${module.ecr.repository_url}:latest
+      ✅ CloudFront Static Website Deployment:
+         - Frontend URL: ${var.use_cloudfront_deployment ? (length(var.cloudfront_aliases) > 0 ? "https://${var.cloudfront_aliases[0]}" : "https://${module.cloudfront[0].distribution_domain_name}") : "CloudFront deployment not enabled"}
+         - S3 Bucket: ${module.s3_buckets.frontend_bucket_id}
       
       🔧 Next Steps:
-      1. Build & push your frontend container to ECR: ${module.ecr.repository_url}
-      2. Your app will have access to DynamoDB tables via environment variables
+      1. Build your Next.js application with environment variables from build_environment_variables output
+      2. Deploy static files to S3 bucket: ${module.s3_buckets.frontend_bucket_id}
       3. Use the Cognito configuration for user authentication
       4. Implement sign-in UI with federated provider options
       
-      📚 Environment Variables Available in Container:
+      📚 Environment Variables Available at Build Time:
          - NEXT_PUBLIC_COGNITO_USER_POOL_ID
          - NEXT_PUBLIC_COGNITO_CLIENT_ID
          - NEXT_PUBLIC_COGNITO_DOMAIN
-         - USER_PROFILES_TABLE_NAME
-         - SECURITY_EVENTS_TABLE_NAME
-         - USER_SESSIONS_TABLE_NAME
+         - NEXT_PUBLIC_USER_PROFILES_TABLE
+         - NEXT_PUBLIC_SECURITY_EVENTS_TABLE
+         - NEXT_PUBLIC_USER_SESSIONS_TABLE
       ========================================================================================
     EOT
   }
