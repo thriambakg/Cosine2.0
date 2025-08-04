@@ -291,7 +291,9 @@ module "cloudfront" {
   aliases             = var.cloudfront_aliases
 
   # Enable WAF for security
-  create_waf = true
+  create_waf            = true
+  waf_rate_limit        = var.waf_rate_limit
+  waf_blocked_countries = var.waf_blocked_countries
 
   # SPA configuration for Next.js
   default_root_object = "index.html"

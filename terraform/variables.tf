@@ -83,12 +83,6 @@ variable "waf_blocked_countries" {
   default     = []
 }
 
-variable "enable_waf_logging" {
-  description = "Enable WAF logging to CloudWatch (may require additional permissions)"
-  type        = bool
-  default     = false # Temporarily disabled to avoid deployment issues
-}
-
 # Cognito Configuration (from existing infrastructure)
 variable "cognito_user_pool_id" {
   description = "Cognito User Pool ID from base infrastructure"
