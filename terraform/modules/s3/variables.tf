@@ -27,3 +27,27 @@ variable "log_prefix" {
   type        = string
   default     = "access-logs/"
 }
+
+variable "enable_website_hosting" {
+  description = "Enable S3 website hosting"
+  type        = bool
+  default     = false
+}
+
+variable "index_document" {
+  description = "Index document for website hosting"
+  type        = string
+  default     = "index.html"
+}
+
+variable "error_document" {
+  description = "Error document for website hosting"
+  type        = string
+  default     = "error.html"
+}
+
+variable "enable_public_read" {
+  description = "Enable public read access for website hosting"
+  type        = bool
+  default     = false
+}

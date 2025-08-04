@@ -84,7 +84,6 @@ resource "aws_kms_key" "main" {
           ArnLike = {
             "kms:EncryptionContext:aws:logs:arn" = [
               "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-*",
-              "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.project_name}*",
               "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/wafv2/${var.project_name}-*",
               "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/vpc/flowlogs/${var.project_name}-*"
             ]
@@ -108,38 +107,48 @@ resource "aws_kms_alias" "main" {
   }
 }
 
-# CloudWatch Log Groups for ECS
-resource "aws_cloudwatch_log_group" "ecs" {
-  name              = "/ecs/${var.project_name}-${var.environment}"
-  retention_in_days = 30
-  kms_key_id        = aws_kms_key.main.arn
-
-  tags = merge(var.common_tags, {
-    Name = "${var.project_name}-ecs-logs-${var.environment}"
-  })
-}
-
-resource "aws_cloudwatch_log_group" "frontend" {
-  name              = "/ecs/${var.project_name}-frontend-${var.environment}"
-  retention_in_days = 30
-  kms_key_id        = aws_kms_key.main.arn
-
-  tags = merge(var.common_tags, {
-    Name = "${var.project_name}-frontend-logs-${var.environment}"
-  })
-}
-
-# S3 Buckets Module (temporarily disabled until S3 permissions are granted)
+# S3 Buckets Module for static website hosting
 module "s3_buckets" {
-  count  = 0 # Temporarily disabled - requires s3:CreateBucket permission
   source = "./modules/s3"
 
-  bucket_name       = local.bucket_name
-  kms_key_arn       = aws_kms_key.main.arn
-  enable_versioning = true
-  log_prefix        = "access-logs/"
+  bucket_name            = local.bucket_name
+  kms_key_arn            = aws_kms_key.main.arn
+  enable_versioning      = true
+  log_prefix             = "access-logs/"
+  enable_website_hosting = true
+  index_document         = "index.html"
+  error_document         = "index.html"                  # SPA routing - serve index.html for all errors
+  enable_public_read     = var.use_cloudfront_deployment # Only enable public read for CloudFront deployment
 
   tags = var.common_tags
+}
+
+# CloudFront Distribution OAC Bucket Policy (separate resource to avoid circular dependency)
+resource "aws_s3_bucket_policy" "cloudfront_oac" {
+  count  = var.use_cloudfront_deployment ? 1 : 0
+  bucket = module.s3_buckets.frontend_bucket_id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowCloudFrontServicePrincipal"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action   = "s3:GetObject"
+        Resource = "${module.s3_buckets.frontend_bucket_arn}/*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = length(module.cloudfront) > 0 ? module.cloudfront[0].distribution_arn : ""
+          }
+        }
+      }
+    ]
+  })
+
+  depends_on = [module.s3_buckets, module.cloudfront]
 }
 
 # Custom IAM policy for stock volatility Lambda (temporarily disabled until IAM permissions are granted)
@@ -218,17 +227,6 @@ module "vpc" {
   tags = var.common_tags
 }
 
-# ECR Repository for frontend container
-module "ecr" {
-  source = "./modules/ecr"
-
-  project_name = var.project_name
-  environment  = var.environment
-  kms_key_arn  = aws_kms_key.main.arn
-
-  tags = var.common_tags
-}
-
 # SSL Certificate for staging HTTPS (when no custom domain)
 module "ssl_certificate" {
   count  = var.enable_custom_domain ? 0 : 1
@@ -242,35 +240,13 @@ module "ssl_certificate" {
 # Local values for certificate management
 locals {
   # Use certificate when available: either from custom domain module or provided certificate_arn
-  certificate_arn_for_alb = var.enable_custom_domain ? (
+  certificate_arn = var.enable_custom_domain ? (
     length(module.domain) > 0 ? module.domain[0].certificate_arn : ""
     ) : (
     var.certificate_arn != "" ? var.certificate_arn : (
       length(module.ssl_certificate) > 0 ? module.ssl_certificate[0].certificate_arn : ""
     )
   )
-} # Application Load Balancer with WAF
-module "alb" {
-  source = "./modules/alb"
-
-  project_name       = var.project_name
-  environment        = var.environment
-  vpc_id             = module.vpc.vpc_id
-  public_subnet_ids  = module.vpc.public_subnet_ids
-  certificate_arn    = local.certificate_arn_for_alb
-  enable_https       = true # Always use HTTPS for security (self-signed cert if no custom domain)
-  enable_access_logs = var.enable_alb_access_logs
-  access_logs_bucket = var.alb_access_logs_bucket
-  kms_key_arn        = aws_kms_key.main.arn
-  rate_limit         = var.waf_rate_limit
-  blocked_countries  = var.waf_blocked_countries
-  enable_waf_logging = var.enable_waf_logging
-
-  # Use existing resources in production to avoid conflicts
-
-  tags = var.common_tags
-
-  depends_on = [module.vpc, module.ssl_certificate]
 }
 
 # ============================================================================
@@ -292,70 +268,50 @@ module "domain" {
 
 # ============================================================================
 # CUSTOM DOMAIN CONFIGURATION - PHASE 2: DNS RECORDS
-# A records pointing to ALB (depends on ALB being created)
+# For CloudFront, DNS records will be handled separately if needed
 # ============================================================================
 
-module "domain_records" {
-  count  = var.enable_custom_domain ? 1 : 0
-  source = "./modules/domain-records"
-
-  enable_custom_domain = var.enable_custom_domain
-  domain_name          = var.domain_name
-  subdomain            = var.environment == "production" ? var.production_subdomain : var.staging_subdomain
-  hosted_zone_id       = module.domain[0].hosted_zone_id
-  alb_dns_name         = module.alb.alb_dns_name
-  alb_zone_id          = module.alb.alb_zone_id
-
-  depends_on = [module.alb, module.domain]
-}
-
 # ============================================================================
-# FRONTEND APPLICATION DEPLOYMENT - ECS Service with Cognito & DynamoDB
+# FRONTEND APPLICATION DEPLOYMENT - CloudFront + S3 Static Hosting
 # ============================================================================
 
-# ECS Service for frontend with authentication and database integration
-module "ecs" {
-  source = "./modules/ecs"
+# CloudFront Distribution for static website hosting
+module "cloudfront" {
+  count  = var.use_cloudfront_deployment ? 1 : 0
+  source = "./modules/cloudfront"
 
   project_name          = var.project_name
   environment           = var.environment
-  aws_region            = var.aws_region
-  vpc_id                = module.vpc.vpc_id
-  private_subnet_ids    = module.vpc.private_subnet_ids
-  alb_security_group_id = module.alb.security_group_id
-  target_group_arn      = module.alb.target_group_arn
-  ecr_repository_url    = module.ecr.repository_url
-  ecr_repository_arn    = module.ecr.repository_arn
-  kms_key_arn           = aws_kms_key.main.arn
+  s3_bucket_domain_name = module.s3_buckets.frontend_bucket_regional_domain_name
+  s3_bucket_id          = module.s3_buckets.frontend_bucket_id
+  s3_bucket_arn         = module.s3_buckets.frontend_bucket_arn
 
-  # CloudWatch Log Groups
-  ecs_log_group_name      = aws_cloudwatch_log_group.ecs.name
-  frontend_log_group_name = aws_cloudwatch_log_group.frontend.name
+  # Use the same certificate as ALB if available
+  acm_certificate_arn = local.certificate_arn
+  aliases             = var.cloudfront_aliases
 
-  # Cognito configuration - use computed local values for automatic discovery
-  cognito_user_pool_id = local.auth_config.user_pool_id
-  cognito_client_id    = local.auth_config.client_id
-  cognito_domain       = local.auth_config.full_domain_url
-  api_gateway_url      = var.api_gateway_url
+  # Enable WAF for security
+  create_waf = true
 
-  # DynamoDB configuration - use computed local values for automatic discovery
-  user_profiles_table_name   = local.database_config.user_profiles_table_name
-  security_events_table_name = local.database_config.security_events_table_name
-  user_sessions_table_name   = local.database_config.user_sessions_table_name
-
-  # ECS configuration
-  task_cpu                 = var.ecs_task_cpu
-  task_memory              = var.ecs_task_memory
-  task_memory_reservation  = var.ecs_task_memory_reservation
-  desired_count            = var.ecs_desired_count
-  enable_service_discovery = var.enable_service_discovery
-  enable_execute_command   = var.enable_ecs_execute_command
+  # SPA configuration for Next.js
+  default_root_object = "index.html"
+  custom_error_responses = [
+    {
+      error_code            = 403
+      response_code         = 200
+      response_page_path    = "/index.html"
+      error_caching_min_ttl = 0
+    },
+    {
+      error_code            = 404
+      response_code         = 200
+      response_page_path    = "/index.html"
+      error_caching_min_ttl = 0
+    }
+  ]
 
   tags = var.common_tags
 
-  # Pass the ALB ready signal as a dependency to ensure it's fully created before the ECS service
-  alb_dependency = module.alb.alb_ready
-
-  depends_on = [module.alb, aws_cloudwatch_log_group.ecs, aws_cloudwatch_log_group.frontend]
+  depends_on = [module.s3_buckets]
 }
 

@@ -63,21 +63,9 @@ variable "az_count" {
   default     = 2
 }
 
-# ALB Configuration
+# SSL Certificate Configuration
 variable "certificate_arn" {
   description = "ARN of SSL certificate for HTTPS"
-  type        = string
-  default     = ""
-}
-
-variable "enable_alb_access_logs" {
-  description = "Enable access logs for ALB"
-  type        = bool
-  default     = false
-}
-
-variable "alb_access_logs_bucket" {
-  description = "S3 bucket name for ALB access logs"
   type        = string
   default     = ""
 }
@@ -145,43 +133,6 @@ variable "api_gateway_url" {
   default     = ""
 }
 
-# ECS Configuration
-variable "ecs_task_cpu" {
-  description = "CPU units for ECS task"
-  type        = number
-  default     = 256
-}
-
-variable "ecs_task_memory" {
-  description = "Memory for ECS task in MB"
-  type        = number
-  default     = 512
-}
-
-variable "ecs_task_memory_reservation" {
-  description = "Memory reservation for ECS task in MB"
-  type        = number
-  default     = 256
-}
-
-variable "ecs_desired_count" {
-  description = "Desired number of ECS tasks"
-  type        = number
-  default     = 2
-}
-
-variable "enable_service_discovery" {
-  description = "Enable service discovery for ECS"
-  type        = bool
-  default     = false
-}
-
-variable "enable_ecs_execute_command" {
-  description = "Enable execute command for ECS debugging"
-  type        = bool
-  default     = false
-}
-
 # =============================================================================
 # CUSTOM DOMAIN CONFIGURATION
 # Variables for custom domain setup with Route53 and SSL certificates
@@ -209,4 +160,20 @@ variable "production_subdomain" {
   description = "Subdomain for production environment (e.g., app or leave empty for root domain)"
   type        = string
   default     = ""
+}
+
+# ============================================================================
+# DEPLOYMENT CONFIGURATION VARIABLES
+# ============================================================================
+
+variable "use_cloudfront_deployment" {
+  description = "Whether to use CloudFront + S3 static hosting instead of ECS"
+  type        = bool
+  default     = true
+}
+
+variable "cloudfront_aliases" {
+  description = "Custom domain aliases for CloudFront distribution"
+  type        = list(string)
+  default     = []
 }

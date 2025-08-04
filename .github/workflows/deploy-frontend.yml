@@ -63,9 +63,6 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: cosine-frontend
-  ECS_CLUSTER: cosine-cluster
-  ECS_SERVICE: cosine-frontend-service
 
 jobs:
   # Determine environment based on branch or input
@@ -73,9 +70,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.env.outputs.environment }}
-      ecr_repository: ${{ steps.env.outputs.ecr_repository }}
-      ecs_cluster: ${{ steps.env.outputs.ecs_cluster }}
-      ecs_service: ${{ steps.env.outputs.ecs_service }}
     steps:
       - name: Determine environment
         id: env
@@ -93,11 +87,8 @@ jobs:
           fi
           
           echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
-          echo "ecr_repository=${ECR_REPOSITORY}-${ENVIRONMENT}" >> $GITHUB_OUTPUT
-          echo "ecs_cluster=${ECS_CLUSTER}-${ENVIRONMENT}" >> $GITHUB_OUTPUT
-          echo "ecs_service=${ECS_SERVICE}-${ENVIRONMENT}" >> $GITHUB_OUTPUT
 
-  # Build and deploy frontend
+  # Check CloudFront infrastructure
   check-infrastructure:
     needs: setup
     runs-on: ubuntu-latest
@@ -106,6 +97,9 @@ jobs:
     if: ${{ !(github.event.inputs.frontend_only == 'true' || inputs.frontend_only == true) }}
     
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -113,42 +107,75 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Check if infrastructure exists
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
+      - name: Check if CloudFront infrastructure exists
         env:
-          ECR_REPOSITORY: ${{ needs.setup.outputs.ecr_repository }}
-          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
-          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+          ENVIRONMENT: ${{ needs.setup.outputs.environment }}
         run: |
-          echo "🔍 Checking if infrastructure is ready..."
+          echo "🔍 Checking if CloudFront infrastructure is ready..."
           
-          # Check ECR repository
-          if aws ecr describe-repositories --repository-names $ECR_REPOSITORY --region $AWS_REGION > /dev/null 2>&1; then
-            echo "✅ ECR Repository '$ECR_REPOSITORY' exists"
+          cd terraform
+          # Initialize Terraform with the appropriate backend configuration
+          echo "🔧 Initializing Terraform with backend config for $ENVIRONMENT..."
+          terraform init -backend-config="backend-configs/${ENVIRONMENT}.tfbackend"
+          
+          # Check if S3 bucket exists
+          S3_BUCKET_NAME=$(terraform output -raw frontend_s3_bucket_name 2>/dev/null || echo "")
+          if [ -n "$S3_BUCKET_NAME" ]; then
+            if aws s3api head-bucket --bucket "$S3_BUCKET_NAME" --region $AWS_REGION 2>/dev/null; then
+              echo "✅ S3 Bucket '$S3_BUCKET_NAME' exists and is accessible"
+            else
+              echo "❌ S3 Bucket '$S3_BUCKET_NAME' not found or not accessible"
+              echo "🚨 Please run terraform apply first to create infrastructure"
+              exit 1
+            fi
           else
-            echo "❌ ECR Repository '$ECR_REPOSITORY' not found"
+            echo "❌ S3 bucket name not found in Terraform outputs"
             echo "🚨 Please run terraform apply first to create infrastructure"
             exit 1
           fi
           
-          # Check ECS cluster
-          if aws ecs describe-clusters --clusters $ECS_CLUSTER --region $AWS_REGION --query 'clusters[0].status' --output text | grep -q ACTIVE; then
-            echo "✅ ECS Cluster '$ECS_CLUSTER' is active"
+          # Check if CloudFront distribution exists
+          CLOUDFRONT_DISTRIBUTION_ID=$(terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "")
+          if [ -n "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
+            DISTRIBUTION_STATUS=$(aws cloudfront get-distribution \
+              --id "$CLOUDFRONT_DISTRIBUTION_ID" \
+              --query 'Distribution.Status' \
+              --output text \
+              --region $AWS_REGION 2>/dev/null || echo "NOT_FOUND")
+            
+            if [ "$DISTRIBUTION_STATUS" = "Deployed" ]; then
+              echo "✅ CloudFront Distribution '$CLOUDFRONT_DISTRIBUTION_ID' is deployed"
+            elif [ "$DISTRIBUTION_STATUS" = "InProgress" ]; then
+              echo "⚠️  CloudFront Distribution '$CLOUDFRONT_DISTRIBUTION_ID' is still deploying"
+              echo "💡 Deployment can continue, but propagation may take longer"
+            else
+              echo "❌ CloudFront Distribution '$CLOUDFRONT_DISTRIBUTION_ID' not found or in unexpected state: $DISTRIBUTION_STATUS"
+              echo "🚨 Please run terraform apply first to create infrastructure"
+              exit 1
+            fi
           else
-            echo "❌ ECS Cluster '$ECS_CLUSTER' not found or not active"
+            echo "❌ CloudFront distribution ID not found in Terraform outputs"
             echo "🚨 Please run terraform apply first to create infrastructure"
             exit 1
           fi
           
-          # Check ECS service
-          if aws ecs describe-services --cluster $ECS_CLUSTER --services $ECS_SERVICE --region $AWS_REGION --query 'services[0].status' --output text | grep -q ACTIVE; then
-            echo "✅ ECS Service '$ECS_SERVICE' is active"
-          else
-            echo "❌ ECS Service '$ECS_SERVICE' not found or not active"
+          # Check build environment variables are available
+          BUILD_ENV=$(terraform output -json build_environment_variables 2>/dev/null || echo "{}")
+          if [ "$BUILD_ENV" = "{}" ] || [ "$BUILD_ENV" = "null" ]; then
+            echo "❌ Build environment variables not found in Terraform outputs"
             echo "🚨 Please run terraform apply first to create infrastructure"
             exit 1
+          else
+            echo "✅ Build environment variables are available"
           fi
           
-          echo "🎉 All infrastructure components are ready!"
+          cd ..
+          echo "🎉 All CloudFront infrastructure components are ready!"
 
   # Build and deploy frontend
   deploy-frontend:
@@ -169,10 +196,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
       - name: Get commit SHA (short)
         id: vars
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
@@ -182,15 +205,12 @@ jobs:
         with:
           terraform_version: "1.5.0"
 
-      - name: Get authentication config from Terraform outputs
-        id: get-auth-config
+      - name: Get build environment variables from Terraform
+        id: get-build-env
         env:
           ENVIRONMENT: ${{ needs.setup.outputs.environment }}
         run: |
-          echo "🔍 Getting authentication configuration from Terraform outputs..."
-          
-          # Use terraform output from the current workspace's state
-          # This reads the computed values from our data sources
+          echo "🔍 Getting build environment variables from Terraform outputs..."
           
           cd terraform
           
@@ -198,14 +218,14 @@ jobs:
           echo "🔧 Initializing Terraform with backend config for $ENVIRONMENT..."
           terraform init -backend-config="backend-configs/${ENVIRONMENT}.tfbackend"
           
-          # Get authentication configuration from terraform output
-          echo "🔍 Retrieving authentication config..."
-          AUTH_CONFIG=$(terraform output -json authentication_config 2>/dev/null || echo "{}")
+          # Get build environment variables from terraform output
+          echo "🔍 Retrieving build environment variables..."
+          BUILD_ENV=$(terraform output -json build_environment_variables 2>/dev/null || echo "{}")
           
-          echo "🔍 Raw AUTH_CONFIG received: $AUTH_CONFIG"
+          echo "🔍 Raw BUILD_ENV received: $BUILD_ENV"
           
-          if [ "$AUTH_CONFIG" = "{}" ] || [ "$AUTH_CONFIG" = "null" ]; then
-            echo "❌ Could not retrieve authentication config from Terraform outputs"
+          if [ "$BUILD_ENV" = "{}" ] || [ "$BUILD_ENV" = "null" ]; then
+            echo "❌ Could not retrieve build environment variables from Terraform outputs"
             echo "🚨 Debugging information:"
             echo "   Current directory: $(pwd)"
             echo "   Terraform version: $(terraform version)"
@@ -216,277 +236,219 @@ jobs:
             exit 1
           fi
           
-          # Parse the JSON output - handle both possible field name formats
-          COGNITO_USER_POOL_ID=$(echo $AUTH_CONFIG | jq -r '.user_pool_id // .cognito_user_pool_id // empty')
-          COGNITO_CLIENT_ID=$(echo $AUTH_CONFIG | jq -r '.client_id // .cognito_client_id // empty')
-          COGNITO_FULL_DOMAIN=$(echo $AUTH_CONFIG | jq -r '.full_domain // .cognito_domain // .domain_name // empty')
-          ENVIRONMENT=$(echo $AUTH_CONFIG | jq -r '.environment // "staging"')
+          # Parse the JSON output and set environment variables for Next.js build
+          NEXT_PUBLIC_AWS_REGION=$(echo $BUILD_ENV | jq -r '.NEXT_PUBLIC_AWS_REGION // "us-east-1"')
+          NEXT_PUBLIC_COGNITO_USER_POOL_ID=$(echo $BUILD_ENV | jq -r '.NEXT_PUBLIC_COGNITO_USER_POOL_ID // empty')
+          NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID=$(echo $BUILD_ENV | jq -r '.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID // empty')
+          NEXT_PUBLIC_COGNITO_DOMAIN=$(echo $BUILD_ENV | jq -r '.NEXT_PUBLIC_COGNITO_DOMAIN // empty')
+          NEXT_PUBLIC_API_GATEWAY_URL=$(echo $BUILD_ENV | jq -r '.NEXT_PUBLIC_API_GATEWAY_URL // ""')
+          NEXT_PUBLIC_REDIRECT_SIGN_IN=$(echo $BUILD_ENV | jq -r '.NEXT_PUBLIC_REDIRECT_SIGN_IN // "https://investcosine.com/auth/callback"')
+          NEXT_PUBLIC_REDIRECT_SIGN_OUT=$(echo $BUILD_ENV | jq -r '.NEXT_PUBLIC_REDIRECT_SIGN_OUT // "https://investcosine.com"')
           
           cd ..
           
-          # If domain is empty, construct it from the environment
-          if [ -z "$COGNITO_FULL_DOMAIN" ] && [ -n "$COGNITO_USER_POOL_ID" ]; then
-            COGNITO_FULL_DOMAIN="cosine-auth-${ENVIRONMENT}.auth.us-east-1.amazoncognito.com"
-            echo "🔧 Constructed domain from naming convention: $COGNITO_FULL_DOMAIN"
-          fi
-          
-          # Validate all required values
-          if [ -z "$COGNITO_USER_POOL_ID" ]; then
+          # Validate required values
+          if [ -z "$NEXT_PUBLIC_COGNITO_USER_POOL_ID" ]; then
             echo "❌ Missing Cognito User Pool ID in terraform outputs"
             echo "🚨 Base infrastructure may not be deployed or accessible"
-            echo "📋 Full authentication config received: $AUTH_CONFIG"
             exit 1
           fi
           
-          if [ -z "$COGNITO_CLIENT_ID" ]; then
+          if [ -z "$NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID" ]; then
             echo "❌ Missing Cognito Client ID in terraform outputs"  
             echo "🚨 Base infrastructure may not be deployed or accessible"
-            echo "📋 Full authentication config received: $AUTH_CONFIG"
             exit 1
           fi
           
-          if [ -z "$COGNITO_FULL_DOMAIN" ]; then
+          if [ -z "$NEXT_PUBLIC_COGNITO_DOMAIN" ]; then
             echo "❌ Missing Cognito Domain in terraform outputs"
             echo "🚨 Base infrastructure may not be deployed or accessible"
-            echo "📋 Full authentication config received: $AUTH_CONFIG"
             exit 1
           fi
           
-          # Set outputs for Docker build
-          echo "cognito_user_pool_id=${COGNITO_USER_POOL_ID}" >> $GITHUB_OUTPUT
-          echo "cognito_client_id=${COGNITO_CLIENT_ID}" >> $GITHUB_OUTPUT
-          echo "cognito_domain=${COGNITO_FULL_DOMAIN}" >> $GITHUB_OUTPUT
+          # Set outputs for Next.js build
+          echo "next_public_aws_region=${NEXT_PUBLIC_AWS_REGION}" >> $GITHUB_OUTPUT
+          echo "next_public_cognito_user_pool_id=${NEXT_PUBLIC_COGNITO_USER_POOL_ID}" >> $GITHUB_OUTPUT
+          echo "next_public_cognito_user_pool_client_id=${NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID}" >> $GITHUB_OUTPUT
+          echo "next_public_cognito_domain=${NEXT_PUBLIC_COGNITO_DOMAIN}" >> $GITHUB_OUTPUT
+          echo "next_public_api_gateway_url=${NEXT_PUBLIC_API_GATEWAY_URL}" >> $GITHUB_OUTPUT
+          echo "next_public_redirect_sign_in=${NEXT_PUBLIC_REDIRECT_SIGN_IN}" >> $GITHUB_OUTPUT
+          echo "next_public_redirect_sign_out=${NEXT_PUBLIC_REDIRECT_SIGN_OUT}" >> $GITHUB_OUTPUT
           
-          echo "✅ Authentication config retrieved successfully:"
+          echo "✅ Build environment variables retrieved successfully:"
           echo "  - Environment: ${ENVIRONMENT}"
-          echo "  - User Pool ID: ${COGNITO_USER_POOL_ID}"
-          echo "  - Client ID: ${COGNITO_CLIENT_ID}"
-          echo "  - Domain: ${COGNITO_FULL_DOMAIN}"
-          echo "� Source: Terraform outputs with automatic base infrastructure discovery"
+          echo "  - User Pool ID: ${NEXT_PUBLIC_COGNITO_USER_POOL_ID}"
+          echo "  - Client ID: ${NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID}"
+          echo "  - Domain: ${NEXT_PUBLIC_COGNITO_DOMAIN}"
+          echo "  - Sign In Redirect: ${NEXT_PUBLIC_REDIRECT_SIGN_IN}"
+          echo "  - Sign Out Redirect: ${NEXT_PUBLIC_REDIRECT_SIGN_OUT}"
 
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ needs.setup.outputs.ecr_repository }}
-          IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
-        run: |
-          # Build Docker image with build args for environment variables
-          docker build \
-            --build-arg NEXT_PUBLIC_AWS_REGION=us-east-1 \
-            --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_ID="${{ steps.get-auth-config.outputs.cognito_user_pool_id }}" \
-            --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID="${{ steps.get-auth-config.outputs.cognito_client_id }}" \
-            --build-arg NEXT_PUBLIC_COGNITO_DOMAIN="${{ steps.get-auth-config.outputs.cognito_domain }}" \
-            --build-arg NEXT_PUBLIC_API_GATEWAY_URL="" \
-            --build-arg NEXT_PUBLIC_REDIRECT_SIGN_IN="https://investcosine.com/auth/callback" \
-            --build-arg NEXT_PUBLIC_REDIRECT_SIGN_OUT="https://investcosine.com" \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
-            ./frontend/app
-          
-          # Delete existing tags if they exist (ignore failures)
-          aws ecr batch-delete-image \
-            --repository-name $ECR_REPOSITORY \
-            --region $AWS_REGION \
-            --image-ids imageTag=$IMAGE_TAG || true
-          
-          aws ecr batch-delete-image \
-            --repository-name $ECR_REPOSITORY \
-            --region $AWS_REGION \
-            --image-ids imageTag=latest || true
-          
-          # Push commit-specific tag first
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          
-          # Push new latest tag
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: './frontend/app/package-lock.json'
 
-      - name: Deploy to ECS with health check fix
+      - name: Install dependencies
+        working-directory: ./frontend/app
+        run: npm ci
+
+      - name: Build Next.js static export
+        working-directory: ./frontend/app
         env:
-          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
-          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ needs.setup.outputs.ecr_repository }}
-          IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
+          NEXT_PUBLIC_AWS_REGION: ${{ steps.get-build-env.outputs.next_public_aws_region }}
+          NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ steps.get-build-env.outputs.next_public_cognito_user_pool_id }}
+          NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID: ${{ steps.get-build-env.outputs.next_public_cognito_user_pool_client_id }}
+          NEXT_PUBLIC_COGNITO_DOMAIN: ${{ steps.get-build-env.outputs.next_public_cognito_domain }}
+          NEXT_PUBLIC_API_GATEWAY_URL: ${{ steps.get-build-env.outputs.next_public_api_gateway_url }}
+          NEXT_PUBLIC_REDIRECT_SIGN_IN: ${{ steps.get-build-env.outputs.next_public_redirect_sign_in }}
+          NEXT_PUBLIC_REDIRECT_SIGN_OUT: ${{ steps.get-build-env.outputs.next_public_redirect_sign_out }}
         run: |
-          echo "🚀 Deploying new image with health check optimization..."
+          echo "🔨 Building Next.js application with environment variables..."
+          echo "  - AWS Region: $NEXT_PUBLIC_AWS_REGION"
+          echo "  - User Pool ID: $NEXT_PUBLIC_COGNITO_USER_POOL_ID"
+          echo "  - Client ID: $NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID"
+          echo "  - Domain: $NEXT_PUBLIC_COGNITO_DOMAIN"
+          echo "  - Sign In Redirect: $NEXT_PUBLIC_REDIRECT_SIGN_IN"
+          echo "  - Sign Out Redirect: $NEXT_PUBLIC_REDIRECT_SIGN_OUT"
           
-          # Get current task definition
-          CURRENT_TASK_DEF=$(aws ecs describe-services \
-            --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE \
-            --query 'services[0].taskDefinition' \
+          # Build the Next.js application
+          npm run build
+          
+          # Verify the build output
+          echo "✅ Build completed successfully"
+          echo "🔍 Build output size:"
+          du -sh out/ || echo "out/ directory not found"
+          
+          # List the build output structure
+          echo "🔍 Build output structure:"
+          find out/ -type f -name "*.html" | head -10 || echo "No HTML files found"
+          find out/ -type f -name "*.js" | head -5 || echo "No JS files found"
+          find out/ -type f -name "*.css" | head -5 || echo "No CSS files found"
+
+      - name: Get S3 bucket and CloudFront distribution from Terraform
+        id: get-deployment-targets
+        env:
+          ENVIRONMENT: ${{ needs.setup.outputs.environment }}
+        run: |
+          echo "� Getting S3 bucket and CloudFront distribution from Terraform outputs..."
+          
+          cd terraform
+          
+          # Get deployment targets from terraform output
+          S3_BUCKET_NAME=$(terraform output -raw frontend_s3_bucket_name 2>/dev/null || echo "")
+          CLOUDFRONT_DISTRIBUTION_ID=$(terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "")
+          CLOUDFRONT_URL=$(terraform output -raw frontend_url 2>/dev/null || echo "")
+          
+          cd ..
+          
+          if [ -z "$S3_BUCKET_NAME" ]; then
+            echo "❌ Could not retrieve S3 bucket name from Terraform outputs"
+            echo "� Please ensure CloudFront infrastructure is deployed"
+            exit 1
+          fi
+          
+          if [ -z "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
+            echo "❌ Could not retrieve CloudFront distribution ID from Terraform outputs"
+            echo "🚨 Please ensure CloudFront infrastructure is deployed"
+            exit 1
+          fi
+          
+          # Set outputs for deployment steps
+          echo "s3_bucket_name=${S3_BUCKET_NAME}" >> $GITHUB_OUTPUT
+          echo "cloudfront_distribution_id=${CLOUDFRONT_DISTRIBUTION_ID}" >> $GITHUB_OUTPUT
+          echo "cloudfront_url=${CLOUDFRONT_URL}" >> $GITHUB_OUTPUT
+          
+          echo "✅ Deployment targets retrieved successfully:"
+          echo "  - S3 Bucket: ${S3_BUCKET_NAME}"
+          echo "  - CloudFront Distribution: ${CLOUDFRONT_DISTRIBUTION_ID}"
+          echo "  - Frontend URL: ${CLOUDFRONT_URL}"
+
+      - name: Deploy to S3
+        env:
+          S3_BUCKET_NAME: ${{ steps.get-deployment-targets.outputs.s3_bucket_name }}
+        run: |
+          echo "🚀 Deploying static files to S3..."
+          
+          # Sync the build output to S3
+          aws s3 sync ./frontend/app/out/ s3://$S3_BUCKET_NAME/ \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "*.html" \
+            --region $AWS_REGION
+          
+          # Upload HTML files with different cache settings
+          aws s3 sync ./frontend/app/out/ s3://$S3_BUCKET_NAME/ \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --content-type "text/html" \
+            --exclude "*" \
+            --include "*.html" \
+            --region $AWS_REGION
+          
+          echo "✅ Static files deployed to S3 successfully"
+          
+          # Show deployment summary
+          echo "📊 Deployment Summary:"
+          aws s3 ls s3://$S3_BUCKET_NAME/ --recursive --human-readable --summarize --region $AWS_REGION | tail -2
+
+      - name: Invalidate CloudFront cache
+        id: invalidate-cache
+        env:
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ steps.get-deployment-targets.outputs.cloudfront_distribution_id }}
+        run: |
+          echo "♻️ Invalidating CloudFront cache..."
+          
+          # Create invalidation for all files
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id $CLOUDFRONT_DISTRIBUTION_ID \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
             --output text \
             --region $AWS_REGION)
           
-          echo "📋 Current task definition: $CURRENT_TASK_DEF"
+          echo "✅ CloudFront invalidation created: $INVALIDATION_ID"
+          echo "🔄 Cache invalidation is in progress..."
           
-          # Get task definition details
-          TASK_DEFINITION=$(aws ecs describe-task-definition \
-            --task-definition $CURRENT_TASK_DEF \
-            --query 'taskDefinition' \
-            --region $AWS_REGION)
-          
-          # Extract the new image URI
-          NEW_IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          echo "🐳 New image: $NEW_IMAGE_URI"
-          
-          # Debug current container configuration first
-          echo "🔍 Current container configuration:"
-          echo $TASK_DEFINITION | jq '.containerDefinitions[0] | {name, image, portMappings, healthCheck}'
-          
-          # Update task definition with new image AND improved health check settings
-          echo "🔧 Updating task definition JSON..."
-          NEW_TASK_DEFINITION=$(echo $TASK_DEFINITION | jq --arg IMAGE "$NEW_IMAGE_URI" '
-            .containerDefinitions[0].image = $IMAGE |
-            .containerDefinitions[0].healthCheck = {
-              "command": ["CMD-SHELL", "curl -f --connect-timeout 5 --max-time 10 http://localhost:3000/api/health || exit 1"],
-              "interval": 60,
-              "timeout": 15,
-              "retries": 5,
-              "startPeriod": 300
-            } |
-            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)
-          ')
-          
-          # Debug the new task definition
-          echo "🔍 New container configuration:"
-          echo "$NEW_TASK_DEFINITION" | jq '.containerDefinitions[0] | {name, image, portMappings, healthCheck}'
-          
-          # Validate the JSON before proceeding
-          if ! echo "$NEW_TASK_DEFINITION" | jq empty 2>/dev/null; then
-            echo "❌ Generated task definition JSON is invalid"
-            echo "� Debugging task definition transformation..."
-            echo "Original task definition keys:" 
-            echo $TASK_DEFINITION | jq 'keys'
-            echo "Container definition structure:"
-            echo $TASK_DEFINITION | jq '.containerDefinitions[0] | keys'
-            exit 1
-          fi
-          
-          echo "✅ Task definition JSON validated"
-          
-          # Write to file and inspect it before registering
-          echo "$NEW_TASK_DEFINITION" > /tmp/td.json
-          echo "🔍 Task definition file size: $(wc -c < /tmp/td.json) bytes"
-          echo "🔍 First few lines of task definition:"
-          head -n 10 /tmp/td.json
-          
-          # Register new task definition
-          echo "📝 Registering optimized task definition with health checks..."
-          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
-            --region $AWS_REGION \
-            --cli-input-json file:///tmp/td.json \
-            --query 'taskDefinition.taskDefinitionArn' \
-            --output text)
-          
-          if [ $? -ne 0 ]; then
-            echo "❌ Failed to register task definition"
-            echo "🔍 Task definition content that failed:"
-            cat /tmp/td.json | jq '.'
-            exit 1
-          fi
-          
-          echo "✅ New task definition: $NEW_TASK_DEF_ARN"
-          
-          # Update service with new task definition
-          echo "🔄 Updating service..."
-          aws ecs update-service \
-            --cluster $ECS_CLUSTER \
-            --service $ECS_SERVICE \
-            --task-definition $NEW_TASK_DEF_ARN \
-            --region $AWS_REGION \
-            --query 'service.{serviceName:serviceName,runningCount:runningCount,desiredCount:desiredCount}' \
-            --output table
-          
-          echo "✅ Deployment initiated with optimized health checks"
+          # Set output for monitoring step
+          echo "invalidation_id=${INVALIDATION_ID}" >> $GITHUB_OUTPUT
 
-      - name: Monitor deployment
+      - name: Monitor CloudFront invalidation
         if: ${{ !(github.event.inputs.skip_wait == 'true' || inputs.skip_wait == true) }}
         env:
-          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
-          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ steps.get-deployment-targets.outputs.cloudfront_distribution_id }}
+          INVALIDATION_ID: ${{ steps.invalidate-cache.outputs.invalidation_id }}
         run: |
-          echo "� Monitoring deployment (simplified)..."
+          echo "⏳ Monitoring CloudFront invalidation progress..."
           
-          for i in {1..10}; do  # 5 minutes max (30s * 10 = 300s)
-            echo "⏳ Check $i/10..."
+          for i in {1..6}; do  # 3 minutes max (30s * 6 = 180s)
+            echo "⏳ Check $i/6..."
             
-            SERVICE_INFO=$(aws ecs describe-services \
-              --cluster $ECS_CLUSTER \
-              --services $ECS_SERVICE \
+            STATUS=$(aws cloudfront get-invalidation \
+              --distribution-id $CLOUDFRONT_DISTRIBUTION_ID \
+              --id $INVALIDATION_ID \
+              --query 'Invalidation.Status' \
+              --output text \
               --region $AWS_REGION)
             
-            RUNNING_COUNT=$(echo "$SERVICE_INFO" | jq -r '.services[0].runningCount')
-            DESIRED_COUNT=$(echo "$SERVICE_INFO" | jq -r '.services[0].desiredCount')
-            PENDING_COUNT=$(echo "$SERVICE_INFO" | jq -r '.services[0].pendingCount')
-            ROLLOUT_STATE=$(echo "$SERVICE_INFO" | jq -r '.services[0].deployments[] | select(.status=="PRIMARY") | .rolloutState // "IN_PROGRESS"')
+            echo "   Invalidation Status: $STATUS"
             
-            echo "   Tasks: $RUNNING_COUNT/$DESIRED_COUNT running, $PENDING_COUNT pending"
-            echo "   State: $ROLLOUT_STATE"
-            
-            # Get detailed task information for debugging
-            if [ $RUNNING_COUNT -eq 0 ] && [ $PENDING_COUNT -gt 0 ]; then
-              echo "🔍 Checking task details for debugging..."
-              TASK_ARNS=$(aws ecs list-tasks \
-                --cluster $ECS_CLUSTER \
-                --service-name $ECS_SERVICE \
-                --query 'taskArns' \
-                --output text \
-                --region $AWS_REGION)
-              
-              if [ "$TASK_ARNS" != "None" ] && [ -n "$TASK_ARNS" ]; then
-                echo "📋 Current task health status:"
-                aws ecs describe-tasks \
-                  --cluster $ECS_CLUSTER \
-                  --tasks $TASK_ARNS \
-                  --query 'tasks[0].containers[0].{name:name,lastStatus:lastStatus,healthStatus:healthStatus,reason:reason}' \
-                  --output table \
-                  --region $AWS_REGION || echo "Could not get task details"
-              fi
-            fi
-            
-            if [[ "$ROLLOUT_STATE" == "COMPLETED" ]] && [ "$RUNNING_COUNT" -eq "$DESIRED_COUNT" ]; then
-              echo "✅ Deployment completed successfully!"
+            if [ "$STATUS" = "Completed" ]; then
+              echo "✅ CloudFront invalidation completed successfully!"
               break
-            elif [[ "$ROLLOUT_STATE" == "FAILED" ]]; then
-              echo "❌ Deployment failed - check container logs in ECS console"
-              
-              # Show the most recent task failure
-              echo "📋 Recent events:"
-              aws ecs describe-services \
-                --cluster $ECS_CLUSTER \
-                --services $ECS_SERVICE \
-                --query 'services[0].events[:2].[createdAt,message]' \
-                --output table \
-                --region $AWS_REGION
-              exit 1
             fi
             
-            if [ $i -lt 10 ]; then
+            if [ $i -lt 6 ]; then
+              echo "   Waiting 30 seconds before next check..."
               sleep 30
             fi
           done
           
-          if [ $i -eq 10 ]; then
-            echo "⚠️  Monitoring timed out after 5 minutes - check ECS console for task status"
-            echo "💡 Your deployment may still succeed, just taking longer than expected"
+          if [ $i -eq 6 ] && [ "$STATUS" != "Completed" ]; then
+            echo "⚠️  Invalidation monitoring timed out after 3 minutes"
+            echo "💡 Your invalidation may still complete successfully"
+            echo "� Check CloudFront console for invalidation status"
           fi
-
-      - name: Get service status
-        env:
-          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
-          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
-        run: |
-          echo "📊 Service Status:"
-          aws ecs describe-services \
-            --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE \
-            --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount}' \
-            --output table \
-            --region $AWS_REGION
 
   # Verify deployment
   verify-deployment:
@@ -510,150 +472,110 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get ALB URL
+      - name: Get CloudFront URL
         id: get-url
         env:
-          ECS_CLUSTER: ${{ needs.setup.outputs.ecs_cluster }}
-          ECS_SERVICE: ${{ needs.setup.outputs.ecs_service }}
           ENVIRONMENT: ${{ needs.setup.outputs.environment }}
         run: |
-          echo "🔍 Getting ALB URL from Terraform outputs for environment: $ENVIRONMENT..."
+          echo "🔍 Getting CloudFront URL from Terraform outputs for environment: $ENVIRONMENT..."
           
-          # First try to get URL from Terraform output (preferred)
-          if [ -d "terraform" ]; then
-            cd terraform
-            # Initialize Terraform with the correct backend for the environment
-            echo "🔧 Initializing Terraform with backend config for $ENVIRONMENT..."
-            terraform init -backend-config="backend-configs/${ENVIRONMENT}.tfbackend" > /dev/null 2>&1 || true
-            FRONTEND_URL=$(terraform output -raw frontend_url 2>/dev/null || echo "")
-            cd ..
-          else
-            echo "📋 Terraform directory not found in verify stage, using ECS service discovery..."
-            FRONTEND_URL=""
-          fi
+          cd terraform
+          # Initialize Terraform with the correct backend for the environment
+          echo "🔧 Initializing Terraform with backend config for $ENVIRONMENT..."
+          terraform init -backend-config="backend-configs/${ENVIRONMENT}.tfbackend" > /dev/null 2>&1 || true
+          FRONTEND_URL=$(terraform output -raw frontend_url 2>/dev/null || echo "")
+          cd ..
           
           if [ "$FRONTEND_URL" != "" ] && [ "$FRONTEND_URL" != "null" ]; then
             echo "url=$FRONTEND_URL" >> $GITHUB_OUTPUT
             echo "🌐 Frontend URL from Terraform (${ENVIRONMENT}): $FRONTEND_URL"
           else
-            echo "📋 Terraform output not available, constructing URL from ECS service..."
-            
-            # Fallback: Get target group ARN from ECS service and construct URL
-            TARGET_GROUP_ARN=$(aws ecs describe-services \
-              --cluster $ECS_CLUSTER \
-              --services $ECS_SERVICE \
-              --query 'services[0].loadBalancers[0].targetGroupArn' \
-              --output text \
-              --region $AWS_REGION)
-            
-            echo "Target Group ARN: $TARGET_GROUP_ARN"
-            
-            if [ "$TARGET_GROUP_ARN" != "None" ] && [ "$TARGET_GROUP_ARN" != "" ] && [ "$TARGET_GROUP_ARN" != "null" ]; then
-              # Get load balancer ARN from target group
-              LB_ARN=$(aws elbv2 describe-target-groups \
-                --target-group-arns $TARGET_GROUP_ARN \
-                --query 'TargetGroups[0].LoadBalancerArns[0]' \
-                --output text \
-                --region $AWS_REGION)
-              
-              echo "Load Balancer ARN: $LB_ARN"
-              
-              if [ "$LB_ARN" != "None" ] && [ "$LB_ARN" != "" ] && [ "$LB_ARN" != "null" ]; then
-                # Get ALB DNS name directly from ARN
-                ALB_URL=$(aws elbv2 describe-load-balancers \
-                  --load-balancer-arns $LB_ARN \
-                  --query 'LoadBalancers[0].DNSName' \
-                  --output text \
-                  --region $AWS_REGION)
-                
-                echo "ALB DNS Name: $ALB_URL"
-                
-                if [ "$ALB_URL" != "None" ] && [ "$ALB_URL" != "" ] && [ "$ALB_URL" != "null" ]; then
-                  echo "url=https://$ALB_URL" >> $GITHUB_OUTPUT
-                  echo "🌐 Frontend URL: https://$ALB_URL"
-                else
-                  echo "❌ Could not get ALB DNS name"
-                fi
-              else
-                echo "❌ Could not get load balancer ARN from target group"
-              fi
-            else
-              echo "❌ No target group found for ECS service"
-              echo "ℹ️  This might be expected if the service doesn't use a load balancer"
-            fi
+            echo "❌ Could not retrieve frontend URL from Terraform outputs"
+            echo "🚨 Please ensure CloudFront infrastructure is deployed"
+            exit 1
           fi
 
       - name: Health check
         if: steps.get-url.outputs.url
         run: |
-          echo "🔍 Performing health check..."
+          echo "🔍 Performing health check on CloudFront distribution..."
           URL="${{ steps.get-url.outputs.url }}"
           
           echo "🌐 Testing URL: $URL"
           
-          # Wait for service to be ready with improved error handling
-          for i in {1..10}; do
-            echo "⏳ Attempt $i/10: Checking frontend health..."
+          # Wait for CloudFront to serve the new content
+          for i in {1..8}; do  # 4 minutes max (30s * 8 = 240s)
+            echo "⏳ Attempt $i/8: Checking frontend health..."
             
-            # Use -k flag for self-signed certificates and -L to follow redirects
-            HTTP_STATUS=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$URL" || echo "000")
+            # Test the main page
+            HTTP_STATUS=$(curl -L -s -o /dev/null -w "%{http_code}" "$URL" || echo "000")
             echo "   HTTP Status: $HTTP_STATUS"
             
-            # Also check redirect chain to understand what's happening
-            REDIRECT_INFO=$(curl -k -s -I "$URL" | head -n 5 || echo "No redirect info")
+            # Also check response headers to understand caching
+            RESPONSE_HEADERS=$(curl -L -s -I "$URL" 2>/dev/null || echo "No headers")
             echo "   Response headers:"
-            echo "$REDIRECT_INFO" | sed 's/^/     /'
+            echo "$RESPONSE_HEADERS" | grep -E "(HTTP/|cache|age|cloudfront)" | sed 's/^/     /' || echo "     No relevant headers found"
             
             if [ "$HTTP_STATUS" = "200" ]; then
               echo "✅ Frontend is responding successfully at $URL"
               
-              # Additional check - try to get some content (with redirect following)
-              CONTENT_LENGTH=$(curl -k -L -s "$URL" | wc -c)
-              echo "   Response content length: $CONTENT_LENGTH bytes"
-              
-              if [ "$CONTENT_LENGTH" -gt 100 ]; then
-                echo "✅ Frontend appears to be serving content properly"
+              # Additional check - get content and verify it's a proper page
+              CONTENT_CHECK=$(curl -L -s "$URL" | head -c 500)
+              if echo "$CONTENT_CHECK" | grep -q "<!DOCTYPE html\|<html"; then
+                echo "✅ Frontend appears to be serving HTML content properly"
                 
-                # Test health endpoint specifically
-                echo "🏥 Testing health endpoint..."
-                HEALTH_TEST=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$URL/api/health" || echo "000")
-                echo "   Health endpoint status: $HEALTH_TEST"
+                # Test a few key static assets
+                echo "🔍 Testing static assets..."
                 
-                # Test OAuth endpoints are accessible
-                echo "🔐 Testing OAuth endpoints..."
-                OAUTH_TEST=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$URL/api/auth/signin" || echo "000")
-                echo "   OAuth signin endpoint status: $OAUTH_TEST"
+                # Check if there are JS/CSS files in the content
+                JS_FILES=$(curl -L -s "$URL" | grep -o 'src="[^"]*\.js"' | head -2 | sed 's/src="//; s/"//')
+                CSS_FILES=$(curl -L -s "$URL" | grep -o 'href="[^"]*\.css"' | head -2 | sed 's/href="//; s/"//')
                 
-                if [ "$HEALTH_TEST" = "200" ]; then
-                  echo "✅ Health endpoint is working correctly"
+                # Test one JS file if found
+                if [ -n "$JS_FILES" ]; then
+                  JS_FILE=$(echo "$JS_FILES" | head -1)
+                  if [[ "$JS_FILE" == /* ]]; then
+                    JS_URL="$URL$JS_FILE"
+                  else
+                    JS_URL="$URL/$JS_FILE"
+                  fi
+                  JS_STATUS=$(curl -L -s -o /dev/null -w "%{http_code}" "$JS_URL" 2>/dev/null || echo "000")
+                  echo "   JavaScript asset status: $JS_STATUS ($JS_FILE)"
                 fi
                 
+                # Test one CSS file if found
+                if [ -n "$CSS_FILES" ]; then
+                  CSS_FILE=$(echo "$CSS_FILES" | head -1)
+                  if [[ "$CSS_FILE" == /* ]]; then
+                    CSS_URL="$URL$CSS_FILE"
+                  else
+                    CSS_URL="$URL/$CSS_FILE"
+                  fi
+                  CSS_STATUS=$(curl -L -s -o /dev/null -w "%{http_code}" "$CSS_URL" 2>/dev/null || echo "000")
+                  echo "   CSS asset status: $CSS_STATUS ($CSS_FILE)"
+                fi
+                
+                # Test auth callback page (important for OAuth flow)
+                AUTH_CALLBACK_STATUS=$(curl -L -s -o /dev/null -w "%{http_code}" "$URL/auth/callback" 2>/dev/null || echo "000")
+                echo "   Auth callback page status: $AUTH_CALLBACK_STATUS"
+                
+                echo "✅ Static site health check completed successfully!"
                 exit 0
               else
-                echo "⚠️  Frontend responding but content seems minimal"
+                echo "⚠️  Frontend responding but content doesn't appear to be HTML"
+                echo "   Content preview: $(echo "$CONTENT_CHECK" | head -c 100)..."
               fi
-            elif [ "$HTTP_STATUS" = "301" ] || [ "$HTTP_STATUS" = "302" ]; then
-              echo "   Redirect response (${HTTP_STATUS}) - this may be expected for HTTP->HTTPS"
-              # Check if we're testing HTTP when we should test HTTPS
-              if [[ "$URL" == http://* ]]; then
-                echo "   💡 URL is HTTP but ALB redirects to HTTPS - trying HTTPS directly"
-                HTTPS_URL="${URL/http:/https:}"
-                HTTPS_STATUS=$(curl -k -L -s -o /dev/null -w "%{http_code}" "$HTTPS_URL" || echo "000")
-                echo "   HTTPS direct test status: $HTTPS_STATUS"
-                if [ "$HTTPS_STATUS" = "200" ]; then
-                  echo "✅ HTTPS endpoint is working correctly"
-                  exit 0
-                fi
-              fi
-            elif [ "$HTTP_STATUS" = "503" ] || [ "$HTTP_STATUS" = "502" ]; then
-              echo "   Service unavailable (${HTTP_STATUS}) - container may still be starting"
+            elif [ "$HTTP_STATUS" = "403" ]; then
+              echo "   Access Forbidden (403) - CloudFront may still be propagating"
+            elif [ "$HTTP_STATUS" = "404" ]; then
+              echo "   Not Found (404) - Site may not be deployed yet"
             elif [ "$HTTP_STATUS" = "000" ]; then
-              echo "   Connection failed - ALB or container not ready"
+              echo "   Connection failed - CloudFront distribution may not be ready"
             else
               echo "   Unexpected status: $HTTP_STATUS"
             fi
             
-            if [ $i -lt 10 ]; then
+            if [ $i -lt 8 ]; then
               echo "   Waiting 30 seconds before next attempt..."
               sleep 30
             fi
@@ -662,15 +584,24 @@ jobs:
           echo "⚠️  Frontend health check completed with issues"
           echo "🔍 Final diagnostics:"
           echo "   URL: $URL"
-          echo "   Final HTTP Status: $(curl -k -L -s -o /dev/null -w "%{http_code}" "$URL" || echo "connection_failed")"
+          echo "   Final HTTP Status: $(curl -L -s -o /dev/null -w "%{http_code}" "$URL" 2>/dev/null || echo "connection_failed")"
           
-          # Test both HTTP and HTTPS endpoints for debugging
-          if [[ "$URL" == https://* ]]; then
-            HTTP_URL="${URL/https:/http:}"
-            echo "   HTTP redirect test: $(curl -s -o /dev/null -w "%{http_code}" "$HTTP_URL" || echo "connection_failed")"
+          # Check CloudFront distribution status
+          echo "🔍 CloudFront distribution info:"
+          # We need to get the distribution ID from Terraform since it's in a different job
+          cd terraform
+          CLOUDFRONT_DISTRIBUTION_ID=$(terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "")
+          cd ..
+          if [ -n "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
+            aws cloudfront get-distribution \
+              --id "$CLOUDFRONT_DISTRIBUTION_ID" \
+              --query 'Distribution.{Status:Status,DomainName:DomainName,LastModifiedTime:LastModifiedTime}' \
+              --output table \
+              --region $AWS_REGION 2>/dev/null || echo "Could not get CloudFront distribution info"
           fi
           
-          # Don't fail the pipeline - just warn
+          # Don't fail the pipeline - CloudFront propagation can take time
           echo "⚠️  Health check inconclusive but deployment may still be successful"
+          echo "💡 CloudFront distributions can take up to 15 minutes to fully propagate"
           echo "💡 Check the frontend URL manually: $URL"
-          echo "💡 Container logs can be found in AWS ECS console"
+          echo "💡 Monitor CloudFront distribution in AWS console for propagation status"

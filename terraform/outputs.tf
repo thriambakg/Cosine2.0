@@ -17,42 +17,20 @@ output "private_subnet_ids" {
   value       = module.vpc.private_subnet_ids
 }
 
-# ECR Outputs
-output "ecr_repository_url" {
-  description = "URL of the ECR repository"
-  value       = module.ecr.repository_url
+# CloudFront Outputs (for static hosting)
+output "cloudfront_distribution_id" {
+  description = "ID of the CloudFront distribution"
+  value       = var.use_cloudfront_deployment ? module.cloudfront[0].distribution_id : null
 }
 
-output "ecr_repository_name" {
-  description = "Name of the ECR repository"
-  value       = module.ecr.repository_name
-}
-
-# ALB Outputs
-output "alb_dns_name" {
-  description = "DNS name of the Application Load Balancer"
-  value       = module.alb.alb_dns_name
-}
-
-output "alb_zone_id" {
-  description = "Zone ID of the Application Load Balancer"
-  value       = module.alb.alb_zone_id
+output "cloudfront_domain_name" {
+  description = "Domain name of the CloudFront distribution"
+  value       = var.use_cloudfront_deployment ? module.cloudfront[0].distribution_domain_name : null
 }
 
 output "waf_arn" {
   description = "ARN of the WAF Web ACL"
-  value       = module.alb.waf_arn
-}
-
-# ECS Outputs
-output "ecs_cluster_id" {
-  description = "ID of the ECS cluster"
-  value       = module.ecs.cluster_id
-}
-
-output "ecs_service_name" {
-  description = "Name of the ECS service"
-  value       = module.ecs.service_name
+  value       = var.use_cloudfront_deployment ? module.cloudfront[0].web_acl_arn : null
 }
 
 # ============================================================================
@@ -60,22 +38,26 @@ output "ecs_service_name" {
 # URLs for accessing the live website in staging and production
 # ============================================================================
 
-# ALB DNS URL (always available)
-output "alb_dns_url" {
-  description = "Direct ALB DNS URL for the frontend application"
-  value       = var.certificate_arn != "" || var.enable_custom_domain ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}"
+# CloudFront distribution URL (for static hosting)
+output "cloudfront_url" {
+  description = "CloudFront distribution URL for the static website"
+  value       = var.use_cloudfront_deployment ? "https://${module.cloudfront[0].distribution_domain_name}" : null
 }
 
-# Custom domain URL (if custom domain is enabled)
+# Custom domain URL (if custom domain is enabled with CloudFront)
 output "custom_domain_url" {
-  description = "Custom domain URL for the frontend application"
-  value       = var.enable_custom_domain ? module.domain_records[0].website_url : null
+  description = "Custom domain URL for the static website"
+  value       = var.enable_custom_domain && var.use_cloudfront_deployment && length(var.cloudfront_aliases) > 0 ? "https://${var.cloudfront_aliases[0]}" : null
 }
 
-# Primary frontend URL (prefers custom domain, falls back to ALB DNS)
+# Primary frontend URL (prefers custom domain, falls back to CloudFront)
 output "frontend_url" {
   description = "Primary URL to access the frontend application"
-  value       = var.enable_custom_domain ? module.domain_records[0].website_url : (var.certificate_arn != "" ? "https://${module.alb.alb_dns_name}" : "http://${module.alb.alb_dns_name}")
+  value = var.use_cloudfront_deployment ? (
+    var.enable_custom_domain && length(var.cloudfront_aliases) > 0 ?
+    "https://${var.cloudfront_aliases[0]}" :
+    "https://${module.cloudfront[0].distribution_domain_name}"
+  ) : null
 }
 
 # S3 Bucket Outputs (existing)
@@ -263,13 +245,13 @@ output "domain_configuration" {
   value = var.enable_custom_domain ? {
     enabled                = true
     domain_name            = module.domain[0].domain_name
-    full_domain_name       = module.domain_records[0].full_domain_name
-    website_url            = module.domain_records[0].website_url
+    full_domain_name       = length(var.cloudfront_aliases) > 0 ? var.cloudfront_aliases[0] : null
+    website_url            = length(var.cloudfront_aliases) > 0 ? "https://${var.cloudfront_aliases[0]}" : null
     hosted_zone_id         = module.domain[0].hosted_zone_id
     certificate_arn        = module.domain[0].certificate_arn
     name_servers           = module.domain[0].hosted_zone_name_servers
-    dns_setup_required     = true
-    dns_setup_instructions = "Update your domain registrar to use these nameservers: ${join(", ", module.domain[0].hosted_zone_name_servers)}"
+    dns_setup_required     = var.use_cloudfront_deployment
+    dns_setup_instructions = var.use_cloudfront_deployment ? "Create a CNAME record pointing ${var.cloudfront_aliases[0]} to ${module.cloudfront[0].distribution_domain_name}" : "Configure DNS for your hosting method"
     message                = "Custom domain configured successfully"
     } : {
     enabled                = false
@@ -288,12 +270,98 @@ output "domain_configuration" {
 # Website Access Information
 output "website_access_info" {
   description = "Information about accessing the deployed website"
-  value = var.enable_custom_domain ? join("\n", [
-    "🌐 Your website will be live at: ${module.domain_records[0].website_url}",
-    "⚙️  DNS Setup Required: Update your domain's nameservers to: ${join(", ", module.domain[0].hosted_zone_name_servers)}",
-    "🔗 Temporary ALB URL: ${var.certificate_arn != "" || var.enable_custom_domain ? "https" : "http"}://${module.alb.alb_dns_name}"
-    ]) : join("\n", [
-    "🌐 Your website is live at: ${var.certificate_arn != "" ? "https" : "http"}://${module.alb.alb_dns_name}",
-    "💡 To set up a custom domain, set enable_custom_domain = true and provide domain_name"
-  ])
+  value = var.use_cloudfront_deployment ? (
+    length(var.cloudfront_aliases) > 0 ? join("\n", [
+      "🌐 Your static website is live at: https://${var.cloudfront_aliases[0]}",
+      "☁️  CloudFront URL: https://${module.cloudfront[0].distribution_domain_name}",
+      "⚙️  DNS Setup: Point your domain CNAME to the CloudFront distribution"
+      ]) : join("\n", [
+      "🌐 Your static website is live at: https://${module.cloudfront[0].distribution_domain_name}",
+      "💡 To use a custom domain, add it to cloudfront_aliases variable"
+    ])
+  ) : "CloudFront deployment not enabled. Set use_cloudfront_deployment = true to deploy static website."
+}
+
+# ============================================================================
+# CLOUDFRONT + S3 STATIC HOSTING OUTPUTS
+# ============================================================================
+
+# CloudFront distribution for static hosting
+output "cloudfront_distribution_id" {
+  description = "ID of the CloudFront distribution"
+  value       = var.use_cloudfront_deployment ? module.cloudfront[0].distribution_id : null
+}
+
+output "cloudfront_distribution_domain_name" {
+  description = "Domain name of the CloudFront distribution"
+  value       = var.use_cloudfront_deployment ? module.cloudfront[0].distribution_domain_name : null
+}
+
+output "cloudfront_distribution_arn" {
+  description = "ARN of the CloudFront distribution"
+  value       = var.use_cloudfront_deployment ? module.cloudfront[0].distribution_arn : null
+}
+
+# S3 bucket outputs
+output "s3_bucket_name" {
+  description = "Name of the S3 bucket for static hosting"
+  value       = module.s3_buckets.frontend_bucket_id
+}
+
+output "s3_website_endpoint" {
+  description = "S3 website endpoint"
+  value       = module.s3_buckets.website_endpoint
+}
+
+# Environment variables for build-time injection
+output "build_environment_variables" {
+  description = "Environment variables needed for Next.js build process"
+  value = {
+    # Authentication configuration
+    NEXT_PUBLIC_COGNITO_USER_POOL_ID = local.auth_config.user_pool_id
+    NEXT_PUBLIC_COGNITO_CLIENT_ID    = local.auth_config.client_id
+    NEXT_PUBLIC_COGNITO_DOMAIN       = local.auth_config.full_domain_url
+    NEXT_PUBLIC_AWS_REGION           = var.aws_region
+
+    # API Gateway URL
+    NEXT_PUBLIC_API_GATEWAY_URL = var.api_gateway_url
+
+    # DynamoDB table names (for client-side reference if needed)
+    NEXT_PUBLIC_USER_PROFILES_TABLE   = local.database_config.user_profiles_table_name
+    NEXT_PUBLIC_SECURITY_EVENTS_TABLE = local.database_config.security_events_table_name
+    NEXT_PUBLIC_USER_SESSIONS_TABLE   = local.database_config.user_sessions_table_name
+
+    # Environment information
+    NEXT_PUBLIC_ENVIRONMENT  = var.environment
+    NEXT_PUBLIC_PROJECT_NAME = var.project_name
+
+    # OAuth redirect URLs (construct from CloudFront domain or custom domain)
+    NEXT_PUBLIC_REDIRECT_SIGN_IN = var.use_cloudfront_deployment ? (
+      length(var.cloudfront_aliases) > 0 ?
+      "https://${var.cloudfront_aliases[0]}/dashboard" :
+      "https://${module.cloudfront[0].distribution_domain_name}/dashboard"
+    ) : null
+
+    NEXT_PUBLIC_REDIRECT_SIGN_OUT = var.use_cloudfront_deployment ? (
+      length(var.cloudfront_aliases) > 0 ?
+      "https://${var.cloudfront_aliases[0]}/" :
+      "https://${module.cloudfront[0].distribution_domain_name}/"
+    ) : null
+  }
+}
+
+# Deployment mode information
+output "deployment_mode" {
+  description = "Current deployment mode"
+  value       = "CloudFront + S3 Static Hosting"
+}
+
+output "website_urls" {
+  description = "Primary website access URLs"
+  value = var.use_cloudfront_deployment ? {
+    cloudfront_url = "https://${module.cloudfront[0].distribution_domain_name}"
+    custom_domain  = length(var.cloudfront_aliases) > 0 ? "https://${var.cloudfront_aliases[0]}" : null
+    } : {
+    message = "CloudFront deployment not enabled. Set use_cloudfront_deployment = true to deploy static website."
+  }
 }

@@ -27,10 +27,10 @@ resource "aws_s3_bucket_acl" "frontend" {
 resource "aws_s3_bucket_public_access_block" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  block_public_acls       = !var.enable_public_read
+  block_public_policy     = !var.enable_public_read
+  ignore_public_acls      = !var.enable_public_read
+  restrict_public_buckets = !var.enable_public_read
 }
 
 resource "aws_s3_bucket_versioning" "frontend" {
@@ -112,4 +112,18 @@ resource "aws_s3_bucket_logging" "frontend" {
 
   target_bucket = aws_s3_bucket.logs.id
   target_prefix = var.log_prefix
+}
+
+# Website hosting configuration (when enabled)
+resource "aws_s3_bucket_website_configuration" "frontend" {
+  count  = var.enable_website_hosting ? 1 : 0
+  bucket = aws_s3_bucket.frontend.id
+
+  index_document {
+    suffix = var.index_document
+  }
+
+  error_document {
+    key = var.error_document
+  }
 }
