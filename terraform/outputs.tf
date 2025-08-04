@@ -302,10 +302,11 @@ output "build_environment_variables" {
   description = "Environment variables needed for Next.js build process"
   value = {
     # Authentication configuration
-    NEXT_PUBLIC_COGNITO_USER_POOL_ID = local.auth_config.user_pool_id
-    NEXT_PUBLIC_COGNITO_CLIENT_ID    = local.auth_config.client_id
-    NEXT_PUBLIC_COGNITO_DOMAIN       = local.auth_config.full_domain_url
-    NEXT_PUBLIC_AWS_REGION           = var.aws_region
+    NEXT_PUBLIC_COGNITO_USER_POOL_ID        = local.auth_config.user_pool_id
+    NEXT_PUBLIC_COGNITO_CLIENT_ID           = local.auth_config.client_id
+    NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID = local.auth_config.client_id # Legacy name for GitHub Actions compatibility
+    NEXT_PUBLIC_COGNITO_DOMAIN              = local.auth_config.full_domain_url
+    NEXT_PUBLIC_AWS_REGION                  = var.aws_region
 
     # API Gateway URL
     NEXT_PUBLIC_API_GATEWAY_URL = var.api_gateway_url

@@ -110,7 +110,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.5.0"
+          terraform_version: "1.9.8"
 
       - name: Check if CloudFront infrastructure exists
         env:
@@ -203,7 +203,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.5.0"
+          terraform_version: "1.9.8"
 
       - name: Get build environment variables from Terraform
         id: get-build-env
@@ -463,7 +463,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.5.0"
+          terraform_version: "1.9.8"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
