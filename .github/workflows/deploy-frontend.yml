@@ -84,6 +84,8 @@ jobs:
             ENVIRONMENT="${{ inputs.environment }}"
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             ENVIRONMENT="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" == "refs/heads/prod" ]; then
+            ENVIRONMENT="production"
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
             ENVIRONMENT="production"
           else
