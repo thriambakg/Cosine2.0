@@ -32,8 +32,8 @@ export default function AmplifyClientConfig({ children }: { children: React.Reac
         Amplify.configure({
           Auth: {
             Cognito: {
-              userPoolId: 'us-east-1_TEMP12345',
-              userPoolClientId: 'TEMPTEMPTEMPTEMP123456',
+              userPoolId: 'us-east-1_3VXhGxuIb',
+              userPoolClientId: '6i4mrjk2keivkfouqj7e11s3gn',
             }
           }
         });
