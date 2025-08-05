@@ -266,15 +266,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       
+      // Only send email to Cognito. Store other fields in backend after registration.
       const result = await signUp({
         username: userData.email.toLowerCase().trim(),
         password: userData.password,
         options: {
           userAttributes: {
             email: userData.email.toLowerCase().trim(),
-            given_name: userData.firstName,
-            family_name: userData.lastName,
-            phone_number: userData.phoneNumber,
             'custom:terms_accepted': userData.termsAccepted.toString(),
             'custom:marketing_consent': (userData.marketingConsent || false).toString(),
             'custom:role': 'user',
@@ -283,6 +281,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
       });
+
+      // TODO: After Cognito registration, send firstName, lastName, phoneNumber to backend/DynamoDB
       
       // Log successful registration
       await logSecurityEvent('registration_success', { 

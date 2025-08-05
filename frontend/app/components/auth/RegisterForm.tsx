@@ -114,15 +114,19 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
     setIsSubmitting(true);
     
     try {
-        const result = await register({
-          firstName: formData.firstName.trim(),
-          lastName: formData.lastName.trim(),
-          email: formData.email.toLowerCase().trim(),
-          phoneNumber: formData.phoneNumber || undefined,
-          password: formData.password,
-          termsAccepted: formData.agreeToTerms,
-          marketingConsent: formData.agreeToMarketing,
-        });      if (result.success) {
+      // Only send email and password to Cognito
+      const result = await register({
+        email: formData.email.toLowerCase().trim(),
+        password: formData.password,
+        termsAccepted: formData.agreeToTerms,
+        marketingConsent: formData.agreeToMarketing,
+        // The following fields are for backend storage only
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+        phoneNumber: formData.phoneNumber || undefined,
+      });
+      if (result.success) {
+        // TODO: Send firstName, lastName, phoneNumber to backend/DynamoDB here
         onClose?.();
       } else {
         setErrors({ submit: result.error || 'Registration failed' });
