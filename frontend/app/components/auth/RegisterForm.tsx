@@ -114,19 +114,30 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
     setIsSubmitting(true);
     
     try {
-      // Only send email and password to Cognito
+      // Pass all required fields for RegisterData, but only email/password are sent to Cognito in backend
       const result = await register({
         email: formData.email.toLowerCase().trim(),
         password: formData.password,
-        termsAccepted: formData.agreeToTerms,
-        marketingConsent: formData.agreeToMarketing,
-        // The following fields are for backend storage only
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim(),
         phoneNumber: formData.phoneNumber || undefined,
+        termsAccepted: formData.agreeToTerms,
+        marketingConsent: formData.agreeToMarketing,
       });
       if (result.success) {
-        // TODO: Send firstName, lastName, phoneNumber to backend/DynamoDB here
+        // Send extra fields to backend/DynamoDB
+        await fetch('/api/user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: formData.email.toLowerCase().trim(),
+            firstName: formData.firstName.trim(),
+            lastName: formData.lastName.trim(),
+            phoneNumber: formData.phoneNumber || undefined,
+            marketingConsent: formData.agreeToMarketing,
+            termsAccepted: formData.agreeToTerms,
+          }),
+        });
         onClose?.();
       } else {
         setErrors({ submit: result.error || 'Registration failed' });
