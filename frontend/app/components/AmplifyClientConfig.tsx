@@ -12,7 +12,7 @@ Amplify.configure({
         oauth: {
           domain: 'cosine-production.auth.us-east-1.amazoncognito.com',
           scopes: ['email', 'openid', 'profile', 'aws.cognito.signin.user.admin'],
-          redirectSignIn: ['https://investcosine.com'],
+          redirectSignIn: ['https://investcosine.com/app'],
           redirectSignOut: ['https://investcosine.com'],
           responseType: 'code',
         },
