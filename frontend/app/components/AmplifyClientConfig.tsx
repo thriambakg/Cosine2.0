@@ -11,8 +11,16 @@ export default function AmplifyClientConfig({ children }: { children: React.Reac
         Cognito: {
           userPoolId: 'us-east-1_3VXhGxuIb',
           userPoolClientId: '6i4mrjk2keivkfouqj7e11s3gn',
-          // region: 'us-east-1', // Uncomment if needed
-          // loginWith: { ... } // Uncomment and fill if using OAuth/Hosted UI
+          loginWith: {
+            oauth: {
+              domain: 'cosine-production.auth.us-east-1.amazoncognito.com',
+              scopes: ['email', 'openid', 'profile'],
+              redirectSignIn: ['https://investcosine.com'],
+              redirectSignOut: ['https://investcosine.com'],
+              responseType: 'code',
+            },
+            email: true,
+          },
         }
       }
     });
