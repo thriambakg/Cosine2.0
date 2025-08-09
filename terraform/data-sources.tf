@@ -4,7 +4,7 @@
 
 # Data source to find Cognito User Pool by environment-specific naming convention
 data "aws_cognito_user_pools" "main" {
-  name = "${var.project_name}-user-pool-${var.environment}"
+  name = "${var.project_name}-user-pool-auth-${var.environment}"
 }
 
 # Data source to find User Pool Clients for the discovered user pool
