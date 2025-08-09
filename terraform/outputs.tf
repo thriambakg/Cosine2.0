@@ -305,7 +305,7 @@ output "build_environment_variables" {
     NEXT_PUBLIC_COGNITO_USER_POOL_ID        = local.auth_config.user_pool_id
     NEXT_PUBLIC_COGNITO_CLIENT_ID           = local.auth_config.client_id
     NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID = local.auth_config.client_id # Legacy name for GitHub Actions compatibility
-    NEXT_PUBLIC_COGNITO_DOMAIN              = "cosine-staging.auth.us-east-1.amazoncognito.com"
+    NEXT_PUBLIC_COGNITO_DOMAIN              = "cosine-production.auth.us-east-1.amazoncognito.com"
     NEXT_PUBLIC_AWS_REGION                  = var.aws_region
 
     # API Gateway URL

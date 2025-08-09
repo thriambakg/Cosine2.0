@@ -6,8 +6,8 @@ import { Amplify } from 'aws-amplify';
 Amplify.configure({
   Auth: {
     Cognito: {
-      userPoolId: 'us-east-1_fd5J8uzWn',
-      userPoolClientId: '4ndb0lshac2fqeb0vuataaasrk',
+      userPoolId: 'us-east-1_dACC5MBr3',
+      userPoolClientId: '57opgf3bjct1v7vos2anppjepp',
       loginWith: {
         oauth: {
           domain: 'cosine-production.auth.us-east-1.amazoncognito.com',

@@ -273,11 +273,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         options: {
           userAttributes: {
             email: userData.email.toLowerCase().trim(),
-            'custom:terms_accepted': userData.termsAccepted.toString(),
-            'custom:marketing_consent': (userData.marketingConsent || false).toString(),
-            'custom:role': 'user',
-            'custom:subscription_plan': 'free',
-            'custom:subscription_status': 'active'
+            'custom_termsaccept': userData.termsAccepted.toString(),
+            'custom_markconsent': (userData.marketingConsent || false).toString(),
+            'custom_role': 'user',
+            'custom_subplan': 'free',
+            'custom_substatus': 'active'
           }
         }
       });
