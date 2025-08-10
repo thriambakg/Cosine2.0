@@ -68,6 +68,9 @@ jobs:
   # Determine environment based on branch or input
   setup:
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      url: https://github.com/${{ github.repository }}/actions
     outputs:
       environment: ${{ steps.env.outputs.environment }}
     steps:
@@ -85,7 +88,6 @@ jobs:
           else
             ENVIRONMENT="staging"
           fi
-          
           echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
 
   # Check CloudFront infrastructure
