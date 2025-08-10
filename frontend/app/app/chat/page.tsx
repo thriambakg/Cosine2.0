@@ -25,8 +25,8 @@ interface UploadedFile {
 
 export default function ChatPage() {
   // Authentication
-  const { user, logout } = useAuth();
-  
+  const { user, logout, isLoading: authLoading } = useAuth();
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
@@ -51,6 +51,18 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Route protection and loading state
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="mt-2 text-gray-600">Loading chat...</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleFileUpload = (files: FileList) => {
     Array.from(files).forEach((file) => {
