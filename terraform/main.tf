@@ -254,6 +254,7 @@ module "cloudfront" {
   # SPA configuration for Next.js
   default_root_object = "index.html"
   custom_error_responses = [
+    # Handle all possible error codes for SPA routing
     {
       error_code            = 403
       response_code         = 200
@@ -265,6 +266,19 @@ module "cloudfront" {
       response_code         = 200
       response_page_path    = "/index.html"
       error_caching_min_ttl = 0
+    },
+    # Handle other potential error codes
+    {
+      error_code            = 400
+      response_code         = 200
+      response_page_path    = "/index.html"
+      error_caching_min_ttl = 0
+    },
+    {
+      error_code            = 500
+      response_code         = 200
+      response_page_path    = "/index.html"
+      error_caching_min_ttl = 0
     }
   ]
 
@@ -272,4 +286,3 @@ module "cloudfront" {
 
   depends_on = [data.aws_s3_bucket.static_hosting]
 }
-

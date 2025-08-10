@@ -1,15 +1,12 @@
 const path = require('path');
 
 /** @type {import('next').NextConfig} */
-const isDev = process.env.NODE_ENV !== 'production'
-
 const nextConfig = {
-  // Use static export only for production builds destined for S3/CloudFront
-  // Keep dev server in normal mode to avoid chunk loading issues
-  output: isDev ? undefined : 'export',
-
-  // Trailing slash only needed for exported static hosting
-  trailingSlash: isDev ? false : true,
+  // Enable static export for S3/CloudFront deployment
+  output: 'export',
+  
+  // Add trailing slash for better S3 compatibility
+  trailingSlash: true,
 
   // Environment variables available to the client
   env: {
@@ -51,6 +48,23 @@ const nextConfig = {
     }
     return config;
   },
+
+  // Ensure all routes are treated as static pages for export
+  exportPathMap: async function() {
+    return {
+      '/': { page: '/' },
+      '/login': { page: '/login' },
+      '/chat': { page: '/chat' },
+      '/crypto-stats': { page: '/crypto-stats' },
+      '/heatmap': { page: '/heatmap' },
+      '/option-pricing': { page: '/option-pricing' },
+      '/portfolio-risk': { page: '/portfolio-risk' },
+      '/robinhood': { page: '/robinhood' },
+      '/stock-alerts': { page: '/stock-alerts' },
+      '/stock-volatility': { page: '/stock-volatility' },
+      '/auth/callback': { page: '/auth/callback' }
+    };
+  }
 }
 
 module.exports = nextConfig
