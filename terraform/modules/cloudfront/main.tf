@@ -336,16 +336,16 @@ resource "aws_cloudfront_distribution" "distribution" {
     }
   }
 
-  # # Custom Error Responses (for SPA routing)
-  # dynamic "custom_error_response" {
-  #   for_each = var.custom_error_responses
-  #   content {
-  #     error_code            = custom_error_response.value.error_code
-  #     response_code         = custom_error_response.value.response_code
-  #     response_page_path    = custom_error_response.value.response_page_path
-  #     error_caching_min_ttl = custom_error_response.value.error_caching_min_ttl
-  #   }
-  # }
+  # Custom Error Responses (for SPA routing)
+  dynamic "custom_error_response" {
+    for_each = var.custom_error_responses
+    content {
+      error_code            = custom_error_response.value.error_code
+      response_code         = custom_error_response.value.response_code
+      response_page_path    = custom_error_response.value.response_page_path
+      error_caching_min_ttl = custom_error_response.value.error_caching_min_ttl
+    }
+  }
 
   # Geographic Restrictions
   restrictions {

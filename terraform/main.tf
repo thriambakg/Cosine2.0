@@ -253,20 +253,20 @@ module "cloudfront" {
 
   # SPA configuration for Next.js
   default_root_object = "index.html"
-  # custom_error_responses = [
-  #   {
-  #     error_code            = 403
-  #     response_code         = 200
-  #     response_page_path    = "/index.html"
-  #     error_caching_min_ttl = 0
-  #   },
-  #   {
-  #     error_code            = 404
-  #     response_code         = 200
-  #     response_page_path    = "/index.html"
-  #     error_caching_min_ttl = 0
-  #   }
-  # ]
+  custom_error_responses = [
+    {
+      error_code            = 403
+      response_code         = 200
+      response_page_path    = "/index.html"
+      error_caching_min_ttl = 0
+    },
+    {
+      error_code            = 404
+      response_code         = 200
+      response_page_path    = "/index.html"
+      error_caching_min_ttl = 0
+    }
+  ]
 
   tags = var.common_tags
 
