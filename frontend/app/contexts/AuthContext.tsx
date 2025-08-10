@@ -139,6 +139,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+
+
       // Check if user is authenticated with Cognito
       const cognitoUser = await getCurrentUser();
 
@@ -166,6 +168,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   };
+
+
 
   const login = async (email: string, password: string, mfaCode?: string) => {
     try {
@@ -265,13 +269,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authUrl.searchParams.set('scope', 'email openid profile');
       authUrl.searchParams.set('identity_provider', provider === 'Google' ? 'Google' : 'Microsoft');
       
-      // Add state parameter for security
-      const state = Math.random().toString(36).substring(2, 15);
-      authUrl.searchParams.set('state', state);
-      
-      // Store state in session storage for validation
-      sessionStorage.setItem('oauth_state', state);
-
       console.log(`Redirecting directly to ${provider} OAuth:`, authUrl.toString());
 
       // Redirect directly to the provider (bypassing Cognito hosted UI)
