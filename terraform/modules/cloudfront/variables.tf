@@ -58,29 +58,29 @@ variable "price_class" {
   }
 }
 
-variable "custom_error_responses" {
-  description = "Custom error responses for SPA routing"
-  type = list(object({
-    error_code            = number
-    response_code         = number
-    response_page_path    = string
-    error_caching_min_ttl = number
-  }))
-  default = [
-    {
-      error_code            = 403
-      response_code         = 200
-      response_page_path    = "/index.html"
-      error_caching_min_ttl = 0
-    },
-    {
-      error_code            = 404
-      response_code         = 200
-      response_page_path    = "/index.html"
-      error_caching_min_ttl = 0
-    }
-  ]
-}
+# variable "custom_error_responses" {
+#   description = "Custom error responses for SPA routing"
+#   type = list(object({
+#     error_code            = number
+#     response_code         = number
+#     response_page_path    = string
+#     error_caching_min_ttl = number
+#   }))
+#   default = [
+#     {
+#       error_code            = 403
+#       response_code         = 200
+#       response_page_path    = "/index.html"
+#       error_caching_min_ttl = 0
+#     },
+#     {
+#       error_code            = 404
+#       response_code         = 200
+#       response_page_path    = "/index.html"
+#       error_caching_min_ttl = 0
+#     }
+#   ]
+# }
 
 variable "default_cache_behavior_settings" {
   description = "Settings for the default cache behavior"
