@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect,useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { TrendingUp, Bot, BarChart3, PieChart, Activity, MessageSquare, Upload, Settings, Bell, Star, ArrowRight, DollarSign, Percent, Calendar, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -9,8 +10,26 @@ import AuthStatusBanner from '@/components/AuthStatusBanner';
 import Link from 'next/link';
 
 export default function HomePage() {
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, isLoading } = useAuth();
   const [notifications] = useState(3);
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push('/login');
+    }
+  }, [user, isLoading, router]);
+
+  if (isLoading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="mt-2 text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">

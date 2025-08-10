@@ -86,6 +86,7 @@ const logSecurityEvent = async (event: string, data: any) => {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const isAuthenticated = !!user;
 
@@ -128,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const initializeAuth = async () => {
     try {
       setIsLoading(true);
-      
+
       // Check if we have valid Cognito configuration
       const userPoolId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID;
       if (!userPoolId || userPoolId.includes('TEMP')) {
@@ -137,24 +138,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
         return;
       }
-      
+
       // Check if user is authenticated with Cognito
       const cognitoUser = await getCurrentUser();
-      
+
       if (cognitoUser) {
         const userData = await convertCognitoUser(cognitoUser);
         setUser(userData);
-        
+
         // Log successful auth initialization
-        await logSecurityEvent('auth_initialized', { 
-          userId: userData.id, 
-          timestamp: new Date().toISOString() 
+        await logSecurityEvent('auth_initialized', {
+          userId: userData.id,
+          timestamp: new Date().toISOString()
         });
+        setAuthError(null);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Auth initialization failed:', error);
       // User is not authenticated, which is fine
       setUser(null);
+      if (error?.name === 'UserUnAuthenticatedException') {
+        setAuthError('You are not signed in. Please log in to access your account.');
+      } else {
+        setAuthError(error?.message || 'Authentication error.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -541,7 +548,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const value: AuthContextType = {
+  const value: AuthContextType & { authError: string | null } = {
     user,
     isLoading,
     isAuthenticated,
@@ -560,6 +567,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     disableMfa,
     refreshToken,
     deleteAccount,
+    authError,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
