@@ -8,6 +8,9 @@ const nextConfig = {
   // Add trailing slash for better S3 compatibility
   trailingSlash: true,
 
+  // Disable static optimization that can cause routing issues
+  distDir: 'out',
+
   // Environment variables available to the client
   env: {
     NEXT_PUBLIC_AWS_REGION: process.env.NEXT_PUBLIC_AWS_REGION,
@@ -47,15 +50,6 @@ const nextConfig = {
       };
     }
     return config;
-  },
-
-  // Ensure all routes are treated as static pages for export
-  // Note: With App Router, static paths are handled by generateStaticParams in each route's page.ts
-  experimental: {
-    // Enable App Router static exports
-    appDocumentPreloading: false,
-    // Optimize CloudFront/S3 compatibility
-    optimizePackageImports: ['@aws-amplify/ui-react']
   }
 }
 

@@ -8,25 +8,9 @@ import { UserProvider } from '@/contexts/UserContext'
 import { AuthProvider } from '@/contexts/AuthContext'
 import AuthWrapper from '@/components/AuthWrapper'
 import AmplifyClientConfig from '@/components/AmplifyClientConfig'
+import Script from 'next/script'
 
 const inter = Inter({ subsets: ['latin'] })
-
-// Generate all static routes for export
-export async function generateStaticParams() {
-  return [
-    { path: [''] }, // root
-    { path: ['login'] },
-    { path: ['chat'] },
-    { path: ['crypto-stats'] },
-    { path: ['heatmap'] },
-    { path: ['option-pricing'] },
-    { path: ['portfolio-risk'] },
-    { path: ['robinhood'] },
-    { path: ['stock-alerts'] },
-    { path: ['stock-volatility'] },
-    { path: ['auth', 'callback'] }
-  ]
-}
 
 // Generate static metadata
 export const metadata = {
@@ -41,6 +25,24 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <Script id="spa-routing" strategy="beforeInteractive">
+          {`
+            // Handle SPA routing for CloudFront + S3
+            (function() {
+              var path = window.location.pathname;
+              var validRoutes = ['/', '/login', '/chat', '/crypto-stats', '/heatmap', '/option-pricing', '/portfolio-risk', '/robinhood', '/stock-alerts', '/stock-volatility', '/auth/callback'];
+              
+              // If we're on a valid route but it's not rendering correctly,
+              // it means CloudFront served index.html but the browser needs to handle routing
+              if (validRoutes.includes(path) && path !== '/') {
+                // Store the intended path for the app to handle
+                sessionStorage.setItem('intendedPath', path);
+              }
+            })();
+          `}
+        </Script>
+      </head>
       <body className={inter.className}>
         <AmplifyClientConfig>
           <AuthProvider>

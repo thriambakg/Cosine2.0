@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import AuthStatusBanner from '@/components/AuthStatusBanner';
+import RouteHandler from '@/components/RouteHandler';
 import Link from 'next/link';
 
 export default function HomePage() {
@@ -33,6 +34,9 @@ export default function HomePage() {
 
   return (
     <div className="space-y-8">
+      {/* Route Handler for SPA routing */}
+      <RouteHandler />
+      
       {/* Authentication Status Banner */}
       <AuthStatusBanner />
       
