@@ -50,20 +50,12 @@ const nextConfig = {
   },
 
   // Ensure all routes are treated as static pages for export
-  exportPathMap: async function() {
-    return {
-      '/': { page: '/' },
-      '/login': { page: '/login' },
-      '/chat': { page: '/chat' },
-      '/crypto-stats': { page: '/crypto-stats' },
-      '/heatmap': { page: '/heatmap' },
-      '/option-pricing': { page: '/option-pricing' },
-      '/portfolio-risk': { page: '/portfolio-risk' },
-      '/robinhood': { page: '/robinhood' },
-      '/stock-alerts': { page: '/stock-alerts' },
-      '/stock-volatility': { page: '/stock-volatility' },
-      '/auth/callback': { page: '/auth/callback' }
-    };
+  // Note: With App Router, static paths are handled by generateStaticParams in each route's page.ts
+  experimental: {
+    // Enable App Router static exports
+    appDocumentPreloading: false,
+    // Optimize CloudFront/S3 compatibility
+    optimizePackageImports: ['@aws-amplify/ui-react']
   }
 }
 

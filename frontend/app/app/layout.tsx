@@ -11,6 +11,29 @@ import AmplifyClientConfig from '@/components/AmplifyClientConfig'
 
 const inter = Inter({ subsets: ['latin'] })
 
+// Generate all static routes for export
+export async function generateStaticParams() {
+  return [
+    { path: [''] }, // root
+    { path: ['login'] },
+    { path: ['chat'] },
+    { path: ['crypto-stats'] },
+    { path: ['heatmap'] },
+    { path: ['option-pricing'] },
+    { path: ['portfolio-risk'] },
+    { path: ['robinhood'] },
+    { path: ['stock-alerts'] },
+    { path: ['stock-volatility'] },
+    { path: ['auth', 'callback'] }
+  ]
+}
+
+// Generate static metadata
+export const metadata = {
+  title: 'Cosine - Interactive Investment Assistant',
+  description: 'AI-powered investment analysis and portfolio management',
+}
+
 export default function RootLayout({
   children,
 }: {
