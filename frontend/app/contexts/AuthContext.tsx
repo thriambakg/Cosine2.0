@@ -139,8 +139,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-
-
       // Check if user is authenticated with Cognito
       const cognitoUser = await getCurrentUser();
 
@@ -168,8 +166,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   };
-
-
 
   const login = async (email: string, password: string, mfaCode?: string) => {
     try {
@@ -256,24 +252,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(`OAuth authentication requires HTTPS in production. Current URL: ${window.location.href}. Please configure SSL certificate on your load balancer or use HTTPS.`);
       }
       
-      // Use direct OAuth URLs to bypass Cognito hosted UI and go straight to provider
-      const redirectUri = `${window.location.origin}/auth/callback`;
-      const cognitoDomain = 'cosine-production.auth.us-east-1.amazoncognito.com';
-      const clientId = '57opgf3bjct1v7vos2anppjepp';
+      // Map provider names to AWS Amplify provider constants
+      const providerMap = {
+        'Google': 'Google',
+        'Microsoft': 'Microsoft'
+      };
       
-      // Construct the direct OAuth URL
-      const authUrl = new URL(`https://${cognitoDomain}/oauth2/authorize`);
-      authUrl.searchParams.set('response_type', 'code');
-      authUrl.searchParams.set('client_id', clientId);
-      authUrl.searchParams.set('redirect_uri', redirectUri);
-      authUrl.searchParams.set('scope', 'email openid profile');
-      authUrl.searchParams.set('identity_provider', provider === 'Google' ? 'Google' : 'Microsoft');
-      
-      console.log(`Redirecting directly to ${provider} OAuth:`, authUrl.toString());
-
-      // Redirect directly to the provider (bypassing Cognito hosted UI)
-      window.location.href = authUrl.toString();
-      
+      await signInWithRedirect({ 
+        provider: providerMap[provider] as any
+      });
     } catch (error: any) {
       console.error(`${provider} login error:`, error);
       throw new Error(`Failed to login with ${provider}: ${error.message}`);
