@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import LandingPage from '@/components/LandingPage';
 import { Loader2 } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
 
 interface AuthWrapperProps {
   children: React.ReactNode;
@@ -10,6 +12,23 @@ interface AuthWrapperProps {
 
 export default function AuthWrapper({ children }: AuthWrapperProps) {
   const { isAuthenticated, isLoading } = useAuth();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  // Routes that should be accessible without auth
+  const publicRoutes = new Set<string>([
+    '/',
+    '/login',
+    '/auth/callback'
+  ]);
+
+  // Redirect unauthenticated users trying to access protected routes
+  useEffect(() => {
+    if (isLoading) return;
+    if (!isAuthenticated && pathname && !publicRoutes.has(pathname)) {
+      router.replace('/login');
+    }
+  }, [isAuthenticated, isLoading, pathname, router]);
 
   // Show loading state while checking authentication
   if (isLoading) {
@@ -23,9 +42,12 @@ export default function AuthWrapper({ children }: AuthWrapperProps) {
     );
   }
 
-  // Show landing page if not authenticated
+  // If not authenticated: render landing page on root, otherwise allow public routes or wait for redirect
   if (!isAuthenticated) {
-    return <LandingPage />;
+    if (pathname === '/') return <LandingPage />;
+    if (pathname && publicRoutes.has(pathname)) return <>{children}</>;
+    // For protected routes, a redirect will occur; render nothing to avoid flash
+    return null;
   }
 
   // Show main app if authenticated

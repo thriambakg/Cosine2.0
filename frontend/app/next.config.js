@@ -1,12 +1,15 @@
 const path = require('path');
 
 /** @type {import('next').NextConfig} */
+const isDev = process.env.NODE_ENV !== 'production'
+
 const nextConfig = {
-  // Enable static export for S3/CloudFront deployment
-  output: 'export',
-  
-  // Add trailing slash for better S3 compatibility
-  trailingSlash: true,
+  // Use static export only for production builds destined for S3/CloudFront
+  // Keep dev server in normal mode to avoid chunk loading issues
+  output: isDev ? undefined : 'export',
+
+  // Trailing slash only needed for exported static hosting
+  trailingSlash: isDev ? false : true,
 
   // Environment variables available to the client
   env: {
