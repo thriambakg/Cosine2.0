@@ -312,7 +312,7 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
               disabled={isSubmitting}
               tabIndex={-1}
             >
-              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {showPassword ? <VisibilityOff /> : <Visibility />}
             </button>
           </div>
 
@@ -389,7 +389,7 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
               disabled={isSubmitting}
               tabIndex={-1}
             >
-              {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
             </button>
           </div>
           {formData.confirmPassword && formData.password === formData.confirmPassword && !errors.confirmPassword && (

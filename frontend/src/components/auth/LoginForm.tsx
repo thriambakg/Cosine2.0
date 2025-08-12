@@ -191,7 +191,7 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
               disabled={isSubmitting || isAccountLocked}
               tabIndex={-1}
             >
-              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {showPassword ? <VisibilityOff /> : <Visibility />}
             </button>
           </div>
           {errors.password && (

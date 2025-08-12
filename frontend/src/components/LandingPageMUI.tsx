@@ -83,49 +83,19 @@ export default function LandingPageMUI() {
                 }}
               />
               
-              {/* Logo and Main Title */}
-              <Box display="flex" alignItems="center" justifyContent={{ xs: 'center', lg: 'flex-start' }} mb={2}>
+              {/* Main Logo */}
+              <Box display="flex" justifyContent={{ xs: 'center', lg: 'flex-start' }} mb={4}>
                 <Box
                   component="img"
                   src="/logo.svg"
-                  alt="Cosine"
+                  alt="Cosine - AI Trading Intelligence"
                   sx={{
-                    height: 80,
+                    height: { xs: 120, md: 160 },
                     width: 'auto',
-                    filter: 'brightness(1.1)',
-                    mr: 3,
+                    filter: 'brightness(1.1) drop-shadow(0 8px 16px rgba(0, 0, 0, 0.3))',
                   }}
                 />
-                <Typography 
-                  variant="h1" 
-                  component="h1" 
-                  sx={{ 
-                    fontSize: { xs: '3rem', md: '4rem' },
-                    fontWeight: 700,
-                    color: '#FFFFFF',
-                    textShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-                  }}
-                >
-                  Cosine
-                </Typography>
               </Box>
-              
-              {/* Subheader */}
-              <Typography 
-                variant="h4" 
-                component="h2" 
-                sx={{ 
-                  mb: 4,
-                  background: 'linear-gradient(135deg, #60A5FA 0%, #A78BFA 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
-                  fontWeight: 600,
-                  textAlign: { xs: 'center', lg: 'left' },
-                }}
-              >
-                AI-Powered Trading Intelligence
-              </Typography>
               
               <Typography variant="h6" color="primary.light" sx={{ mb: 4, lineHeight: 1.6 }}>
                 Experience the future of trading with our advanced AI assistant. Get real-time analysis, 
