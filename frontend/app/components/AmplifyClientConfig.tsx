@@ -15,7 +15,7 @@ Amplify.configure({
           redirectSignIn: ['https://investcosine.com/auth/callback'],
           redirectSignOut: ['https://investcosine.com'],
           responseType: 'code',
-          providers: ['Google', 'Microsoft' as any]
+          providers: ['Google']
         },
         email: true,
       },

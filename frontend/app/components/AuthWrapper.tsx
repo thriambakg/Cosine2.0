@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import LandingPage from '@/components/LandingPage';
+import LandingPageMUI from '@/components/LandingPageMUI';
 import { Loader2 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 
@@ -44,7 +44,7 @@ export default function AuthWrapper({ children }: AuthWrapperProps) {
 
   // If not authenticated: render landing page on root, otherwise allow public routes or wait for redirect
   if (!isAuthenticated) {
-    if (pathname === '/') return <LandingPage />;
+    if (pathname === '/') return <LandingPageMUI />;
     if (pathname && publicRoutes.has(pathname)) return <>{children}</>;
     // For protected routes, a redirect will occur; render nothing to avoid flash
     return null;

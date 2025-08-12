@@ -11,11 +11,11 @@ interface SocialAuthButtonsProps {
 
 export default function SocialAuthButtons({ mode = 'login', isDisabled = false }: SocialAuthButtonsProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingProvider, setLoadingProvider] = useState<'Google' | 'Microsoft' | null>(null);
+  const [loadingProvider, setLoadingProvider] = useState<'Google' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { loginWithProvider } = useAuth();
 
-  const handleSocialLogin = async (provider: 'Google' | 'Microsoft') => {
+  const handleSocialLogin = async (provider: 'Google') => {
     if (isDisabled) return;
     
     try {
@@ -72,29 +72,7 @@ export default function SocialAuthButtons({ mode = 'login', isDisabled = false }
         )}
       </button>
 
-      {/* Microsoft Button */}
-      <button
-        onClick={() => handleSocialLogin('Microsoft')}
-        disabled={isDisabled || isLoading}
-        className="w-full flex items-center justify-center px-4 py-3 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 group"
-      >
-        {loadingProvider === 'Microsoft' ? (
-          <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-        ) : (
-          <>
-            {/* Microsoft Logo SVG */}
-            <svg className="w-5 h-5 mr-3" viewBox="0 0 24 24">
-              <path fill="#f25022" d="M1 1h10v10H1z"/>
-              <path fill="#00a4ef" d="M13 1h10v10H13z"/>
-              <path fill="#7fba00" d="M1 13h10v10H1z"/>
-              <path fill="#ffb900" d="M13 13h10v10H13z"/>
-            </svg>
-            <span className="group-hover:text-gray-900 transition-colors">
-              {buttonText} Microsoft
-            </span>
-          </>
-        )}
-      </button>
+
 
       {/* Error Message */}
       {error && (

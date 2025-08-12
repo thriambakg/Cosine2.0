@@ -25,7 +25,7 @@ export default function AuthTestComponent() {
     }
   };
 
-  const handleProviderLogin = async (provider: 'Google' | 'Microsoft') => {
+  const handleProviderLogin = async (provider: 'Google') => {
     setMessage(`Attempting ${provider} login...`);
     
     try {
@@ -119,12 +119,7 @@ export default function AuthTestComponent() {
             >
               Login with Google
             </button>
-            <button
-              onClick={() => handleProviderLogin('Microsoft')}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              Login with Microsoft
-            </button>
+
           </div>
 
           <div className="text-sm text-gray-600 text-center">

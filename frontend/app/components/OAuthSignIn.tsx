@@ -1,4 +1,4 @@
-// OAuth Sign-In Component for Google and Microsoft authentication
+// OAuth Sign-In Component for Google authentication
 'use client';
 
 import { useState } from 'react';
@@ -10,7 +10,7 @@ interface OAuthSignInProps {
 export default function OAuthSignIn({ className = '' }: OAuthSignInProps) {
   const [loading, setLoading] = useState<string | null>(null);
 
-  const handleOAuthSignIn = async (provider: 'google' | 'microsoft') => {
+  const handleOAuthSignIn = async (provider: 'google') => {
     try {
       setLoading(provider);
 
@@ -30,7 +30,7 @@ export default function OAuthSignIn({ className = '' }: OAuthSignInProps) {
       authUrl.searchParams.set('client_id', clientId);
       authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('scope', 'email openid profile');
-      authUrl.searchParams.set('identity_provider', provider === 'google' ? 'Google' : 'Microsoft');
+      authUrl.searchParams.set('identity_provider', 'Google');
       
       // Add state parameter for security
       const state = Math.random().toString(36).substring(2, 15);
@@ -74,25 +74,7 @@ export default function OAuthSignIn({ className = '' }: OAuthSignInProps) {
           )}
         </button>
 
-        <button
-          onClick={() => handleOAuthSignIn('microsoft')}
-          disabled={loading === 'microsoft'}
-          className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading === 'microsoft' ? (
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600"></div>
-          ) : (
-            <>
-              <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
-                <path fill="#F25022" d="M1 1h10v10H1z"/>
-                <path fill="#00A4EF" d="M13 1h10v10H13z"/>
-                <path fill="#7FBA00" d="M1 13h10v10H1z"/>
-                <path fill="#FFB900" d="M13 13h10v10H13z"/>
-              </svg>
-              Continue with Microsoft
-            </>
-          )}
-        </button>
+
       </div>
 
       <div className="mt-4 text-center">

@@ -145,7 +145,7 @@ export default function MFASetup({ onComplete, onSkip, isOptional = false }: MFA
           <div>
             <h3 className="font-medium text-green-900">Authenticator App Required</h3>
             <p className="text-green-700 text-sm mt-1">
-              You'll need an authenticator app like Google Authenticator, Authy, or Microsoft Authenticator installed on your phone.
+              You'll need an authenticator app like Google Authenticator or Authy installed on your phone.
             </p>
           </div>
         </div>

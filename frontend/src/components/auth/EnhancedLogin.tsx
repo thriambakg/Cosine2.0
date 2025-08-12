@@ -30,7 +30,7 @@ export const EnhancedLogin: React.FC<LoginProps> = ({ onLoginSuccess, onLoginErr
   };
 
   // Federated identity provider login
-  const handleFederatedLogin = async (provider: 'Google' | 'Microsoft') => {
+  const handleFederatedLogin = async (provider: 'Google') => {
     try {
       setLoading(true);
       await Auth.federatedSignIn({ provider: provider as any });
@@ -71,20 +71,7 @@ export const EnhancedLogin: React.FC<LoginProps> = ({ onLoginSuccess, onLoginErr
             Continue with Google
           </button>
 
-          {/* Microsoft Sign-In */}
-          <button
-            onClick={() => handleFederatedLogin('Microsoft')}
-            disabled={loading}
-            className="w-full flex justify-center items-center px-4 py-3 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-          >
-            <svg className="w-5 h-5 mr-3" viewBox="0 0 24 24">
-              <path fill="#f25022" d="M1 1h10v10H1z"/>
-              <path fill="#00a4ef" d="M13 1h10v10H13z"/>
-              <path fill="#7fba00" d="M1 13h10v10H1z"/>
-              <path fill="#ffb900" d="M13 13h10v10H13z"/>
-            </svg>
-            Continue with Microsoft
-          </button>
+
         </div>
 
         {/* Divider */}

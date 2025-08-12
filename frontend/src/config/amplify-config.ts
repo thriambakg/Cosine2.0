@@ -33,7 +33,7 @@ const amplifyConfig = {
       // Configure social providers
       socialProviders: [
         'GOOGLE',        // Will be available when Google provider is enabled
-        'MICROSOFT'      // Will be available when Microsoft provider is enabled
+
       ],
     },
     

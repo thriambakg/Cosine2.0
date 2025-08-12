@@ -45,7 +45,7 @@ export interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string, mfaCode?: string) => Promise<{ success: boolean; error?: string; requiresMfa?: boolean }>;
-  loginWithProvider: (provider: 'Google' | 'Microsoft') => Promise<void>;
+  loginWithProvider: (provider: 'Google') => Promise<void>;
   register: (userData: RegisterData) => Promise<{ success: boolean; error?: string; verificationRequired?: boolean }>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
@@ -227,7 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loginWithProvider = async (provider: 'Google' | 'Microsoft') => {
+  const loginWithProvider = async (provider: 'Google') => {
     try {
       setIsLoading(true);
       
@@ -254,8 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // Map provider names to AWS Amplify provider constants
       const providerMap = {
-        'Google': 'Google',
-        'Microsoft': 'Microsoft'
+        'Google': 'Google'
       };
       
       await signInWithRedirect({ 
