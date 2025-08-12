@@ -10,8 +10,8 @@ import {
   Select,
   MenuItem
 } from "@mui/material";
-import { GlassCard } from "@/components/mui/GlassCard";
-import { MetricCard } from "@/components/mui/MetricCard";
+import GlassCard from "@/components/mui/GlassCard";
+import MetricCard from "@/components/mui/MetricCard";
 
 const CRYPTO_SYMBOLS = ["BTC", "ETH", "XRP", "LTC", "DOGE", "ADA", "SOL"];
 

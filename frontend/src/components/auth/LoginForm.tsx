@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from 'react';
-import { Eye, EyeOff, Mail, Lock, Shield, Loader2, AlertCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Visibility, VisibilityOff, Email, Lock, Shield, Warning } from '@mui/icons-material';
+import { Card, Button, TextField, Alert, CircularProgress, Box, Typography, InputAdornment, IconButton } from '@mui/material';
 import { useAuth } from '@/contexts/AuthContext';
 import SocialAuthButtons from './SocialAuthButtons';
 

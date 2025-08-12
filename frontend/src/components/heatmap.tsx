@@ -1,9 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { TextField, Button, Card, CardContent, Typography, Box } from "@mui/material"
 import dynamic from "next/dynamic"
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false })
@@ -72,25 +70,25 @@ export function Heatmap() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Input
+                          <TextField
           type="number"
           placeholder="Minimum Stock Price (S)"
           value={minS}
           onChange={(e) => setMinS(e.target.value)}
         />
-        <Input
+                          <TextField
           type="number"
           placeholder="Maximum Stock Price (S)"
           value={maxS}
           onChange={(e) => setMaxS(e.target.value)}
         />
-        <Input
+                          <TextField
           type="number"
           placeholder="Minimum Volatility (σ)"
           value={minSigma}
           onChange={(e) => setMinSigma(e.target.value)}
         />
-        <Input
+                          <TextField
           type="number"
           placeholder="Maximum Volatility (σ)"
           value={maxSigma}

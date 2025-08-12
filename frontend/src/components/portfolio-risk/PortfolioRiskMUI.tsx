@@ -20,8 +20,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import CalculateIcon from '@mui/icons-material/Calculate';
 import { useTimeFrame } from '@/contexts/TimeFrameContext';
-import { GlassCard } from '@/components/mui/GlassCard';
-import { MetricCard } from '@/components/mui/MetricCard';
+import GlassCard from '@/components/mui/GlassCard';
+import MetricCard from '@/components/mui/MetricCard';
 
 interface PortfolioEntry {
   stock: string;

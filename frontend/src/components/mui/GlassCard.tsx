@@ -1,38 +1,19 @@
 "use client";
 
 import React from 'react';
-import { Card, CardProps, CardContent, CardActions, useTheme } from '@mui/material';
-import { styled } from '@mui/material/styles';
+import { Card, CardProps } from '@mui/material';
 
-const StyledGlassCard = styled(Card)(({ theme }) => ({
-  background: theme.customColors.background.glass,
-  backdropFilter: 'blur(16px)',
-  border: `1px solid ${theme.customColors.background.glassBorder}`,
-  borderRadius: 16,
-  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-  '&:hover': {
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    transform: 'translateY(-4px)',
-    boxShadow: '0 16px 48px rgba(0, 0, 0, 0.4)',
-  },
-}));
-
-interface GlassCardProps extends Omit<CardProps, 'variant'> {
+interface GlassCardProps extends CardProps {
   children: React.ReactNode;
-  hover?: boolean;
   glassTint?: 'light' | 'medium' | 'dark';
 }
 
-export default function GlassCard({ 
+const GlassCard: React.FC<GlassCardProps> = ({ 
   children, 
-  hover = true, 
   glassTint = 'medium',
   sx,
   ...props 
-}: GlassCardProps) {
-  const theme = useTheme();
-  
+}) => {
   const glassOpacity = {
     light: 0.05,
     medium: 0.1,
@@ -40,19 +21,26 @@ export default function GlassCard({
   };
 
   return (
-    <StyledGlassCard
+    <Card
       {...props}
       sx={{
-        backgroundColor: `rgba(255, 255, 255, ${glassOpacity[glassTint]})`,
-        '&:hover': hover ? {
+        background: `rgba(255, 255, 255, ${glassOpacity[glassTint]})`,
+        backdropFilter: 'blur(16px)',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        borderRadius: 2,
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        '&:hover': {
           backgroundColor: `rgba(255, 255, 255, ${glassOpacity[glassTint] + 0.05})`,
-          transform: 'translateY(-4px)',
+          transform: 'translateY(-2px)',
           boxShadow: '0 16px 48px rgba(0, 0, 0, 0.4)',
-        } : {},
+        },
         ...sx,
       }}
     >
       {children}
-    </StyledGlassCard>
+    </Card>
   );
-}
+};
+
+export default GlassCard;

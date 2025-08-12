@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Close as X } from '@mui/icons-material';
+import { Dialog, DialogContent, IconButton, Box } from '@mui/material';
 import LoginForm from './LoginForm';
 import RegisterForm from './RegisterForm';
 import MFASetup from './MFASetup';
@@ -90,29 +90,37 @@ export default function AuthModal({
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={handleClose}
-      />
-      
-      {/* Modal Content */}
-      <div className="relative w-full max-w-md">
+    <Dialog 
+      open={isOpen} 
+      onClose={handleClose}
+      maxWidth="sm"
+      fullWidth
+      PaperProps={{
+        sx: {
+          borderRadius: 2,
+          overflow: 'hidden'
+        }
+      }}
+    >
+      <DialogContent sx={{ p: 0, position: 'relative' }}>
         {/* Close Button */}
         {!(showMFASetup && requireMFA && user && !user.mfaEnabled) && (
-          <Button
-            variant="ghost"
-            size="sm"
+          <IconButton
             onClick={handleClose}
-            className="absolute -top-12 right-0 text-white hover:text-gray-300 hover:bg-white/10 z-10"
+            sx={{
+              position: 'absolute',
+              right: 8,
+              top: 8,
+              zIndex: 10,
+              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 1)',
+              }
+            }}
           >
-            <X className="w-5 h-5" />
-            <span className="sr-only">Close</span>
-          </Button>
+            <X />
+          </IconButton>
         )}
 
         {/* Content */}
@@ -134,17 +142,24 @@ export default function AuthModal({
             onClose={handleAuthSuccess}
           />
         ) : mode === 'reset' ? (
-          <div className="bg-white rounded-lg p-6 space-y-4">
-            <h2 className="text-2xl font-bold text-gray-900">Reset Password</h2>
-            <p className="text-gray-600">
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <Typography variant="h5" fontWeight={600} color="text.primary" mb={2}>
+              Reset Password
+            </Typography>
+            <Typography variant="body1" color="text.secondary" mb={3}>
               Password reset functionality will be implemented in the next phase.
-            </p>
-            <Button onClick={handleSwitchToLogin} className="w-full">
+            </Typography>
+            <Button 
+              variant="contained" 
+              onClick={handleSwitchToLogin} 
+              fullWidth
+              sx={{ mt: 2 }}
+            >
               Back to Login
             </Button>
-          </div>
+          </Box>
         ) : null}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

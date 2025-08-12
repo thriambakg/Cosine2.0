@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { Shield, Smartphone, Copy, Check, AlertCircle, Loader2, QrCode } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Shield, Smartphone, ContentCopy, Check, Warning, QrCode } from '@mui/icons-material';
+import { Card, Button, Alert, CircularProgress, Box, Typography } from '@mui/material';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface MFASetupProps {

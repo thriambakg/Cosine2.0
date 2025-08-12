@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { TextField, Button, Autocomplete, Paper, Typography, Box } from "@mui/material";
 import { useTimeFrame } from "@/contexts/TimeFrameContext";
-import { GlassCard } from "@/components/mui/GlassCard";
+import GlassCard from "@/components/mui/GlassCard";
 
 const STOCK_TICKERS = [
   "AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "META",

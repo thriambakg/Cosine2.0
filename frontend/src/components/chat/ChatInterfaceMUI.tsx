@@ -34,7 +34,7 @@ import {
 } from "@mui/icons-material";
 import LoadingButton from "@mui/lab/LoadingButton";
 import { useAuth } from "@/contexts/AuthContext";
-import { GlassCard } from "@/components/mui/GlassCard";
+import GlassCard from "@/components/mui/GlassCard";
 
 interface Message {
   id: string;

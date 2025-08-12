@@ -10,8 +10,8 @@ import {
   useTheme
 } from '@mui/material';
 import { Calculate as CalculateIcon } from '@mui/icons-material';
-import { GlassCard } from '@/components/mui/GlassCard';
-import { MetricCard } from '@/components/mui/MetricCard';
+import GlassCard from '@/components/mui/GlassCard';
+import MetricCard from '@/components/mui/MetricCard';
 
 interface OptionPrices {
   call: number;

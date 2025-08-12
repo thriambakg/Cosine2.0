@@ -1,11 +1,10 @@
 "use client";
 
 import React from 'react';
-import { Box, Typography, useTheme } from '@mui/material';
+import { Box, Typography, Card, CardProps } from '@mui/material';
 import { SvgIconComponent } from '@mui/icons-material';
-import GlassCard from './GlassCard';
 
-interface MetricCardProps {
+interface MetricCardProps extends CardProps {
   title: string;
   value: string | number;
   subtitle?: string;
@@ -13,43 +12,48 @@ interface MetricCardProps {
   color?: 'primary' | 'secondary' | 'success' | 'warning' | 'error';
   trend?: 'up' | 'down' | 'neutral';
   trendValue?: string;
-  onClick?: () => void;
 }
 
-export default function MetricCard({
+const MetricCard: React.FC<MetricCardProps> = ({
   title,
   value,
   subtitle,
   icon: Icon,
   color = 'primary',
-  trend,
+  trend = 'neutral',
   trendValue,
-  onClick,
-}: MetricCardProps) {
-  const theme = useTheme();
-  
+  sx,
+  ...props
+}) => {
   const colorMap = {
-    primary: theme.palette.primary.main,
-    secondary: theme.palette.secondary.main,
-    success: theme.palette.success.main,
-    warning: theme.palette.warning.main,
-    error: theme.palette.error.main,
+    primary: '#3B82F6',
+    secondary: '#8B5CF6',
+    success: '#10B981',
+    warning: '#F59E0B',
+    error: '#EF4444',
   };
 
-  const trendColor = {
-    up: theme.palette.success.main,
-    down: theme.palette.error.main,
-    neutral: theme.palette.text.secondary,
+  const trendColorMap = {
+    up: '#10B981',
+    down: '#EF4444',
+    neutral: '#6B7280',
   };
 
   return (
-    <GlassCard
-      onClick={onClick}
+    <Card
+      {...props}
       sx={{
         p: 3,
-        cursor: onClick ? 'pointer' : 'default',
         background: `linear-gradient(135deg, ${colorMap[color]}15 0%, ${colorMap[color]}08 100%)`,
+        backdropFilter: 'blur(16px)',
         border: `1px solid ${colorMap[color]}30`,
+        borderRadius: 2,
+        transition: 'all 0.2s ease-in-out',
+        '&:hover': {
+          transform: 'translateY(-2px)',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+        },
+        ...sx,
       }}
     >
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
@@ -80,20 +84,22 @@ export default function MetricCard({
         </Box>
       </Box>
       
-      <Box textAlign="right">
-        <Typography variant="h4" fontWeight={700} color="text.primary" mb={0.5}>
+      <Box display="flex" alignItems="baseline" justifyContent="space-between">
+        <Typography variant="h4" fontWeight={700} color="text.primary">
           {value}
         </Typography>
-        {trend && trendValue && (
+        {trendValue && (
           <Typography 
             variant="body2" 
-            color={trendColor[trend]}
-            fontWeight={500}
+            fontWeight={600}
+            sx={{ color: trendColorMap[trend] }}
           >
             {trendValue}
           </Typography>
         )}
       </Box>
-    </GlassCard>
+    </Card>
   );
-}
+};
+
+export default MetricCard;

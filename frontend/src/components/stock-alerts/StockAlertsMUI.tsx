@@ -25,7 +25,7 @@ import {
   Delete as DeleteIcon,
   NotificationsActive as AlertIcon 
 } from '@mui/icons-material';
-import { GlassCard } from '@/components/mui/GlassCard';
+import GlassCard from '@/components/mui/GlassCard';
 
 interface Alert {
   email: string;
