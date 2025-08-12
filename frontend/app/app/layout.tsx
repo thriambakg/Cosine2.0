@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { TimeFrameProvider } from '@/contexts/TimeFrameContext';
 import AmplifyClientConfig from '@/components/AmplifyClientConfig';
 import ThemeProvider from '@/providers/ThemeProvider';
 
@@ -23,7 +24,9 @@ export default function RootLayout({
         <ThemeProvider>
           <AmplifyClientConfig>
             <AuthProvider>
-              {children}
+              <TimeFrameProvider>
+                {children}
+              </TimeFrameProvider>
             </AuthProvider>
           </AmplifyClientConfig>
         </ThemeProvider>
