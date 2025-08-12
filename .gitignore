@@ -570,24 +570,24 @@ yarn.lock
 # ==============================================================================
 
 # Frontend build output (specific paths for this project)
-frontend/app/out/
-frontend/app/.next/
-frontend/app/dist/
-frontend/app/node_modules/
-frontend/app/.pnp
-frontend/app/.pnp.js
-frontend/app/.yarn/install-state.gz
-frontend/app/coverage/
-frontend/app/build/
-frontend/app/.DS_Store
-frontend/app/*.pem
-frontend/app/npm-debug.log*
-frontend/app/yarn-debug.log*
-frontend/app/yarn-error.log*
-frontend/app/.env*.local
-frontend/app/.vercel
-frontend/app/*.tsbuildinfo
-frontend/app/next-env.d.ts
+frontend/out/
+frontend/.next/
+frontend/dist/
+frontend/node_modules/
+frontend/.pnp
+frontend/.pnp.js
+frontend/.yarn/install-state.gz
+frontend/coverage/
+frontend/build/
+frontend/.DS_Store
+frontend/*.pem
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.env*.local
+frontend/.vercel
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
 
 # Backend compiled Python (specific paths for this project)
 backend_app/src/**/__pycache__/
