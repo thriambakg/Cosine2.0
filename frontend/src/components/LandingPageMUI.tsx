@@ -6,8 +6,6 @@ import {
   Container,
   Typography,
   Grid,
-  AppBar,
-  Toolbar,
   Chip,
 } from '@mui/material';
 import {
@@ -51,32 +49,22 @@ export default function LandingPageMUI() {
 
   return (
     <GradientBackground variant="default" animated>
-      {/* Header */}
-      <AppBar position="fixed" elevation={0}>
-        <Container maxWidth="xl">
-          <Toolbar sx={{ justifyContent: 'space-between', py: 1 }}>
-            <Box display="flex" alignItems="center">
-              <Box
-                component="img"
-                src="/logo.svg"
-                alt="Cosine - AI Trading Intelligence"
-                sx={{
-                  height: 40,
-                  width: 'auto',
-                  filter: 'brightness(1.1)',
-                }}
-              />
-            </Box>
-            
-            <GradientButton onClick={handleSignIn} sx={{ px: 3 }}>
-              Sign In
-            </GradientButton>
-          </Toolbar>
-        </Container>
-      </AppBar>
+      {/* Sign In Button - Floating in top right */}
+      <Box
+        sx={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          zIndex: 1000,
+        }}
+      >
+        <GradientButton onClick={handleSignIn} sx={{ px: 3 }}>
+          Sign In
+        </GradientButton>
+      </Box>
 
       {/* Hero Section */}
-      <Container maxWidth="xl" sx={{ pt: 16, pb: 8 }}>
+      <Container maxWidth="xl" sx={{ pt: 8, pb: 8 }}>
         <Grid container spacing={6} alignItems="center" minHeight="80vh">
           <Grid item xs={12} lg={6}>
             <Box textAlign={{ xs: 'center', lg: 'left' }}>
@@ -95,20 +83,48 @@ export default function LandingPageMUI() {
                 }}
               />
               
-              <Typography variant="h1" component="h1" sx={{ mb: 4 }}>
-                AI-Powered
+              {/* Logo and Main Title */}
+              <Box display="flex" alignItems="center" justifyContent={{ xs: 'center', lg: 'flex-start' }} mb={2}>
                 <Box
-                  component="span"
-                  display="block"
+                  component="img"
+                  src="/logo.svg"
+                  alt="Cosine"
                   sx={{
-                    background: 'linear-gradient(135deg, #60A5FA 0%, #A78BFA 100%)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    backgroundClip: 'text',
+                    height: 80,
+                    width: 'auto',
+                    filter: 'brightness(1.1)',
+                    mr: 3,
+                  }}
+                />
+                <Typography 
+                  variant="h1" 
+                  component="h1" 
+                  sx={{ 
+                    fontSize: { xs: '3rem', md: '4rem' },
+                    fontWeight: 700,
+                    color: '#FFFFFF',
+                    textShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
                   }}
                 >
-                  Trading Intelligence
-                </Box>
+                  Cosine
+                </Typography>
+              </Box>
+              
+              {/* Subheader */}
+              <Typography 
+                variant="h4" 
+                component="h2" 
+                sx={{ 
+                  mb: 4,
+                  background: 'linear-gradient(135deg, #60A5FA 0%, #A78BFA 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                  fontWeight: 600,
+                  textAlign: { xs: 'center', lg: 'left' },
+                }}
+              >
+                AI-Powered Trading Intelligence
               </Typography>
               
               <Typography variant="h6" color="primary.light" sx={{ mb: 4, lineHeight: 1.6 }}>
