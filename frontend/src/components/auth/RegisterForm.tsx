@@ -2,7 +2,22 @@
 
 import { useState } from 'react';
 import { Visibility, VisibilityOff, Email, Lock, Person, Phone, Shield, Warning, Check, Close } from '@mui/icons-material';
-import { Card, Button, TextField, Alert, CircularProgress, Box, Typography, InputAdornment, IconButton } from '@mui/material';
+import { 
+  Card, 
+  Button, 
+  TextField, 
+  Alert, 
+  CircularProgress, 
+  Box, 
+  Typography, 
+  InputAdornment, 
+  IconButton,
+  Checkbox,
+  FormControlLabel,
+  Link,
+  Divider,
+  Grid
+} from '@mui/material';
 import { useAuth } from '@/contexts/AuthContext';
 import SocialAuthButtons from './SocialAuthButtonsMUI';
 
@@ -163,11 +178,25 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
   const passwordStrength = getPasswordStrength();
 
   return (
-    <Card className="w-full max-w-md p-6 space-y-6 max-h-[90vh] overflow-y-auto">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-900">Create Account</h2>
-        <p className="text-gray-600">Join Cosine and start trading smarter</p>
-      </div>
+    <Card sx={{ 
+      width: '100%', 
+      maxWidth: 400, 
+      p: 4,
+      backgroundColor: '#ffffff',
+      border: '1px solid #e5e7eb',
+      borderRadius: '8px',
+      boxShadow: 'none',
+      maxHeight: '90vh',
+      overflowY: 'auto'
+    }}>
+      <Box textAlign="center" mb={3}>
+        <Typography variant="h5" fontWeight="600" color="#111827" mb={1}>
+          Create Account
+        </Typography>
+        <Typography variant="body2" color="#6b7280" mb={2}>
+          Join Cosine and start trading smarter
+        </Typography>
+      </Box>
 
       {/* Social Authentication */}
       <SocialAuthButtons 
@@ -175,13 +204,13 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
         isDisabled={isSubmitting} 
       />
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} style={{ marginTop: '24px' }}>
         {/* Name Fields */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <label htmlFor="firstName" className="text-sm font-medium text-gray-700">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+          <div style={{ marginBottom: '8px' }}>
+            <Typography variant="body2" fontWeight="500" color="#374151" mb={1}>
               First Name *
-            </label>
+            </Typography>
             <div className="relative">
               <Person className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input

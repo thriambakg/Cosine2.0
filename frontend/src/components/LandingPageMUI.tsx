@@ -97,53 +97,56 @@ export default function LandingPageMUI() {
                 />
               </Box>
               
-              <Typography variant="h6" color="primary.light" sx={{ mb: 4, lineHeight: 1.6 }}>
-                Experience the future of trading with our advanced AI assistant. Get real-time analysis, 
-                portfolio optimization, and intelligent insights to maximize your trading potential.
-              </Typography>
-              
-              <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} gap={2} mb={6}>
-                <GradientButton
-                  onClick={handleGetStarted}
-                  size="large"
-                  endIcon={<ArrowRightIcon />}
-                  sx={{
-                    px: 4,
-                    py: 2,
-                    fontSize: '1.1rem',
-                    fontWeight: 600,
-                  }}
-                >
-                  Get Started Free
-                </GradientButton>
-              </Box>
+              {/* Description and Dashboard side by side */}
+              <Grid container spacing={4} alignItems="center">
+                {/* Description Text */}
+                <Grid item xs={12} lg={6}>
+                  <Typography variant="h6" color="primary.light" sx={{ mb: 4, lineHeight: 1.6 }}>
+                    Experience the future of trading with our advanced AI assistant. Get real-time analysis, 
+                    portfolio optimization, and intelligent insights to maximize your trading potential.
+                  </Typography>
+                  
+                  <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} gap={2} mb={4}>
+                    <GradientButton
+                      onClick={handleGetStarted}
+                      size="large"
+                      endIcon={<ArrowRightIcon />}
+                      sx={{
+                        px: 4,
+                        py: 2,
+                        fontSize: '1.1rem',
+                        fontWeight: 600,
+                      }}
+                    >
+                      Get Started Free
+                    </GradientButton>
+                  </Box>
 
-              {/* Trust Indicators */}
-              <Box 
-                display="flex" 
-                justifyContent={{ xs: 'center', lg: 'flex-start' }} 
-                flexWrap="wrap"
-                gap={3}
-                color="text.secondary"
-              >
-                <Box display="flex" alignItems="center" gap={1}>
-                  <ShieldIcon sx={{ color: 'success.main', fontSize: 20 }} />
-                  <Typography variant="body2">Bank-Grade Security</Typography>
-                </Box>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <UsersIcon sx={{ color: 'primary.light', fontSize: 20 }} />
-                  <Typography variant="body2">10K+ Users</Typography>
-                </Box>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <DollarSignIcon sx={{ color: 'success.main', fontSize: 20 }} />
-                  <Typography variant="body2">$50M+ Managed</Typography>
-                </Box>
-              </Box>
-            </Box>
-          </Grid>
+                  {/* Trust Indicators */}
+                  <Box 
+                    display="flex" 
+                    justifyContent={{ xs: 'center', lg: 'flex-start' }} 
+                    flexWrap="wrap"
+                    gap={3}
+                    color="text.secondary"
+                  >
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <ShieldIcon sx={{ color: 'success.main', fontSize: 20 }} />
+                      <Typography variant="body2">Bank-Grade Security</Typography>
+                    </Box>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <UsersIcon sx={{ color: 'primary.light', fontSize: 20 }} />
+                      <Typography variant="body2">10K+ Users</Typography>
+                    </Box>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <DollarSignIcon sx={{ color: 'success.main', fontSize: 20 }} />
+                      <Typography variant="body2">$50M+ Managed</Typography>
+                    </Box>
+                  </Box>
+                </Grid>
 
-          {/* Feature Preview */}
-          <Grid item xs={12} lg={6}>
+                {/* Dashboard Preview */}
+                <Grid item xs={12} lg={6}>
             <GlassCard sx={{ p: 4, position: 'relative' }}>
               <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
                 <Typography variant="h6" fontWeight={600} color="text.primary">
@@ -242,6 +245,9 @@ export default function LandingPageMUI() {
                 <PieChart sx={{ color: 'white', fontSize: 24 }} />
               </Box>
             </GlassCard>
+                </Grid>
+              </Grid>
+            </Box>
           </Grid>
         </Grid>
       </Container>

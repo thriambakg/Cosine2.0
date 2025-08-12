@@ -98,28 +98,42 @@ export default function AuthModal({
       fullWidth
       PaperProps={{
         sx: {
-          borderRadius: 2,
-          overflow: 'hidden'
+          backgroundColor: '#ffffff',
+          borderRadius: '12px',
+          border: '1px solid #e5e7eb',
+          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
+          overflow: 'hidden',
+          margin: 2
+        }
+      }}
+      BackdropProps={{
+        sx: {
+          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          backdropFilter: 'blur(4px)'
         }
       }}
     >
-      <DialogContent sx={{ p: 0, position: 'relative' }}>
+      <DialogContent sx={{ p: 4, position: 'relative', backgroundColor: '#ffffff' }}>
         {/* Close Button */}
         {!(showMFASetup && requireMFA && user && !user.mfaEnabled) && (
           <IconButton
             onClick={handleClose}
             sx={{
               position: 'absolute',
-              right: 8,
-              top: 8,
+              right: 12,
+              top: 12,
               zIndex: 10,
-              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              backgroundColor: '#f9fafb',
+              border: '1px solid #e5e7eb',
+              width: 32,
+              height: 32,
               '&:hover': {
-                backgroundColor: 'rgba(255, 255, 255, 1)',
+                backgroundColor: '#f3f4f6',
+                borderColor: '#d1d5db',
               }
             }}
           >
-            <X />
+            <X sx={{ fontSize: 16, color: '#6b7280' }} />
           </IconButton>
         )}
 

@@ -107,25 +107,39 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
   const isAccountLocked = attemptCount >= 5;
 
   return (
-    <Card sx={{ 
+    <Box sx={{ 
       width: '100%', 
-      maxWidth: 448, 
-      p: 3,
-      boxShadow: 3,
-      borderRadius: 2
+      maxWidth: 400, 
+      p: 4,
+      backgroundColor: '#ffffff',
+      border: '1px solid #e5e7eb',
+      borderRadius: '8px',
+      boxShadow: 'none'
     }}>
       {/* Header */}
       <Box textAlign="center" mb={3}>
-        <Typography variant="h4" fontWeight="bold" color="text.primary" mb={1}>
+        <Typography variant="h5" fontWeight="600" color="#111827" mb={1}>
           Welcome Back
         </Typography>
-        <Typography variant="body2" color="text.secondary" mb={2}>
+        <Typography variant="body2" color="#6b7280" mb={2}>
           Sign in to your Cosine account
         </Typography>
         {requiresMfa && (
-          <Alert severity="info" icon={<Shield />} sx={{ textAlign: 'left' }}>
-            Two-factor authentication required
-          </Alert>
+          <Box sx={{ 
+            p: 2, 
+            backgroundColor: '#dbeafe', 
+            border: '1px solid #93c5fd',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            mb: 2
+          }}>
+            <Shield sx={{ color: '#2563eb', fontSize: 16 }} />
+            <Typography variant="body2" color="#1e40af">
+              Two-factor authentication required
+            </Typography>
+          </Box>
         )}
       </Box>
 
@@ -147,68 +161,112 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
       {/* Form */}
       <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {/* Email Field */}
-        <TextField
-          id="email"
-          label="Email Address"
-          type="email"
-          value={formData.email}
-          onChange={(e) => handleInputChange('email', e.target.value)}
-          error={!!errors.email}
-          helperText={errors.email}
-          placeholder="Enter your email"
-          disabled={isSubmitting || isAccountLocked}
-          autoComplete="email"
-          required
-          fullWidth
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Email color={errors.email ? 'error' : 'action'} />
-              </InputAdornment>
-            ),
-          }}
-        />
+        <Box mb={2}>
+          <Typography variant="body2" fontWeight="500" color="#374151" mb={1}>
+            Email Address *
+          </Typography>
+          <TextField
+            id="email"
+            type="email"
+            value={formData.email}
+            onChange={(e) => handleInputChange('email', e.target.value)}
+            error={!!errors.email}
+            helperText={errors.email}
+            placeholder="Enter your email"
+            disabled={isSubmitting || isAccountLocked}
+            autoComplete="email"
+            required
+            fullWidth
+            variant="outlined"
+            size="medium"
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Email sx={{ color: errors.email ? '#ef4444' : '#9ca3af', fontSize: 16 }} />
+                </InputAdornment>
+              ),
+              sx: {
+                backgroundColor: '#ffffff',
+                '& .MuiOutlinedInput-notchedOutline': {
+                  borderColor: errors.email ? '#ef4444' : '#d1d5db',
+                },
+                '&:hover .MuiOutlinedInput-notchedOutline': {
+                  borderColor: errors.email ? '#ef4444' : '#9ca3af',
+                },
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                  borderColor: errors.email ? '#ef4444' : '#3b82f6',
+                  borderWidth: '2px',
+                },
+              }
+            }}
+          />
+        </Box>
 
         {/* Password Field */}
-        <TextField
-          id="password"
-          label="Password"
-          type={showPassword ? 'text' : 'password'}
-          value={formData.password}
-          onChange={(e) => handleInputChange('password', e.target.value)}
-          error={!!errors.password}
-          helperText={errors.password}
-          placeholder="Enter your password"
-          disabled={isSubmitting || isAccountLocked}
-          autoComplete="current-password"
-          required
-          fullWidth
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Lock color={errors.password ? 'error' : 'action'} />
-              </InputAdornment>
-            ),
-            endAdornment: (
-              <InputAdornment position="end">
-                <IconButton
-                  onClick={() => setShowPassword(!showPassword)}
-                  disabled={isSubmitting || isAccountLocked}
-                  edge="end"
-                >
-                  {showPassword ? <VisibilityOff /> : <Visibility />}
-                </IconButton>
-              </InputAdornment>
-            ),
-          }}
-        />
+        <Box mb={2}>
+          <Typography variant="body2" fontWeight="500" color="#374151" mb={1}>
+            Password *
+          </Typography>
+          <TextField
+            id="password"
+            type={showPassword ? 'text' : 'password'}
+            value={formData.password}
+            onChange={(e) => handleInputChange('password', e.target.value)}
+            error={!!errors.password}
+            helperText={errors.password}
+            placeholder="Enter your password"
+            disabled={isSubmitting || isAccountLocked}
+            autoComplete="current-password"
+            required
+            fullWidth
+            variant="outlined"
+            size="medium"
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Lock sx={{ color: errors.password ? '#ef4444' : '#9ca3af', fontSize: 16 }} />
+                </InputAdornment>
+              ),
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() => setShowPassword(!showPassword)}
+                    disabled={isSubmitting || isAccountLocked}
+                    edge="end"
+                    size="small"
+                  >
+                    {showPassword ? 
+                      <VisibilityOff sx={{ color: '#9ca3af', fontSize: 16 }} /> : 
+                      <Visibility sx={{ color: '#9ca3af', fontSize: 16 }} />
+                    }
+                  </IconButton>
+                </InputAdornment>
+              ),
+              sx: {
+                backgroundColor: '#ffffff',
+                '& .MuiOutlinedInput-notchedOutline': {
+                  borderColor: errors.password ? '#ef4444' : '#d1d5db',
+                },
+                '&:hover .MuiOutlinedInput-notchedOutline': {
+                  borderColor: errors.password ? '#ef4444' : '#9ca3af',
+                },
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                  borderColor: errors.password ? '#ef4444' : '#3b82f6',
+                  borderWidth: '2px',
+                },
+              }
+            }}
+          />
+        </Box>
 
         {/* MFA Field (if required) */}
         {requiresMfa && (
-          <Box>
+          <Box mb={2}>
+            <Typography variant="body2" fontWeight="500" color="#374151" mb={1}>
+              Authentication Code *
+            </Typography>
             <TextField
               id="mfaCode"
-              label="Authentication Code"
               type="text"
               inputMode="numeric"
               value={formData.mfaCode}
@@ -220,12 +278,27 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
               autoComplete="one-time-code"
               required
               fullWidth
+              variant="outlined"
+              size="medium"
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <Shield color={errors.mfaCode ? 'error' : 'action'} />
+                    <Shield sx={{ color: errors.mfaCode ? '#ef4444' : '#9ca3af', fontSize: 16 }} />
                   </InputAdornment>
                 ),
+                sx: {
+                  backgroundColor: '#ffffff',
+                  '& .MuiOutlinedInput-notchedOutline': {
+                    borderColor: errors.mfaCode ? '#ef4444' : '#d1d5db',
+                  },
+                  '&:hover .MuiOutlinedInput-notchedOutline': {
+                    borderColor: errors.mfaCode ? '#ef4444' : '#9ca3af',
+                  },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                    borderColor: errors.mfaCode ? '#ef4444' : '#3b82f6',
+                    borderWidth: '2px',
+                  },
+                }
               }}
               inputProps={{
                 maxLength: 6,
@@ -256,23 +329,44 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
 
         {/* Account Locked Warning */}
         {isAccountLocked && (
-          <Alert severity="error" icon={<Warning />}>
-            Account temporarily locked due to multiple failed attempts
-          </Alert>
+          <Box sx={{ 
+            p: 2, 
+            backgroundColor: '#fef2f2', 
+            border: '1px solid #fecaca',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            mb: 2
+          }}>
+            <Warning sx={{ color: '#dc2626', fontSize: 16 }} />
+            <Typography variant="body2" color="#dc2626">
+              Account temporarily locked due to multiple failed attempts
+            </Typography>
+          </Box>
         )}
 
         {/* Submit Error */}
         {errors.submit && !isAccountLocked && (
-          <Alert severity="error" icon={<Warning />}>
-            <Box>
-              <Typography variant="body2">{errors.submit}</Typography>
-              {attemptCount > 2 && (
-                <Typography variant="caption" color="error.main" mt={0.5}>
-                  {5 - attemptCount} attempts remaining before account lock
-                </Typography>
-              )}
+          <Box sx={{ 
+            p: 2, 
+            backgroundColor: '#fef2f2', 
+            border: '1px solid #fecaca',
+            borderRadius: '6px',
+            mb: 2
+          }}>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Warning sx={{ color: '#dc2626', fontSize: 16 }} />
+              <Typography variant="body2" color="#dc2626">
+                {errors.submit}
+              </Typography>
             </Box>
-          </Alert>
+            {attemptCount > 2 && (
+              <Typography variant="caption" color="#dc2626" mt={0.5}>
+                {5 - attemptCount} attempts remaining before account lock
+              </Typography>
+            )}
+          </Box>
         )}
 
         {/* Submit Button */}
@@ -286,9 +380,19 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
             py: 1.5,
             fontWeight: 600,
             textTransform: 'none',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            backgroundColor: '#3b82f6',
+            color: '#ffffff',
             '&:hover': {
-              background: 'linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%)',
+              backgroundColor: '#2563eb',
+            },
+            '&:disabled': {
+              backgroundColor: '#9ca3af',
+              color: '#ffffff',
+            },
+            borderRadius: '6px',
+            boxShadow: 'none',
+            '&:hover': {
+              boxShadow: 'none',
             }
           }}
         >
@@ -304,26 +408,34 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
 
         {/* Forgot Password Link */}
         {!requiresMfa && (
-          <Box textAlign="center" mt={1}>
-            <Link
+          <Box textAlign="center" mt={2}>
+            <Typography 
               component="button"
               type="button"
               onClick={onSwitchToReset}
               variant="body2"
-              color="primary"
-              underline="hover"
               disabled={isSubmitting}
-              sx={{ cursor: 'pointer' }}
+              sx={{ 
+                cursor: 'pointer',
+                color: '#3b82f6',
+                textDecoration: 'none',
+                border: 'none',
+                background: 'none',
+                '&:hover': {
+                  color: '#1d4ed8',
+                  textDecoration: 'underline',
+                }
+              }}
             >
               Forgot your password?
-            </Link>
+            </Typography>
           </Box>
         )}
 
         {/* Back to Password (when in MFA mode) */}
         {requiresMfa && (
-          <Box textAlign="center" mt={1}>
-            <Link
+          <Box textAlign="center" mt={2}>
+            <Typography
               component="button"
               type="button"
               onClick={() => {
@@ -332,45 +444,61 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
                 setErrors({});
               }}
               variant="body2"
-              color="text.secondary"
-              underline="hover"
               disabled={isSubmitting}
-              sx={{ cursor: 'pointer' }}
+              sx={{ 
+                cursor: 'pointer',
+                color: '#6b7280',
+                textDecoration: 'none',
+                border: 'none',
+                background: 'none',
+                '&:hover': {
+                  color: '#374151',
+                  textDecoration: 'underline',
+                }
+              }}
             >
               ← Back to password
-            </Link>
+            </Typography>
           </Box>
         )}
       </Box>
 
       {/* Switch to Register */}
       {!requiresMfa && (
-        <Box textAlign="center" pt={3} borderTop="1px solid" borderColor="divider">
-          <Typography variant="body2" color="text.secondary">
+        <Box textAlign="center" pt={3} borderTop="1px solid #e5e7eb">
+          <Typography variant="body2" color="#6b7280">
             Don't have an account?{' '}
-            <Link
+            <Typography
               component="button"
               onClick={onSwitchToRegister}
               variant="body2"
-              color="primary"
-              underline="hover"
               fontWeight={600}
               disabled={isSubmitting}
-              sx={{ cursor: 'pointer' }}
+              sx={{ 
+                cursor: 'pointer',
+                color: '#3b82f6',
+                textDecoration: 'none',
+                border: 'none',
+                background: 'none',
+                '&:hover': {
+                  color: '#1d4ed8',
+                  textDecoration: 'underline',
+                }
+              }}
             >
               Create account
-            </Link>
+            </Typography>
           </Typography>
         </Box>
       )}
 
       {/* Security Notice */}
       <Box textAlign="center" mt={2}>
-        <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" justifyContent="center" gap={0.5}>
+        <Typography variant="caption" color="#9ca3af" display="flex" alignItems="center" justifyContent="center" gap={0.5}>
           <Shield sx={{ fontSize: 12 }} />
           Protected by enterprise-grade security
         </Typography>
       </Box>
-    </Card>
+    </Box>
   );
 }
