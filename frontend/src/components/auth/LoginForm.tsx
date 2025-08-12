@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Visibility, VisibilityOff, Email, Lock, Shield, Warning } from '@mui/icons-material';
+import { Visibility, VisibilityOff, Email, Lock, Shield, Warning, Close } from '@mui/icons-material';
 import { 
   Card, 
   Button, 
@@ -114,8 +114,31 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
       backgroundColor: '#ffffff',
       border: '1px solid #e5e7eb',
       borderRadius: '8px',
-      boxShadow: 'none'
+      boxShadow: 'none',
+      position: 'relative'
     }}>
+      {/* Close Button */}
+      {onClose && (
+        <IconButton
+          onClick={onClose}
+          sx={{
+            position: 'absolute',
+            right: 12,
+            top: 12,
+            backgroundColor: '#f9fafb',
+            border: '1px solid #e5e7eb',
+            width: 32,
+            height: 32,
+            '&:hover': {
+              backgroundColor: '#f3f4f6',
+              borderColor: '#d1d5db',
+            }
+          }}
+        >
+          <Close sx={{ fontSize: 16, color: '#6b7280' }} />
+        </IconButton>
+      )}
+
       {/* Header */}
       <Box textAlign="center" mb={3}>
         <Typography variant="h5" fontWeight="600" color="#111827" mb={1}>
@@ -188,13 +211,14 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
               sx: {
                 backgroundColor: '#ffffff',
                 '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.email ? '#ef4444' : '#d1d5db',
+                  borderColor: errors.email ? '#ef4444' : '#374151',
+                  borderWidth: '1.5px',
                 },
                 '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.email ? '#ef4444' : '#9ca3af',
+                  borderColor: errors.email ? '#ef4444' : '#1f2937',
                 },
                 '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.email ? '#ef4444' : '#3b82f6',
+                  borderColor: errors.email ? '#ef4444' : '#1f2937',
                   borderWidth: '2px',
                 },
               }
@@ -245,13 +269,14 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
               sx: {
                 backgroundColor: '#ffffff',
                 '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.password ? '#ef4444' : '#d1d5db',
+                  borderColor: errors.password ? '#ef4444' : '#374151',
+                  borderWidth: '1.5px',
                 },
                 '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.password ? '#ef4444' : '#9ca3af',
+                  borderColor: errors.password ? '#ef4444' : '#1f2937',
                 },
                 '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.password ? '#ef4444' : '#3b82f6',
+                  borderColor: errors.password ? '#ef4444' : '#1f2937',
                   borderWidth: '2px',
                 },
               }
@@ -380,14 +405,17 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
             py: 1.5,
             fontWeight: 600,
             textTransform: 'none',
-            backgroundColor: '#3b82f6',
+            backgroundColor: '#1f2937',
             color: '#ffffff',
+            border: '1px solid #374151',
             '&:hover': {
-              backgroundColor: '#2563eb',
+              backgroundColor: '#111827',
+              borderColor: '#1f2937',
             },
             '&:disabled': {
-              backgroundColor: '#9ca3af',
+              backgroundColor: '#6b7280',
               color: '#ffffff',
+              borderColor: '#9ca3af',
             },
             borderRadius: '6px',
             boxShadow: 'none',

@@ -181,19 +181,56 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
     <Card sx={{ 
       width: '100%', 
       maxWidth: 400, 
-      p: 4,
+      p: 3,
       backgroundColor: '#ffffff',
       border: '1px solid #e5e7eb',
       borderRadius: '8px',
       boxShadow: 'none',
-      maxHeight: '90vh',
-      overflowY: 'auto'
+      maxHeight: '85vh',
+      overflowY: 'auto',
+      position: 'relative',
+      '&::-webkit-scrollbar': {
+        width: '6px',
+      },
+      '&::-webkit-scrollbar-track': {
+        backgroundColor: '#f1f5f9',
+        borderRadius: '3px',
+      },
+      '&::-webkit-scrollbar-thumb': {
+        backgroundColor: '#cbd5e1',
+        borderRadius: '3px',
+        '&:hover': {
+          backgroundColor: '#94a3b8',
+        },
+      },
     }}>
-      <Box textAlign="center" mb={3}>
-        <Typography variant="h5" fontWeight="600" color="#111827" mb={1}>
+      {/* Close Button */}
+      {onClose && (
+        <IconButton
+          onClick={onClose}
+          sx={{
+            position: 'absolute',
+            right: 12,
+            top: 12,
+            backgroundColor: '#f9fafb',
+            border: '1px solid #e5e7eb',
+            width: 32,
+            height: 32,
+            '&:hover': {
+              backgroundColor: '#f3f4f6',
+              borderColor: '#d1d5db',
+            }
+          }}
+        >
+          <Close sx={{ fontSize: 16, color: '#6b7280' }} />
+        </IconButton>
+      )}
+
+      <Box textAlign="center" mb={2}>
+        <Typography variant="h6" fontWeight="600" color="#111827" mb={1}>
           Create Account
         </Typography>
-        <Typography variant="body2" color="#6b7280" mb={2}>
+        <Typography variant="body2" color="#6b7280" fontSize="0.875rem">
           Join Cosine and start trading smarter
         </Typography>
       </Box>
@@ -204,11 +241,11 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
         isDisabled={isSubmitting} 
       />
 
-      <form onSubmit={handleSubmit} style={{ marginTop: '24px' }}>
-        {/* Name Fields */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-          <div style={{ marginBottom: '8px' }}>
-            <Typography variant="body2" fontWeight="500" color="#374151" mb={1}>
+      <form onSubmit={handleSubmit} style={{ marginTop: '16px' }}>
+        {/* Name Fields - Stacked */}
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ marginBottom: '12px' }}>
+            <Typography variant="body2" fontWeight="500" color="#374151" fontSize="0.875rem" mb={0.5}>
               First Name *
             </Typography>
             <div className="relative">
@@ -225,17 +262,18 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
                 disabled={isSubmitting}
                 autoComplete="given-name"
                 required
+                style={{ fontSize: '0.875rem' }}
               />
             </div>
             {errors.firstName && (
-              <p className="text-red-500 text-xs">{errors.firstName}</p>
+              <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '4px' }}>{errors.firstName}</p>
             )}
           </div>
 
-          <div className="space-y-2">
-            <label htmlFor="lastName" className="text-sm font-medium text-gray-700">
+          <div>
+            <Typography variant="body2" fontWeight="500" color="#374151" fontSize="0.875rem" mb={0.5}>
               Last Name *
-            </label>
+            </Typography>
             <input
               id="lastName"
               type="text"
@@ -248,18 +286,19 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
               disabled={isSubmitting}
               autoComplete="family-name"
               required
+              style={{ fontSize: '0.875rem' }}
             />
             {errors.lastName && (
-              <p className="text-red-500 text-xs">{errors.lastName}</p>
+              <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '4px' }}>{errors.lastName}</p>
             )}
           </div>
         </div>
 
         {/* Email Field */}
-        <div className="space-y-2">
-          <label htmlFor="email" className="text-sm font-medium text-gray-700">
+        <div style={{ marginBottom: '12px' }}>
+          <Typography variant="body2" fontWeight="500" color="#374151" fontSize="0.875rem" mb={0.5}>
             Email Address *
-          </label>
+          </Typography>
           <div className="relative">
             <Email className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input
