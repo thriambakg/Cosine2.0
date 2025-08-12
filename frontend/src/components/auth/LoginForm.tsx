@@ -2,9 +2,23 @@
 
 import { useState } from 'react';
 import { Visibility, VisibilityOff, Email, Lock, Shield, Warning } from '@mui/icons-material';
-import { Card, Button, TextField, Alert, CircularProgress, Box, Typography, InputAdornment, IconButton } from '@mui/material';
+import { 
+  Card, 
+  Button, 
+  TextField, 
+  Alert, 
+  CircularProgress, 
+  Box, 
+  Typography, 
+  InputAdornment, 
+  IconButton,
+  Checkbox,
+  FormControlLabel,
+  Link,
+  Divider
+} from '@mui/material';
 import { useAuth } from '@/contexts/AuthContext';
-import SocialAuthButtons from './SocialAuthButtons';
+import SocialAuthButtons from './SocialAuthButtonsMUI';
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;
@@ -48,53 +62,11 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
     if (requiresMfa && !formData.mfaCode) {
       newErrors.mfaCode = 'MFA code is required';
     } else if (requiresMfa && !/^\d{6}$/.test(formData.mfaCode)) {
-      newErrors.mfaCode = 'MFA code must be 6 digits';
+      newErrors.mfaCode = 'Please enter a valid 6-digit code';
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateForm()) return;
-
-    // Rate limiting - prevent too many attempts
-    if (attemptCount >= 5) {
-      setErrors({ submit: 'Too many login attempts. Please try again in 15 minutes.' });
-      return;
-    }
-
-    setIsSubmitting(true);
-    
-    try {
-      const result = await login(formData.email, formData.password, formData.mfaCode);
-      
-      if (result.success) {
-        // Reset attempt count on success
-        setAttemptCount(0);
-        onClose?.();
-      } else if (result.requiresMfa) {
-        setRequiresMfa(true);
-        setErrors({});
-        // Don't increment attempt count for MFA requirement
-      } else {
-        setAttemptCount(prev => prev + 1);
-        setErrors({ submit: result.error || 'Login failed' });
-        
-        // Clear MFA requirement if login fails
-        if (requiresMfa) {
-          setRequiresMfa(false);
-          setFormData(prev => ({ ...prev, mfaCode: '' }));
-        }
-      }
-    } catch (error) {
-      setAttemptCount(prev => prev + 1);
-      setErrors({ submit: 'An unexpected error occurred' });
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   const handleInputChange = (field: string, value: string | boolean) => {
@@ -103,258 +75,302 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: '' }));
     }
-    // Clear submit error when user makes changes
-    if (errors.submit) {
-      setErrors(prev => ({ ...prev, submit: '' }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) return;
+
+    setIsSubmitting(true);
+    setErrors({});
+
+    try {
+      const result = await login(formData.email, formData.password, formData.mfaCode);
+      
+      if (result.success) {
+        onClose?.();
+      } else if (result.requiresMfa) {
+        setRequiresMfa(true);
+      } else {
+        setErrors({ submit: result.error || 'Login failed' });
+        setAttemptCount(prev => prev + 1);
+      }
+    } catch (error) {
+      setErrors({ submit: 'An unexpected error occurred. Please try again.' });
+      setAttemptCount(prev => prev + 1);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const isAccountLocked = attemptCount >= 5;
 
   return (
-    <Card className="w-full max-w-md p-6 space-y-6">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-gray-900">Welcome Back</h2>
-        <p className="text-gray-600">Sign in to your Cosine account</p>
+    <Card sx={{ 
+      width: '100%', 
+      maxWidth: 448, 
+      p: 3,
+      boxShadow: 3,
+      borderRadius: 2
+    }}>
+      {/* Header */}
+      <Box textAlign="center" mb={3}>
+        <Typography variant="h4" fontWeight="bold" color="text.primary" mb={1}>
+          Welcome Back
+        </Typography>
+        <Typography variant="body2" color="text.secondary" mb={2}>
+          Sign in to your Cosine account
+        </Typography>
         {requiresMfa && (
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
-            <div className="flex items-center space-x-2">
-              <Shield className="w-4 h-4 text-blue-600" />
-              <p className="text-blue-700 text-sm">Two-factor authentication required</p>
-            </div>
-          </div>
+          <Alert severity="info" icon={<Shield />} sx={{ textAlign: 'left' }}>
+            Two-factor authentication required
+          </Alert>
         )}
-      </div>
+      </Box>
 
       {/* Social Authentication - only show if not in MFA mode */}
       {!requiresMfa && (
-        <SocialAuthButtons 
-          mode="login" 
-          isDisabled={isSubmitting || isAccountLocked} 
-        />
+        <Box mb={3}>
+          <SocialAuthButtons 
+            mode="login" 
+            isDisabled={isSubmitting || isAccountLocked} 
+          />
+          <Divider sx={{ my: 3 }}>
+            <Typography variant="body2" color="text.secondary">
+              or continue with email
+            </Typography>
+          </Divider>
+        </Box>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Form */}
+      <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {/* Email Field */}
-        <div className="space-y-2">
-          <label htmlFor="email" className="text-sm font-medium text-gray-700">
-            Email Address *
-          </label>
-          <div className="relative">
-            <Email className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              id="email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => handleInputChange('email', e.target.value)}
-              className={`w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
-                errors.email ? 'border-red-500' : 'border-gray-300'
-              }`}
-              placeholder="Enter your email"
-              disabled={isSubmitting || isAccountLocked}
-              autoComplete="email"
-              required
-            />
-          </div>
-          {errors.email && (
-            <div className="flex items-center space-x-1">
-              <AlertCircle className="w-4 h-4 text-red-500" />
-              <p className="text-red-500 text-sm">{errors.email}</p>
-            </div>
-          )}
-        </div>
+        <TextField
+          id="email"
+          label="Email Address"
+          type="email"
+          value={formData.email}
+          onChange={(e) => handleInputChange('email', e.target.value)}
+          error={!!errors.email}
+          helperText={errors.email}
+          placeholder="Enter your email"
+          disabled={isSubmitting || isAccountLocked}
+          autoComplete="email"
+          required
+          fullWidth
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Email color={errors.email ? 'error' : 'action'} />
+              </InputAdornment>
+            ),
+          }}
+        />
 
         {/* Password Field */}
-        <div className="space-y-2">
-          <label htmlFor="password" className="text-sm font-medium text-gray-700">
-            Password *
-          </label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              id="password"
-              type={showPassword ? 'text' : 'password'}
-              value={formData.password}
-              onChange={(e) => handleInputChange('password', e.target.value)}
-              className={`w-full pl-10 pr-12 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
-                errors.password ? 'border-red-500' : 'border-gray-300'
-              }`}
-              placeholder="Enter your password"
-              disabled={isSubmitting || isAccountLocked}
-              autoComplete="current-password"
-              required
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-              disabled={isSubmitting || isAccountLocked}
-              tabIndex={-1}
-            >
-              {showPassword ? <VisibilityOff /> : <Visibility />}
-            </button>
-          </div>
-          {errors.password && (
-            <div className="flex items-center space-x-1">
-              <AlertCircle className="w-4 h-4 text-red-500" />
-              <p className="text-red-500 text-sm">{errors.password}</p>
-            </div>
-          )}
-        </div>
+        <TextField
+          id="password"
+          label="Password"
+          type={showPassword ? 'text' : 'password'}
+          value={formData.password}
+          onChange={(e) => handleInputChange('password', e.target.value)}
+          error={!!errors.password}
+          helperText={errors.password}
+          placeholder="Enter your password"
+          disabled={isSubmitting || isAccountLocked}
+          autoComplete="current-password"
+          required
+          fullWidth
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Lock color={errors.password ? 'error' : 'action'} />
+              </InputAdornment>
+            ),
+            endAdornment: (
+              <InputAdornment position="end">
+                <IconButton
+                  onClick={() => setShowPassword(!showPassword)}
+                  disabled={isSubmitting || isAccountLocked}
+                  edge="end"
+                >
+                  {showPassword ? <VisibilityOff /> : <Visibility />}
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+        />
 
         {/* MFA Field (if required) */}
         {requiresMfa && (
-          <div className="space-y-2">
-            <label htmlFor="mfaCode" className="text-sm font-medium text-gray-700">
-              Authentication Code *
-            </label>
-            <div className="relative">
-              <Shield className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input
-                id="mfaCode"
-                type="text"
-                value={formData.mfaCode}
-                onChange={(e) => handleInputChange('mfaCode', e.target.value.replace(/\D/g, '').slice(0, 6))}
-                className={`w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
-                  errors.mfaCode ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="000000"
-                disabled={isSubmitting}
-                maxLength={6}
-                pattern="[0-9]{6}"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                required
-              />
-            </div>
-            {errors.mfaCode && (
-              <div className="flex items-center space-x-1">
-                <AlertCircle className="w-4 h-4 text-red-500" />
-                <p className="text-red-500 text-sm">{errors.mfaCode}</p>
-              </div>
-            )}
-            <p className="text-xs text-gray-500">
-              Enter the 6-digit code from your authenticator app
-            </p>
-          </div>
+          <Box>
+            <TextField
+              id="mfaCode"
+              label="Authentication Code"
+              type="text"
+              inputMode="numeric"
+              value={formData.mfaCode}
+              onChange={(e) => handleInputChange('mfaCode', e.target.value.replace(/\D/g, '').slice(0, 6))}
+              error={!!errors.mfaCode}
+              helperText={errors.mfaCode || "Enter the 6-digit code from your authenticator app"}
+              placeholder="000000"
+              disabled={isSubmitting}
+              autoComplete="one-time-code"
+              required
+              fullWidth
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Shield color={errors.mfaCode ? 'error' : 'action'} />
+                  </InputAdornment>
+                ),
+              }}
+              inputProps={{
+                maxLength: 6,
+                pattern: '[0-9]*',
+              }}
+            />
+          </Box>
         )}
 
         {/* Remember Me */}
         {!requiresMfa && (
-          <div className="flex items-center">
-            <input
-              id="rememberMe"
-              type="checkbox"
-              checked={formData.rememberMe}
-              onChange={(e) => handleInputChange('rememberMe', e.target.checked)}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              disabled={isSubmitting || isAccountLocked}
-            />
-            <label htmlFor="rememberMe" className="ml-2 text-sm text-gray-700">
-              Keep me signed in for 30 days
-            </label>
-          </div>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={formData.rememberMe}
+                onChange={(e) => handleInputChange('rememberMe', e.target.checked)}
+                disabled={isSubmitting || isAccountLocked}
+                color="primary"
+              />
+            }
+            label={
+              <Typography variant="body2" color="text.secondary">
+                Keep me signed in for 30 days
+              </Typography>
+            }
+          />
         )}
 
         {/* Account Locked Warning */}
         {isAccountLocked && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-md">
-            <div className="flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 text-red-600" />
-              <p className="text-red-700 text-sm">
-                Account temporarily locked due to multiple failed attempts
-              </p>
-            </div>
-          </div>
+          <Alert severity="error" icon={<Warning />}>
+            Account temporarily locked due to multiple failed attempts
+          </Alert>
         )}
 
         {/* Submit Error */}
         {errors.submit && !isAccountLocked && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-md">
-            <div className="flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 text-red-600" />
-              <p className="text-red-700 text-sm">{errors.submit}</p>
-            </div>
-            {attemptCount > 2 && (
-              <p className="text-red-600 text-xs mt-1">
-                {5 - attemptCount} attempts remaining before account lock
-              </p>
-            )}
-          </div>
+          <Alert severity="error" icon={<Warning />}>
+            <Box>
+              <Typography variant="body2">{errors.submit}</Typography>
+              {attemptCount > 2 && (
+                <Typography variant="caption" color="error.main" mt={0.5}>
+                  {5 - attemptCount} attempts remaining before account lock
+                </Typography>
+              )}
+            </Box>
+          </Alert>
         )}
 
         {/* Submit Button */}
         <Button
           type="submit"
-          className="w-full"
+          variant="contained"
+          size="large"
           disabled={isSubmitting || isAccountLocked}
+          fullWidth
+          sx={{ 
+            py: 1.5,
+            fontWeight: 600,
+            textTransform: 'none',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            '&:hover': {
+              background: 'linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%)',
+            }
+          }}
         >
           {isSubmitting ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            <Box display="flex" alignItems="center" gap={1}>
+              <CircularProgress size={16} color="inherit" />
               {requiresMfa ? 'Verifying...' : 'Signing In...'}
-            </>
+            </Box>
           ) : (
-            requiresMfa ? 'Verify & Sign In' : 'Sign In'
+            requiresMfa ? 'Verify Code' : 'Sign In'
           )}
         </Button>
 
         {/* Forgot Password Link */}
         {!requiresMfa && (
-          <div className="text-center">
-            <button
+          <Box textAlign="center" mt={1}>
+            <Link
+              component="button"
               type="button"
               onClick={onSwitchToReset}
-              className="text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+              variant="body2"
+              color="primary"
+              underline="hover"
               disabled={isSubmitting}
+              sx={{ cursor: 'pointer' }}
             >
               Forgot your password?
-            </button>
-          </div>
+            </Link>
+          </Box>
         )}
 
         {/* Back to Password (when in MFA mode) */}
         {requiresMfa && (
-          <div className="text-center">
-            <button
+          <Box textAlign="center" mt={1}>
+            <Link
+              component="button"
               type="button"
               onClick={() => {
                 setRequiresMfa(false);
                 setFormData(prev => ({ ...prev, mfaCode: '' }));
                 setErrors({});
               }}
-              className="text-sm text-gray-600 hover:text-gray-800 hover:underline transition-colors"
+              variant="body2"
+              color="text.secondary"
+              underline="hover"
               disabled={isSubmitting}
+              sx={{ cursor: 'pointer' }}
             >
               ← Back to password
-            </button>
-          </div>
+            </Link>
+          </Box>
         )}
-      </form>
+      </Box>
 
       {/* Switch to Register */}
       {!requiresMfa && (
-        <div className="text-center pt-4 border-t">
-          <p className="text-sm text-gray-600">
+        <Box textAlign="center" pt={3} borderTop="1px solid" borderColor="divider">
+          <Typography variant="body2" color="text.secondary">
             Don't have an account?{' '}
-            <button
+            <Link
+              component="button"
               onClick={onSwitchToRegister}
-              className="text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors"
+              variant="body2"
+              color="primary"
+              underline="hover"
+              fontWeight={600}
               disabled={isSubmitting}
+              sx={{ cursor: 'pointer' }}
             >
               Create account
-            </button>
-          </p>
-        </div>
+            </Link>
+          </Typography>
+        </Box>
       )}
 
       {/* Security Notice */}
-      <div className="text-center">
-        <p className="text-xs text-gray-500 flex items-center justify-center space-x-1">
-          <Shield className="w-3 h-3" />
-          <span>Protected by enterprise-grade security</span>
-        </p>
-      </div>
+      <Box textAlign="center" mt={2}>
+        <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" justifyContent="center" gap={0.5}>
+          <Shield sx={{ fontSize: 12 }} />
+          Protected by enterprise-grade security
+        </Typography>
+      </Box>
     </Card>
   );
 }

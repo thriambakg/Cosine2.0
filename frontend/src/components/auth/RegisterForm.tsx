@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Visibility, VisibilityOff, Email, Lock, Person, Phone, Shield, Warning, Check, Close } from '@mui/icons-material';
 import { Card, Button, TextField, Alert, CircularProgress, Box, Typography, InputAdornment, IconButton } from '@mui/material';
 import { useAuth } from '@/contexts/AuthContext';
-import SocialAuthButtons from './SocialAuthButtons';
+import SocialAuthButtons from './SocialAuthButtonsMUI';
 
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
@@ -183,7 +183,7 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
               First Name *
             </label>
             <div className="relative">
-              <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Person className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
                 id="firstName"
                 type="text"
