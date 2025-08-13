@@ -272,9 +272,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       
-      // Only send email to Cognito. Store other fields in backend after registration.
+      // Generate a unique username since User Pool has email alias enabled
+      // Cognito will handle email separately as an alias
+      const timestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
+      const uniqueUsername = `user_${timestamp}_${randomSuffix}`;
+      
       const result = await signUp({
-        username: userData.email.toLowerCase().trim(),
+        username: uniqueUsername,
         password: userData.password,
         options: {
           userAttributes: {
