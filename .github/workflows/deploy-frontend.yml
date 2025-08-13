@@ -39,11 +39,6 @@ on:
       AWS_SECRET_ACCESS_KEY:
         required: true
 
-# Add required permissions for checking workflow runs
-permissions:
-  actions: read
-  contents: read
-  
   # Manual trigger
   workflow_dispatch:
     inputs:
@@ -65,6 +60,11 @@ permissions:
         required: false
         default: false
         type: boolean
+
+# Add required permissions for checking workflow runs
+permissions:
+  actions: read
+  contents: read
 
 env:
   AWS_REGION: us-east-1
