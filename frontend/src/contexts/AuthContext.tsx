@@ -299,11 +299,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // TODO: After Cognito registration, send firstName, lastName, phoneNumber to backend/DynamoDB
       
-      // Store password temporarily for auto-login after verification
+      // Store password and username temporarily for auto-login after verification
       if (!result.isSignUpComplete) {
         sessionStorage.setItem('pendingRegistration', JSON.stringify({
           email: userData.email.toLowerCase().trim(),
-          password: userData.password
+          password: userData.password,
+          username: uniqueUsername
         }));
       }
 
@@ -513,8 +514,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const confirmSignUpFunc = async (email: string, code: string, autoLogin = true) => {
     try {
+      // Get the username from stored registration data
+      const storedData = sessionStorage.getItem('pendingRegistration');
+      let username = email.toLowerCase().trim(); // fallback to email
+      
+      if (storedData) {
+        const { username: storedUsername } = JSON.parse(storedData);
+        if (storedUsername) {
+          username = storedUsername;
+        }
+      }
+
       await confirmSignUp({
-        username: email.toLowerCase().trim(),
+        username: username,
         confirmationCode: code,
       });
 
@@ -526,12 +538,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Auto-login after successful verification
       if (autoLogin) {
         try {
-          // Get the stored password from registration (if available)
+          // Get the stored password and username from registration (if available)
           const storedData = sessionStorage.getItem('pendingRegistration');
           if (storedData) {
-            const { password } = JSON.parse(storedData);
+            const { password, username: storedUsername } = JSON.parse(storedData);
             const loginResult = await signIn({
-              username: email.toLowerCase().trim(),
+              username: storedUsername || email.toLowerCase().trim(),
               password
             });
 
@@ -540,7 +552,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               sessionStorage.removeItem('pendingRegistration');
               
               // Fetch user and update state
-              await checkAuthState();
+              await initializeAuth();
               
               await logSecurityEvent('auto_login_success', { 
                 email: email.toLowerCase().trim(),
@@ -573,8 +585,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const resendConfirmationCodeFunc = async (email: string) => {
     try {
+      // Get the username from stored registration data
+      const storedData = sessionStorage.getItem('pendingRegistration');
+      let username = email.toLowerCase().trim(); // fallback to email
+      
+      if (storedData) {
+        const { username: storedUsername } = JSON.parse(storedData);
+        if (storedUsername) {
+          username = storedUsername;
+        }
+      }
+
       await resendSignUpCode({
-        username: email.toLowerCase().trim(),
+        username: username,
       });
 
       await logSecurityEvent('verification_code_resent', { 
