@@ -46,11 +46,13 @@ export interface AuthContextType {
   isAuthenticated: boolean;
   login: (email: string, password: string, mfaCode?: string) => Promise<{ success: boolean; error?: string; requiresMfa?: boolean }>;
   loginWithProvider: (provider: 'Google') => Promise<void>;
-  register: (userData: RegisterData) => Promise<{ success: boolean; error?: string; verificationRequired?: boolean }>;
+  register: (userData: RegisterData) => Promise<{ success: boolean; error?: string; verificationRequired?: boolean; email?: string }>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   confirmResetPassword: (email: string, code: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   verifyEmail: (email: string, code: string) => Promise<{ success: boolean; error?: string }>;
+  confirmSignUp: (email: string, code: string, autoLogin?: boolean) => Promise<{ success: boolean; error?: string }>;
+  resendConfirmationCode: (email: string) => Promise<{ success: boolean; error?: string }>;
   resendVerificationCode: (email: string) => Promise<{ success: boolean; error?: string }>;
   updateProfile: (userData: Partial<User>) => Promise<{ success: boolean; error?: string }>;
   changePassword: (oldPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
@@ -297,6 +299,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // TODO: After Cognito registration, send firstName, lastName, phoneNumber to backend/DynamoDB
       
+      // Store password temporarily for auto-login after verification
+      if (!result.isSignUpComplete) {
+        sessionStorage.setItem('pendingRegistration', JSON.stringify({
+          email: userData.email.toLowerCase().trim(),
+          password: userData.password
+        }));
+      }
+
       // Log successful registration
       await logSecurityEvent('registration_success', { 
         email: userData.email, 
@@ -306,7 +316,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       return { 
         success: true, 
-        verificationRequired: !result.isSignUpComplete 
+        verificationRequired: !result.isSignUpComplete,
+        email: userData.email.toLowerCase().trim()
       };
     } catch (error: any) {
       console.error('Registration error:', error);
@@ -500,6 +511,88 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   };
 
+  const confirmSignUpFunc = async (email: string, code: string, autoLogin = true) => {
+    try {
+      await confirmSignUp({
+        username: email.toLowerCase().trim(),
+        confirmationCode: code,
+      });
+
+      await logSecurityEvent('email_verified', { 
+        email: email.toLowerCase().trim(),
+        timestamp: new Date().toISOString() 
+      });
+
+      // Auto-login after successful verification
+      if (autoLogin) {
+        try {
+          // Get the stored password from registration (if available)
+          const storedData = sessionStorage.getItem('pendingRegistration');
+          if (storedData) {
+            const { password } = JSON.parse(storedData);
+            const loginResult = await signIn({
+              username: email.toLowerCase().trim(),
+              password
+            });
+
+            if (loginResult.isSignedIn) {
+              // Clear stored registration data
+              sessionStorage.removeItem('pendingRegistration');
+              
+              // Fetch user and update state
+              await checkAuthState();
+              
+              await logSecurityEvent('auto_login_success', { 
+                email: email.toLowerCase().trim(),
+                timestamp: new Date().toISOString() 
+              });
+            }
+          }
+        } catch (loginError) {
+          console.warn('Auto-login failed:', loginError);
+          // Don't fail the confirmation if auto-login fails
+        }
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Email confirmation error:', error);
+      
+      await logSecurityEvent('email_verification_failed', { 
+        email: email.toLowerCase().trim(),
+        error: error.message,
+        timestamp: new Date().toISOString() 
+      });
+
+      return { 
+        success: false, 
+        error: error.message || 'Failed to verify email'
+      };
+    }
+  };
+
+  const resendConfirmationCodeFunc = async (email: string) => {
+    try {
+      await resendSignUpCode({
+        username: email.toLowerCase().trim(),
+      });
+
+      await logSecurityEvent('verification_code_resent', { 
+        email: email.toLowerCase().trim(),
+        timestamp: new Date().toISOString() 
+      });
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('Resend confirmation code error:', error);
+
+      return { 
+        success: false, 
+        error: error.message || 'Failed to resend confirmation code'
+      };
+    }
+  };
+
   const confirmMfa = async (code: string, secret: string) => {
     // TODO: Implement MFA confirmation
     console.log('MFA confirmation not yet implemented');
@@ -570,6 +663,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     changePassword,
     enableMfa,
     confirmMfa,
+    confirmSignUp: confirmSignUpFunc,
+    resendConfirmationCode: resendConfirmationCodeFunc,
     disableMfa,
     refreshToken,
     deleteAccount,

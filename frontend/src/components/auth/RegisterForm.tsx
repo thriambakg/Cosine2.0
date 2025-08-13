@@ -22,9 +22,10 @@ import { Close, Check, Clear } from '@mui/icons-material';
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
   onClose?: () => void;
+  onRegistrationSuccess?: (email: string) => void;
 }
 
-export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormProps) {
+export default function RegisterForm({ onSwitchToLogin, onClose, onRegistrationSuccess }: RegisterFormProps) {
   const { register, loginWithProvider } = useAuth();
   const router = useRouter();
   
@@ -114,8 +115,14 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
         marketingConsent: false // You can add this field to the form if needed
       });
       if (result.success) {
-        router.push('/');
-        onClose?.();
+        if (result.verificationRequired && result.email && onRegistrationSuccess) {
+          // Show email confirmation modal
+          onRegistrationSuccess(result.email);
+        } else {
+          // Registration complete, redirect to dashboard
+          router.push('/');
+          onClose?.();
+        }
       } else {
         setError(result.error || 'Registration failed');
       }

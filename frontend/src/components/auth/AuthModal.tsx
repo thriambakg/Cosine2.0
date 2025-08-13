@@ -13,6 +13,7 @@ interface AuthModalProps {
   onClose: () => void;
   defaultMode?: 'login' | 'register';
   requireMFA?: boolean;
+  onRegistrationSuccess?: (email: string) => void;
 }
 
 type AuthModalMode = 'login' | 'register' | 'reset' | 'mfa-setup';
@@ -21,7 +22,8 @@ export default function AuthModal({
   isOpen, 
   onClose, 
   defaultMode = 'login',
-  requireMFA = false 
+  requireMFA = false,
+  onRegistrationSuccess
 }: AuthModalProps) {
   const [mode, setMode] = useState<AuthModalMode>(defaultMode);
   const [showMFASetup, setShowMFASetup] = useState(false);
@@ -124,6 +126,7 @@ export default function AuthModal({
         <RegisterForm
           onSwitchToLogin={handleSwitchToLogin}
           onClose={handleAuthSuccess}
+          onRegistrationSuccess={onRegistrationSuccess}
         />
       ) : mode === 'reset' ? (
         <Box sx={{ p: 3, textAlign: 'center', backgroundColor: 'white', borderRadius: 2, boxShadow: 3 }}>

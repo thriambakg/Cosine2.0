@@ -23,12 +23,14 @@ import {
   AttachMoney as DollarSignIcon,
 } from '@mui/icons-material';
 
-import { AuthModal } from './auth';
+import { AuthModal, EmailConfirmation } from './auth';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LandingPageMUI() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [showEmailConfirmation, setShowEmailConfirmation] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState('');
   const { isAuthenticated } = useAuth();
 
   useEffect(() => {
@@ -45,6 +47,25 @@ export default function LandingPageMUI() {
   const handleSignIn = () => {
     setAuthMode('login');
     setAuthModalOpen(true);
+  };
+
+  const handleRegistrationSuccess = (email: string) => {
+    setPendingEmail(email);
+    setAuthModalOpen(false);
+    setShowEmailConfirmation(true);
+  };
+
+  const handleEmailConfirmed = () => {
+    setShowEmailConfirmation(false);
+    setPendingEmail('');
+    // User will be automatically logged in and redirected
+  };
+
+  const handleCloseEmailConfirmation = () => {
+    setShowEmailConfirmation(false);
+    setPendingEmail('');
+    // Clear stored registration data
+    sessionStorage.removeItem('pendingRegistration');
   };
 
   return (
@@ -531,7 +552,16 @@ export default function LandingPageMUI() {
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
         defaultMode={authMode}
+        onRegistrationSuccess={handleRegistrationSuccess}
       />
+
+      {showEmailConfirmation && pendingEmail && (
+        <EmailConfirmation
+          email={pendingEmail}
+          onClose={handleCloseEmailConfirmation}
+          onConfirmed={handleEmailConfirmed}
+        />
+      )}
     </Box>
   );
 }
