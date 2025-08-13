@@ -13,7 +13,7 @@ interface AuthModalProps {
   onClose: () => void;
   defaultMode?: 'login' | 'register';
   requireMFA?: boolean;
-  onRegistrationSuccess?: (email: string) => void;
+  onRegistrationSuccess?: () => void;
 }
 
 type AuthModalMode = 'login' | 'register' | 'reset' | 'mfa-setup';

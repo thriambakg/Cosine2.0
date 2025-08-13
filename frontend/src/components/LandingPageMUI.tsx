@@ -23,14 +23,12 @@ import {
   AttachMoney as DollarSignIcon,
 } from '@mui/icons-material';
 
-import { AuthModal, EmailConfirmation } from './auth';
+import { AuthModal } from './auth';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LandingPageMUI() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [showEmailConfirmation, setShowEmailConfirmation] = useState(false);
-  const [pendingEmail, setPendingEmail] = useState('');
   const { isAuthenticated } = useAuth();
 
   useEffect(() => {
@@ -49,23 +47,9 @@ export default function LandingPageMUI() {
     setAuthModalOpen(true);
   };
 
-  const handleRegistrationSuccess = (email: string) => {
-    setPendingEmail(email);
+  const handleRegistrationSuccess = () => {
     setAuthModalOpen(false);
-    setShowEmailConfirmation(true);
-  };
-
-  const handleEmailConfirmed = () => {
-    setShowEmailConfirmation(false);
-    setPendingEmail('');
-    // User will be automatically logged in and redirected
-  };
-
-  const handleCloseEmailConfirmation = () => {
-    setShowEmailConfirmation(false);
-    setPendingEmail('');
-    // Clear stored registration data
-    sessionStorage.removeItem('pendingRegistration');
+    // Show success message - user will get email with verification link
   };
 
   return (
@@ -554,14 +538,6 @@ export default function LandingPageMUI() {
         defaultMode={authMode}
         onRegistrationSuccess={handleRegistrationSuccess}
       />
-
-      {showEmailConfirmation && pendingEmail && (
-        <EmailConfirmation
-          email={pendingEmail}
-          onClose={handleCloseEmailConfirmation}
-          onConfirmed={handleEmailConfirmed}
-        />
-      )}
     </Box>
   );
 }

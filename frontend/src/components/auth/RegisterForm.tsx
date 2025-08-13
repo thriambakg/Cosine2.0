@@ -22,7 +22,7 @@ import { Close, Check, Clear } from '@mui/icons-material';
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
   onClose?: () => void;
-  onRegistrationSuccess?: (email: string) => void;
+  onRegistrationSuccess?: () => void;
 }
 
 export default function RegisterForm({ onSwitchToLogin, onClose, onRegistrationSuccess }: RegisterFormProps) {
@@ -37,6 +37,7 @@ export default function RegisterForm({ onSwitchToLogin, onClose, onRegistrationS
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   // Password strength calculation
   const getPasswordStrength = () => {
@@ -115,13 +116,14 @@ export default function RegisterForm({ onSwitchToLogin, onClose, onRegistrationS
         marketingConsent: false // You can add this field to the form if needed
       });
       if (result.success) {
-        if (result.verificationRequired && result.email && onRegistrationSuccess) {
-          // Show email confirmation modal
-          onRegistrationSuccess(result.email);
+        if (result.verificationRequired) {
+          // Show success message - user will get verification email
+          setSuccessMessage('Account created! Please check your email to verify your account. You can then sign in.');
+          onRegistrationSuccess?.();
         } else {
           // Registration complete, redirect to dashboard
           router.push('/');
-          onClose?.();
+        onClose?.();
         }
       } else {
         setError(result.error || 'Registration failed');
@@ -217,6 +219,24 @@ export default function RegisterForm({ onSwitchToLogin, onClose, onRegistrationS
           }}
         >
           {error}
+        </Alert>
+      )}
+
+      {successMessage && (
+        <Alert 
+          severity="success" 
+          sx={{ 
+            mb: 3,
+            backgroundColor: '#f0fdf4', // bg-green-50
+            border: '1px solid #bbf7d0', // border-green-200
+            borderRadius: 2,
+            '& .MuiAlert-message': {
+              color: '#166534', // text-green-800
+              fontSize: '0.875rem' // text-sm
+            }
+          }}
+        >
+          {successMessage}
         </Alert>
       )}
 
