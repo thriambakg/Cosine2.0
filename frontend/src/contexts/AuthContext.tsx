@@ -281,11 +281,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: userData.email.toLowerCase().trim(),
             given_name: userData.firstName.trim(),
             family_name: userData.lastName.trim(),
-            'custom:termsaccept': userData.termsAccepted.toString(),
-            'custom:markconsent': (userData.marketingConsent || false).toString(),
-            'custom:role': 'user',
-            'custom:subplan': 'free',
-            'custom:substatus': 'active'
+            'custom:custom_termsaccept': userData.termsAccepted.toString(),
+            'custom:custom_markconsent': (userData.marketingConsent || false).toString(),
+            'custom:custom_role': 'user',
+            'custom:custom_subplan': 'free',
+            'custom:custom_substatus': 'active'
           }
         }
       });

@@ -119,81 +119,87 @@ resource "aws_kms_alias" "main" {
   }
 }
 
-# Custom IAM policy for stock volatility Lambda (temporarily disabled until IAM permissions are granted)
-resource "aws_iam_policy" "stock_volatility_lambda_policy" {
-  count       = 0 # Temporarily disabled - requires iam:CreatePolicy permission
-  name        = "${var.project_name}-stock-volatility-policy-${var.environment}"
-  description = "Custom policy for stock volatility Lambda function"
+# Custom IAM policy for stock volatility Lambda - DISABLED FOR CLOUDFRONT DEPLOYMENT
+# CloudFront + S3 static hosting doesn't need Lambda IAM policies
+# resource "aws_iam_policy" "stock_volatility_lambda_policy" {
+#   count       = 0 # Disabled for static hosting deployment
+#   name        = "${var.project_name}-stock-volatility-policy-${var.environment}"
+#   description = "Custom policy for stock volatility Lambda function"
+#
+#   policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Effect = "Allow"
+#         Action = [
+#           "s3:GetObject",
+#           "s3:PutObject"
+#         ]
+#         Resource = [
+#           "arn:aws:s3:::${var.project_name}-*/*"
+#         ]
+#       },
+#       {
+#         Effect = "Allow"
+#         Action = [
+#           "secretsmanager:GetSecretValue"
+#         ]
+#         Resource = [
+#           "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*"
+#         ]
+#       }
+#     ]
+#   })
+#
+#   tags = var.common_tags
+# }
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject"
-        ]
-        Resource = [
-          "arn:aws:s3:::${var.project_name}-*/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
-        ]
-        Resource = [
-          "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*"
-        ]
-      }
-    ]
-  })
+# Stock Volatility Lambda Function - DISABLED FOR CLOUDFRONT DEPLOYMENT
+# CloudFront + S3 static hosting doesn't need backend Lambda functions
+# This saves Lambda compute costs and simplifies the architecture
+# Re-enable when you need dynamic backend functionality
+# module "stock_volatility_lambda" {
+#   count  = 0 # Disabled for static hosting deployment
+#   source = "./modules/lambda"
+#
+#   function_name = "${var.project_name}-stock-volatility-${var.environment}"
+#   description   = "Lambda function for stock volatility calculation using yfinance"
+#   handler       = "lambda_function.lambda_handler"
+#   runtime       = "python3.11"
+#   timeout       = 60
+#   memory_size   = 512
+#
+#   # Source directory
+#   source_dir = "../backend_app/src/stocks/volatility_fetch/app"
+#
+#   # Environment variables
+#   environment_variables = {
+#     ENVIRONMENT = var.environment
+#     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+#   }
+#
+#   # Additional IAM policies (temporarily empty until permissions are granted)
+#   additional_policy_arns = [
+#     # aws_iam_policy.stock_volatility_lambda_policy.arn # Disabled until IAM permissions granted
+#   ]
+#
+#   tags = var.common_tags
+# }
 
-  tags = var.common_tags
-}
-
-# Stock Volatility Lambda Function (temporarily disabled until IAM permissions are granted)
-module "stock_volatility_lambda" {
-  count  = 0 # Temporarily disabled - requires iam:CreateRole permission  
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-stock-volatility-${var.environment}"
-  description   = "Lambda function for stock volatility calculation using yfinance"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 60
-  memory_size   = 512
-
-  # Source directory
-  source_dir = "../backend_app/src/stocks/volatility_fetch/app"
-
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-  }
-
-  # Additional IAM policies (temporarily empty until permissions are granted)
-  additional_policy_arns = [
-    # aws_iam_policy.stock_volatility_lambda_policy.arn # Disabled until IAM permissions granted
-  ]
-
-  tags = var.common_tags
-}
-
-# VPC for secure networking
-module "vpc" {
-  source = "./modules/vpc"
-
-  project_name = var.project_name
-  environment  = var.environment
-  vpc_cidr     = var.vpc_cidr
-  az_count     = var.az_count
-  kms_key_arn  = aws_kms_key.main.arn
-
-  tags = var.common_tags
-}
+# VPC for secure networking - DISABLED FOR CLOUDFRONT DEPLOYMENT
+# CloudFront + S3 static hosting doesn't need VPC, NAT gateways, or private subnets
+# This saves ~$50-100/month in NAT Gateway and EIP costs
+# module "vpc" {
+#   source = "./modules/vpc"
+#
+#   project_name = var.project_name
+#   environment  = var.environment
+#   vpc_cidr     = var.vpc_cidr
+#   az_count     = var.az_count
+#   kms_key_arn  = aws_kms_key.main.arn
+#
+#   tags = var.common_tags
+# }
 
 # SSL Certificate for staging HTTPS (when no custom domain)
 module "ssl_certificate" {

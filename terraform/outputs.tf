@@ -1,21 +1,22 @@
 # outputs.tf
 # Output values from the Terraform configuration
 
-# VPC Outputs
-output "vpc_id" {
-  description = "ID of the VPC"
-  value       = module.vpc.vpc_id
-}
+# VPC Outputs - DISABLED FOR CLOUDFRONT DEPLOYMENT
+# CloudFront + S3 static hosting doesn't use VPC resources
+# output "vpc_id" {
+#   description = "ID of the VPC"
+#   value       = module.vpc.vpc_id
+# }
 
-output "public_subnet_ids" {
-  description = "IDs of the public subnets"
-  value       = module.vpc.public_subnet_ids
-}
+# output "public_subnet_ids" {
+#   description = "IDs of the public subnets"
+#   value       = module.vpc.public_subnet_ids
+# }
 
-output "private_subnet_ids" {
-  description = "IDs of the private subnets"
-  value       = module.vpc.private_subnet_ids
-}
+# output "private_subnet_ids" {
+#   description = "IDs of the private subnets"
+#   value       = module.vpc.private_subnet_ids
+# }
 
 output "cloudfront_domain_name" {
   description = "Domain name of the CloudFront distribution"

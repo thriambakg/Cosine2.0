@@ -50,18 +50,19 @@ variable "common_tags" {
   }
 }
 
-# VPC Configuration
-variable "vpc_cidr" {
-  description = "CIDR block for VPC"
-  type        = string
-  default     = "10.0.0.0/16"
-}
+# VPC Configuration - DISABLED FOR CLOUDFRONT DEPLOYMENT
+# CloudFront + S3 static hosting doesn't need VPC networking
+# variable "vpc_cidr" {
+#   description = "CIDR block for VPC"
+#   type        = string
+#   default     = "10.0.0.0/16"
+# }
 
-variable "az_count" {
-  description = "Number of Availability Zones to use"
-  type        = number
-  default     = 2
-}
+# variable "az_count" {
+#   description = "Number of Availability Zones to use"
+#   type        = number
+#   default     = 2
+# }
 
 # SSL Certificate Configuration
 variable "certificate_arn" {
