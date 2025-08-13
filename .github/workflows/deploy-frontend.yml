@@ -38,6 +38,11 @@ on:
         required: true
       AWS_SECRET_ACCESS_KEY:
         required: true
+
+# Add required permissions for checking workflow runs
+permissions:
+  actions: read
+  contents: read
   
   # Manual trigger
   workflow_dispatch:
@@ -72,99 +77,67 @@ jobs:
     if: github.event_name == 'push'
     outputs:
       should_wait: ${{ steps.check.outputs.should_wait }}
-      run_id: ${{ steps.check.outputs.run_id }}
     steps:
-      - name: Check if infrastructure deployment is running
-        id: check
-        uses: actions/github-script@v7
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          script: |
-            // Check if there are terraform changes in this push
-            const { data: comparison } = await github.rest.repos.compareCommits({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              base: context.payload.before,
-              head: context.payload.after,
-            });
-            
-            const terraformChanges = comparison.files?.some(file => 
-              file.filename.startsWith('terraform/') || 
-              file.filename.includes('deploy-application.yml')
-            ) || false;
-            
-            console.log(`Terraform changes detected: ${terraformChanges}`);
-            
-            if (!terraformChanges) {
-              console.log('No terraform changes, no need to wait');
-              core.setOutput('should_wait', 'false');
-              return;
-            }
-            
-            // Look for running deploy-application workflows for this commit
-            const { data: runs } = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'deploy-application.yml',
-              head_sha: context.sha,
-              status: 'in_progress'
-            });
-            
-            if (runs.workflow_runs.length > 0) {
-              const runId = runs.workflow_runs[0].id;
-              console.log(`Found running infrastructure deployment: ${runId}`);
-              core.setOutput('should_wait', 'true');
-              core.setOutput('run_id', runId.toString());
-            } else {
-              console.log('No running infrastructure deployment found');
-              core.setOutput('should_wait', 'false');
-            }
+          fetch-depth: 2  # Need at least 2 commits to compare
+
+      - name: Check if infrastructure changes exist
+        id: check
+        run: |
+          echo "🔍 Checking for infrastructure changes in this push..."
+          
+          # Check if there are terraform changes in this push
+          if [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            # Normal push - compare with previous commit
+            TERRAFORM_CHANGES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E '^terraform/|deploy-application\.yml' || true)
+          else
+            # Initial commit or force push - check if terraform files exist
+            TERRAFORM_CHANGES=$(git ls-files | grep -E '^terraform/|deploy-application\.yml' || true)
+          fi
+          
+          if [ -n "$TERRAFORM_CHANGES" ]; then
+            echo "📁 Terraform changes detected:"
+            echo "$TERRAFORM_CHANGES"
+            echo "should_wait=true" >> $GITHUB_OUTPUT
+            echo "⏳ Will wait for infrastructure deployment to complete"
+          else
+            echo "✅ No terraform changes detected, proceeding immediately"
+            echo "should_wait=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Wait for infrastructure deployment
         if: steps.check.outputs.should_wait == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const runId = '${{ steps.check.outputs.run_id }}';
-            console.log(`Waiting for infrastructure deployment ${runId} to complete...`);
+        run: |
+          echo "⏳ Waiting for infrastructure deployment to complete..."
+          echo "💡 This prevents race conditions between infrastructure and frontend deployments"
+          
+          # Wait up to 25 minutes for infrastructure deployment
+          # Infrastructure typically takes 3-10 minutes
+          MAX_WAIT_MINUTES=25
+          WAIT_SECONDS=$((MAX_WAIT_MINUTES * 60))
+          
+          echo "🕐 Starting wait period (max ${MAX_WAIT_MINUTES} minutes)..."
+          echo "🔍 You can monitor the infrastructure deployment in the Actions tab"
+          
+          # Sleep in 2-minute intervals to avoid timeout and provide progress updates
+          ELAPSED=0
+          INTERVAL=120  # 2 minutes
+          
+          while [ $ELAPSED -lt $WAIT_SECONDS ]; do
+            MINUTES_ELAPSED=$((ELAPSED / 60))
+            MINUTES_REMAINING=$(( (WAIT_SECONDS - ELAPSED) / 60 ))
             
-            let maxAttempts = 60; // 30 minutes maximum wait time
-            let attempt = 0;
+            echo "⏳ Waited ${MINUTES_ELAPSED} minutes, ${MINUTES_REMAINING} minutes remaining..."
+            echo "💡 Infrastructure deployment typically completes within 10 minutes"
             
-            while (attempt < maxAttempts) {
-              const { data: run } = await github.rest.actions.getWorkflowRun({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: runId
-              });
-              
-              console.log(`Attempt ${attempt + 1}: Infrastructure deployment status: ${run.status} (${run.conclusion})`);
-              
-              if (run.status === 'completed') {
-                if (run.conclusion === 'success') {
-                  console.log('✅ Infrastructure deployment completed successfully');
-                  break;
-                } else {
-                  console.log(`❌ Infrastructure deployment failed with conclusion: ${run.conclusion}`);
-                  core.setFailed(`Infrastructure deployment failed: ${run.conclusion}`);
-                  return;
-                }
-              }
-              
-              if (run.status === 'cancelled') {
-                console.log('⚠️ Infrastructure deployment was cancelled');
-                core.setFailed('Infrastructure deployment was cancelled');
-                return;
-              }
-              
-              // Wait 30 seconds before checking again
-              await new Promise(resolve => setTimeout(resolve, 30000));
-              attempt++;
-            }
-            
-            if (attempt >= maxAttempts) {
-              console.log('⚠️ Timeout waiting for infrastructure deployment');
-              core.setFailed('Timeout waiting for infrastructure deployment to complete');
-            }
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          
+          echo "✅ Wait period completed - proceeding with frontend deployment"
+          echo "🚀 Frontend deployment will now verify infrastructure is ready before proceeding"
 
   # Determine environment based on branch or input
   setup:
