@@ -14,9 +14,10 @@ import {
   TextField,
   Typography,
   Alert,
-  CircularProgress
+  CircularProgress,
+  LinearProgress
 } from '@mui/material';
-import { Close } from '@mui/icons-material';
+import { Close, Check, Clear } from '@mui/icons-material';
 
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
@@ -36,6 +37,48 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Password strength calculation
+  const getPasswordStrength = () => {
+    if (!password) return { score: 0, level: '', color: '', requirements: [] };
+
+    let score = 0;
+    const requirements = [
+      { text: 'At least 8 characters', met: password.length >= 8 },
+      { text: 'Contains uppercase letter', met: /[A-Z]/.test(password) },
+      { text: 'Contains lowercase letter', met: /[a-z]/.test(password) },
+      { text: 'Contains number', met: /\d/.test(password) },
+      { text: 'Contains special character', met: /[!@#$%^&*(),.?":{}|<>]/.test(password) },
+    ];
+
+    requirements.forEach(req => {
+      if (req.met) score += 20;
+    });
+
+    let level = '';
+    let color = '';
+    
+    if (score === 0) {
+      level = '';
+      color = '#9ca3af';
+    } else if (score <= 40) {
+      level = 'Weak';
+      color = '#ef4444';
+    } else if (score <= 60) {
+      level = 'Fair';
+      color = '#f59e0b';
+    } else if (score <= 80) {
+      level = 'Good';
+      color = '#3b82f6';
+    } else {
+      level = 'Strong';
+      color = '#10b981';
+    }
+
+    return { score, level, color, requirements };
+  };
+
+  const passwordStrength = getPasswordStrength();
+
   // Traditional registration
   const handleEmailRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +92,12 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
       return;
     }
 
+    if (passwordStrength.score < 60) {
+      setError('Password is too weak. Please choose a stronger password.');
+      setLoading(false);
+      return;
+    }
+
     if (!agreeToTerms) {
       setError('Please agree to the terms and conditions');
       setLoading(false);
@@ -56,7 +105,14 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
     }
     
     try {
-      const result = await register(email, password, { firstName, lastName });
+      const result = await register({
+        email,
+        password,
+        firstName,
+        lastName,
+        termsAccepted: agreeToTerms,
+        marketingConsent: false // You can add this field to the form if needed
+      });
       if (result.success) {
         router.push('/');
         onClose?.();
@@ -407,7 +463,7 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
           >
             Password
           </Typography>
-          <TextField
+                    <TextField
               id="password"
             name="password"
             type="password"
@@ -418,7 +474,6 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Create a password"
             sx={{
-              mb: 2,
               '& .MuiOutlinedInput-root': {
                 borderRadius: '8px', // rounded-lg
                 fontSize: '0.875rem', // text-sm
@@ -444,6 +499,71 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
               }
             }}
           />
+
+          {/* Password Strength Indicator */}
+          {password && (
+            <Box sx={{ mt: 1, mb: 2 }}>
+              {/* Strength Bar */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <LinearProgress
+                  variant="determinate"
+                  value={passwordStrength.score}
+                  sx={{
+                    flex: 1,
+                    height: 6,
+                    borderRadius: 3,
+                    backgroundColor: '#e5e7eb',
+                    '& .MuiLinearProgress-bar': {
+                      backgroundColor: passwordStrength.color,
+                      borderRadius: 3,
+                    }
+                  }}
+                />
+                {passwordStrength.level && (
+                  <Typography 
+                    variant="caption" 
+                    sx={{ 
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      color: passwordStrength.color,
+                      minWidth: 'fit-content'
+                    }}
+                  >
+                    {passwordStrength.level}
+                  </Typography>
+                )}
+              </Box>
+
+              {/* Requirements Checklist */}
+              <Box sx={{ 
+                display: 'grid', 
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, 
+                gap: 0.5,
+                fontSize: '0.75rem'
+              }}>
+                {passwordStrength.requirements.map((req, index) => (
+                  <Box 
+                    key={index} 
+                    sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 0.5,
+                      color: req.met ? '#10b981' : '#6b7280'
+                    }}
+                  >
+                    {req.met ? (
+                      <Check sx={{ fontSize: 12 }} />
+                    ) : (
+                      <Clear sx={{ fontSize: 12 }} />
+                    )}
+                    <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                      {req.text}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
 
           <Typography 
             component="label" 

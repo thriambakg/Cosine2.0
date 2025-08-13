@@ -279,11 +279,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         options: {
           userAttributes: {
             email: userData.email.toLowerCase().trim(),
-            'custom_termsaccept': userData.termsAccepted.toString(),
-            'custom_markconsent': (userData.marketingConsent || false).toString(),
-            'custom_role': 'user',
-            'custom_subplan': 'free',
-            'custom_substatus': 'active'
+            given_name: userData.firstName.trim(),
+            family_name: userData.lastName.trim(),
+            'custom:termsaccept': userData.termsAccepted.toString(),
+            'custom:markconsent': (userData.marketingConsent || false).toString(),
+            'custom:role': 'user',
+            'custom:subplan': 'free',
+            'custom:substatus': 'active'
           }
         }
       });
