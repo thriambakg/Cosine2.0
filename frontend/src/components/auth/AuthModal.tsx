@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Close as X } from '@mui/icons-material';
-import { Dialog, DialogContent, IconButton, Box } from '@mui/material';
+import { Box, Typography, Button } from '@mui/material';
 import LoginForm from './LoginForm';
 import RegisterForm from './RegisterForm';
 import MFASetup from './MFASetup';
@@ -90,66 +90,59 @@ export default function AuthModal({
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <Dialog 
-      open={isOpen} 
-      onClose={handleClose}
-      maxWidth="sm"
-      fullWidth
-      PaperProps={{
-        sx: {
-          backgroundColor: 'transparent',
-          boxShadow: 'none',
-          overflow: 'visible',
-          margin: 2
-        }
-      }}
-      BackdropProps={{
-        sx: {
-          backgroundColor: 'rgba(0, 0, 0, 0.4)',
-          backdropFilter: 'blur(4px)'
-        }
+    <Box
+      sx={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        p: 2,
+        zIndex: 1300,
       }}
     >
-      <DialogContent sx={{ p: 0, position: 'relative', backgroundColor: 'transparent' }}>
-
-        {/* Content */}
-        {showMFASetup ? (
-          <MFASetup
-            onComplete={handleMFAComplete}
-            onSkip={requireMFA ? undefined : handleMFASkip}
-            isOptional={!requireMFA}
-          />
-        ) : mode === 'login' ? (
-          <LoginForm
-            onSwitchToRegister={handleSwitchToRegister}
-            onSwitchToReset={handleSwitchToReset}
-            onClose={handleAuthSuccess}
-          />
-        ) : mode === 'register' ? (
-          <RegisterForm
-            onSwitchToLogin={handleSwitchToLogin}
-            onClose={handleAuthSuccess}
-          />
-        ) : mode === 'reset' ? (
-          <Box sx={{ p: 3, textAlign: 'center' }}>
-            <Typography variant="h5" fontWeight={600} color="text.primary" mb={2}>
-              Reset Password
-            </Typography>
-            <Typography variant="body1" color="text.secondary" mb={3}>
-              Password reset functionality will be implemented in the next phase.
-            </Typography>
-            <Button 
-              variant="contained" 
-              onClick={handleSwitchToLogin} 
-              fullWidth
-              sx={{ mt: 2 }}
-            >
-              Back to Login
-            </Button>
-          </Box>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+      {/* Content */}
+      {showMFASetup ? (
+        <MFASetup
+          onComplete={handleMFAComplete}
+          onSkip={requireMFA ? undefined : handleMFASkip}
+          isOptional={!requireMFA}
+        />
+      ) : mode === 'login' ? (
+        <LoginForm
+          onSwitchToRegister={handleSwitchToRegister}
+          onSwitchToReset={handleSwitchToReset}
+          onClose={handleAuthSuccess}
+        />
+      ) : mode === 'register' ? (
+        <RegisterForm
+          onSwitchToLogin={handleSwitchToLogin}
+          onClose={handleAuthSuccess}
+        />
+      ) : mode === 'reset' ? (
+        <Box sx={{ p: 3, textAlign: 'center', backgroundColor: 'white', borderRadius: 2, boxShadow: 3 }}>
+          <Typography variant="h5" fontWeight={600} color="text.primary" mb={2}>
+            Reset Password
+          </Typography>
+          <Typography variant="body1" color="text.secondary" mb={3}>
+            Password reset functionality will be implemented in the next phase.
+          </Typography>
+          <Button 
+            variant="contained" 
+            onClick={handleSwitchToLogin} 
+            fullWidth
+            sx={{ mt: 2 }}
+          >
+            Back to Login
+          </Button>
+        </Box>
+      ) : null}
+    </Box>
   );
 }

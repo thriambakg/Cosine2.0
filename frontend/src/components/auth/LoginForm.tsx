@@ -1,121 +1,119 @@
 "use client";
 
-import { useState } from 'react';
-import { Visibility, VisibilityOff, Email, Lock, Shield, Warning, Close } from '@mui/icons-material';
-import { 
-  Card, 
-  Button, 
-  TextField, 
-  Alert, 
-  CircularProgress, 
-  Box, 
-  Typography, 
-  InputAdornment, 
-  IconButton,
-  Checkbox,
-  FormControlLabel,
-  Link,
-  Divider
-} from '@mui/material';
 import { useAuth } from '@/contexts/AuthContext';
-import SocialAuthButtons from './SocialAuthButtonsMUI';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import {
+  Box,
+  Button,
+  Card,
+  Checkbox,
+  Divider,
+  FormControlLabel,
+  IconButton,
+  Link,
+  TextField,
+  Typography,
+  Alert,
+  CircularProgress
+} from '@mui/material';
+import { Close } from '@mui/icons-material';
 
 interface LoginFormProps {
-  onSwitchToRegister: () => void;
-  onSwitchToReset: () => void;
   onClose?: () => void;
+  onSwitchToRegister?: () => void;
+  onSwitchToReset?: () => void;
 }
 
-export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose }: LoginFormProps) {
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    mfaCode: '',
-    rememberMe: false,
-  });
-  const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [requiresMfa, setRequiresMfa] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [attemptCount, setAttemptCount] = useState(0);
+export default function LoginForm({ onClose, onSwitchToRegister, onSwitchToReset }: LoginFormProps) {
+  const { user, isLoading, isAuthenticated, login, loginWithProvider } = useAuth();
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const { login } = useAuth();
-
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-
-    // Email validation
-    if (!formData.email) {
-      newErrors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email address';
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      router.push('/');
     }
-
-    // Password validation
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
-    } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
-    }
-
-    // MFA validation if required
-    if (requiresMfa && !formData.mfaCode) {
-      newErrors.mfaCode = 'MFA code is required';
-    } else if (requiresMfa && !/^\d{6}$/.test(formData.mfaCode)) {
-      newErrors.mfaCode = 'Please enter a valid 6-digit code';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleInputChange = (field: string, value: string | boolean) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: '' }));
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
     
-    if (!validateForm()) return;
+    // Check for authentication errors from callback
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorParam = urlParams.get('error');
+    if (errorParam === 'authentication_failed') {
+      setError('Authentication failed. Please try again.');
+    } else if (errorParam === 'callback_error') {
+      setError('There was an error completing authentication. Please try again.');
+    }
+  }, [isAuthenticated, user, router]);
 
-    setIsSubmitting(true);
-    setErrors({});
-
+  // Traditional email/password login
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    
     try {
-      const result = await login(formData.email, formData.password, formData.mfaCode);
-      
+      const result = await login(email, password);
       if (result.success) {
+        router.push('/');
         onClose?.();
-      } else if (result.requiresMfa) {
-        setRequiresMfa(true);
       } else {
-        setErrors({ submit: result.error || 'Login failed' });
-        setAttemptCount(prev => prev + 1);
+        setError(result.error || 'Login failed');
       }
-    } catch (error) {
-      setErrors({ submit: 'An unexpected error occurred. Please try again.' });
-      setAttemptCount(prev => prev + 1);
+    } catch (error: any) {
+      setError(error.message || 'Login failed');
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
-  const isAccountLocked = attemptCount >= 5;
+  // Federated identity provider login
+  const handleFederatedLogin = async (provider: 'Google') => {
+    try {
+      setLoading(true);
+      setError('');
+      await loginWithProvider(provider);
+      // The callback will handle the success/error
+    } catch (error: any) {
+      setError(error.message || `${provider} login failed`);
+      setLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <Box sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%)'
+      }}>
+        <Box textAlign="center">
+          <CircularProgress sx={{ color: '#4f46e5' }} />
+          <Typography sx={{ mt: 1, color: '#6b7280' }}>Loading...</Typography>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
-    <Box sx={{ 
-      width: '100%', 
-      maxWidth: 400, 
-      p: 4,
+    <Card sx={{
+      maxWidth: 448, // max-w-md
+      width: '100%',
+      p: 4, // space-y-8 p-8
       backgroundColor: '#ffffff',
-      border: '1px solid #e5e7eb',
-      borderRadius: '8px',
-      boxShadow: 'none',
-      position: 'relative'
+      borderRadius: '12px', // rounded-xl
+      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)', // shadow-lg
+      position: 'relative',
+      '&:hover': {
+        backgroundColor: '#ffffff', // Prevent any hover color changes
+        boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)', // Keep same shadow
+      }
     }}>
       {/* Close Button */}
       {onClose && (
@@ -123,410 +121,386 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
           onClick={onClose}
           sx={{
             position: 'absolute',
-            right: 12,
-            top: 12,
-            backgroundColor: '#f9fafb',
-            border: '1px solid #e5e7eb',
-            width: 32,
-            height: 32,
-            '&:hover': {
-              backgroundColor: '#f3f4f6',
-              borderColor: '#d1d5db',
-            }
+            right: 8,
+            top: 8,
+            color: '#6b7280',
+            '&:hover': { backgroundColor: '#f3f4f6' }
           }}
         >
-          <Close sx={{ fontSize: 16, color: '#6b7280' }} />
+          <Close sx={{ fontSize: 18 }} />
         </IconButton>
       )}
 
       {/* Header */}
-      <Box textAlign="center" mb={3}>
-        <Typography variant="h5" fontWeight="600" color="#111827" mb={1}>
-          Welcome Back
+      <Box textAlign="center" sx={{ mb: 4 }}>
+        <Typography 
+          variant="h4" 
+          sx={{ 
+            mt: 3, 
+            fontSize: '1.875rem', // text-3xl
+            fontWeight: 800, // font-extrabold
+            color: '#111827', // text-gray-900
+            mb: 1
+          }}
+        >
+          Sign in to Cosine
         </Typography>
-        <Typography variant="body2" color="#6b7280" mb={2}>
-          Sign in to your Cosine account
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            fontSize: '0.875rem', // text-sm
+            color: '#6b7280' // text-gray-600
+          }}
+        >
+          Choose your preferred sign-in method
         </Typography>
-        {requiresMfa && (
-          <Box sx={{ 
-            p: 2, 
-            backgroundColor: '#dbeafe', 
-            border: '1px solid #93c5fd',
-            borderRadius: '6px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            mb: 2
-          }}>
-            <Shield sx={{ color: '#2563eb', fontSize: 16 }} />
-            <Typography variant="body2" color="#1e40af">
-              Two-factor authentication required
-            </Typography>
-          </Box>
-        )}
       </Box>
 
-      {/* Social Authentication - only show if not in MFA mode */}
-      {!requiresMfa && (
-        <Box mb={3}>
-          <SocialAuthButtons 
-            mode="login" 
-            isDisabled={isSubmitting || isAccountLocked} 
-          />
-          <Divider sx={{ my: 3 }}>
-            <Typography variant="body2" color="text.secondary">
-              or continue with email
-            </Typography>
-          </Divider>
-        </Box>
-      )}
-
-      {/* Form */}
-      <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {/* Email Field */}
-        <Box mb={2}>
-          <Typography variant="body2" fontWeight="500" color="#374151" mb={1}>
-            Email Address *
-          </Typography>
-          <TextField
-            id="email"
-            type="email"
-            value={formData.email}
-            onChange={(e) => handleInputChange('email', e.target.value)}
-            error={!!errors.email}
-            helperText={errors.email}
-            placeholder="Enter your email"
-            disabled={isSubmitting || isAccountLocked}
-            autoComplete="email"
-            required
-            fullWidth
-            variant="outlined"
-            size="medium"
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Email sx={{ color: errors.email ? '#ef4444' : '#9ca3af', fontSize: 16 }} />
-                </InputAdornment>
-              ),
-              sx: {
-                backgroundColor: '#ffffff',
-                '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.email ? '#ef4444' : '#374151',
-                  borderWidth: '1.5px',
-                },
-                '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.email ? '#ef4444' : '#1f2937',
-                },
-                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.email ? '#ef4444' : '#1f2937',
-                  borderWidth: '2px',
-                },
-              }
-            }}
-          />
-        </Box>
-
-        {/* Password Field */}
-        <Box mb={2}>
-          <Typography variant="body2" fontWeight="500" color="#374151" mb={1}>
-            Password *
-          </Typography>
-          <TextField
-            id="password"
-            type={showPassword ? 'text' : 'password'}
-            value={formData.password}
-            onChange={(e) => handleInputChange('password', e.target.value)}
-            error={!!errors.password}
-            helperText={errors.password}
-            placeholder="Enter your password"
-            disabled={isSubmitting || isAccountLocked}
-            autoComplete="current-password"
-            required
-            fullWidth
-            variant="outlined"
-            size="medium"
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Lock sx={{ color: errors.password ? '#ef4444' : '#9ca3af', fontSize: 16 }} />
-                </InputAdornment>
-              ),
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton
-                    onClick={() => setShowPassword(!showPassword)}
-                    disabled={isSubmitting || isAccountLocked}
-                    edge="end"
-                    size="small"
-                  >
-                    {showPassword ? 
-                      <VisibilityOff sx={{ color: '#9ca3af', fontSize: 16 }} /> : 
-                      <Visibility sx={{ color: '#9ca3af', fontSize: 16 }} />
-                    }
-                  </IconButton>
-                </InputAdornment>
-              ),
-              sx: {
-                backgroundColor: '#ffffff',
-                '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.password ? '#ef4444' : '#374151',
-                  borderWidth: '1.5px',
-                },
-                '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.password ? '#ef4444' : '#1f2937',
-                },
-                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                  borderColor: errors.password ? '#ef4444' : '#1f2937',
-                  borderWidth: '2px',
-                },
-              }
-            }}
-          />
-        </Box>
-
-        {/* MFA Field (if required) */}
-        {requiresMfa && (
-          <Box mb={2}>
-            <Typography variant="body2" fontWeight="500" color="#374151" mb={1}>
-              Authentication Code *
-            </Typography>
-            <TextField
-              id="mfaCode"
-              type="text"
-              inputMode="numeric"
-              value={formData.mfaCode}
-              onChange={(e) => handleInputChange('mfaCode', e.target.value.replace(/\D/g, '').slice(0, 6))}
-              error={!!errors.mfaCode}
-              helperText={errors.mfaCode || "Enter the 6-digit code from your authenticator app"}
-              placeholder="000000"
-              disabled={isSubmitting}
-              autoComplete="one-time-code"
-              required
-              fullWidth
-              variant="outlined"
-              size="medium"
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Shield sx={{ color: errors.mfaCode ? '#ef4444' : '#9ca3af', fontSize: 16 }} />
-                  </InputAdornment>
-                ),
-                sx: {
-                  backgroundColor: '#ffffff',
-                  '& .MuiOutlinedInput-notchedOutline': {
-                    borderColor: errors.mfaCode ? '#ef4444' : '#d1d5db',
-                  },
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: errors.mfaCode ? '#ef4444' : '#9ca3af',
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: errors.mfaCode ? '#ef4444' : '#3b82f6',
-                    borderWidth: '2px',
-                  },
-                }
-              }}
-              inputProps={{
-                maxLength: 6,
-                pattern: '[0-9]*',
-              }}
-            />
-          </Box>
-        )}
-
-        {/* Remember Me */}
-        {!requiresMfa && (
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={formData.rememberMe}
-                onChange={(e) => handleInputChange('rememberMe', e.target.checked)}
-                disabled={isSubmitting || isAccountLocked}
-                color="primary"
-              />
-            }
-            label={
-              <Typography variant="body2" color="text.secondary">
-                Keep me signed in for 30 days
-              </Typography>
-            }
-          />
-        )}
-
-        {/* Account Locked Warning */}
-        {isAccountLocked && (
-          <Box sx={{ 
-            p: 2, 
-            backgroundColor: '#fef2f2', 
-            border: '1px solid #fecaca',
-            borderRadius: '6px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            mb: 2
-          }}>
-            <Warning sx={{ color: '#dc2626', fontSize: 16 }} />
-            <Typography variant="body2" color="#dc2626">
-              Account temporarily locked due to multiple failed attempts
-            </Typography>
-          </Box>
-        )}
-
-        {/* Submit Error */}
-        {errors.submit && !isAccountLocked && (
-          <Box sx={{ 
-            p: 2, 
-            backgroundColor: '#fef2f2', 
-            border: '1px solid #fecaca',
-            borderRadius: '6px',
-            mb: 2
-          }}>
-            <Box display="flex" alignItems="center" gap={1}>
-              <Warning sx={{ color: '#dc2626', fontSize: 16 }} />
-              <Typography variant="body2" color="#dc2626">
-                {errors.submit}
-              </Typography>
-            </Box>
-            {attemptCount > 2 && (
-              <Typography variant="caption" color="#dc2626" mt={0.5}>
-                {5 - attemptCount} attempts remaining before account lock
-              </Typography>
-            )}
-          </Box>
-        )}
-
-        {/* Submit Button */}
-        <Button
-          type="submit"
-          variant="contained"
-          size="large"
-          disabled={isSubmitting || isAccountLocked}
-          fullWidth
+      {/* Error Message */}
+      {error && (
+        <Alert 
+          severity="error" 
           sx={{ 
-            py: 1.5,
-            fontWeight: 600,
-            textTransform: 'none',
-            backgroundColor: '#1f2937',
-            color: '#ffffff',
-            border: '1px solid #374151',
-            '&:hover': {
-              backgroundColor: '#111827',
-              borderColor: '#1f2937',
-            },
-            '&:disabled': {
-              backgroundColor: '#6b7280',
-              color: '#ffffff',
-              borderColor: '#9ca3af',
-            },
-            borderRadius: '6px',
-            boxShadow: 'none',
-            '&:hover': {
-              boxShadow: 'none',
+            mb: 3,
+            backgroundColor: '#fef2f2', // bg-red-50
+            border: '1px solid #fecaca', // border-red-200
+            borderRadius: '8px',
+            '& .MuiAlert-message': {
+              color: '#991b1b', // text-red-800
+              fontSize: '0.875rem' // text-sm
             }
           }}
         >
-          {isSubmitting ? (
-            <Box display="flex" alignItems="center" gap={1}>
-              <CircularProgress size={16} color="inherit" />
-              {requiresMfa ? 'Verifying...' : 'Signing In...'}
-            </Box>
-          ) : (
-            requiresMfa ? 'Verify Code' : 'Sign In'
-          )}
-        </Button>
-
-        {/* Forgot Password Link */}
-        {!requiresMfa && (
-          <Box textAlign="center" mt={2}>
-            <Typography 
-              component="button"
-              type="button"
-              onClick={onSwitchToReset}
-              variant="body2"
-              disabled={isSubmitting}
-              sx={{ 
-                cursor: 'pointer',
-                color: '#3b82f6',
-                textDecoration: 'none',
-                border: 'none',
-                background: 'none',
-                '&:hover': {
-                  color: '#1d4ed8',
-                  textDecoration: 'underline',
-                }
-              }}
-            >
-              Forgot your password?
-            </Typography>
-          </Box>
-        )}
-
-        {/* Back to Password (when in MFA mode) */}
-        {requiresMfa && (
-          <Box textAlign="center" mt={2}>
-            <Typography
-              component="button"
-              type="button"
-              onClick={() => {
-                setRequiresMfa(false);
-                setFormData(prev => ({ ...prev, mfaCode: '' }));
-                setErrors({});
-              }}
-              variant="body2"
-              disabled={isSubmitting}
-              sx={{ 
-                cursor: 'pointer',
-                color: '#6b7280',
-                textDecoration: 'none',
-                border: 'none',
-                background: 'none',
-                '&:hover': {
-                  color: '#374151',
-                  textDecoration: 'underline',
-                }
-              }}
-            >
-              ← Back to password
-            </Typography>
-          </Box>
-        )}
-      </Box>
-
-      {/* Switch to Register */}
-      {!requiresMfa && (
-        <Box textAlign="center" pt={3} borderTop="1px solid #e5e7eb">
-          <Typography variant="body2" color="#6b7280">
-            Don't have an account?{' '}
-            <Typography
-              component="button"
-              onClick={onSwitchToRegister}
-              variant="body2"
-              fontWeight={600}
-              disabled={isSubmitting}
-              sx={{ 
-                cursor: 'pointer',
-                color: '#3b82f6',
-                textDecoration: 'none',
-                border: 'none',
-                background: 'none',
-                '&:hover': {
-                  color: '#1d4ed8',
-                  textDecoration: 'underline',
-                }
-              }}
-            >
-              Create account
-            </Typography>
-          </Typography>
-        </Box>
+          {error}
+        </Alert>
       )}
 
-      {/* Security Notice */}
-      <Box textAlign="center" mt={2}>
-        <Typography variant="caption" color="#9ca3af" display="flex" alignItems="center" justifyContent="center" gap={0.5}>
-          <Shield sx={{ fontSize: 12 }} />
-          Protected by enterprise-grade security
+      {/* Third-Party Authentication Buttons */}
+      <Box sx={{ mb: 3 }}>
+        {/* Google Sign-In */}
+        <Button
+          fullWidth
+          variant="outlined"
+          onClick={() => handleFederatedLogin('Google')}
+          disabled={loading}
+          sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            px: 2,
+            py: 1.5,
+            border: '1px solid #d1d5db', // border-gray-300
+            borderRadius: '8px', // rounded-lg
+            backgroundColor: '#ffffff', // bg-white
+            fontSize: '0.875rem', // text-sm
+            fontWeight: 500, // font-medium
+            color: '#374151', // text-gray-700
+            textTransform: 'none',
+            boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)', // shadow-sm
+            '&:hover': {
+              backgroundColor: '#f9fafb', // hover:bg-gray-50
+              borderColor: '#d1d5db',
+            },
+            '&:focus': {
+              outline: 'none',
+              ringWidth: '2px',
+              ringColor: '#4f46e5', // focus:ring-indigo-500
+              ringOffset: '2px',
+            },
+            '&:disabled': {
+              opacity: 0.5
+            }
+          }}
+        >
+          <Box sx={{ mr: 1.5 }}>
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+          </Box>
+          Continue with Google
+        </Button>
+      </Box>
+
+      {/* Divider */}
+      <Box sx={{ position: 'relative', mb: 3 }}>
+        <Box sx={{ 
+          position: 'absolute', 
+          inset: 0, 
+          display: 'flex', 
+          alignItems: 'center' 
+        }}>
+          <Divider sx={{ width: '100%', borderColor: '#d1d5db' }} />
+        </Box>
+        <Box sx={{ 
+          position: 'relative', 
+          display: 'flex', 
+          justifyContent: 'center' 
+        }}>
+          <Typography 
+            variant="body2" 
+            sx={{ 
+              px: 1, 
+              backgroundColor: '#ffffff', 
+              color: '#6b7280', // text-gray-500
+              fontSize: '0.875rem' // text-sm
+            }}
+          >
+            Or continue with email
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Traditional Email/Password Form */}
+      <Box component="form" onSubmit={handleEmailLogin} sx={{ mb: 3 }}>
+        <Box sx={{ mb: 3 }}>
+          <Typography 
+            component="label" 
+            htmlFor="email" 
+            sx={{ 
+              display: 'block', 
+              fontSize: '0.875rem', // text-sm
+              fontWeight: 500, // font-medium
+              color: '#374151', // text-gray-700
+              mb: 0.5
+            }}
+          >
+            Email address
+          </Typography>
+          <TextField
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            fullWidth
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Enter your email"
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '8px', // rounded-lg
+                fontSize: '0.875rem', // text-sm
+                color: '#111827', // text-gray-900
+                '& fieldset': {
+                  borderColor: '#d1d5db', // border-gray-300
+                },
+                '&:hover fieldset': {
+                  borderColor: '#d1d5db',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#4f46e5', // focus:border-indigo-500
+                  borderWidth: '1px',
+                },
+                '&.Mui-focused': {
+                  outline: 'none',
+                  ringWidth: '2px',
+                  ringColor: '#4f46e5', // focus:ring-indigo-500
+                }
+              },
+              '& .MuiOutlinedInput-input': {
+                px: 1.5,
+                py: 1,
+                '&::placeholder': {
+                  color: '#6b7280', // placeholder-gray-500
+                  opacity: 1
+                }
+              }
+            }}
+          />
+        </Box>
+
+        <Box sx={{ mb: 3 }}>
+          <Typography 
+            component="label" 
+            htmlFor="password" 
+            sx={{ 
+              display: 'block', 
+              fontSize: '0.875rem', // text-sm
+              fontWeight: 500, // font-medium
+              color: '#374151', // text-gray-700
+              mb: 0.5
+            }}
+          >
+            Password
+          </Typography>
+          <TextField
+            id="password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            fullWidth
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter your password"
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '8px', // rounded-lg
+                fontSize: '0.875rem', // text-sm
+                color: '#111827', // text-gray-900
+                '& fieldset': {
+                  borderColor: '#d1d5db', // border-gray-300
+                },
+                '&:hover fieldset': {
+                  borderColor: '#d1d5db',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#4f46e5', // focus:border-indigo-500
+                  borderWidth: '1px',
+                },
+                '&.Mui-focused': {
+                  outline: 'none',
+                  ringWidth: '2px',
+                  ringColor: '#4f46e5', // focus:ring-indigo-500
+                }
+              },
+              '& .MuiOutlinedInput-input': {
+                px: 1.5,
+                py: 1,
+                '&::placeholder': {
+                  color: '#6b7280', // placeholder-gray-500
+                  opacity: 1
+                }
+              }
+            }}
+          />
+        </Box>
+
+        <Box sx={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          mb: 3
+        }}>
+          <FormControlLabel
+            control={
+              <Checkbox
+                id="remember-me"
+                name="remember-me"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                sx={{
+                  color: '#4f46e5', // text-indigo-600
+                  '&.Mui-checked': {
+                    color: '#4f46e5',
+                  },
+                  '&:focus': {
+                    ringWidth: '2px',
+                    ringColor: '#4f46e5', // focus:ring-indigo-500
+                  }
+                }}
+              />
+            }
+            label={
+              <Typography 
+                sx={{ 
+                  fontSize: '0.875rem', // text-sm
+                  color: '#111827' // text-gray-900
+                }}
+              >
+                Remember me
+              </Typography>
+            }
+          />
+
+          <Typography
+            component="button"
+            type="button"
+            onClick={onSwitchToReset}
+            sx={{
+              fontSize: '0.875rem', // text-sm
+              fontWeight: 500, // font-medium
+              color: '#4f46e5', // text-indigo-600
+              textDecoration: 'none',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              '&:hover': {
+                color: '#4338ca', // hover:text-indigo-500
+                textDecoration: 'underline'
+              }
+            }}
+          >
+            Forgot your password?
+          </Typography>
+        </Box>
+
+        <Button
+          type="submit"
+          fullWidth
+          disabled={loading}
+          sx={{
+            position: 'relative',
+            display: 'flex',
+            justifyContent: 'center',
+            py: 1,
+            px: 2,
+            border: 'none',
+            fontSize: '0.875rem', // text-sm
+            fontWeight: 500, // font-medium
+            borderRadius: '8px', // rounded-lg
+            color: '#ffffff', // text-white
+            backgroundColor: '#4f46e5', // bg-indigo-600
+            textTransform: 'none',
+            '&:hover': {
+              backgroundColor: '#4338ca', // hover:bg-indigo-700
+            },
+            '&:focus': {
+              outline: 'none',
+              ringWidth: '2px',
+              ringColor: '#4f46e5', // focus:ring-indigo-500
+              ringOffset: '2px',
+            },
+            '&:disabled': {
+              opacity: 0.5
+            }
+          }}
+        >
+          {loading ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={16} sx={{ color: '#ffffff' }} />
+              Signing in...
+            </Box>
+          ) : (
+            'Sign in with Email'
+          )}
+        </Button>
+      </Box>
+
+      {/* Sign Up Link */}
+      <Box textAlign="center">
+        <Typography 
+          sx={{ 
+            fontSize: '0.875rem', // text-sm
+            color: '#6b7280' // text-gray-600
+          }}
+        >
+          Don't have an account?{' '}
+          <Typography
+            component="button"
+            type="button"
+            onClick={onSwitchToRegister}
+            sx={{
+              fontWeight: 500, // font-medium
+              color: '#4f46e5', // text-indigo-600
+              textDecoration: 'none',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'inline',
+              '&:hover': {
+                color: '#4338ca', // hover:text-indigo-500
+                textDecoration: 'underline'
+              }
+            }}
+          >
+            Sign up here
+          </Typography>
         </Typography>
       </Box>
-    </Box>
+    </Card>
   );
 }

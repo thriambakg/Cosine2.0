@@ -1,25 +1,22 @@
 "use client";
 
-import { useState } from 'react';
-import { Visibility, VisibilityOff, Email, Lock, Person, Phone, Shield, Warning, Check, Close } from '@mui/icons-material';
-import { 
-  Card, 
-  Button, 
-  TextField, 
-  Alert, 
-  CircularProgress, 
-  Box, 
-  Typography, 
-  InputAdornment, 
-  IconButton,
-  Checkbox,
-  FormControlLabel,
-  Link,
-  Divider,
-  Grid
-} from '@mui/material';
 import { useAuth } from '@/contexts/AuthContext';
-import SocialAuthButtons from './SocialAuthButtonsMUI';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import {
+  Box,
+  Button,
+  Card,
+  Checkbox,
+  Divider,
+  FormControlLabel,
+  IconButton,
+  TextField,
+  Typography,
+  Alert,
+  CircularProgress
+} from '@mui/material';
+import { Close } from '@mui/icons-material';
 
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
@@ -27,182 +24,78 @@ interface RegisterFormProps {
 }
 
 export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormProps) {
-  const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    phoneNumber: '',
-    password: '',
-    confirmPassword: '',
-    agreeToTerms: false,
-    agreeToMarketing: false,
-  });
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [passwordFocus, setPasswordFocus] = useState(false);
+  const { register, loginWithProvider } = useAuth();
+  const router = useRouter();
+  
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreeToTerms, setAgreeToTerms] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const { register } = useAuth();
-
-  // Password strength validation
-  const passwordRequirements = [
-    { label: 'At least 8 characters', test: (pwd: string) => pwd.length >= 8 },
-    { label: 'Contains uppercase letter', test: (pwd: string) => /[A-Z]/.test(pwd) },
-    { label: 'Contains lowercase letter', test: (pwd: string) => /[a-z]/.test(pwd) },
-    { label: 'Contains number', test: (pwd: string) => /\d/.test(pwd) },
-    { label: 'Contains special character', test: (pwd: string) => /[!@#$%^&*(),.?":{}|<>]/.test(pwd) },
-  ];
-
-  const getPasswordStrength = () => {
-    const passedRequirements = passwordRequirements.filter(req => req.test(formData.password)).length;
-    if (passedRequirements < 2) return { strength: 'weak', color: 'bg-red-500', text: 'Weak' };
-    if (passedRequirements < 4) return { strength: 'medium', color: 'bg-yellow-500', text: 'Medium' };
-    return { strength: 'strong', color: 'bg-green-500', text: 'Strong' };
-  };
-
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-
-    // First name validation
-    if (!formData.firstName.trim()) {
-      newErrors.firstName = 'First name is required';
-    } else if (formData.firstName.trim().length < 2) {
-      newErrors.firstName = 'First name must be at least 2 characters';
-    } else if (!/^[a-zA-Z\s-']+$/.test(formData.firstName.trim())) {
-      newErrors.firstName = 'First name contains invalid characters';
-    }
-
-    // Last name validation
-    if (!formData.lastName.trim()) {
-      newErrors.lastName = 'Last name is required';
-    } else if (formData.lastName.trim().length < 2) {
-      newErrors.lastName = 'Last name must be at least 2 characters';
-    } else if (!/^[a-zA-Z\s-']+$/.test(formData.lastName.trim())) {
-      newErrors.lastName = 'Last name contains invalid characters';
-    }
-
-    // Email validation
-    if (!formData.email) {
-      newErrors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email address';
-    }
-
-    // Phone number validation (optional but must be valid if provided)
-    if (formData.phoneNumber && !/^\+?[\d\s-()]{10,}$/.test(formData.phoneNumber)) {
-      newErrors.phoneNumber = 'Please enter a valid phone number';
-    }
-
-    // Password validation
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
-    } else {
-      const failedRequirements = passwordRequirements.filter(req => !req.test(formData.password));
-      if (failedRequirements.length > 0) {
-        newErrors.password = 'Password does not meet security requirements';
-      }
-    }
-
-    // Confirm password validation
-    if (!formData.confirmPassword) {
-      newErrors.confirmPassword = 'Please confirm your password';
-    } else if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match';
-    }
-
-    // Terms validation
-    if (!formData.agreeToTerms) {
-      newErrors.agreeToTerms = 'You must agree to the Terms of Service';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Traditional registration
+  const handleEmailRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!validateForm()) return;
+    setLoading(true);
+    setError('');
 
-    setIsSubmitting(true);
+    // Basic validation
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      setLoading(false);
+      return;
+    }
+
+    if (!agreeToTerms) {
+      setError('Please agree to the terms and conditions');
+      setLoading(false);
+      return;
+    }
     
     try {
-      // Pass all required fields for RegisterData, but only email/password are sent to Cognito in backend
-      const result = await register({
-        email: formData.email.toLowerCase().trim(),
-        password: formData.password,
-        firstName: formData.firstName.trim(),
-        lastName: formData.lastName.trim(),
-        phoneNumber: formData.phoneNumber || undefined,
-        termsAccepted: formData.agreeToTerms,
-        marketingConsent: formData.agreeToMarketing,
-      });
+      const result = await register(email, password, { firstName, lastName });
       if (result.success) {
-        // Send extra fields to backend/DynamoDB
-        await fetch('/api/user', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: formData.email.toLowerCase().trim(),
-            firstName: formData.firstName.trim(),
-            lastName: formData.lastName.trim(),
-            phoneNumber: formData.phoneNumber || undefined,
-            marketingConsent: formData.agreeToMarketing,
-            termsAccepted: formData.agreeToTerms,
-          }),
-        });
+        router.push('/');
         onClose?.();
       } else {
-        setErrors({ submit: result.error || 'Registration failed' });
+        setError(result.error || 'Registration failed');
       }
-    } catch (error) {
-      setErrors({ submit: 'An unexpected error occurred' });
+    } catch (error: any) {
+      setError(error.message || 'Registration failed');
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
-  const handleInputChange = (field: string, value: string | boolean) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: '' }));
-    }
-    // Clear submit error when user makes changes
-    if (errors.submit) {
-      setErrors(prev => ({ ...prev, submit: '' }));
+  // Federated identity provider login
+  const handleFederatedLogin = async (provider: 'Google') => {
+    try {
+      setLoading(true);
+      setError('');
+      await loginWithProvider(provider);
+      // The callback will handle the success/error
+    } catch (error: any) {
+      setError(error.message || `${provider} registration failed`);
+      setLoading(false);
     }
   };
-
-  const passwordStrength = getPasswordStrength();
 
   return (
-    <Card sx={{ 
-      width: '100%', 
-      maxWidth: 400, 
-      p: 3,
+    <Card sx={{
+      maxWidth: 448, // max-w-md
+      width: '100%',
+      p: 4, // space-y-8 p-8
       backgroundColor: '#ffffff',
-      border: '1px solid #e5e7eb',
-      borderRadius: '8px',
-      boxShadow: 'none',
-      maxHeight: '85vh',
-      overflowY: 'auto',
+      borderRadius: '12px', // rounded-xl
+      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)', // shadow-lg
       position: 'relative',
-      '&::-webkit-scrollbar': {
-        width: '6px',
-      },
-      '&::-webkit-scrollbar-track': {
-        backgroundColor: '#f1f5f9',
-        borderRadius: '3px',
-      },
-      '&::-webkit-scrollbar-thumb': {
-        backgroundColor: '#cbd5e1',
-        borderRadius: '3px',
-        '&:hover': {
-          backgroundColor: '#94a3b8',
-        },
-      },
+      '&:hover': {
+        backgroundColor: '#ffffff', // Prevent any hover color changes
+        boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)', // Keep same shadow
+      }
     }}>
       {/* Close Button */}
       {onClose && (
@@ -210,364 +103,526 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
           onClick={onClose}
           sx={{
             position: 'absolute',
-            right: 12,
-            top: 12,
-            backgroundColor: '#f9fafb',
-            border: '1px solid #e5e7eb',
-            width: 32,
-            height: 32,
-            '&:hover': {
-              backgroundColor: '#f3f4f6',
-              borderColor: '#d1d5db',
-            }
+            right: 8,
+            top: 8,
+            color: '#6b7280',
+            '&:hover': { backgroundColor: '#f3f4f6' }
           }}
         >
-          <Close sx={{ fontSize: 16, color: '#6b7280' }} />
+          <Close sx={{ fontSize: 18 }} />
         </IconButton>
       )}
 
-      <Box textAlign="center" mb={2}>
-        <Typography variant="h6" fontWeight="600" color="#111827" mb={1}>
+      {/* Header */}
+      <Box textAlign="center" sx={{ mb: 4 }}>
+        <Typography 
+          variant="h4" 
+          sx={{ 
+            mt: 3, 
+            fontSize: '1.875rem', // text-3xl
+            fontWeight: 800, // font-extrabold
+            color: '#111827', // text-gray-900
+            mb: 1
+          }}
+        >
           Create Account
         </Typography>
-        <Typography variant="body2" color="#6b7280" fontSize="0.875rem">
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            fontSize: '0.875rem', // text-sm
+            color: '#6b7280' // text-gray-600
+          }}
+        >
           Join Cosine and start trading smarter
         </Typography>
       </Box>
 
-      {/* Social Authentication */}
-      <SocialAuthButtons 
-        mode="register" 
-        isDisabled={isSubmitting} 
-      />
+      {/* Error Message */}
+      {error && (
+        <Alert 
+          severity="error" 
+          sx={{ 
+            mb: 3,
+            backgroundColor: '#fef2f2', // bg-red-50
+            border: '1px solid #fecaca', // border-red-200
+            borderRadius: '8px',
+            '& .MuiAlert-message': {
+              color: '#991b1b', // text-red-800
+              fontSize: '0.875rem' // text-sm
+            }
+          }}
+        >
+          {error}
+        </Alert>
+      )}
 
-      <form onSubmit={handleSubmit} style={{ marginTop: '16px' }}>
+      {/* Third-Party Authentication Buttons */}
+      <Box sx={{ mb: 3 }}>
+        {/* Google Sign-Up */}
+        <Button
+          fullWidth
+          variant="outlined"
+          onClick={() => handleFederatedLogin('Google')}
+          disabled={loading}
+          sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            px: 2,
+            py: 1.5,
+            border: '1px solid #d1d5db', // border-gray-300
+            borderRadius: '8px', // rounded-lg
+            backgroundColor: '#ffffff', // bg-white
+            fontSize: '0.875rem', // text-sm
+            fontWeight: 500, // font-medium
+            color: '#374151', // text-gray-700
+            textTransform: 'none',
+            boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)', // shadow-sm
+            '&:hover': {
+              backgroundColor: '#f9fafb', // hover:bg-gray-50
+              borderColor: '#d1d5db',
+            },
+            '&:focus': {
+              outline: 'none',
+              ringWidth: '2px',
+              ringColor: '#4f46e5', // focus:ring-indigo-500
+              ringOffset: '2px',
+            },
+            '&:disabled': {
+              opacity: 0.5
+            }
+          }}
+        >
+          <Box sx={{ mr: 1.5 }}>
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+          </Box>
+          Continue with Google
+        </Button>
+      </Box>
+
+      {/* Divider */}
+      <Box sx={{ position: 'relative', mb: 3 }}>
+        <Box sx={{ 
+          position: 'absolute', 
+          inset: 0, 
+          display: 'flex', 
+          alignItems: 'center' 
+        }}>
+          <Divider sx={{ width: '100%', borderColor: '#d1d5db' }} />
+        </Box>
+        <Box sx={{ 
+          position: 'relative', 
+          display: 'flex', 
+          justifyContent: 'center' 
+        }}>
+          <Typography 
+            variant="body2" 
+            sx={{ 
+              px: 1, 
+              backgroundColor: '#ffffff', 
+              color: '#6b7280', // text-gray-500
+              fontSize: '0.875rem' // text-sm
+            }}
+          >
+            Or create account with email
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Registration Form */}
+      <Box component="form" onSubmit={handleEmailRegister} sx={{ mb: 3 }}>
         {/* Name Fields - Stacked */}
-        <div style={{ marginBottom: '16px' }}>
-          <div style={{ marginBottom: '12px' }}>
-            <Typography variant="body2" fontWeight="500" color="#374151" fontSize="0.875rem" mb={0.5}>
-              First Name *
-            </Typography>
-            <div className="relative">
-              <Person className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input
+        <Box sx={{ mb: 3 }}>
+          <Typography 
+            component="label" 
+            htmlFor="firstName" 
+            sx={{ 
+              display: 'block', 
+              fontSize: '0.875rem', // text-sm
+              fontWeight: 500, // font-medium
+              color: '#374151', // text-gray-700
+              mb: 0.5
+            }}
+          >
+            First Name
+          </Typography>
+          <TextField
                 id="firstName"
+            name="firstName"
                 type="text"
-                value={formData.firstName}
-                onChange={(e) => handleInputChange('firstName', e.target.value)}
-                className={`w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
-                  errors.firstName ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="John"
-                disabled={isSubmitting}
                 autoComplete="given-name"
                 required
-                style={{ fontSize: '0.875rem' }}
-              />
-            </div>
-            {errors.firstName && (
-              <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '4px' }}>{errors.firstName}</p>
-            )}
-          </div>
+            fullWidth
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            placeholder="John"
+            sx={{
+              mb: 2,
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '8px', // rounded-lg
+                fontSize: '0.875rem', // text-sm
+                color: '#111827', // text-gray-900
+                '& fieldset': {
+                  borderColor: '#d1d5db', // border-gray-300
+                },
+                '&:hover fieldset': {
+                  borderColor: '#d1d5db',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#4f46e5', // focus:border-indigo-500
+                  borderWidth: '1px',
+                }
+              },
+              '& .MuiOutlinedInput-input': {
+                px: 1.5,
+                py: 1,
+                '&::placeholder': {
+                  color: '#6b7280', // placeholder-gray-500
+                  opacity: 1
+                }
+              }
+            }}
+          />
 
-          <div>
-            <Typography variant="body2" fontWeight="500" color="#374151" fontSize="0.875rem" mb={0.5}>
-              Last Name *
-            </Typography>
-            <input
+          <Typography 
+            component="label" 
+            htmlFor="lastName" 
+            sx={{ 
+              display: 'block', 
+              fontSize: '0.875rem', // text-sm
+              fontWeight: 500, // font-medium
+              color: '#374151', // text-gray-700
+              mb: 0.5
+            }}
+          >
+            Last Name
+          </Typography>
+          <TextField
               id="lastName"
+            name="lastName"
               type="text"
-              value={formData.lastName}
-              onChange={(e) => handleInputChange('lastName', e.target.value)}
-              className={`w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
-                errors.lastName ? 'border-red-500' : 'border-gray-300'
-              }`}
-              placeholder="Doe"
-              disabled={isSubmitting}
               autoComplete="family-name"
               required
-              style={{ fontSize: '0.875rem' }}
-            />
-            {errors.lastName && (
-              <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '4px' }}>{errors.lastName}</p>
-            )}
-          </div>
-        </div>
+            fullWidth
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            placeholder="Doe"
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '8px', // rounded-lg
+                fontSize: '0.875rem', // text-sm
+                color: '#111827', // text-gray-900
+                '& fieldset': {
+                  borderColor: '#d1d5db', // border-gray-300
+                },
+                '&:hover fieldset': {
+                  borderColor: '#d1d5db',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#4f46e5', // focus:border-indigo-500
+                  borderWidth: '1px',
+                }
+              },
+              '& .MuiOutlinedInput-input': {
+                px: 1.5,
+                py: 1,
+                '&::placeholder': {
+                  color: '#6b7280', // placeholder-gray-500
+                  opacity: 1
+                }
+              }
+            }}
+          />
+        </Box>
 
-        {/* Email Field */}
-        <div style={{ marginBottom: '12px' }}>
-          <Typography variant="body2" fontWeight="500" color="#374151" fontSize="0.875rem" mb={0.5}>
-            Email Address *
+        <Box sx={{ mb: 3 }}>
+          <Typography 
+            component="label" 
+            htmlFor="email" 
+            sx={{ 
+              display: 'block', 
+              fontSize: '0.875rem', // text-sm
+              fontWeight: 500, // font-medium
+              color: '#374151', // text-gray-700
+              mb: 0.5
+            }}
+          >
+            Email address
           </Typography>
-          <div className="relative">
-            <Email className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
+          <TextField
               id="email"
+            name="email"
               type="email"
-              value={formData.email}
-              onChange={(e) => handleInputChange('email', e.target.value)}
-              className={`w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
-                errors.email ? 'border-red-500' : 'border-gray-300'
-              }`}
-              placeholder="john@example.com"
-              disabled={isSubmitting}
               autoComplete="email"
               required
-            />
-          </div>
-          {errors.email && (
-            <div className="flex items-center space-x-1">
-              <AlertCircle className="w-4 h-4 text-red-500" />
-              <p className="text-red-500 text-sm">{errors.email}</p>
-            </div>
-          )}
-        </div>
+            fullWidth
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Enter your email"
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '8px', // rounded-lg
+                fontSize: '0.875rem', // text-sm
+                color: '#111827', // text-gray-900
+                '& fieldset': {
+                  borderColor: '#d1d5db', // border-gray-300
+                },
+                '&:hover fieldset': {
+                  borderColor: '#d1d5db',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#4f46e5', // focus:border-indigo-500
+                  borderWidth: '1px',
+                }
+              },
+              '& .MuiOutlinedInput-input': {
+                px: 1.5,
+                py: 1,
+                '&::placeholder': {
+                  color: '#6b7280', // placeholder-gray-500
+                  opacity: 1
+                }
+              }
+            }}
+          />
+        </Box>
 
-        {/* Phone Number Field (Optional) */}
-        <div className="space-y-2">
-          <label htmlFor="phoneNumber" className="text-sm font-medium text-gray-700">
-            Phone Number <span className="text-gray-500">(Optional)</span>
-          </label>
-          <div className="relative">
-            <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              id="phoneNumber"
-              type="tel"
-              value={formData.phoneNumber}
-              onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
-              className={`w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
-                errors.phoneNumber ? 'border-red-500' : 'border-gray-300'
-              }`}
-              placeholder="+1 (555) 123-4567"
-              disabled={isSubmitting}
-              autoComplete="tel"
-            />
-          </div>
-          {errors.phoneNumber && (
-            <div className="flex items-center space-x-1">
-              <AlertCircle className="w-4 h-4 text-red-500" />
-              <p className="text-red-500 text-sm">{errors.phoneNumber}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Password Field */}
-        <div className="space-y-2">
-          <label htmlFor="password" className="text-sm font-medium text-gray-700">
-            Password *
-          </label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
+        <Box sx={{ mb: 3 }}>
+          <Typography 
+            component="label" 
+            htmlFor="password" 
+            sx={{ 
+              display: 'block', 
+              fontSize: '0.875rem', // text-sm
+              fontWeight: 500, // font-medium
+              color: '#374151', // text-gray-700
+              mb: 0.5
+            }}
+          >
+            Password
+          </Typography>
+          <TextField
               id="password"
-              type={showPassword ? 'text' : 'password'}
-              value={formData.password}
-              onChange={(e) => handleInputChange('password', e.target.value)}
-              onFocus={() => setPasswordFocus(true)}
-              onBlur={() => setPasswordFocus(false)}
-              className={`w-full pl-10 pr-12 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
-                errors.password ? 'border-red-500' : 'border-gray-300'
-              }`}
-              placeholder="Create a strong password"
-              disabled={isSubmitting}
+            name="password"
+            type="password"
               autoComplete="new-password"
               required
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-              disabled={isSubmitting}
-              tabIndex={-1}
-            >
-              {showPassword ? <VisibilityOff /> : <Visibility />}
-            </button>
-          </div>
+            fullWidth
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Create a password"
+            sx={{
+              mb: 2,
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '8px', // rounded-lg
+                fontSize: '0.875rem', // text-sm
+                color: '#111827', // text-gray-900
+                '& fieldset': {
+                  borderColor: '#d1d5db', // border-gray-300
+                },
+                '&:hover fieldset': {
+                  borderColor: '#d1d5db',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#4f46e5', // focus:border-indigo-500
+                  borderWidth: '1px',
+                }
+              },
+              '& .MuiOutlinedInput-input': {
+                px: 1.5,
+                py: 1,
+                '&::placeholder': {
+                  color: '#6b7280', // placeholder-gray-500
+                  opacity: 1
+                }
+              }
+            }}
+          />
 
-          {/* Password Strength Indicator */}
-          {formData.password && (passwordFocus || errors.password) && (
-            <div className="space-y-2">
-              <div className="flex items-center space-x-2">
-                <div className="flex-1 bg-gray-200 rounded-full h-2">
-                  <div 
-                    className={`h-2 rounded-full transition-all duration-300 ${passwordStrength.color}`}
-                    style={{ width: `${(passwordRequirements.filter(req => req.test(formData.password)).length / passwordRequirements.length) * 100}%` }}
-                  />
-                </div>
-                <span className={`text-xs font-medium ${
-                  passwordStrength.strength === 'weak' ? 'text-red-600' :
-                  passwordStrength.strength === 'medium' ? 'text-yellow-600' : 'text-green-600'
-                }`}>
-                  {passwordStrength.text}
-                </span>
-              </div>
-              <div className="space-y-1">
-                {passwordRequirements.map((req, index) => {
-                  const passed = req.test(formData.password);
-                  return (
-                    <div key={index} className="flex items-center space-x-2">
-                      {passed ? (
-                        <Check className="w-3 h-3 text-green-500" />
-                      ) : (
-                        <X className="w-3 h-3 text-gray-300" />
-                      )}
-                      <span className={`text-xs ${passed ? 'text-green-600' : 'text-gray-500'}`}>
-                        {req.label}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {errors.password && (
-            <div className="flex items-center space-x-1">
-              <AlertCircle className="w-4 h-4 text-red-500" />
-              <p className="text-red-500 text-sm">{errors.password}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Confirm Password Field */}
-        <div className="space-y-2">
-          <label htmlFor="confirmPassword" className="text-sm font-medium text-gray-700">
-            Confirm Password *
-          </label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
+          <Typography 
+            component="label" 
+            htmlFor="confirmPassword" 
+            sx={{ 
+              display: 'block', 
+              fontSize: '0.875rem', // text-sm
+              fontWeight: 500, // font-medium
+              color: '#374151', // text-gray-700
+              mb: 0.5
+            }}
+          >
+            Confirm Password
+          </Typography>
+          <TextField
               id="confirmPassword"
-              type={showConfirmPassword ? 'text' : 'password'}
-              value={formData.confirmPassword}
-              onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-              className={`w-full pl-10 pr-12 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
-                errors.confirmPassword ? 'border-red-500' : 
-                formData.confirmPassword && formData.password === formData.confirmPassword ? 'border-green-500' : 'border-gray-300'
-              }`}
-              placeholder="Confirm your password"
-              disabled={isSubmitting}
+            name="confirmPassword"
+            type="password"
               autoComplete="new-password"
               required
-            />
-            <button
-              type="button"
-              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-              disabled={isSubmitting}
-              tabIndex={-1}
-            >
-              {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
-            </button>
-          </div>
-          {formData.confirmPassword && formData.password === formData.confirmPassword && !errors.confirmPassword && (
-            <div className="flex items-center space-x-1">
-              <Check className="w-4 h-4 text-green-500" />
-              <p className="text-green-500 text-sm">Passwords match</p>
-            </div>
-          )}
-          {errors.confirmPassword && (
-            <div className="flex items-center space-x-1">
-              <AlertCircle className="w-4 h-4 text-red-500" />
-              <p className="text-red-500 text-sm">{errors.confirmPassword}</p>
-            </div>
-          )}
-        </div>
+            fullWidth
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Confirm your password"
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '8px', // rounded-lg
+                fontSize: '0.875rem', // text-sm
+                color: '#111827', // text-gray-900
+                '& fieldset': {
+                  borderColor: '#d1d5db', // border-gray-300
+                },
+                '&:hover fieldset': {
+                  borderColor: '#d1d5db',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#4f46e5', // focus:border-indigo-500
+                  borderWidth: '1px',
+                }
+              },
+              '& .MuiOutlinedInput-input': {
+                px: 1.5,
+                py: 1,
+                '&::placeholder': {
+                  color: '#6b7280', // placeholder-gray-500
+                  opacity: 1
+                }
+              }
+            }}
+          />
+        </Box>
 
-        {/* Terms and Conditions */}
-        <div className="space-y-3">
-          <div className="flex items-start space-x-2">
-            <input
-              id="agreeToTerms"
-              type="checkbox"
-              checked={formData.agreeToTerms}
-              onChange={(e) => handleInputChange('agreeToTerms', e.target.checked)}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 mt-0.5"
-              disabled={isSubmitting}
-              required
-            />
-            <label htmlFor="agreeToTerms" className="text-sm text-gray-700">
+        <Box sx={{ mb: 3 }}>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={agreeToTerms}
+                onChange={(e) => setAgreeToTerms(e.target.checked)}
+                sx={{
+                  color: '#4f46e5', // text-indigo-600
+                  '&.Mui-checked': {
+                    color: '#4f46e5',
+                  }
+                }}
+              />
+            }
+            label={
+              <Typography 
+                sx={{ 
+                  fontSize: '0.875rem', // text-sm
+                  color: '#111827' // text-gray-900
+                }}
+              >
               I agree to the{' '}
-              <a href="/terms" className="text-blue-600 hover:text-blue-800 hover:underline" target="_blank">
+                <Typography
+                  component="span"
+                  sx={{
+                    color: '#4f46e5',
+                    textDecoration: 'none',
+                    '&:hover': {
+                      color: '#4338ca',
+                      textDecoration: 'underline'
+                    }
+                  }}
+                >
                 Terms of Service
-              </a>{' '}
-              and{' '}
-              <a href="/privacy" className="text-blue-600 hover:text-blue-800 hover:underline" target="_blank">
+                </Typography>
+                {' '}and{' '}
+                <Typography
+                  component="span"
+                  sx={{
+                    color: '#4f46e5',
+                    textDecoration: 'none',
+                    '&:hover': {
+                      color: '#4338ca',
+                      textDecoration: 'underline'
+                    }
+                  }}
+                >
                 Privacy Policy
-              </a>
-              *
-            </label>
-          </div>
-          {errors.agreeToTerms && (
-            <div className="flex items-center space-x-1">
-              <AlertCircle className="w-4 h-4 text-red-500" />
-              <p className="text-red-500 text-sm">{errors.agreeToTerms}</p>
-            </div>
-          )}
+                </Typography>
+              </Typography>
+            }
+          />
+        </Box>
 
-          <div className="flex items-start space-x-2">
-            <input
-              id="agreeToMarketing"
-              type="checkbox"
-              checked={formData.agreeToMarketing}
-              onChange={(e) => handleInputChange('agreeToMarketing', e.target.checked)}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 mt-0.5"
-              disabled={isSubmitting}
-            />
-            <label htmlFor="agreeToMarketing" className="text-sm text-gray-700">
-              I would like to receive product updates and trading insights via email
-            </label>
-          </div>
-        </div>
-
-        {/* Submit Error */}
-        {errors.submit && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-md">
-            <div className="flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 text-red-600" />
-              <p className="text-red-700 text-sm">{errors.submit}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Submit Button */}
         <Button
           type="submit"
-          className="w-full"
-          disabled={isSubmitting}
+          fullWidth
+          disabled={loading}
+          sx={{
+            position: 'relative',
+            display: 'flex',
+            justifyContent: 'center',
+            py: 1,
+            px: 2,
+            border: 'none',
+            fontSize: '0.875rem', // text-sm
+            fontWeight: 500, // font-medium
+            borderRadius: '8px', // rounded-lg
+            color: '#ffffff', // text-white
+            backgroundColor: '#4f46e5', // bg-indigo-600
+            textTransform: 'none',
+            '&:hover': {
+              backgroundColor: '#4338ca', // hover:bg-indigo-700
+            },
+            '&:focus': {
+              outline: 'none',
+              ringWidth: '2px',
+              ringColor: '#4f46e5', // focus:ring-indigo-500
+              ringOffset: '2px',
+            },
+            '&:disabled': {
+              opacity: 0.5
+            }
+          }}
         >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Creating Account...
-            </>
+          {loading ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={16} sx={{ color: '#ffffff' }} />
+              Creating account...
+            </Box>
           ) : (
             'Create Account'
           )}
         </Button>
-      </form>
+      </Box>
 
-      {/* Switch to Login */}
-      <div className="text-center pt-4 border-t">
-        <p className="text-sm text-gray-600">
+      {/* Sign In Link */}
+      <Box textAlign="center">
+        <Typography 
+          sx={{ 
+            fontSize: '0.875rem', // text-sm
+            color: '#6b7280' // text-gray-600
+          }}
+        >
           Already have an account?{' '}
-          <button
+          <Typography
+            component="button"
+            type="button"
             onClick={onSwitchToLogin}
-            className="text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors"
-            disabled={isSubmitting}
+            sx={{
+              fontWeight: 500, // font-medium
+              color: '#4f46e5', // text-indigo-600
+              textDecoration: 'none',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'inline',
+              '&:hover': {
+                color: '#4338ca', // hover:text-indigo-500
+                textDecoration: 'underline'
+              }
+            }}
           >
-            Sign in
-          </button>
-        </p>
-      </div>
-
-      {/* Security Notice */}
-      <div className="text-center">
-        <p className="text-xs text-gray-500 flex items-center justify-center space-x-1">
-          <Shield className="w-3 h-3" />
-          <span>Your data is encrypted and secure</span>
-        </p>
-      </div>
+            Sign in here
+          </Typography>
+        </Typography>
+      </Box>
     </Card>
   );
 }
