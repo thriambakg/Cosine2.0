@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Box, Typography, Button, CircularProgress, Alert } from '@mui/material';
 import { CheckCircle, Error } from '@mui/icons-material';
 
-export default function VerifyEmailPage() {
+function VerifyEmailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -123,5 +123,46 @@ export default function VerifyEmailPage() {
         )}
       </Box>
     </Box>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense
+      fallback={
+        <Box
+          sx={{
+            minHeight: '100vh',
+            background: 'linear-gradient(135deg, #1e3a8a 0%, #581c87 50%, #3730a3 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 2,
+          }}
+        >
+          <Box
+            sx={{
+              maxWidth: 480,
+              width: '100%',
+              backgroundColor: 'white',
+              borderRadius: 3,
+              padding: 6,
+              textAlign: 'center',
+              boxShadow: 3,
+            }}
+          >
+            <CircularProgress size={60} sx={{ color: 'primary.main', mb: 3 }} />
+            <Typography variant="h5" fontWeight="bold" gutterBottom>
+              Loading...
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              Please wait while we load the verification page.
+            </Typography>
+          </Box>
+        </Box>
+      }
+    >
+      <VerifyEmailContent />
+    </Suspense>
   );
 }

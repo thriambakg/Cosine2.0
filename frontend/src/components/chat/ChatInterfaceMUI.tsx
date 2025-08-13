@@ -32,7 +32,7 @@ import {
   Security as SecurityIcon,
   MoreVert as MoreVertIcon
 } from "@mui/icons-material";
-import LoadingButton from "@mui/lab/LoadingButton";
+
 import { useAuth } from "@/contexts/AuthContext";
 import GlassCard from "@/components/mui/GlassCard";
 
@@ -523,8 +523,7 @@ export default function ChatInterfaceMUI() {
                 },
               }}
             />
-            <LoadingButton
-              loading={isLoading}
+            <Button
               variant="contained"
               onClick={handleSendMessage}
               disabled={(!inputMessage.trim() && uploadedFiles.length === 0) || isLoading}
@@ -534,8 +533,8 @@ export default function ChatInterfaceMUI() {
                 background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
               }}
             >
-              <SendIcon />
-            </LoadingButton>
+              {isLoading ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
+            </Button>
           </Stack>
 
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
