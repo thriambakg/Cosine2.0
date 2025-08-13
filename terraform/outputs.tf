@@ -81,24 +81,25 @@ output "kms_alias_name" {
   value       = aws_kms_alias.main.name
 }
 
-# Lambda Function Outputs
-output "stock_volatility_lambda" {
-  description = "Information about the stock volatility Lambda function"
-  value = length(module.stock_volatility_lambda) > 0 ? {
-    function_name = module.stock_volatility_lambda[0].function_name
-    function_arn  = module.stock_volatility_lambda[0].function_arn
-    invoke_arn    = module.stock_volatility_lambda[0].invoke_arn
-    role_arn      = module.stock_volatility_lambda[0].execution_role_arn
-    role_name     = module.stock_volatility_lambda[0].execution_role_name
-    } : {
-    function_name = null
-    function_arn  = null
-    invoke_arn    = null
-    role_arn      = null
-    role_name     = null
-    status        = "Disabled - IAM permissions required"
-  }
-}
+# Lambda Function Outputs - DISABLED FOR CLOUDFRONT DEPLOYMENT
+# Stock Volatility Lambda module is disabled to reduce costs and simplify architecture
+# output "stock_volatility_lambda" {
+#   description = "Information about the stock volatility Lambda function"
+#   value = length(module.stock_volatility_lambda) > 0 ? {
+#     function_name = module.stock_volatility_lambda[0].function_name
+#     function_arn  = module.stock_volatility_lambda[0].function_arn
+#     invoke_arn    = module.stock_volatility_lambda[0].invoke_arn
+#     role_arn      = module.stock_volatility_lambda[0].execution_role_arn
+#     role_name     = module.stock_volatility_lambda[0].execution_role_name
+#     } : {
+#     function_name = null
+#     function_arn  = null
+#     invoke_arn    = null
+#     role_arn      = null
+#     role_name     = null
+#     status        = "Disabled - IAM permissions required"
+#   }
+# }
 
 # CloudFront Outputs (disabled)
 # output "cloudfront_distribution_id" {
