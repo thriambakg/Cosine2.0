@@ -1,22 +1,13 @@
 "use client";
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Box,
-  Container,
   Typography,
   Grid,
-  AppBar,
-  Toolbar,
-  IconButton,
-  Badge,
-  Avatar,
-  Menu,
-  MenuItem,
   Chip,
 } from '@mui/material';
 import {
-  SmartToy as BotIcon,
   TrendingUp,
   BarChart as BarChart3Icon,
   PieChart,
@@ -24,92 +15,21 @@ import {
   Chat as MessageSquareIcon,
   Upload,
   Settings,
-  Notifications as BellIcon,
   AttachMoney as DollarSignIcon,
   Percent,
   Flag as TargetIcon,
   ArrowForward as ArrowRightIcon,
 } from '@mui/icons-material';
 
-import { GradientBackground, GlassCard, GradientButton, MetricCard } from './mui';
-import { useAuth } from '@/contexts/AuthContext';
+import { GlassCard, GradientButton, MetricCard } from './mui';
 import AuthStatusBanner from './AuthStatusBanner';
 import RouteHandler from './RouteHandler';
 import Link from 'next/link';
 
 export default function DashboardMUI() {
-  const { user, logout } = useAuth();
-  const [notifications] = useState(3);
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-
-  const handleProfileMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    handleMenuClose();
-  };
 
   return (
-    <GradientBackground variant="minimal" animated={false}>
-      {/* Top Navigation */}
-      <AppBar position="fixed" elevation={0}>
-        <Container maxWidth="xl">
-          <Toolbar sx={{ justifyContent: 'space-between' }}>
-            <Box display="flex" alignItems="center" gap={2}>
-              <Box
-                sx={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: '10px',
-                  background: 'linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <BotIcon sx={{ color: 'white', fontSize: 24 }} />
-              </Box>
-              <Typography variant="h6" fontWeight={600} color="text.primary">
-                Cosine
-              </Typography>
-            </Box>
-            
-            <Box display="flex" alignItems="center" gap={2}>
-              <IconButton color="inherit">
-                <Badge badgeContent={notifications} color="error">
-                  <BellIcon />
-                </Badge>
-              </IconButton>
-              
-              <IconButton onClick={handleProfileMenuOpen}>
-                <Avatar sx={{ width: 36, height: 36, bgcolor: 'primary.main' }}>
-                  {user?.firstName?.[0] || 'U'}
-                </Avatar>
-              </IconButton>
-              
-              <Menu
-                anchorEl={anchorEl}
-                open={Boolean(anchorEl)}
-                onClose={handleMenuClose}
-                transformOrigin={{ horizontal: 'right', vertical: 'top' }}
-                anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-              >
-                <MenuItem onClick={handleMenuClose}>Profile</MenuItem>
-                <MenuItem onClick={handleMenuClose}>Settings</MenuItem>
-                <MenuItem onClick={handleLogout}>Logout</MenuItem>
-              </Menu>
-            </Box>
-          </Toolbar>
-        </Container>
-      </AppBar>
-
-      <Container maxWidth="xl" sx={{ pt: 12, pb: 4 }}>
+    <Box>
         {/* Route Handler and Auth Banner */}
         <RouteHandler />
         <AuthStatusBanner />
@@ -485,7 +405,6 @@ export default function DashboardMUI() {
             </GlassCard>
           </Grid>
         </Grid>
-      </Container>
-    </GradientBackground>
+    </Box>
   );
 }

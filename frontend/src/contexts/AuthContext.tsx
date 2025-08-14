@@ -213,6 +213,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             success: false, 
             error: 'Please verify your email address before signing in. Check your email for a verification link.' 
           };
+        } else if (result.nextStep.signInStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP') {
+          return { 
+            success: false, 
+            error: 'MFA setup is required. This feature is not yet implemented. Please contact support or disable MFA in the User Pool configuration.' 
+          };
         }
       }
       
