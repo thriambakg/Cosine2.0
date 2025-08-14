@@ -268,8 +268,8 @@ module "cloudfront" {
     compress               = true
     viewer_protocol_policy = "redirect-to-https"
     min_ttl                = 0
-    default_ttl            = 0 # Don't cache HTML files by default
-    max_ttl                = 0
+    default_ttl            = 1 # Minimal caching to allow compression
+    max_ttl                = 1
   }
 
   custom_error_responses = [
