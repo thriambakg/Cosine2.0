@@ -7,6 +7,9 @@ export default function RouteHandler() {
   const router = useRouter()
 
   useEffect(() => {
+    // Only run on client side
+    if (typeof window === 'undefined') return;
+    
     // Check if we have an intended path stored from the SPA routing script
     const intendedPath = sessionStorage.getItem('intendedPath')
     
