@@ -99,7 +99,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Helper function to convert Cognito user to our User interface
   const convertCognitoUser = async (cognitoUser: AuthUser): Promise<User> => {
     try {
+      console.log('Converting Cognito user:', cognitoUser.userId);
+      
       const attributes = await fetchUserAttributes();
+      console.log('Fetched user attributes:', attributes);
       
       return {
         id: cognitoUser.userId,
@@ -110,19 +113,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         phoneNumber: attributes.phone_number,
         emailVerified: attributes.email_verified === 'true',
         phoneVerified: attributes.phone_number_verified === 'true',
-        role: (attributes['custom:role'] as 'user' | 'admin' | 'premium') || 'user',
+        role: (attributes['custom:custom_role'] as 'user' | 'admin' | 'premium') || 'user',
         verified: attributes.email_verified === 'true',
         mfaEnabled: false, // TODO: Implement MFA status check
         createdAt: new Date().toISOString(), // TODO: Get actual creation date
         lastLogin: new Date().toISOString(),
         subscription: {
-          plan: (attributes['custom:subscription_plan'] as 'free' | 'premium' | 'enterprise') || 'free',
-          status: (attributes['custom:subscription_status'] as 'active' | 'inactive' | 'trial') || 'active',
+          plan: (attributes['custom:custom_subplan'] as 'free' | 'premium' | 'enterprise') || 'free',
+          status: (attributes['custom:custom_substatus'] as 'active' | 'inactive' | 'trial') || 'active',
           expiresAt: attributes['custom:subscription_expires_at']
         }
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error converting Cognito user:', error);
+      
+      // If it's specifically a UserUnAuthenticatedException, provide a more helpful error
+      if (error?.name === 'UserUnAuthenticatedException') {
+        throw new Error('User session not fully established. Please try logging in again.');
+      }
+      
       throw error;
     }
   };
@@ -187,16 +196,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password 
       });
       
-      // Handle MFA challenge
-      if (result.nextStep?.signInStep === 'CONFIRM_SIGN_IN_WITH_TOTP_CODE') {
-        if (!mfaCode) {
-          return { success: false, requiresMfa: true };
+      console.log('Sign-in result:', result);
+      
+      // Handle different sign-in steps
+      if (result.nextStep) {
+        console.log('Next step required:', result.nextStep);
+        
+        if (result.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_TOTP_CODE') {
+          if (!mfaCode) {
+            return { success: false, requiresMfa: true };
+          }
+          // TODO: Implement MFA confirmation
+          // await confirmSignIn({ challengeResponse: mfaCode });
+        } else if (result.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+          return { 
+            success: false, 
+            error: 'Please verify your email address before signing in. Check your email for a verification link.' 
+          };
         }
-        // TODO: Implement MFA confirmation
-        // await confirmSignIn({ challengeResponse: mfaCode });
+      }
+      
+      // Check if sign-in is complete
+      if (!result.isSignedIn) {
+        return { 
+          success: false, 
+          error: 'Sign-in not completed. Please check your email for verification instructions.' 
+        };
       }
       
       // Get user data after successful sign in
+      // Add a small delay to ensure the session is fully established
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       const cognitoUser = await getCurrentUser();
       const userData = await convertCognitoUser(cognitoUser);
       setUser(userData);
