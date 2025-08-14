@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Typography,
@@ -16,6 +16,7 @@ import {
   Chat as MessageSquareIcon,
   Upload,
   Settings,
+  Notifications as BellIcon,
   AttachMoney as DollarSignIcon,
   Percent,
   Flag as TargetIcon,
@@ -30,6 +31,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 export default function DashboardMUI() {
   const { user } = useAuth();
+  const [notifications] = useState(3); // Mock notification count for dashboard display
 
   return (
     <Box>
