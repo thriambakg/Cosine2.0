@@ -25,8 +25,10 @@ import { GlassCard, GradientButton, MetricCard } from './mui';
 import AuthStatusBanner from './AuthStatusBanner';
 import RouteHandler from './RouteHandler';
 import Link from 'next/link';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function DashboardMUI() {
+  const { user } = useAuth();
 
   return (
     <Box>
