@@ -431,6 +431,8 @@ resource "aws_cloudfront_origin_request_policy" "default" {
   }
 }
 
+
+
 # S3 Bucket Policy for CloudFront OAC
 resource "aws_s3_bucket_policy" "cloudfront_oac_policy" {
   bucket = var.s3_bucket_id

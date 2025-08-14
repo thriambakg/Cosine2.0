@@ -259,6 +259,19 @@ module "cloudfront" {
 
   # SPA configuration for Next.js
   default_root_object = "index.html"
+
+  # Cache behavior settings optimized for Next.js
+  default_cache_behavior_settings = {
+    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "S3Origin"
+    compress               = true
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0 # Don't cache HTML files by default
+    max_ttl                = 0
+  }
+
   custom_error_responses = [
     # Handle all possible error codes for SPA routing
     {
