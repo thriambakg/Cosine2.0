@@ -32,7 +32,7 @@ export default function LandingPageMUI() {
   const { isAuthenticated } = useAuth();
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && typeof window !== 'undefined') {
       window.location.href = '/chat';
     }
   }, [isAuthenticated]);

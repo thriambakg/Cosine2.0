@@ -14,6 +14,11 @@ export default function OAuthSignIn({ className = '' }: OAuthSignInProps) {
     try {
       setLoading(provider);
 
+      // Only run on client side
+      if (typeof window === 'undefined') {
+        throw new Error('OAuth sign-in can only be performed on the client side');
+      }
+
       // Get the current URL for redirect_uri
       const redirectUri = `${window.location.origin}/auth/callback`;
       

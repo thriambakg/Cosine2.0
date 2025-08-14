@@ -111,7 +111,11 @@ function VerifyEmailContent() {
               </Button>
               <Button
                 variant="contained"
-                onClick={() => window.location.reload()}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.location.reload();
+                  }
+                }}
                 sx={{
                   background: 'linear-gradient(135deg, #1e3a8a, #3730a3)',
                 }}

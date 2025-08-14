@@ -34,7 +34,7 @@ export default function FeatureCard({
   const cardGradient = gradient || defaultGradients[Math.floor(Math.random() * defaultGradients.length)];
 
   const handleClick = () => {
-    if (href) {
+    if (href && typeof window !== 'undefined') {
       window.location.href = href;
     } else if (onClick) {
       onClick();

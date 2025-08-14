@@ -83,23 +83,21 @@ export default function MFASetup({ onComplete, onSkip, isOptional = false }: MFA
   };
 
   const copyToClipboard = async (text: string, type: 'secret' | 'backup') => {
+    // Only run on client side
+    if (typeof window === 'undefined') return;
+    
     try {
-      await navigator.clipboard.writeText(text);
-      if (type === 'secret') {
-        setSecretCopied(true);
-        setTimeout(() => setSecretCopied(false), 2000);
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
       } else {
-        setBackupCodesCopied(true);
-        setTimeout(() => setBackupCodesCopied(false), 2000);
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
       }
-    } catch (error) {
-      // Fallback for older browsers
-      const textArea = document.createElement('textarea');
-      textArea.value = text;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
       
       if (type === 'secret') {
         setSecretCopied(true);
@@ -108,6 +106,8 @@ export default function MFASetup({ onComplete, onSkip, isOptional = false }: MFA
         setBackupCodesCopied(true);
         setTimeout(() => setBackupCodesCopied(false), 2000);
       }
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
     }
   };
 

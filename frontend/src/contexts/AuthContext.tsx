@@ -96,6 +96,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initializeAuth();
   }, []);
 
+  // Handle OAuth callbacks
+  useEffect(() => {
+    const handleOAuthCallback = async () => {
+      // Only run on client side
+      if (typeof window === 'undefined') return;
+      
+      // Check if we're on the callback page
+      if (window.location.pathname === '/auth/callback') {
+        try {
+          // Wait a bit for Amplify to process the callback
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Try to get the current user
+          const cognitoUser = await getCurrentUser();
+          if (cognitoUser) {
+            const userData = await convertCognitoUser(cognitoUser);
+            setUser(userData);
+            setAuthError(null);
+          }
+        } catch (error) {
+          console.error('OAuth callback handling failed:', error);
+          setAuthError('Authentication failed. Please try again.');
+        }
+      }
+    };
+
+    handleOAuthCallback();
+  }, []);
+
   // Helper function to convert Cognito user to our User interface
   const convertCognitoUser = async (cognitoUser: AuthUser): Promise<User> => {
     try {
@@ -285,7 +314,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         !window.location.hostname.includes('127.0.0.1');
       
       // Only enforce HTTPS checking if not using trusted proxy setup
-      if (isProduction && !trustProxy && window.location.protocol === 'http:') {
+      if (isProduction && !trustProxy && typeof window !== 'undefined' && window.location.protocol === 'http:') {
         throw new Error(`OAuth authentication requires HTTPS in production. Current URL: ${window.location.href}. Please configure SSL certificate on your load balancer or use HTTPS.`);
       }
       

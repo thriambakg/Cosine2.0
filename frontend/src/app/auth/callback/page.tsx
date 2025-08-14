@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function AuthCallbackPage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
+  const [attempts, setAttempts] = useState(0);
 
   useEffect(() => {
     // Handle OAuth callback
@@ -17,8 +18,15 @@ export default function AuthCallbackPage() {
           if (user) {
             // Successful authentication - redirect to home
             router.push('/');
+          } else if (attempts < 5) {
+            // Try again after a delay
+            setAttempts(prev => prev + 1);
+            setTimeout(() => {
+              // Force a re-check of auth state
+              window.location.reload();
+            }, 2000);
           } else {
-            // Authentication failed - redirect to login with error
+            // Authentication failed after multiple attempts - redirect to login with error
             router.push('/login?error=authentication_failed');
           }
         }
@@ -29,7 +37,7 @@ export default function AuthCallbackPage() {
     };
 
     handleCallback();
-  }, [user, isLoading, router]);
+  }, [user, isLoading, router, attempts]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
