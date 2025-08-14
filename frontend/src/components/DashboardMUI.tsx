@@ -8,6 +8,7 @@ import {
   Chip,
 } from '@mui/material';
 import {
+  SmartToy as BotIcon,
   TrendingUp,
   BarChart as BarChart3Icon,
   PieChart,
