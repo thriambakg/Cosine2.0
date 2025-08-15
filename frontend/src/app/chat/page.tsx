@@ -1,9 +1,16 @@
 "use client";
 
+import { useEffect } from 'react';
 import { ChatInterfaceMUI } from '@/components/chat';
 import { Box, Typography, Paper, Container } from '@mui/material';
 
 export default function ChatPage() {
+  useEffect(() => {
+    console.log('🔄 ChatPage component mounted');
+  }, []);
+
+  console.log('🎯 ChatPage render function executing');
+
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
       <Box sx={{ p: 2 }}>

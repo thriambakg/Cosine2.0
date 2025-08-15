@@ -108,6 +108,8 @@ const DropZone = styled(Box, {
 }));
 
 export default function ChatInterfaceMUI() {
+  console.log('🎯 ChatInterfaceMUI render function executing');
+  
   const theme = useTheme();
   const { user, logout, isLoading: authLoading } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
@@ -125,6 +127,10 @@ export default function ChatInterfaceMUI() {
   const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    console.log('🔄 ChatInterfaceMUI component mounted');
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
