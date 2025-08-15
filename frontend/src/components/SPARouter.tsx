@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import LoadingPage from '@/components/LoadingPage';
-import ClientOnly from './ClientOnly';
 
 interface SPARouterProps {
   children: React.ReactNode;
@@ -15,74 +14,41 @@ export default function SPARouter({ children }: SPARouterProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [isClient, setIsClient] = useState(false);
-  const [isRouting, setIsRouting] = useState(true);
-  const routingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Ensure we're on the client side
   useEffect(() => {
     setIsClient(true);
   }, []);
 
-  // Handle SPA routing with better state management
+  // Handle SPA routing
   useEffect(() => {
     if (!isClient || isLoading) return;
 
-    // Clear any existing timeout
-    if (routingTimeoutRef.current) {
-      clearTimeout(routingTimeoutRef.current);
+    // Public routes that don't require authentication
+    const publicRoutes = ['/', '/login', '/auth/callback'];
+    
+    // If user is not authenticated and trying to access protected route
+    if (!user && pathname && !publicRoutes.includes(pathname)) {
+      console.log('Redirecting unauthenticated user to login from:', pathname);
+      router.replace('/login');
+      return;
     }
 
-    const handleSPARouting = () => {
-      try {
-        // Public routes that don't require authentication
-        const publicRoutes = ['/', '/login', '/auth/callback'];
-        
-        // If user is not authenticated and trying to access protected route
-        if (!user && pathname && !publicRoutes.includes(pathname)) {
-          router.replace('/login');
-          return;
-        }
+    // If user is authenticated and on login page, redirect to dashboard
+    if (user && pathname === '/login') {
+      console.log('Redirecting authenticated user to dashboard from login page');
+      router.replace('/');
+      return;
+    }
 
-        // If user is authenticated and on login page, redirect to dashboard
-        if (user && pathname === '/login') {
-          router.replace('/');
-          return;
-        }
-
-        // If we get here, routing is complete
-        setIsRouting(false);
-      } catch (error) {
-        console.error('SPA routing error:', error);
-        // If there's an error, still allow the page to render
-        setIsRouting(false);
-      }
-    };
-
-    // Execute routing logic immediately for better performance
-    handleSPARouting();
-
-    // Fallback timeout to prevent infinite loading
-    const fallbackTimeout = setTimeout(() => {
-      console.warn('SPA routing timeout - allowing page to render');
-      setIsRouting(false);
-    }, 1000);
-
-    return () => {
-      if (routingTimeoutRef.current) {
-        clearTimeout(routingTimeoutRef.current);
-      }
-      clearTimeout(fallbackTimeout);
-    };
+    // If we get here, the route is valid (either public or authenticated user on protected route)
+    console.log('Route is valid, allowing page to render:', pathname);
   }, [user, isLoading, pathname, router, isClient]);
 
-  // Show loading during initial auth check, client-side hydration, or active routing
-  if (isLoading || !isClient || isRouting) {
+  // Show loading only during initial auth check or client-side hydration
+  if (isLoading || !isClient) {
     return <LoadingPage />;
   }
 
-  return (
-    <ClientOnly fallback={<LoadingPage />}>
-      {children}
-    </ClientOnly>
-  );
+  return <>{children}</>;
 }

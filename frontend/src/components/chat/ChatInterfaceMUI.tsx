@@ -17,7 +17,8 @@ import {
   Stack,
   useTheme,
   alpha,
-  styled
+  styled,
+  CircularProgress
 } from "@mui/material";
 import {
   Send as SendIcon,
@@ -202,6 +203,10 @@ export default function ChatInterfaceMUI() {
     setIsLoading(true);
 
     try {
+      // For static export, provide a placeholder response
+      // In production, this should point to your actual backend API
+      const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY_URL || "https://your-api-gateway-url.com";
+      
       const payload = {
         message: inputMessage,
         files: currentFiles,
@@ -210,33 +215,64 @@ export default function ChatInterfaceMUI() {
         type: currentFiles.length > 0 ? 'multimodal' : 'text'
       };
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      // Check if we're in development or have a backend URL configured
+      if (process.env.NODE_ENV === 'development' || apiUrl !== "https://your-api-gateway-url.com") {
+        const response = await fetch(`${apiUrl}/chat`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
 
-      if (!response.ok) {
-        throw new Error("Failed to get response");
-      }
+        if (!response.ok) {
+          throw new Error("Failed to get response");
+        }
 
-      const data = await response.json();
-      
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: data.response || "I'm sorry, I couldn't process that request. Please try again.",
-        sender: "bot",
-        timestamp: new Date(),
-      };
+        const data = await response.json();
+        
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: data.response || "I'm sorry, I couldn't process that request. Please try again.",
+          sender: "bot",
+          timestamp: new Date(),
+        };
 
-      setMessages((prev) => [...prev, botMessage]);
+        setMessages((prev) => [...prev, botMessage]);
 
-      if (currentFiles.length > 0 && data.processed_files !== undefined) {
+        if (currentFiles.length > 0 && data.processed_files !== undefined) {
+          const infoMessage: Message = {
+            id: (Date.now() + 2).toString(),
+            text: `✅ Processed: ${data.processed_files || 0} files | Model: ${selectedModel} | Status: ${data.agent_status || 'active'}`,
+            sender: "bot",
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, infoMessage]);
+        }
+      } else {
+        // Static export placeholder response
+        const placeholderResponses = [
+          "I'm a placeholder AI assistant for the static version of Cosine. To enable full chat functionality, please configure the backend API endpoint.",
+          "This is a demo version of the chat interface. The full AI assistant requires backend integration with your API Gateway.",
+          "Chat functionality is currently in demo mode. Please set up the backend API to enable real AI responses.",
+          "Welcome to Cosine! This is a static preview. For full functionality, deploy the backend services and configure the API endpoint."
+        ];
+        
+        const randomResponse = placeholderResponses[Math.floor(Math.random() * placeholderResponses.length)];
+        
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: randomResponse,
+          sender: "bot",
+          timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, botMessage]);
+
+        // Add info message about backend setup
         const infoMessage: Message = {
           id: (Date.now() + 2).toString(),
-          text: `✅ Processed: ${data.processed_files || 0} files | Model: ${selectedModel} | Status: ${data.agent_status || 'active'}`,
+          text: `💡 To enable full chat: Set NEXT_PUBLIC_API_GATEWAY_URL environment variable to your backend API endpoint.`,
           sender: "bot",
           timestamp: new Date(),
         };
@@ -246,7 +282,7 @@ export default function ChatInterfaceMUI() {
       console.error("Error sending message:", error);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: "I'm experiencing some technical difficulties. Please try again later or make sure the backend server is running.",
+        text: "I'm experiencing some technical difficulties. Please check your backend API configuration or try again later.",
         sender: "bot",
         timestamp: new Date(),
       };
