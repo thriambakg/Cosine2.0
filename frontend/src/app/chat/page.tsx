@@ -16,21 +16,24 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    console.log('🔄 ChatPage auth effect - user:', !!user, 'isLoading:', isLoading);
     if (!isLoading && !user) {
-      console.log('Redirecting unauthenticated user to login from chat page');
+      console.log('🔄 Redirecting unauthenticated user to login from chat page');
       router.replace('/login');
     }
   }, [user, isLoading, router]);
 
-  console.log('🎯 ChatPage render function executing');
+  console.log('🎯 ChatPage render function executing - user:', !!user, 'isLoading:', isLoading, 'pathname: /chat');
 
   // Show loading while checking auth
   if (isLoading) {
+    console.log('🔄 ChatPage showing loading page - isLoading:', isLoading);
     return <LoadingPage />;
   }
 
   // Redirect if not authenticated
   if (!user) {
+    console.log('🔄 ChatPage showing loading page - no user');
     return <LoadingPage />;
   }
 

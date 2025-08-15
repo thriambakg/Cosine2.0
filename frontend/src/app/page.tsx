@@ -13,7 +13,7 @@ export default function HomePage() {
     console.log('🔄 HomePage component mounted');
   }, []);
 
-  console.log('🎯 HomePage render function executing');
+  console.log('🎯 HomePage render function executing - user:', !!user, 'pathname: / (root)');
 
   // This component only handles the root path (/)
   if (user) {
