@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import LandingPageMUI from '@/components/LandingPageMUI';
@@ -12,29 +12,41 @@ export default function HomePage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [isClient, setIsClient] = useState(false);
+
+  // Ensure we're on the client side
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   useEffect(() => {
-    // If loading, don't redirect yet
-    if (isLoading) return;
+    // If loading or not client yet, don't redirect
+    if (isLoading || !isClient) return;
     
-    // Only handle routing logic for the root path
-    if (pathname === '/') {
-      if (user) {
-        // User is authenticated and on root path, show dashboard
-        // Don't redirect, just render dashboard
-      } else {
-        // User is not authenticated and on root path, show landing page
-        // Don't redirect, just render landing page
+    // Handle SPA routing for all paths
+    const handleRouting = () => {
+      // If we're on a protected route and not authenticated, redirect to login
+      if (!user && pathname !== '/' && pathname !== '/login' && pathname !== '/auth/callback') {
+        router.replace('/login');
+        return;
       }
-    }
-    // For all other paths, let Next.js handle the routing naturally
-  }, [user, isLoading, router, pathname]);
+      
+      // If we're on login page and authenticated, redirect to dashboard
+      if (user && pathname === '/login') {
+        router.replace('/');
+        return;
+      }
+    };
 
-  if (isLoading) {
+    handleRouting();
+  }, [user, isLoading, router, pathname, isClient]);
+
+  // Show loading while checking auth or during SSR
+  if (isLoading || !isClient) {
     return <LoadingPage />;
   }
 
-  // Only handle the root path here
+  // Handle root path
   if (pathname === '/') {
     if (user) {
       return (
@@ -47,6 +59,7 @@ export default function HomePage() {
     }
   }
   
-  // For all other paths, return null to let Next.js handle routing
+  // For all other paths, let Next.js handle routing naturally
+  // This allows individual page components to render
   return null;
 }

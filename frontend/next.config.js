@@ -5,8 +5,8 @@ const nextConfig = {
   // Enable static export for S3/CloudFront deployment
   output: 'export',
   
-  // Add trailing slash for better S3 compatibility
-  trailingSlash: true,
+  // Remove trailing slash - can cause routing issues with CloudFront
+  trailingSlash: false,
 
   // Disable static optimization that can cause routing issues
   distDir: 'out',
@@ -33,6 +33,12 @@ const nextConfig = {
   // Skip TypeScript type checking during build (optional - faster builds)
   typescript: {
     ignoreBuildErrors: true,
+  },
+
+  // Disable server-side features that don't work with static export
+  experimental: {
+    // Disable features that require server-side rendering
+    serverComponentsExternalPackages: [],
   },
 
   // Webpack configuration for external dependencies

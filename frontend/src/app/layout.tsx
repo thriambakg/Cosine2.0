@@ -6,6 +6,8 @@ import { TimeFrameProvider } from '@/contexts/TimeFrameContext';
 import AmplifyClientConfig from '@/components/AmplifyClientConfig';
 import ThemeProvider from '@/providers/ThemeProvider';
 import ReduxProvider from '@/providers/ReduxProvider';
+import SPARouter from '@/components/SPARouter';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -56,7 +58,11 @@ export default function RootLayout({
             <AmplifyClientConfig>
               <AuthProvider>
                 <TimeFrameProvider>
-                  {children}
+                  <ErrorBoundary>
+                    <SPARouter>
+                      {children}
+                    </SPARouter>
+                  </ErrorBoundary>
                 </TimeFrameProvider>
               </AuthProvider>
             </AmplifyClientConfig>
