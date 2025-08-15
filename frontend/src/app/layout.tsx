@@ -8,6 +8,8 @@ import ThemeProvider from '@/providers/ThemeProvider';
 import ReduxProvider from '@/providers/ReduxProvider';
 import SPARouter from '@/components/SPARouter';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import RouteChangeHandler from '@/components/RouteChangeHandler';
+import DebugInfo from '@/components/DebugInfo';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -59,9 +61,12 @@ export default function RootLayout({
               <AuthProvider>
                 <TimeFrameProvider>
                   <ErrorBoundary>
-                    <SPARouter>
-                      {children}
-                    </SPARouter>
+                    <RouteChangeHandler>
+                      <SPARouter>
+                        {children}
+                      </SPARouter>
+                      <DebugInfo />
+                    </RouteChangeHandler>
                   </ErrorBoundary>
                 </TimeFrameProvider>
               </AuthProvider>
