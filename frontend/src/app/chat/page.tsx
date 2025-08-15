@@ -1,12 +1,11 @@
 "use client";
 
 import { ChatInterfaceMUI } from '@/components/chat';
-import AppLayout from '@/components/layout/AppLayout';
-import { Box, Typography, Paper } from '@mui/material';
+import { Box, Typography, Paper, Container } from '@mui/material';
 
 export default function ChatPage() {
   return (
-    <AppLayout>
+    <Container maxWidth="xl" sx={{ py: 3 }}>
       <Box sx={{ p: 2 }}>
         <Paper sx={{ p: 3, mb: 2 }}>
           <Typography variant="h4" gutterBottom>
@@ -18,6 +17,6 @@ export default function ChatPage() {
         </Paper>
         <ChatInterfaceMUI />
       </Box>
-    </AppLayout>
+    </Container>
   );
 }
