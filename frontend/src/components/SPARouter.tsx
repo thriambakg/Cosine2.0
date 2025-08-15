@@ -14,10 +14,22 @@ export default function SPARouter({ children }: SPARouterProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [isClient, setIsClient] = useState(false);
+  const [forceRender, setForceRender] = useState(false);
+  
+  // For static export, we need to render content immediately
+  const isStaticExport = typeof window === 'undefined';
 
   // Ensure we're on the client side
   useEffect(() => {
     setIsClient(true);
+    
+    // Force render after 3 seconds to prevent infinite loading
+    const timer = setTimeout(() => {
+      console.log('🔄 SPARouter force render timeout triggered');
+      setForceRender(true);
+    }, 3000);
+    
+    return () => clearTimeout(timer);
   }, []);
 
   // Handle SPA routing
@@ -45,10 +57,18 @@ export default function SPARouter({ children }: SPARouterProps) {
     console.log('Route is valid, allowing page to render:', pathname);
   }, [user, isLoading, pathname, router, isClient]);
 
+  // For static export, render content immediately to avoid pre-rendering loading state
+  if (isStaticExport) {
+    console.log('🔄 SPARouter static export - rendering children immediately');
+    return <>{children}</>;
+  }
+
   // Show loading only during initial auth check or client-side hydration
-  if (isLoading || !isClient) {
+  if ((isLoading || !isClient) && !forceRender) {
+    console.log('🔄 SPARouter showing loading page - isLoading:', isLoading, 'isClient:', isClient, 'forceRender:', forceRender);
     return <LoadingPage />;
   }
 
+  console.log('🔄 SPARouter rendering children - user:', !!user, 'pathname:', pathname, 'forceRender:', forceRender);
   return <>{children}</>;
 }

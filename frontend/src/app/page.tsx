@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import LandingPageMUI from '@/components/LandingPageMUI';
@@ -9,6 +10,12 @@ import AppLayout from '@/components/layout/AppLayout';
 export default function HomePage() {
   const { user } = useAuth();
   const pathname = usePathname();
+
+  useEffect(() => {
+    console.log('🔄 HomePage component mounted');
+  }, []);
+
+  console.log('🎯 HomePage render function executing');
 
   // Only handle the root path here
   if (pathname === '/') {
