@@ -6,7 +6,6 @@ import { TimeFrameProvider } from '@/contexts/TimeFrameContext';
 import AmplifyClientConfig from '@/components/AmplifyClientConfig';
 import ThemeProvider from '@/providers/ThemeProvider';
 import ReduxProvider from '@/providers/ReduxProvider';
-import SPARouter from '@/components/SPARouter';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import RouteChangeHandler from '@/components/RouteChangeHandler';
 import DebugInfo from '@/components/DebugInfo';
@@ -64,9 +63,7 @@ export default function RootLayout({
                 <TimeFrameProvider>
                   <ErrorBoundary>
                     <RouteChangeHandler>
-                      <SPARouter>
-                        {children}
-                      </SPARouter>
+                      {children}
                       <DebugInfo />
                     </RouteChangeHandler>
                   </ErrorBoundary>
