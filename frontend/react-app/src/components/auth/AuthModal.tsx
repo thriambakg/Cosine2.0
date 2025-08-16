@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { Close as X } from '@mui/icons-material';
 import { Box, Typography, Button } from '@mui/material';
 import LoginForm from './LoginForm';
 import RegisterForm from './RegisterForm';
@@ -50,13 +49,7 @@ export default function AuthModal({
     }
   }, [isAuthenticated, requireMFA, user]);
 
-  const handleClose = () => {
-    if (showMFASetup && requireMFA && user && !user.mfaEnabled) {
-      // Don't allow closing if MFA setup is required
-      return;
-    }
-    onClose();
-  };
+
 
   const handleMFAComplete = () => {
     setShowMFASetup(false);

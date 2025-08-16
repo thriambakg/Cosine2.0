@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   Container,
@@ -13,14 +13,12 @@ import {
   Security as ShieldIcon,
   Bolt as ZapIcon,
   BarChart as BarChart3Icon,
-  PieChart,
   Timeline as ActivityIcon,
   ArrowForward as ArrowRightIcon,
   Star,
   People as UsersIcon,
   AttachMoney as DollarSignIcon,
   TrendingDown,
-  AccountBalance as BankIcon,
 } from '@mui/icons-material';
 
 import { AuthModal } from './auth';

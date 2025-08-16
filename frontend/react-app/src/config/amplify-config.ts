@@ -9,7 +9,7 @@ const configureAmplify = () => {
     const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
     const redirectSignIn = import.meta.env.VITE_REDIRECT_SIGN_IN;
     const redirectSignOut = import.meta.env.VITE_REDIRECT_SIGN_OUT;
-    const awsRegion = import.meta.env.VITE_AWS_REGION || 'us-east-1';
+
 
     // Check if we have the required configuration
     if (!userPoolId || !userPoolClientId || !cognitoDomain) {
