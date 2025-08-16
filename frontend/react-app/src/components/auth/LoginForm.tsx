@@ -32,11 +32,11 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Redirect if already authenticated
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      navigate('/chat');
-    }
+           // Redirect if already authenticated
+         useEffect(() => {
+           if (isAuthenticated && user) {
+             navigate('/');
+           }
     
     // Check for authentication errors from callback
     if (typeof window !== 'undefined') {
@@ -59,7 +59,7 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
     try {
       const result = await login(email, password);
       if (result.success) {
-        navigate('/chat');
+        navigate('/');
         onClose();
       } else {
         setError(result.error || 'Login failed');

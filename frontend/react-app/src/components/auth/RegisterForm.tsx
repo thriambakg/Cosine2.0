@@ -119,11 +119,11 @@ export default function RegisterForm({ onSwitchToLogin, onClose, onRegistrationS
           // Show success message - user will get verification email
           setSuccessMessage('Account created! Please check your email to verify your account. You can then sign in.');
           onRegistrationSuccess?.();
-        } else {
-          // Registration complete, redirect to dashboard
-          navigate('/chat');
-          onClose();
-        }
+                       } else {
+                 // Registration complete, redirect to dashboard
+                 navigate('/');
+                 onClose();
+               }
       } else {
         setError(result.error || 'Registration failed');
       }

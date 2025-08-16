@@ -42,6 +42,7 @@ export interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  authError: string | null;
   login: (email: string, password: string, mfaCode?: string) => Promise<{ success: boolean; error?: string; requiresMfa?: boolean }>;
   loginWithProvider: (provider: 'Google') => Promise<void>;
   register: (userData: RegisterData) => Promise<{ success: boolean; error?: string; verificationRequired?: boolean; email?: string }>;
@@ -103,18 +104,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Check if we're on the callback page
       if (window.location.pathname === '/auth/callback') {
         try {
-          // Wait a bit for Amplify to process the callback
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          console.log('🔄 Processing OAuth callback...');
           
-          // Try to get the current user
-          const cognitoUser = await getCurrentUser();
-          if (cognitoUser) {
-            const userData = await convertCognitoUser(cognitoUser);
-            setUser(userData);
-            setAuthError(null);
+          // Check if there are OAuth parameters in the URL
+          const urlParams = new URLSearchParams(window.location.search);
+          const hasOAuthParams = urlParams.has('code') || urlParams.has('state') || urlParams.has('error');
+          
+          if (hasOAuthParams) {
+            console.log('📋 OAuth parameters detected, processing...');
+            
+            // Wait a bit for Amplify to process the callback
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Try to get the current user
+            const cognitoUser = await getCurrentUser();
+            if (cognitoUser) {
+              console.log('✅ OAuth callback successful, user authenticated');
+              const userData = await convertCognitoUser(cognitoUser);
+              setUser(userData);
+              setAuthError(null);
+            } else {
+              console.log('❌ No user found after OAuth callback');
+              setAuthError('Authentication failed. Please try again.');
+            }
+          } else {
+            console.log('ℹ️ No OAuth parameters found, checking existing session...');
+            // No OAuth parameters, just check if user is already authenticated
+            const cognitoUser = await getCurrentUser();
+            if (cognitoUser) {
+              const userData = await convertCognitoUser(cognitoUser);
+              setUser(userData);
+              setAuthError(null);
+            }
           }
         } catch (error) {
-          console.error('OAuth callback handling failed:', error);
+          console.error('❌ OAuth callback handling failed:', error);
           setAuthError('Authentication failed. Please try again.');
         }
       }
@@ -609,7 +633,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const value: AuthContextType & { authError: string | null } = {
+  const value: AuthContextType = {
     user,
     isLoading,
     isAuthenticated,
