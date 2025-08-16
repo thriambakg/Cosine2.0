@@ -14,6 +14,7 @@ on:
     branches: [ staging, prod ]
     paths:
       - 'frontend/**'
+      - 'frontend/react-app/**'
       - '.github/workflows/deploy-frontend.yml'
   
   # Keep workflow_call for manual orchestration if needed
@@ -367,44 +368,44 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: './frontend/package-lock.json'
+          cache-dependency-path: './frontend/react-app/package-lock.json'
 
       - name: Install dependencies
-        working-directory: ./frontend
+        working-directory: ./frontend/react-app
         run: npm ci
 
-      - name: Build Next.js static export
-        working-directory: ./frontend
+      - name: Build React.js (Vite) application
+        working-directory: ./frontend/react-app
         env:
-          NEXT_PUBLIC_AWS_REGION: ${{ steps.get-build-env.outputs.next_public_aws_region }}
-          NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ steps.get-build-env.outputs.next_public_cognito_user_pool_id }}
-          NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID: ${{ steps.get-build-env.outputs.next_public_cognito_user_pool_client_id }}
-          NEXT_PUBLIC_COGNITO_DOMAIN: ${{ steps.get-build-env.outputs.next_public_cognito_domain }}
-          NEXT_PUBLIC_API_GATEWAY_URL: ${{ steps.get-build-env.outputs.next_public_api_gateway_url }}
-          NEXT_PUBLIC_REDIRECT_SIGN_IN: ${{ steps.get-build-env.outputs.next_public_redirect_sign_in }}
-          NEXT_PUBLIC_REDIRECT_SIGN_OUT: ${{ steps.get-build-env.outputs.next_public_redirect_sign_out }}
+          VITE_AWS_REGION: ${{ steps.get-build-env.outputs.next_public_aws_region }}
+          VITE_COGNITO_USER_POOL_ID: ${{ steps.get-build-env.outputs.next_public_cognito_user_pool_id }}
+          VITE_COGNITO_USER_POOL_CLIENT_ID: ${{ steps.get-build-env.outputs.next_public_cognito_user_pool_client_id }}
+          VITE_COGNITO_DOMAIN: ${{ steps.get-build-env.outputs.next_public_cognito_domain }}
+          VITE_API_GATEWAY_URL: ${{ steps.get-build-env.outputs.next_public_api_gateway_url }}
+          VITE_REDIRECT_SIGN_IN: ${{ steps.get-build-env.outputs.next_public_redirect_sign_in }}
+          VITE_REDIRECT_SIGN_OUT: ${{ steps.get-build-env.outputs.next_public_redirect_sign_out }}
         run: |
-          echo "🔨 Building Next.js application with environment variables..."
-          echo "  - AWS Region: $NEXT_PUBLIC_AWS_REGION"
-          echo "  - User Pool ID: $NEXT_PUBLIC_COGNITO_USER_POOL_ID"
-          echo "  - Client ID: $NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID"
-          echo "  - Domain: $NEXT_PUBLIC_COGNITO_DOMAIN"
-          echo "  - Sign In Redirect: $NEXT_PUBLIC_REDIRECT_SIGN_IN"
-          echo "  - Sign Out Redirect: $NEXT_PUBLIC_REDIRECT_SIGN_OUT"
+          echo "🔨 Building React.js (Vite) application with environment variables..."
+          echo "  - AWS Region: $VITE_AWS_REGION"
+          echo "  - User Pool ID: $VITE_COGNITO_USER_POOL_ID"
+          echo "  - Client ID: $VITE_COGNITO_USER_POOL_CLIENT_ID"
+          echo "  - Domain: $VITE_COGNITO_DOMAIN"
+          echo "  - Sign In Redirect: $VITE_REDIRECT_SIGN_IN"
+          echo "  - Sign Out Redirect: $VITE_REDIRECT_SIGN_OUT"
           
-          # Build the Next.js application
+          # Build the React.js application
           npm run build
           
           # Verify the build output
           echo "✅ Build completed successfully"
           echo "🔍 Build output size:"
-          du -sh out/ || echo "out/ directory not found"
+          du -sh dist/ || echo "dist/ directory not found"
           
           # List the build output structure
           echo "🔍 Build output structure:"
-          find out/ -type f -name "*.html" | head -10 || echo "No HTML files found"
-          find out/ -type f -name "*.js" | head -5 || echo "No JS files found"
-          find out/ -type f -name "*.css" | head -5 || echo "No CSS files found"
+          find dist/ -type f -name "*.html" | head -10 || echo "No HTML files found"
+          find dist/ -type f -name "*.js" | head -5 || echo "No JS files found"
+          find dist/ -type f -name "*.css" | head -5 || echo "No CSS files found"
 
       - name: Get S3 bucket and CloudFront distribution from Terraform
         id: get-deployment-targets
@@ -451,14 +452,14 @@ jobs:
           echo "🚀 Deploying static files to S3..."
           
           # Sync the build output to S3
-          aws s3 sync ./frontend/out/ s3://$S3_BUCKET_NAME/ \
+          aws s3 sync ./frontend/react-app/dist/ s3://$S3_BUCKET_NAME/ \
             --delete \
             --cache-control "public,max-age=31536000,immutable" \
             --exclude "*.html" \
             --region $AWS_REGION
           
           # Upload HTML files with different cache settings
-          aws s3 sync ./frontend/out/ s3://$S3_BUCKET_NAME/ \
+          aws s3 sync ./frontend/react-app/dist/ s3://$S3_BUCKET_NAME/ \
             --cache-control "public,max-age=0,must-revalidate" \
             --content-type "text/html" \
             --exclude "*" \
