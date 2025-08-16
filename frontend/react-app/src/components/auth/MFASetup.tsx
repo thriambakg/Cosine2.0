@@ -21,7 +21,7 @@ export default function MFASetup({ onComplete, onSkip, isOptional = false }: MFA
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [secretCopied, setSecretCopied] = useState(false);
-  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [backupCodes, _setBackupCodes] = useState<string[]>([]);
   const [backupCodesCopied, setBackupCodesCopied] = useState(false);
 
   const { enableMfa, confirmMfa } = useAuth();

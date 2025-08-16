@@ -8,9 +8,7 @@ import {
   Alert,
   AlertTitle,
   Divider,
-  SvgIcon,
-  useTheme,
-  alpha
+  SvgIcon
 } from '@mui/material';
 import { Error as ErrorIcon } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
@@ -43,7 +41,6 @@ const GoogleIcon = () => (
 );
 
 export function SocialAuthButtonsMUI({ mode = 'login', isDisabled = false }: SocialAuthButtonsProps) {
-  const theme = useTheme();
   const [isLoading, setIsLoading] = useState(false);
   const [loadingProvider, setLoadingProvider] = useState<'Google' | null>(null);
   const [error, setError] = useState<string | null>(null);
