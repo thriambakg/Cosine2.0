@@ -7,7 +7,11 @@ import CssBaseline from '@mui/material/CssBaseline'
 import App from './App.tsx'
 import { store } from './store/store'
 import { theme } from './theme/theme'
+import configureAmplify from './config/amplify-config'
 import './index.css'
+
+// Configure Amplify before rendering the app
+configureAmplify()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
