@@ -39,9 +39,8 @@ data "terraform_remote_state" "base_infra" {
   }
 }
 
-# Data sources for account and region info
-data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
+# Data sources for account and region info - Not needed for minimal setup
+# These can be added back if needed for future features
 
 # Data source for static hosting bucket from base infrastructure
 data "aws_s3_bucket" "static_hosting" {
