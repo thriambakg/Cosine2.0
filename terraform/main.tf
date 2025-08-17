@@ -121,6 +121,9 @@ module "api_gateway" {
   # CORS settings for frontend integration
   binary_media_types = ["*/*"]
 
+  # Disable automatic deployment - we'll create our own after integrations
+  create_deployment = false
+
   tags = var.common_tags
 }
 
@@ -219,6 +222,57 @@ resource "aws_lambda_permission" "stocks_volatility_api_gateway" {
   function_name = module.stock_volatility_lambda.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
+}
+
+# API Gateway Deployment - Create after all integrations are configured
+resource "aws_api_gateway_deployment" "main" {
+  rest_api_id = module.api_gateway.rest_api_id
+
+  # Trigger redeployment when any integration changes
+  triggers = {
+    redeployment = sha1(jsonencode([
+      aws_api_gateway_integration.stocks_volatility_integration.uri,
+      aws_api_gateway_method.stocks_volatility_get.http_method,
+      aws_api_gateway_resource.stocks_volatility.path_part
+    ]))
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.stocks_volatility_integration,
+    aws_lambda_permission.stocks_volatility_api_gateway
+  ]
+}
+
+# API Gateway Stage - Create stage for the deployment
+resource "aws_api_gateway_stage" "main" {
+  deployment_id = aws_api_gateway_deployment.main.id
+  rest_api_id   = module.api_gateway.rest_api_id
+  stage_name    = var.environment
+
+  # Enable CloudWatch logging
+  access_log_settings {
+    destination_arn = module.api_gateway.cloudwatch_log_group_arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      caller         = "$context.identity.caller"
+      user           = "$context.identity.user"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      resourcePath   = "$context.resourcePath"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+      errorMessage   = "$context.error.message"
+      errorType      = "$context.error.messageString"
+    })
+  }
+
+  tags = var.common_tags
 }
 
 # ============================================================================

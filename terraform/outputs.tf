@@ -65,7 +65,7 @@ output "api_gateway" {
     rest_api_id = module.api_gateway.rest_api_id
     api_name    = "cosine-api-${var.environment}"
     api_url     = "https://${module.api_gateway.rest_api_id}.execute-api.${var.aws_region}.amazonaws.com"
-    stage_url   = module.api_gateway.stage_invoke_url
+    stage_url   = aws_api_gateway_stage.main.invoke_url
   }
 }
 
@@ -85,7 +85,7 @@ output "stock_volatility_lambda" {
 output "api_endpoints" {
   description = "Available API endpoints"
   value = {
-    stock_volatility_endpoint = "${module.api_gateway.stage_invoke_url}/stocks/volatility"
+    stock_volatility_endpoint = "${aws_api_gateway_stage.main.invoke_url}/stocks/volatility"
   }
 }
 
@@ -102,7 +102,7 @@ output "deployment_summary" {
     lambda_functions = [
       "stock-volatility"
     ]
-    api_base_url = module.api_gateway.stage_invoke_url
+    api_base_url = aws_api_gateway_stage.main.invoke_url
     frontend_url = var.enable_s3_bucket ? "S3 bucket created (CloudFront disabled)" : null
   }
 }
@@ -147,8 +147,8 @@ output "integration_guide" {
       
       Your frontend application is now configured with:
       
-      ✅ Stock Volatility API:
-         - Endpoint: ${module.api_gateway.stage_invoke_url}/stocks/volatility
+             ✅ Stock Volatility API:
+          - Endpoint: ${aws_api_gateway_stage.main.invoke_url}/stocks/volatility
          - Method: GET
          - Parameters: ticker (query param), period (query param)
       
@@ -267,7 +267,7 @@ output "build_environment_variables" {
     NEXT_PUBLIC_AWS_REGION                  = var.aws_region
 
     # API Gateway URL
-    NEXT_PUBLIC_API_GATEWAY_URL = module.api_gateway.stage_invoke_url
+    NEXT_PUBLIC_API_GATEWAY_URL = aws_api_gateway_stage.main.invoke_url
 
     # DynamoDB table names (for client-side reference if needed)
     NEXT_PUBLIC_USER_PROFILES_TABLE   = try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, "not_configured")
