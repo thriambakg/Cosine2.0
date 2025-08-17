@@ -84,49 +84,8 @@ variable "waf_blocked_countries" {
   default     = []
 }
 
-# Cognito Configuration (from existing infrastructure)
-variable "cognito_user_pool_id" {
-  description = "Cognito User Pool ID from base infrastructure"
-  type        = string
-  default     = ""
-}
-
-variable "cognito_client_id" {
-  description = "Cognito User Pool Client ID from base infrastructure"
-  type        = string
-  default     = ""
-}
-
-variable "cognito_domain" {
-  description = "Cognito domain from base infrastructure"
-  type        = string
-  default     = ""
-}
-
-# DynamoDB Configuration (from base infrastructure)
-variable "user_profiles_table_name" {
-  description = "DynamoDB table name for user profiles from base infrastructure"
-  type        = string
-  default     = ""
-}
-
-variable "security_events_table_name" {
-  description = "DynamoDB table name for security events from base infrastructure"
-  type        = string
-  default     = ""
-}
-
-variable "user_sessions_table_name" {
-  description = "DynamoDB table name for user sessions from base infrastructure"
-  type        = string
-  default     = ""
-}
-
-variable "api_gateway_url" {
-  description = "API Gateway URL for backend services"
-  type        = string
-  default     = ""
-}
+# Cognito and DynamoDB Configuration - Not needed for minimal stock volatility setup
+# These variables are kept for future expansion when authentication and database features are added
 
 # =============================================================================
 # CUSTOM DOMAIN CONFIGURATION
