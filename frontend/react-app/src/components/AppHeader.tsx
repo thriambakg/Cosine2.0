@@ -18,7 +18,7 @@ import {
   Notifications as BellIcon,
   NavigateNext as NavigateNextIcon,
 } from '@mui/icons-material';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../store/hooks';
 import { toggleSidebar } from '../store/slices/navigationSlice';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,7 +27,7 @@ import NotificationCenter from './NotificationCenter';
 export default function AppHeader() {
   const theme = useTheme();
   const navigate = useNavigate();
-  const location = useLocation();
+  // const location = useLocation(); // Removed unused variable
   const dispatch = useAppDispatch();
   const { user, logout } = useAuth();
   

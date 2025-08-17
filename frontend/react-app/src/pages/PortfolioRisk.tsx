@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Box,
   Typography,
@@ -19,9 +19,7 @@ import {
   Delete as DeleteIcon,
   Add as AddIcon,
   Calculate as CalculateIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  Warning as WarningIcon,
+
 } from '@mui/icons-material';
 
 interface PortfolioEntry {

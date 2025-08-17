@@ -10,10 +10,9 @@ import {
   Chip,
   Divider,
   IconButton,
-  useTheme,
+
 } from '@mui/material';
 import {
-  Notifications as NotificationIcon,
   Info as InfoIcon,
   Warning as WarningIcon,
   Error as ErrorIcon,
@@ -112,7 +111,7 @@ const formatTimestamp = (timestamp: Date) => {
 };
 
 export default function NotificationCenter({ anchorEl, onClose }: NotificationCenterProps) {
-  const theme = useTheme();
+  // const theme = useTheme(); // Removed unused variable
   const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
 
   const unreadCount = notifications.filter(n => !n.read).length;

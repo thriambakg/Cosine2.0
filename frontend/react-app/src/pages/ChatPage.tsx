@@ -6,7 +6,6 @@ import {
   Typography,
   TextField,
   IconButton,
-  Paper,
   Avatar,
   FormControl,
   InputLabel,
@@ -25,11 +24,8 @@ import {
   Person as PersonIcon,
   CloudUpload as UploadIcon,
   InsertDriveFile as FileIcon,
-  Image as ImageIcon,
-  Close as CloseIcon,
+
   Settings as SettingsIcon,
-  Logout as LogoutIcon,
-  Security as SecurityIcon,
   MoreVert as MoreVertIcon,
 } from '@mui/icons-material';
 

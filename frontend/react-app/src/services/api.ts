@@ -1,7 +1,7 @@
 // API service for connecting to backend Lambda functions
 // This service handles all API calls to the AWS API Gateway endpoints
 
-import { API_CONFIG, getApiUrl, isApiConfigured } from '../config/api';
+import { API_CONFIG } from '../config/api';
 
 const API_BASE_URL = API_CONFIG.BASE_URL;
 

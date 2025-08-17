@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Box,
   Typography,
@@ -17,14 +17,13 @@ import {
   TableRow,
 } from '@mui/material';
 import {
-  TrendingUp,
-  TrendingDown,
+
   AccountBalance as BankIcon,
   Security as ShieldIcon,
   CheckCircle,
   Link as LinkIcon,
   Refresh,
-  Warning as WarningIcon,
+
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -45,7 +44,7 @@ interface RobinhoodData {
 }
 
 export default function Robinhood() {
-  const { user } = useAuth();
+  const { } = useAuth();
   const [rhData, setRhData] = useState<RobinhoodData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);

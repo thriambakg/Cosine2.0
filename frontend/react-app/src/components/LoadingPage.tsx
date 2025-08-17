@@ -20,7 +20,7 @@ const pulse = keyframes`
   }
 `;
 
-const LoadingContainer = styled(Box)(({ theme }) => ({
+const LoadingContainer = styled(Box)(() => ({
   minHeight: '100vh',
   background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)',
   display: 'flex',
@@ -57,7 +57,7 @@ const LoadingContainer = styled(Box)(({ theme }) => ({
   },
 }));
 
-const LoadingCard = styled(Box)(({ theme }) => ({
+const LoadingCard = styled(Box)(() => ({
   background: 'rgba(15, 23, 42, 0.95)',
   backdropFilter: 'blur(16px)',
   border: '1px solid #374151',
@@ -70,13 +70,13 @@ const LoadingCard = styled(Box)(({ theme }) => ({
   animation: `${pulse} 2s ease-in-out infinite`,
 }));
 
-const StyledCircularProgress = styled(CircularProgress)(({ theme }) => ({
+const StyledCircularProgress = styled(CircularProgress)(() => ({
   color: '#3b82f6',
   marginBottom: '24px',
   filter: 'drop-shadow(0 4px 8px rgba(59, 130, 246, 0.3))',
 }));
 
-const LoadingText = styled(Typography)(({ theme }) => ({
+const LoadingText = styled(Typography)(() => ({
   color: '#ffffff',
   fontWeight: 700,
   fontSize: '1.5rem',
@@ -86,7 +86,7 @@ const LoadingText = styled(Typography)(({ theme }) => ({
   marginBottom: '8px',
 }));
 
-const SubText = styled(Typography)(({ theme }) => ({
+const SubText = styled(Typography)(() => ({
   color: '#9ca3af',
   fontSize: '0.875rem',
   fontFamily: 'system-ui, -apple-system, sans-serif',

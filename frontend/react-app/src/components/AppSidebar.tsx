@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   Drawer,
   List,
@@ -8,9 +7,7 @@ import {
   ListItemText,
   Typography,
   Box,
-  Divider,
-  Chip,
-  useTheme,
+
   Badge,
 } from '@mui/material';
 import {
@@ -46,7 +43,7 @@ const iconMap = {
 };
 
 export default function AppSidebar() {
-  const theme = useTheme();
+  // const theme = useTheme(); // Removed unused variable
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useAppDispatch();

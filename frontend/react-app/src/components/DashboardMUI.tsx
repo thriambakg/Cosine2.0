@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
-  Grid,
+
   Chip,
   Card,
   CardContent,
@@ -172,8 +172,8 @@ export default function DashboardMUI() {
       </GlassCard>
 
       {/* Quick Actions */}
-      <Grid container spacing={3} mb={4}>
-        <Grid item xs={12} sm={6} md={3}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 4 }}>
+        <Box sx={{ flex: '1 1 250px', minWidth: 0 }}>
           <GlassCard sx={{ p: 3, textAlign: 'center', cursor: 'pointer' }} onClick={() => navigate('/chat')}>
             <Box
               sx={{
@@ -197,9 +197,9 @@ export default function DashboardMUI() {
               Ask anything
             </Typography>
           </GlassCard>
-        </Grid>
+        </Box>
 
-        <Grid item xs={12} sm={6} md={3}>
+        <Box sx={{ flex: '1 1 250px', minWidth: 0 }}>
           <GlassCard sx={{ p: 3, textAlign: 'center', cursor: 'pointer' }}>
             <Box
               sx={{
@@ -223,9 +223,9 @@ export default function DashboardMUI() {
               Analyze files
             </Typography>
           </GlassCard>
-        </Grid>
+        </Box>
 
-        <Grid item xs={12} sm={6} md={3}>
+        <Box sx={{ flex: '1 1 250px', minWidth: 0 }}>
           <GlassCard sx={{ p: 3, textAlign: 'center', cursor: 'pointer' }}>
             <Box
               sx={{
@@ -249,9 +249,9 @@ export default function DashboardMUI() {
               View holdings
             </Typography>
           </GlassCard>
-        </Grid>
+        </Box>
 
-        <Grid item xs={12} sm={6} md={3}>
+        <Box sx={{ flex: '1 1 250px', minWidth: 0 }}>
           <GlassCard sx={{ p: 3, textAlign: 'center', cursor: 'pointer' }}>
             <Box
               sx={{
@@ -275,13 +275,13 @@ export default function DashboardMUI() {
               Preferences
             </Typography>
           </GlassCard>
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
 
       {/* Dashboard Content */}
-      <Grid container spacing={4}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
         {/* Main Content */}
-        <Grid item xs={12} lg={8}>
+        <Box sx={{ flex: '1 1 600px', minWidth: 0 }}>
           {/* Portfolio Overview */}
           <GlassCard sx={{ p: 4, mb: 4 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
@@ -297,8 +297,8 @@ export default function DashboardMUI() {
               </GradientButton>
             </Box>
             
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+              <Box sx={{ flex: '1 1 250px', minWidth: 0 }}>
                 <MetricCard
                   title="Total Value"
                   subtitle="Current portfolio"
@@ -308,8 +308,8 @@ export default function DashboardMUI() {
                   trend="up"
                   trendValue="+$13,425 today"
                 />
-              </Grid>
-              <Grid item xs={12} md={6}>
+              </Box>
+              <Box sx={{ flex: '1 1 250px', minWidth: 0 }}>
                 <MetricCard
                   title="Returns"
                   subtitle="This month"
@@ -319,8 +319,8 @@ export default function DashboardMUI() {
                   trend="up"
                   trendValue="vs +8.2% S&P 500"
                 />
-              </Grid>
-              <Grid item xs={12} md={6}>
+              </Box>
+              <Box sx={{ flex: '1 1 250px', minWidth: 0 }}>
                 <MetricCard
                   title="Risk Score"
                   subtitle="Current level"
@@ -330,8 +330,8 @@ export default function DashboardMUI() {
                   trend="neutral"
                   trendValue="Moderate"
                 />
-              </Grid>
-              <Grid item xs={12} md={6}>
+              </Box>
+              <Box sx={{ flex: '1 1 250px', minWidth: 0 }}>
                 <MetricCard
                   title="AI Score"
                   subtitle="Optimization"
@@ -341,8 +341,8 @@ export default function DashboardMUI() {
                   trend="up"
                   trendValue="Excellent"
                 />
-              </Grid>
-            </Grid>
+              </Box>
+            </Box>
           </GlassCard>
 
           {/* Recent Activity */}
@@ -391,10 +391,10 @@ export default function DashboardMUI() {
               ))}
             </Box>
           </GlassCard>
-        </Grid>
+        </Box>
 
         {/* Sidebar */}
-        <Grid item xs={12} lg={4}>
+        <Box sx={{ flex: '1 1 300px', minWidth: 0 }}>
           {/* AI Assistant */}
           <GlassCard sx={{ p: 4, mb: 4 }}>
             <Box display="flex" alignItems="center" gap={2} mb={3}>
@@ -518,8 +518,8 @@ export default function DashboardMUI() {
                 </Box>
               </Box>
           </GlassCard>
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
     </Box>
   );
 }
