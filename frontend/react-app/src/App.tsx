@@ -2,13 +2,16 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './contexts/AuthContext';
+import { Provider } from 'react-redux';
+import { store } from './store/store';
 
 // Import your existing components (we'll copy them over)
 import LandingPageMUI from './components/LandingPageMUI';
 import DashboardMUI from './components/DashboardMUI';
+import AppLayout from './components/AppLayout';
 import ChatPage from './pages/ChatPage';
-import RobinhoodPage from './pages/RobinhoodPage';
-import PortfolioRiskPage from './pages/PortfolioRiskPage';
+import Robinhood from './pages/Robinhood';
+import PortfolioRisk from './pages/PortfolioRisk';
 import StockVolatilityPage from './pages/StockVolatilityPage';
 import StockAlertsPage from './pages/StockAlertsPage';
 import CryptoStatsPage from './pages/CryptoStatsPage';
@@ -49,54 +52,74 @@ function AppContent() {
       
       {/* Protected Routes */}
       <Route path="/" element={
-        user ? <DashboardMUI /> : <LandingPageMUI />
+        user ? (
+          <AppLayout>
+            <DashboardMUI />
+          </AppLayout>
+        ) : <LandingPageMUI />
       } />
       
       <Route path="/chat" element={
         <ProtectedRoute>
-          <ChatPage />
+          <AppLayout>
+            <ChatPage />
+          </AppLayout>
         </ProtectedRoute>
       } />
       
       <Route path="/robinhood" element={
         <ProtectedRoute>
-          <RobinhoodPage />
+          <AppLayout>
+            <Robinhood />
+          </AppLayout>
         </ProtectedRoute>
       } />
       
       <Route path="/portfolio-risk" element={
         <ProtectedRoute>
-          <PortfolioRiskPage />
+          <AppLayout>
+            <PortfolioRisk />
+          </AppLayout>
         </ProtectedRoute>
       } />
       
       <Route path="/stock-volatility" element={
         <ProtectedRoute>
-          <StockVolatilityPage />
+          <AppLayout>
+            <StockVolatilityPage />
+          </AppLayout>
         </ProtectedRoute>
       } />
       
       <Route path="/stock-alerts" element={
         <ProtectedRoute>
-          <StockAlertsPage />
+          <AppLayout>
+            <StockAlertsPage />
+          </AppLayout>
         </ProtectedRoute>
       } />
       
       <Route path="/crypto-stats" element={
         <ProtectedRoute>
-          <CryptoStatsPage />
+          <AppLayout>
+            <CryptoStatsPage />
+          </AppLayout>
         </ProtectedRoute>
       } />
       
       <Route path="/option-pricing" element={
         <ProtectedRoute>
-          <OptionPricingPage />
+          <AppLayout>
+            <OptionPricingPage />
+          </AppLayout>
         </ProtectedRoute>
       } />
       
       <Route path="/heatmap" element={
         <ProtectedRoute>
-          <HeatmapPage />
+          <AppLayout>
+            <HeatmapPage />
+          </AppLayout>
         </ProtectedRoute>
       } />
       
@@ -109,9 +132,11 @@ function AppContent() {
 // Root App Component with Providers
 function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <Provider store={store}>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </Provider>
   );
 }
 

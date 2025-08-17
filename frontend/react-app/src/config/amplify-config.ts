@@ -13,8 +13,8 @@ const configureAmplify = () => {
             oauth: {
               domain: 'cosine-production.auth.us-east-1.amazoncognito.com',
               scopes: ['email', 'openid', 'profile', 'aws.cognito.signin.user.admin'],
-              redirectSignIn: ['https://investcosine.com/auth/callback'],
-              redirectSignOut: ['https://investcosine.com'],
+              redirectSignIn: ['http://localhost:3000/auth/callback', 'https://investcosine.com/auth/callback'],
+              redirectSignOut: ['http://localhost:3000', 'https://investcosine.com'],
               responseType: 'code',
               providers: ['Google']
             },

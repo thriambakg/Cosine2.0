@@ -81,25 +81,100 @@ output "kms_alias_name" {
   value       = aws_kms_alias.main.name
 }
 
-# Lambda Function Outputs - DISABLED FOR CLOUDFRONT DEPLOYMENT
-# Stock Volatility Lambda module is disabled to reduce costs and simplify architecture
-# output "stock_volatility_lambda" {
-#   description = "Information about the stock volatility Lambda function"
-#   value = length(module.stock_volatility_lambda) > 0 ? {
-#     function_name = module.stock_volatility_lambda[0].function_name
-#     function_arn  = module.stock_volatility_lambda[0].function_arn
-#     invoke_arn    = module.stock_volatility_lambda[0].invoke_arn
-#     role_arn      = module.stock_volatility_lambda[0].execution_role_arn
-#     role_name     = module.stock_volatility_lambda[0].execution_role_name
-#     } : {
-#     function_name = null
-#     function_arn  = null
-#     invoke_arn    = null
-#     role_arn      = null
-#     role_name     = null
-#     status        = "Disabled - IAM permissions required"
-#   }
-# }
+# ============================================================================
+# BACKEND API INFRASTRUCTURE OUTPUTS
+# ============================================================================
+
+# API Gateway Outputs
+output "api_gateway" {
+  description = "API Gateway configuration"
+  value = {
+    rest_api_id = module.api_gateway.rest_api_id
+    api_name    = module.api_gateway.api_name
+    api_url     = module.api_gateway.api_url
+    stage_url   = module.api_gateway.stage_url
+  }
+}
+
+# Lambda Function Outputs
+output "chat_lambda" {
+  description = "Information about the chat Lambda function"
+  value = {
+    function_name = module.chat_lambda.function_name
+    function_arn  = module.chat_lambda.function_arn
+    invoke_arn    = module.chat_lambda.invoke_arn
+    role_arn      = module.chat_lambda.execution_role_arn
+    role_name     = module.chat_lambda.execution_role_name
+  }
+}
+
+output "stock_volatility_lambda" {
+  description = "Information about the stock volatility Lambda function"
+  value = {
+    function_name = module.stock_volatility_lambda.function_name
+    function_arn  = module.stock_volatility_lambda.function_arn
+    invoke_arn    = module.stock_volatility_lambda.invoke_arn
+    role_arn      = module.stock_volatility_lambda.execution_role_arn
+    role_name     = module.stock_volatility_lambda.execution_role_name
+  }
+}
+
+output "portfolio_analysis_lambda" {
+  description = "Information about the portfolio analysis Lambda function"
+  value = {
+    function_name = module.portfolio_analysis_lambda.function_name
+    function_arn  = module.portfolio_analysis_lambda.function_arn
+    invoke_arn    = module.portfolio_analysis_lambda.invoke_arn
+    role_arn      = module.portfolio_analysis_lambda.execution_role_arn
+    role_name     = module.portfolio_analysis_lambda.execution_role_name
+  }
+}
+
+output "crypto_stats_lambda" {
+  description = "Information about the crypto stats Lambda function"
+  value = {
+    function_name = module.crypto_stats_lambda.function_name
+    function_arn  = module.crypto_stats_lambda.function_arn
+    invoke_arn    = module.crypto_stats_lambda.invoke_arn
+    role_arn      = module.crypto_stats_lambda.execution_role_arn
+    role_name     = module.crypto_stats_lambda.execution_role_name
+  }
+}
+
+output "option_pricing_lambda" {
+  description = "Information about the option pricing Lambda function"
+  value = {
+    function_name = module.option_pricing_lambda.function_name
+    function_arn  = module.option_pricing_lambda.function_arn
+    invoke_arn    = module.option_pricing_lambda.invoke_arn
+    role_arn      = module.option_pricing_lambda.execution_role_arn
+    role_name     = module.option_pricing_lambda.execution_role_name
+  }
+}
+
+output "stock_alerts_lambda" {
+  description = "Information about the stock alerts Lambda function"
+  value = {
+    function_name = module.stock_alerts_lambda.function_name
+    function_arn  = module.stock_alerts_lambda.function_arn
+    invoke_arn    = module.stock_alerts_lambda.invoke_arn
+    role_arn      = module.stock_alerts_lambda.execution_role_arn
+    role_name     = module.stock_alerts_lambda.execution_role_name
+  }
+}
+
+# API Endpoints
+output "api_endpoints" {
+  description = "Available API endpoints"
+  value = {
+    chat_endpoint             = "${module.api_gateway.stage_url}/chat"
+    stock_volatility_endpoint = "${module.api_gateway.stage_url}/stocks/volatility"
+    portfolio_endpoint        = "${module.api_gateway.stage_url}/portfolio"
+    crypto_endpoint           = "${module.api_gateway.stage_url}/crypto"
+    options_endpoint          = "${module.api_gateway.stage_url}/options"
+    alerts_endpoint           = "${module.api_gateway.stage_url}/alerts"
+  }
+}
 
 # CloudFront Outputs (disabled)
 # output "cloudfront_distribution_id" {
@@ -126,13 +201,22 @@ output "kms_alias_name" {
 output "deployment_summary" {
   description = "Summary of deployed resources"
   value = {
-    project_name       = var.project_name
-    environment        = var.environment
-    aws_region         = var.aws_region
-    s3_enabled         = var.enable_s3_bucket
-    cloudfront_enabled = var.enable_cloudfront
-    lambda_functions   = ["stock-volatility"]
-    frontend_url       = var.enable_s3_bucket ? "S3 bucket created (CloudFront disabled)" : null
+    project_name        = var.project_name
+    environment         = var.environment
+    aws_region          = var.aws_region
+    s3_enabled          = var.enable_s3_bucket
+    cloudfront_enabled  = var.enable_cloudfront
+    api_gateway_enabled = true
+    lambda_functions = [
+      "chat",
+      "stock-volatility",
+      "portfolio-analysis",
+      "crypto-stats",
+      "option-pricing",
+      "stock-alerts"
+    ]
+    api_base_url = module.api_gateway.stage_url
+    frontend_url = var.enable_s3_bucket ? "S3 bucket created (CloudFront disabled)" : null
   }
 }
 

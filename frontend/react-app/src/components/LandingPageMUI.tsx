@@ -174,19 +174,16 @@ export default function LandingPageMUI() {
                 
                 {/* Cosine Logo */}
                 <Box sx={{ mb: 3, display: 'flex', justifyContent: { xs: 'center', lg: 'flex-start' } }}>
-                  <Typography 
-                    variant="h2" 
+                  <Box 
+                    component="img"
+                    src="/logo-dark.svg"
+                    alt="Cosine"
                     sx={{ 
-                      color: '#ffffff',
-                      fontWeight: 800,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.2em',
-                      borderBottom: '4px solid #dc2626',
-                      pb: 1
-                    }}
-                  >
-                    COSINE
-                  </Typography>
+                      height: { xs: 120, md: 160 },
+                      width: 'auto',
+                      filter: 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))',
+                    }} 
+                  />
                 </Box>
                 
                 <Typography 

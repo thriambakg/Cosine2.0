@@ -114,6 +114,17 @@ const navigationSlice = createSlice({
           state.recentPages = state.recentPages.slice(0, 5);
         }
       }
+
+      // Update breadcrumbs based on current page
+      const currentItem = state.navigationItems.find(item => item.path === action.payload);
+      if (currentItem && action.payload !== '/') {
+        state.breadcrumbs = [
+          { label: 'Dashboard', path: '/' },
+          { label: currentItem.label, path: currentItem.path }
+        ];
+      } else if (action.payload === '/') {
+        state.breadcrumbs = [{ label: 'Dashboard', path: '/' }];
+      }
     },
     setBreadcrumbs: (state, action: PayloadAction<{ label: string; path: string }[]>) => {
       state.breadcrumbs = action.payload;

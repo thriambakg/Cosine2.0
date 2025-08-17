@@ -1,0 +1,12 @@
+# Lambda function dependencies for stock alerts
+# NOTE: Currently using mock implementation - minimal dependencies required
+
+# For future real implementation:
+# boto3>=1.26.0
+# yfinance>=0.2.28
+# requests>=2.31.0
+
+# Current implementation only requires built-in modules:
+# - json
+# - boto3 (for DynamoDB access)
+# - datetime

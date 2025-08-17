@@ -191,15 +191,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
 
-      // Check if we have valid Cognito configuration
-      const userPoolId = import.meta.env?.VITE_COGNITO_USER_POOL_ID;
-      if (!userPoolId || userPoolId.includes('TEMP')) {
-        console.warn('⚠️ Cognito not configured - running in demo mode');
-        setUser(null);
-        setIsLoading(false);
-        return;
-      }
-
       // Check if user is authenticated with Cognito
       const cognitoUser = await getCurrentUser();
 
@@ -231,16 +222,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string, mfaCode?: string) => {
     try {
       setIsLoading(true);
-      
-      // Check if we have valid Cognito configuration
-      const userPoolId = import.meta.env?.VITE_COGNITO_USER_POOL_ID;
-      if (!userPoolId || userPoolId.includes('TEMP')) {
-        console.warn('⚠️ Demo mode: Cognito not configured');
-        return { 
-          success: false, 
-          error: 'Authentication requires AWS Cognito configuration. Please deploy to AWS or configure Cognito credentials.' 
-        };
-      }
       
       const result = await signIn({ 
         username: email.toLowerCase().trim(), 
@@ -318,12 +299,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithProvider = async (provider: 'Google') => {
     try {
       setIsLoading(true);
-      
-      // Check if we have valid Cognito configuration
-      const userPoolId = import.meta.env?.VITE_COGNITO_USER_POOL_ID;
-      if (!userPoolId || userPoolId.includes('TEMP')) {
-        throw new Error('Federated authentication requires AWS Cognito configuration. Please deploy to AWS or configure Cognito credentials.');
-      }
       
       // Map provider names to AWS Amplify provider constants
       const providerMap = {
