@@ -1,23 +1,6 @@
 # outputs.tf
 # Output values from the Terraform configuration
 
-# VPC Outputs - DISABLED FOR CLOUDFRONT DEPLOYMENT
-# CloudFront + S3 static hosting doesn't use VPC resources
-# output "vpc_id" {
-#   description = "ID of the VPC"
-#   value       = module.vpc.vpc_id
-# }
-
-# output "public_subnet_ids" {
-#   description = "IDs of the public subnets"
-#   value       = module.vpc.public_subnet_ids
-# }
-
-# output "private_subnet_ids" {
-#   description = "IDs of the private subnets"
-#   value       = module.vpc.private_subnet_ids
-# }
-
 output "cloudfront_domain_name" {
   description = "Domain name of the CloudFront distribution"
   value       = var.use_cloudfront_deployment ? module.cloudfront[0].distribution_domain_name : null
@@ -82,7 +65,7 @@ output "kms_alias_name" {
 }
 
 # ============================================================================
-# BACKEND API INFRASTRUCTURE OUTPUTS
+# MINIMAL BACKEND API INFRASTRUCTURE OUTPUTS
 # ============================================================================
 
 # API Gateway Outputs
@@ -96,18 +79,7 @@ output "api_gateway" {
   }
 }
 
-# Lambda Function Outputs
-output "chat_lambda" {
-  description = "Information about the chat Lambda function"
-  value = {
-    function_name = module.chat_lambda.function_name
-    function_arn  = module.chat_lambda.function_arn
-    invoke_arn    = module.chat_lambda.invoke_arn
-    role_arn      = module.chat_lambda.execution_role_arn
-    role_name     = module.chat_lambda.execution_role_name
-  }
-}
-
+# Stock Volatility Lambda Function Outputs
 output "stock_volatility_lambda" {
   description = "Information about the stock volatility Lambda function"
   value = {
@@ -119,83 +91,13 @@ output "stock_volatility_lambda" {
   }
 }
 
-output "portfolio_analysis_lambda" {
-  description = "Information about the portfolio analysis Lambda function"
-  value = {
-    function_name = module.portfolio_analysis_lambda.function_name
-    function_arn  = module.portfolio_analysis_lambda.function_arn
-    invoke_arn    = module.portfolio_analysis_lambda.invoke_arn
-    role_arn      = module.portfolio_analysis_lambda.execution_role_arn
-    role_name     = module.portfolio_analysis_lambda.execution_role_name
-  }
-}
-
-output "crypto_stats_lambda" {
-  description = "Information about the crypto stats Lambda function"
-  value = {
-    function_name = module.crypto_stats_lambda.function_name
-    function_arn  = module.crypto_stats_lambda.function_arn
-    invoke_arn    = module.crypto_stats_lambda.invoke_arn
-    role_arn      = module.crypto_stats_lambda.execution_role_arn
-    role_name     = module.crypto_stats_lambda.execution_role_name
-  }
-}
-
-output "option_pricing_lambda" {
-  description = "Information about the option pricing Lambda function"
-  value = {
-    function_name = module.option_pricing_lambda.function_name
-    function_arn  = module.option_pricing_lambda.function_arn
-    invoke_arn    = module.option_pricing_lambda.invoke_arn
-    role_arn      = module.option_pricing_lambda.execution_role_arn
-    role_name     = module.option_pricing_lambda.execution_role_name
-  }
-}
-
-output "stock_alerts_lambda" {
-  description = "Information about the stock alerts Lambda function"
-  value = {
-    function_name = module.stock_alerts_lambda.function_name
-    function_arn  = module.stock_alerts_lambda.function_arn
-    invoke_arn    = module.stock_alerts_lambda.invoke_arn
-    role_arn      = module.stock_alerts_lambda.execution_role_arn
-    role_name     = module.stock_alerts_lambda.execution_role_name
-  }
-}
-
 # API Endpoints
 output "api_endpoints" {
   description = "Available API endpoints"
   value = {
-    chat_endpoint             = "${module.api_gateway.stage_invoke_url}/chat"
     stock_volatility_endpoint = "${module.api_gateway.stage_invoke_url}/stocks/volatility"
-    portfolio_endpoint        = "${module.api_gateway.stage_invoke_url}/portfolio"
-    crypto_endpoint           = "${module.api_gateway.stage_invoke_url}/crypto"
-    options_endpoint          = "${module.api_gateway.stage_invoke_url}/options"
-    alerts_endpoint           = "${module.api_gateway.stage_invoke_url}/alerts"
   }
 }
-
-# CloudFront Outputs (disabled)
-# output "cloudfront_distribution_id" {
-#   description = "ID of the CloudFront distribution"
-#   value       = var.enable_cloudfront && var.enable_s3_bucket ? module.cloudfront[0].distribution_id : null
-# }
-
-# output "cloudfront_distribution_arn" {
-#   description = "ARN of the CloudFront distribution"
-#   value       = var.enable_cloudfront && var.enable_s3_bucket ? module.cloudfront[0].distribution_arn : null
-# }
-
-# output "cloudfront_domain_name" {
-#   description = "Domain name of the CloudFront distribution"
-#   value       = var.enable_cloudfront && var.enable_s3_bucket ? module.cloudfront[0].distribution_domain_name : null
-# }
-
-# output "cloudfront_hosted_zone_id" {
-#   description = "Route 53 hosted zone ID for the CloudFront distribution"
-#   value       = var.enable_cloudfront && var.enable_s3_bucket ? module.cloudfront[0].distribution_hosted_zone_id : null
-# }
 
 # Summary Output
 output "deployment_summary" {
@@ -208,12 +110,7 @@ output "deployment_summary" {
     cloudfront_enabled  = var.enable_cloudfront
     api_gateway_enabled = true
     lambda_functions = [
-      "chat",
-      "stock-volatility",
-      "portfolio-analysis",
-      "crypto-stats",
-      "option-pricing",
-      "stock-alerts"
+      "stock-volatility"
     ]
     api_base_url = module.api_gateway.stage_invoke_url
     frontend_url = var.enable_s3_bucket ? "S3 bucket created (CloudFront disabled)" : null
@@ -228,10 +125,10 @@ output "deployment_summary" {
 output "authentication_config" {
   description = "Authentication configuration for frontend integration"
   value = {
-    user_pool_id = local.auth_config.user_pool_id
-    client_id    = local.auth_config.client_id
-    domain_name  = local.auth_config.domain_name
-    full_domain  = local.auth_config.full_domain_url
+    user_pool_id = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_id, "not_configured")
+    client_id    = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, "not_configured")
+    domain_name  = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, "not_configured")
+    full_domain  = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, "not_configured") != "not_configured" ? "${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, "")}.auth.${var.aws_region}.amazoncognito.com" : "not_configured"
     region       = var.aws_region
     environment  = var.environment
   }
@@ -241,18 +138,12 @@ output "authentication_config" {
 output "database_config" {
   description = "DynamoDB table configuration for frontend integration"
   value = {
-    user_profiles_table   = local.database_config.user_profiles_table_name
-    security_events_table = local.database_config.security_events_table_name
-    user_sessions_table   = local.database_config.user_sessions_table_name
+    user_profiles_table   = try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, "not_configured")
+    security_events_table = try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, "not_configured")
+    user_sessions_table   = try(data.terraform_remote_state.base_infra.outputs.user_sessions_table_name, "not_configured")
     region                = var.aws_region
     environment           = var.environment
   }
-}
-
-# Resource Discovery Debug Information
-output "resource_discovery_debug" {
-  description = "Debug information about resource discovery"
-  value       = local.discovery_status
 }
 
 # Frontend Application Integration Guide
@@ -261,39 +152,30 @@ output "integration_guide" {
   value = {
     message = <<-EOT
       ========================================================================================
-      🚀 FRONTEND INTEGRATION READY!
+      🚀 MINIMAL BACKEND DEPLOYMENT READY!
       ========================================================================================
       
       Your frontend application is now configured with:
       
-      ✅ AWS Cognito Authentication:
-         - User Pool ID: ${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_id, var.cognito_user_pool_id)}
-         - Client ID: ${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, var.cognito_client_id)}
-         - Domain: ${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, var.cognito_domain)}
-         - Supports: Username/Password + Google OAuth + Microsoft OAuth
+      ✅ Stock Volatility API:
+         - Endpoint: ${module.api_gateway.stage_invoke_url}/stocks/volatility
+         - Method: GET
+         - Parameters: ticker (query param), period (query param)
       
-      ✅ DynamoDB User Data Storage:
-         - User Profiles: ${try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, var.user_profiles_table_name)}
-         - Security Events: ${try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, var.security_events_table_name)}
-         - User Sessions: ${try(data.terraform_remote_state.base_infra.outputs.user_sessions_table_name, var.user_sessions_table_name)}
+      ✅ AWS Cognito Authentication (if base infrastructure exists):
+         - User Pool ID: ${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_id, "not_configured")}
+         - Client ID: ${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, "not_configured")}
       
       ✅ CloudFront Static Website Deployment:
          - Frontend URL: ${var.use_cloudfront_deployment ? (length(var.cloudfront_aliases) > 0 ? "https://${var.cloudfront_aliases[0]}" : "https://${module.cloudfront[0].distribution_domain_name}") : "CloudFront deployment not enabled"}
          - S3 Bucket: ${data.aws_s3_bucket.static_hosting.id}
       
       🔧 Next Steps:
-      1. Build your Next.js application with environment variables from build_environment_variables output
-      2. Deploy static files to S3 bucket: ${data.aws_s3_bucket.static_hosting.id}
-      3. Use the Cognito configuration for user authentication
-      4. Implement sign-in UI with federated provider options
+      1. Test the stock volatility API endpoint
+      2. Deploy your frontend to S3 bucket: ${data.aws_s3_bucket.static_hosting.id}
+      3. Configure frontend to use the API endpoint
       
-      📚 Environment Variables Available at Build Time:
-         - NEXT_PUBLIC_COGNITO_USER_POOL_ID
-         - NEXT_PUBLIC_COGNITO_CLIENT_ID
-         - NEXT_PUBLIC_COGNITO_DOMAIN
-         - NEXT_PUBLIC_USER_PROFILES_TABLE
-         - NEXT_PUBLIC_SECURITY_EVENTS_TABLE
-         - NEXT_PUBLIC_USER_SESSIONS_TABLE
+      💰 Cost Estimate: ~$15-25/month for this minimal setup
       ========================================================================================
     EOT
   }
@@ -388,19 +270,19 @@ output "build_environment_variables" {
   description = "Environment variables needed for Next.js build process"
   value = {
     # Authentication configuration
-    NEXT_PUBLIC_COGNITO_USER_POOL_ID        = local.auth_config.user_pool_id
-    NEXT_PUBLIC_COGNITO_CLIENT_ID           = local.auth_config.client_id
-    NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID = local.auth_config.client_id # Legacy name for GitHub Actions compatibility
-    NEXT_PUBLIC_COGNITO_DOMAIN              = "cosine-production.auth.us-east-1.amazoncognito.com"
+    NEXT_PUBLIC_COGNITO_USER_POOL_ID        = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_id, "not_configured")
+    NEXT_PUBLIC_COGNITO_CLIENT_ID           = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, "not_configured")
+    NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_client_id, "not_configured") # Legacy name for GitHub Actions compatibility
+    NEXT_PUBLIC_COGNITO_DOMAIN              = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, "not_configured") != "not_configured" ? "${try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_domain, "")}.auth.${var.aws_region}.amazoncognito.com" : "not_configured"
     NEXT_PUBLIC_AWS_REGION                  = var.aws_region
 
     # API Gateway URL
-    NEXT_PUBLIC_API_GATEWAY_URL = var.api_gateway_url
+    NEXT_PUBLIC_API_GATEWAY_URL = module.api_gateway.stage_invoke_url
 
     # DynamoDB table names (for client-side reference if needed)
-    NEXT_PUBLIC_USER_PROFILES_TABLE   = local.database_config.user_profiles_table_name
-    NEXT_PUBLIC_SECURITY_EVENTS_TABLE = local.database_config.security_events_table_name
-    NEXT_PUBLIC_USER_SESSIONS_TABLE   = local.database_config.user_sessions_table_name
+    NEXT_PUBLIC_USER_PROFILES_TABLE   = try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, "not_configured")
+    NEXT_PUBLIC_SECURITY_EVENTS_TABLE = try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, "not_configured")
+    NEXT_PUBLIC_USER_SESSIONS_TABLE   = try(data.terraform_remote_state.base_infra.outputs.user_sessions_table_name, "not_configured")
 
     # Environment information
     NEXT_PUBLIC_ENVIRONMENT  = var.environment
@@ -424,7 +306,7 @@ output "build_environment_variables" {
 # Deployment mode information
 output "deployment_mode" {
   description = "Current deployment mode"
-  value       = "CloudFront + S3 Static Hosting"
+  value       = "Minimal Backend + CloudFront + S3 Static Hosting"
 }
 
 output "website_urls" {

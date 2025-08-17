@@ -105,8 +105,8 @@ output "cloudwatch_role_arn" {
   value       = var.create_api_gateway_account ? aws_iam_role.api_gateway_cloudwatch[0].arn : null
 }
 
-# WAF Association
-output "waf_web_acl_association_id" {
-  description = "ID of the WAF Web ACL association"
-  value       = var.waf_web_acl_arn != null && var.create_deployment ? aws_wafv2_web_acl_association.this[0].id : null
-}
+# WAF Association - temporarily disabled
+# output "waf_web_acl_association_id" {
+#   description = "ID of the WAF Web ACL association"
+#   value       = var.waf_web_acl_arn != null && var.create_deployment ? aws_wafv2_web_acl_association.this[0].id : null
+# }

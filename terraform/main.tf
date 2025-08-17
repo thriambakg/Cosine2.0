@@ -119,88 +119,6 @@ resource "aws_kms_alias" "main" {
   }
 }
 
-# Custom IAM policy for stock volatility Lambda - DISABLED FOR CLOUDFRONT DEPLOYMENT
-# CloudFront + S3 static hosting doesn't need Lambda IAM policies
-# resource "aws_iam_policy" "stock_volatility_lambda_policy" {
-#   count       = 0 # Disabled for static hosting deployment
-#   name        = "${var.project_name}-stock-volatility-policy-${var.environment}"
-#   description = "Custom policy for stock volatility Lambda function"
-#
-#   policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [
-#       {
-#         Effect = "Allow"
-#         Action = [
-#           "s3:GetObject",
-#           "s3:PutObject"
-#         ]
-#         Resource = [
-#           "arn:aws:s3:::${var.project_name}-*/*"
-#         ]
-#       },
-#       {
-#         Effect = "Allow"
-#         Action = [
-#           "secretsmanager:GetSecretValue"
-#         ]
-#         Resource = [
-#           "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*"
-#         ]
-#       }
-#     ]
-#   })
-#
-#   tags = var.common_tags
-# }
-
-# Stock Volatility Lambda Function - DISABLED FOR CLOUDFRONT DEPLOYMENT
-# CloudFront + S3 static hosting doesn't need backend Lambda functions
-# This saves Lambda compute costs and simplifies the architecture
-# Re-enable when you need dynamic backend functionality
-# module "stock_volatility_lambda" {
-#   count  = 0 # Disabled for static hosting deployment
-#   source = "./modules/lambda"
-#
-#   function_name = "${var.project_name}-stock-volatility-${var.environment}"
-#   description   = "Lambda function for stock volatility calculation using yfinance"
-#   handler       = "lambda_function.lambda_handler"
-#   runtime       = "python3.11"
-#   timeout       = 60
-#   memory_size   = 512
-#
-#   # Source directory
-#   source_dir = "../backend_app/src/stocks/volatility_fetch/app"
-#
-#   # Environment variables
-#   environment_variables = {
-#     ENVIRONMENT = var.environment
-#     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-#   }
-#
-#   # Additional IAM policies (temporarily empty until permissions are granted)
-#   additional_policy_arns = [
-#     # aws_iam_policy.stock_volatility_lambda_policy.arn # Disabled until IAM permissions granted
-#   ]
-#
-#   tags = var.common_tags
-# }
-
-# VPC for secure networking - DISABLED FOR CLOUDFRONT DEPLOYMENT
-# CloudFront + S3 static hosting doesn't need VPC, NAT gateways, or private subnets
-# This saves ~$50-100/month in NAT Gateway and EIP costs
-# module "vpc" {
-#   source = "./modules/vpc"
-#
-#   project_name = var.project_name
-#   environment  = var.environment
-#   vpc_cidr     = var.vpc_cidr
-#   az_count     = var.az_count
-#   kms_key_arn  = aws_kms_key.main.arn
-#
-#   tags = var.common_tags
-# }
-
 # SSL Certificate for staging HTTPS (when no custom domain)
 module "ssl_certificate" {
   count  = var.enable_custom_domain ? 0 : 1
@@ -229,12 +147,7 @@ module "domain" {
 }
 
 # ============================================================================
-# CUSTOM DOMAIN CONFIGURATION - PHASE 2: DNS RECORDS
-# For CloudFront, DNS records will be handled separately if needed
-# ============================================================================
-
-# ============================================================================
-# BACKEND API INFRASTRUCTURE - Lambda Functions + API Gateway
+# MINIMAL BACKEND API INFRASTRUCTURE - Only Stock Volatility
 # ============================================================================
 
 # API Gateway for backend services
@@ -246,6 +159,9 @@ module "api_gateway" {
 
   # Public endpoint for frontend integration
   endpoint_type = "REGIONAL"
+
+  # WAF protection (required for REGIONAL endpoints) - temporarily disabled
+  # waf_web_acl_arn = module.waf.web_acl_arn
 
   # Enable CloudWatch logging
   create_api_gateway_account = true
@@ -282,66 +198,7 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for Lambda functions to access DynamoDB
-resource "aws_iam_policy" "lambda_dynamodb_policy" {
-  name        = "${var.project_name}-lambda-dynamodb-policy-${var.environment}"
-  description = "Policy for Lambda functions to access DynamoDB"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem",
-          "dynamodb:Query",
-          "dynamodb:Scan"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.user_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.user_table_arn}/index/*"
-        ]
-      }
-    ]
-  })
-
-  tags = var.common_tags
-}
-
-# Chat Lambda Function
-module "chat_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-chat-${var.environment}"
-  description   = "Lambda function for AI chat functionality"
-  handler       = "lambda_handler.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 30
-  memory_size   = 1024
-
-  # Source directory
-  source_dir = "../backend_app/src/Chat"
-
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-    USER_TABLE  = data.terraform_remote_state.base_infra.outputs.user_table_name
-  }
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
-    aws_iam_policy.lambda_dynamodb_policy.arn
-  ]
-
-  tags = var.common_tags
-}
-
-# Stock Volatility Lambda Function
+# Stock Volatility Lambda Function - ONLY THIS ONE IS NEEDED
 module "stock_volatility_lambda" {
   source = "./modules/lambda"
 
@@ -369,133 +226,11 @@ module "stock_volatility_lambda" {
   tags = var.common_tags
 }
 
-# Portfolio Analysis Lambda Function
-module "portfolio_analysis_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-portfolio-analysis-${var.environment}"
-  description   = "Lambda function for portfolio risk analysis and calculations"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 60
-  memory_size   = 1024
-
-  # Source directory
-  source_dir = "../backend_app/src/stocks/stock_statistics"
-
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-    USER_TABLE  = data.terraform_remote_state.base_infra.outputs.user_table_name
-  }
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
-    aws_iam_policy.lambda_dynamodb_policy.arn
-  ]
-
-  tags = var.common_tags
-}
-
-# Crypto Stats Lambda Function
-module "crypto_stats_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-crypto-stats-${var.environment}"
-  description   = "Lambda function for cryptocurrency statistics and analysis"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 60
-  memory_size   = 512
-
-  # Source directory
-  source_dir = "../backend_app/src/crypto/app"
-
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-  }
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn
-  ]
-
-  tags = var.common_tags
-}
-
-# Option Pricing Lambda Function
-module "option_pricing_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-option-pricing-${var.environment}"
-  description   = "Lambda function for option pricing calculations using Black-Scholes"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 60
-  memory_size   = 512
-
-  # Source directory
-  source_dir = "../backend_app/src/options/black_scholes"
-
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-  }
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn
-  ]
-
-  tags = var.common_tags
-}
-
-# Stock Alerts Lambda Function
-module "stock_alerts_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-stock-alerts-${var.environment}"
-  description   = "Lambda function for stock alert creation and management"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 60
-  memory_size   = 512
-
-  # Source directory
-  source_dir = "../backend_app/src/stocks/alert_creation"
-
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-    USER_TABLE  = data.terraform_remote_state.base_infra.outputs.user_table_name
-  }
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
-    aws_iam_policy.lambda_dynamodb_policy.arn
-  ]
-
-  tags = var.common_tags
-}
-
 # ============================================================================
-# API GATEWAY RESOURCES AND INTEGRATIONS
+# API GATEWAY RESOURCES AND INTEGRATIONS - Only Stock Volatility
 # ============================================================================
 
 # API Gateway Resources
-resource "aws_api_gateway_resource" "chat" {
-  rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.rest_api_root_resource_id
-  path_part   = "chat"
-}
-
 resource "aws_api_gateway_resource" "stocks" {
   rest_api_id = module.api_gateway.rest_api_id
   parent_id   = module.api_gateway.rest_api_root_resource_id
@@ -508,38 +243,7 @@ resource "aws_api_gateway_resource" "stocks_volatility" {
   path_part   = "volatility"
 }
 
-resource "aws_api_gateway_resource" "portfolio" {
-  rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.rest_api_root_resource_id
-  path_part   = "portfolio"
-}
-
-resource "aws_api_gateway_resource" "crypto" {
-  rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.rest_api_root_resource_id
-  path_part   = "crypto"
-}
-
-resource "aws_api_gateway_resource" "options" {
-  rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.rest_api_root_resource_id
-  path_part   = "options"
-}
-
-resource "aws_api_gateway_resource" "alerts" {
-  rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.rest_api_root_resource_id
-  path_part   = "alerts"
-}
-
 # API Gateway Methods
-resource "aws_api_gateway_method" "chat_post" {
-  rest_api_id   = module.api_gateway.rest_api_id
-  resource_id   = aws_api_gateway_resource.chat.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
 resource "aws_api_gateway_method" "stocks_volatility_get" {
   rest_api_id   = module.api_gateway.rest_api_id
   resource_id   = aws_api_gateway_resource.stocks_volatility.id
@@ -547,45 +251,7 @@ resource "aws_api_gateway_method" "stocks_volatility_get" {
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_method" "portfolio_post" {
-  rest_api_id   = module.api_gateway.rest_api_id
-  resource_id   = aws_api_gateway_resource.portfolio.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_method" "crypto_get" {
-  rest_api_id   = module.api_gateway.rest_api_id
-  resource_id   = aws_api_gateway_resource.crypto.id
-  http_method   = "GET"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_method" "options_post" {
-  rest_api_id   = module.api_gateway.rest_api_id
-  resource_id   = aws_api_gateway_resource.options.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_method" "alerts_post" {
-  rest_api_id   = module.api_gateway.rest_api_id
-  resource_id   = aws_api_gateway_resource.alerts.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
 # Lambda Integrations
-resource "aws_api_gateway_integration" "chat_integration" {
-  rest_api_id = module.api_gateway.rest_api_id
-  resource_id = aws_api_gateway_resource.chat.id
-  http_method = aws_api_gateway_method.chat_post.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = module.chat_lambda.invoke_arn
-}
-
 resource "aws_api_gateway_integration" "stocks_volatility_integration" {
   rest_api_id = module.api_gateway.rest_api_id
   resource_id = aws_api_gateway_resource.stocks_volatility.id
@@ -596,91 +262,11 @@ resource "aws_api_gateway_integration" "stocks_volatility_integration" {
   uri                     = module.stock_volatility_lambda.invoke_arn
 }
 
-resource "aws_api_gateway_integration" "portfolio_integration" {
-  rest_api_id = module.api_gateway.rest_api_id
-  resource_id = aws_api_gateway_resource.portfolio.id
-  http_method = aws_api_gateway_method.portfolio_post.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = module.portfolio_analysis_lambda.invoke_arn
-}
-
-resource "aws_api_gateway_integration" "crypto_integration" {
-  rest_api_id = module.api_gateway.rest_api_id
-  resource_id = aws_api_gateway_resource.crypto.id
-  http_method = aws_api_gateway_method.crypto_get.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = module.crypto_stats_lambda.invoke_arn
-}
-
-resource "aws_api_gateway_integration" "options_integration" {
-  rest_api_id = module.api_gateway.rest_api_id
-  resource_id = aws_api_gateway_resource.options.id
-  http_method = aws_api_gateway_method.options_post.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = module.option_pricing_lambda.invoke_arn
-}
-
-resource "aws_api_gateway_integration" "alerts_integration" {
-  rest_api_id = module.api_gateway.rest_api_id
-  resource_id = aws_api_gateway_resource.alerts.id
-  http_method = aws_api_gateway_method.alerts_post.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = module.stock_alerts_lambda.invoke_arn
-}
-
 # Lambda permissions for API Gateway
-resource "aws_lambda_permission" "chat_api_gateway" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = module.chat_lambda.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
-}
-
 resource "aws_lambda_permission" "stocks_volatility_api_gateway" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
   function_name = module.stock_volatility_lambda.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "portfolio_api_gateway" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = module.portfolio_analysis_lambda.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "crypto_api_gateway" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = module.crypto_stats_lambda.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "options_api_gateway" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = module.option_pricing_lambda.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "alerts_api_gateway" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = module.stock_alerts_lambda.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
 }
