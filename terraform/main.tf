@@ -60,63 +60,14 @@ locals {
   )
 }
 
-# KMS Key for encryption
-resource "aws_kms_key" "main" {
-  description             = "KMS key for ${var.project_name} ${var.environment}"
-  enable_key_rotation     = true
-  deletion_window_in_days = 7
+# Use KMS keys from base infrastructure instead of creating new ones
+# This avoids conflicts and ensures proper permissions
+locals {
+  # Use main KMS key from base infrastructure if available, otherwise use null
+  kms_key_arn = try(data.terraform_remote_state.base_infra.outputs.kms_key_arn, null)
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "EnableIAMUserPermissions"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action   = "kms:*"
-        Resource = "*"
-      },
-      {
-        Sid    = "AllowCloudWatchLogs"
-        Effect = "Allow"
-        Principal = {
-          Service = "logs.amazonaws.com"
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey"
-        ]
-        Resource = "*"
-        Condition = {
-          ArnLike = {
-            "kms:EncryptionContext:aws:logs:arn" = [
-              "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-*",
-              "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/wafv2/${var.project_name}-*",
-              "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/vpc/flowlogs/${var.project_name}-*"
-            ]
-          }
-        }
-      }
-    ]
-  })
-
-  tags = merge(var.common_tags, {
-    Name = "${var.project_name}-kms-key-${var.environment}"
-  })
-}
-
-resource "aws_kms_alias" "main" {
-  name          = "alias/${var.project_name}-${var.environment}"
-  target_key_id = aws_kms_key.main.key_id
-
-  lifecycle {
-    ignore_changes = [target_key_id]
-  }
+  # Use CloudWatch KMS key for CloudWatch logging if available, otherwise use main key
+  cloudwatch_kms_key_arn = try(data.terraform_remote_state.base_infra.outputs.cloudwatch_key_arn, local.kms_key_arn)
 }
 
 # SSL Certificate for staging HTTPS (when no custom domain)
@@ -166,7 +117,7 @@ module "api_gateway" {
   # Enable CloudWatch logging
   create_api_gateway_account = true
   log_retention_days         = 7
-  cloudwatch_kms_key_arn     = aws_kms_key.main.arn
+  cloudwatch_kms_key_arn     = local.cloudwatch_kms_key_arn
 
   # CORS settings for frontend integration
   binary_media_types = ["*/*"]

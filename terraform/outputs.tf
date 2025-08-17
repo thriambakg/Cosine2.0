@@ -48,20 +48,10 @@ output "s3_bucket_domain_name" {
   value       = data.aws_s3_bucket.static_hosting.bucket_regional_domain_name
 }
 
-# KMS Outputs
-output "kms_key_id" {
-  description = "ID of the KMS key"
-  value       = aws_kms_key.main.key_id
-}
-
+# KMS Outputs - Using base infrastructure KMS key
 output "kms_key_arn" {
-  description = "ARN of the KMS key"
-  value       = aws_kms_key.main.arn
-}
-
-output "kms_alias_name" {
-  description = "Name of the KMS alias"
-  value       = aws_kms_alias.main.name
+  description = "ARN of the KMS key from base infrastructure"
+  value       = local.kms_key_arn
 }
 
 # ============================================================================
