@@ -344,3 +344,34 @@ variable "client_certificate_id" {
   type        = string
   default     = null
 }
+
+# CORS Configuration
+variable "enable_cors" {
+  description = "Whether to enable CORS for the API Gateway"
+  type        = bool
+  default     = false
+}
+
+variable "cors_allowed_origins" {
+  description = "List of allowed origins for CORS. Use ['*'] for all origins"
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "cors_allowed_methods" {
+  description = "List of allowed HTTP methods for CORS"
+  type        = list(string)
+  default     = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+}
+
+variable "cors_allowed_headers" {
+  description = "List of allowed headers for CORS"
+  type        = list(string)
+  default     = ["Content-Type", "X-Amz-Date", "Authorization", "X-Api-Key", "X-Amz-Security-Token"]
+}
+
+variable "cors_max_age" {
+  description = "Maximum age for CORS preflight requests in seconds"
+  type        = number
+  default     = 86400
+}

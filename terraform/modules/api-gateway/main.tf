@@ -160,6 +160,11 @@ resource "aws_api_gateway_stage" "this" {
   # CKV2_AWS_51: Client certificate authentication
   client_certificate_id = var.client_certificate_id
 
+  # CORS configuration - Add CORS headers to all responses when enabled
+  variables = var.enable_cors ? {
+    cors_enabled = "true"
+  } : {}
+
   tags = merge(var.tags, {
     Name  = "${var.api_name}-${var.stage_name}"
     Stage = var.stage_name

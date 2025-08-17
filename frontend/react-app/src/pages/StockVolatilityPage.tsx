@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   TextField, 
   Button, 
@@ -16,6 +16,8 @@ import {
 } from '@mui/material';
 import { TrendingUp as VolatilityIcon } from '@mui/icons-material';
 import { useStockVolatility } from '../hooks/useAPI';
+import { logApiConfig } from '../config/api';
+import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 
 const STOCK_TICKERS = [
   "AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "META",
@@ -45,11 +47,49 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
 const StockVolatilityPage: React.FC = () => {
   const [ticker, setTicker] = useState<string | null>(null);
   const [period, setPeriod] = useState<string>('1y');
+  const [configValid, setConfigValid] = useState<boolean>(false);
+  const [configErrors, setConfigErrors] = useState<string[]>([]);
   
   const { data: volatilityData, loading: isLoading, error, execute: fetchVolatility } = useStockVolatility();
 
+  // Load configuration and validate on component mount
+  useEffect(() => {
+    const initializeConfig = async () => {
+      try {
+        await loadConfig();
+        const validation = validateConfig();
+        setConfigValid(validation.isValid);
+        setConfigErrors(validation.errors);
+        
+        // Log API configuration for debugging
+        logApiConfig();
+        
+        console.log('🔧 Configuration Status:', {
+          isValid: validation.isValid,
+          errors: validation.errors,
+          apiUrl: getConfig('apiGatewayUrl')
+        });
+      } catch (error) {
+        console.error('❌ Failed to load configuration:', error);
+        setConfigValid(false);
+        setConfigErrors(['Failed to load configuration']);
+      }
+    };
+
+    initializeConfig();
+  }, []);
+
   const handleFetchVolatility = async () => {
     if (!ticker) return;
+    
+    if (!configValid) {
+      console.error('❌ Configuration is invalid:', configErrors);
+      return;
+    }
+    
+    console.log(`🔍 Attempting to fetch volatility for ${ticker} with period ${period}`);
+    console.log(`🌐 Using API URL: ${getConfig('apiGatewayUrl')}`);
+    
     await fetchVolatility({ ticker, period });
   };
 
@@ -86,6 +126,35 @@ const StockVolatilityPage: React.FC = () => {
             Analyze stock volatility patterns and risk metrics for informed trading decisions
           </Typography>
         </Box>
+
+        {/* Configuration Status */}
+        {!configValid && (
+          <GlassCard sx={{ p: 4, mb: 4 }}>
+            <Alert severity="warning" sx={{ 
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              border: '1px solid #f59e0b',
+              color: '#fbbf24',
+              '& .MuiAlert-icon': {
+                color: '#fbbf24',
+              }
+            }}>
+              <Typography variant="h6" sx={{ color: '#fbbf24', mb: 1 }}>
+                Configuration Issue
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#fbbf24', mb: 2 }}>
+                The API configuration is not properly set up. Please check the following:
+              </Typography>
+              <Box component="ul" sx={{ color: '#fbbf24', pl: 2 }}>
+                {configErrors.map((error, index) => (
+                  <li key={index}>{error}</li>
+                ))}
+              </Box>
+              <Typography variant="body2" sx={{ color: '#fbbf24', mt: 2 }}>
+                Current API URL: {getConfig('apiGatewayUrl') || 'Not configured'}
+              </Typography>
+            </Alert>
+          </GlassCard>
+        )}
 
         {/* Input Section */}
         <GlassCard sx={{ p: 4, mb: 4 }}>

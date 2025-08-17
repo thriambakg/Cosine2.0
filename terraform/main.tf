@@ -119,7 +119,11 @@ module "api_gateway" {
   cloudwatch_kms_key_arn     = local.cloudwatch_kms_key_arn
 
   # CORS settings for frontend integration
-  binary_media_types = ["*/*"]
+  binary_media_types   = ["*/*"]
+  enable_cors          = true
+  cors_allowed_origins = ["*"]
+  cors_allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  cors_allowed_headers = ["Content-Type", "X-Amz-Date", "Authorization", "X-Api-Key", "X-Amz-Security-Token"]
 
   # Disable automatic deployment - we'll create our own after integrations
   create_deployment = false
@@ -204,6 +208,16 @@ resource "aws_api_gateway_method" "stocks_volatility_get" {
   authorization = "NONE"
 }
 
+
+
+
+
+
+
+
+
+
+
 # Lambda Integrations
 resource "aws_api_gateway_integration" "stocks_volatility_integration" {
   rest_api_id = module.api_gateway.rest_api_id
@@ -215,6 +229,18 @@ resource "aws_api_gateway_integration" "stocks_volatility_integration" {
   uri                     = module.stock_volatility_lambda.invoke_arn
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
 # Lambda permissions for API Gateway
 resource "aws_lambda_permission" "stocks_volatility_api_gateway" {
   statement_id  = "AllowExecutionFromAPIGateway"
@@ -223,6 +249,54 @@ resource "aws_lambda_permission" "stocks_volatility_api_gateway" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
 }
+
+# ============================================================================
+# CORS METHOD RESPONSES AND INTEGRATION RESPONSES
+# ============================================================================
+
+# Method Response for GET with CORS headers
+resource "aws_api_gateway_method_response" "stocks_volatility_get_200" {
+  count       = module.api_gateway.cors_enabled ? 1 : 0
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.stocks_volatility.id
+  http_method = aws_api_gateway_method.stocks_volatility_get.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Max-Age"       = true
+  }
+}
+
+
+
+
+
+
+
+# Integration Response for GET with CORS headers
+resource "aws_api_gateway_integration_response" "stocks_volatility_get_integration_response" {
+  count       = module.api_gateway.cors_enabled ? 1 : 0
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.stocks_volatility.id
+  http_method = aws_api_gateway_method.stocks_volatility_get.http_method
+  status_code = aws_api_gateway_method_response.stocks_volatility_get_200[0].status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'${join(",", module.api_gateway.cors_allowed_origins)}'"
+    "method.response.header.Access-Control-Allow-Headers" = "'${join(",", module.api_gateway.cors_allowed_headers)}'"
+    "method.response.header.Access-Control-Allow-Methods" = "'${join(",", module.api_gateway.cors_allowed_methods)}'"
+    "method.response.header.Access-Control-Max-Age"       = "'${module.api_gateway.cors_max_age}'"
+  }
+}
+
+
+
+
+
+
 
 # API Gateway Deployment - Create after all integrations are configured
 resource "aws_api_gateway_deployment" "main" {
@@ -243,6 +317,8 @@ resource "aws_api_gateway_deployment" "main" {
 
   depends_on = [
     aws_api_gateway_integration.stocks_volatility_integration,
+    aws_api_gateway_method_response.stocks_volatility_get_200,
+    aws_api_gateway_integration_response.stocks_volatility_get_integration_response,
     aws_lambda_permission.stocks_volatility_api_gateway
   ]
 }

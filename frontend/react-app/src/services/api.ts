@@ -1,9 +1,15 @@
 // API service for connecting to backend Lambda functions
 // This service handles all API calls to the AWS API Gateway endpoints
 
-import { API_CONFIG } from '../config/api';
+import { API_CONFIG, logApiConfig } from '../config/api';
 
 const API_BASE_URL = API_CONFIG.BASE_URL;
+
+// Debug logging on import
+console.log('🚀 API Service initialized with:', {
+  baseUrl: API_BASE_URL,
+  isConfigured: API_CONFIG.BASE_URL !== 'https://your-api-gateway-url.amazonaws.com/staging'
+});
 
 // Common headers for all API requests
 const getHeaders = (): HeadersInit => ({
@@ -18,22 +24,49 @@ const apiRequest = async <T>(
 ): Promise<T> => {
   const url = `${API_BASE_URL}${endpoint}`;
   
+  console.log(`🌐 Making API request to: ${url}`);
+  
   const config: RequestInit = {
     headers: getHeaders(),
     ...options,
   };
 
   try {
+    console.log(`📡 Request config:`, {
+      method: config.method || 'GET',
+      headers: config.headers,
+      body: config.body ? 'Present' : 'None'
+    });
+    
     const response = await fetch(url, config);
+    
+    console.log(`📥 Response status: ${response.status} ${response.statusText}`);
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      console.error(`❌ API Error Response:`, errorData);
       throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
     }
     
-    return await response.json();
+    const data = await response.json();
+    console.log(`✅ API Response data:`, data);
+    return data;
   } catch (error) {
-    console.error(`API request failed for ${endpoint}:`, error);
+    console.error(`💥 API request failed for ${endpoint}:`, error);
+    
+    // Log additional debugging info
+    if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+      console.error(`🔍 Network Error Details:`, {
+        url,
+        baseUrl: API_BASE_URL,
+        endpoint,
+        error: error.message
+      });
+      
+      // Log API configuration for debugging
+      logApiConfig();
+    }
+    
     throw error;
   }
 };

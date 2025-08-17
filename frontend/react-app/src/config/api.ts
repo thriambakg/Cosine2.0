@@ -1,9 +1,11 @@
 // API Configuration
 // This file manages API Gateway URLs and configuration
 
+import { ENV_CONFIG, logEnvironmentConfig } from './environment';
+
 export const API_CONFIG = {
-  // API Gateway base URL - will be replaced with actual URL after deployment
-  BASE_URL: process.env.NEXT_PUBLIC_API_GATEWAY_URL || 'https://your-api-gateway-url.amazonaws.com/staging',
+  // API Gateway base URL - dynamically loaded from environment
+  BASE_URL: ENV_CONFIG.apiGatewayUrl,
   
   // API endpoints
   ENDPOINTS: {
@@ -42,20 +44,35 @@ export const getApiUrl = (endpoint: string): string => {
 
 // Helper function to check if API is configured
 export const isApiConfigured = (): boolean => {
-  return API_CONFIG.BASE_URL !== 'https://your-api-gateway-url.amazonaws.com/staging';
+  const url = API_CONFIG.BASE_URL;
+  return Boolean(url && 
+         !url.includes('your-') && 
+         url !== 'https://your-api-gateway-url.amazonaws.com/staging' && 
+         url !== 'https://your-staging-api-gateway-url.amazonaws.com/staging' &&
+         url !== 'https://your-production-api-gateway-url.amazonaws.com/production');
 };
 
 // Helper function to get environment-specific configuration
 export const getEnvironmentConfig = () => {
-  const environment = process.env.NEXT_PUBLIC_ENVIRONMENT || 'development';
-  
   return {
-    environment,
-    isDevelopment: environment === 'development',
-    isStaging: environment === 'staging',
-    isProduction: environment === 'production',
+    environment: ENV_CONFIG.environment,
+    isDevelopment: ENV_CONFIG.environment === 'development',
+    isStaging: ENV_CONFIG.environment === 'staging',
+    isProduction: ENV_CONFIG.environment === 'production',
     apiUrl: API_CONFIG.BASE_URL,
   };
+};
+
+// Debug function to log current API configuration
+export const logApiConfig = () => {
+  console.log('🔧 API Configuration Debug:');
+  console.log('Environment:', ENV_CONFIG.environment);
+  console.log('API Gateway URL:', API_CONFIG.BASE_URL);
+  console.log('Is Configured:', isApiConfigured());
+  console.log('Stock Volatility Endpoint:', getApiUrl(API_CONFIG.ENDPOINTS.STOCK_VOLATILITY));
+  
+  // Also log environment configuration
+  logEnvironmentConfig();
 };
 
 export default API_CONFIG;

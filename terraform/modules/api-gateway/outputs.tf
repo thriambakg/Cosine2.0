@@ -110,3 +110,29 @@ output "cloudwatch_role_arn" {
 #   description = "ID of the WAF Web ACL association"
 #   value       = var.waf_web_acl_arn != null && var.create_deployment ? aws_wafv2_web_acl_association.this[0].id : null
 # }
+
+# CORS Configuration Outputs
+output "cors_enabled" {
+  description = "Whether CORS is enabled for this API Gateway"
+  value       = var.enable_cors
+}
+
+output "cors_allowed_origins" {
+  description = "List of allowed origins for CORS"
+  value       = var.cors_allowed_origins
+}
+
+output "cors_allowed_methods" {
+  description = "List of allowed HTTP methods for CORS"
+  value       = var.cors_allowed_methods
+}
+
+output "cors_allowed_headers" {
+  description = "List of allowed headers for CORS"
+  value       = var.cors_allowed_headers
+}
+
+output "cors_max_age" {
+  description = "Maximum age for CORS preflight requests in seconds"
+  value       = var.cors_max_age
+}

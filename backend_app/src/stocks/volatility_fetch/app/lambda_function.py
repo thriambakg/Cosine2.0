@@ -38,8 +38,23 @@ def lambda_handler(event, context):
             event = json.loads(event)
         
         # Extract parameters from event
-        ticker = event.get('ticker')
-        period = event.get('period', '1y')
+        # For GET requests, API Gateway passes query parameters in event['queryStringParameters']
+        # For POST requests, parameters are in event['body']
+        if event.get('queryStringParameters'):
+            # GET request with query parameters
+            ticker = event['queryStringParameters'].get('ticker')
+            period = event['queryStringParameters'].get('period', '1y')
+        elif event.get('body'):
+            # POST request with body
+            body = event['body']
+            if isinstance(body, str):
+                body = json.loads(body)
+            ticker = body.get('ticker')
+            period = body.get('period', '1y')
+        else:
+            # Direct event parameters (fallback)
+            ticker = event.get('ticker')
+            period = event.get('period', '1y')
         
         # Validate required parameters
         if not ticker:

@@ -374,6 +374,45 @@ jobs:
         working-directory: ./frontend/react-app
         run: npm ci
 
+      - name: Generate runtime configuration
+        working-directory: ./frontend/react-app
+        run: |
+          echo "🔧 Generating runtime configuration from Terraform outputs..."
+          
+          # Get values from Terraform outputs (already retrieved in previous step)
+          API_GATEWAY_URL="${{ steps.get-build-env.outputs.next_public_api_gateway_url }}"
+          AWS_REGION="${{ steps.get-build-env.outputs.next_public_aws_region }}"
+          ENVIRONMENT="${{ needs.setup.outputs.environment }}"
+          COGNITO_USER_POOL_ID="${{ steps.get-build-env.outputs.next_public_cognito_user_pool_id }}"
+          COGNITO_CLIENT_ID="${{ steps.get-build-env.outputs.next_public_cognito_user_pool_client_id }}"
+          COGNITO_DOMAIN="${{ steps.get-build-env.outputs.next_public_cognito_domain }}"
+          REDIRECT_SIGN_IN="${{ steps.get-build-env.outputs.next_public_redirect_sign_in }}"
+          REDIRECT_SIGN_OUT="${{ steps.get-build-env.outputs.next_public_redirect_sign_out }}"
+          
+          echo "🔍 Configuration values:"
+          echo "  - API Gateway URL: $API_GATEWAY_URL"
+          echo "  - AWS Region: $AWS_REGION"
+          echo "  - Environment: $ENVIRONMENT"
+          echo "  - Cognito User Pool ID: $COGNITO_USER_POOL_ID"
+          echo "  - Cognito Client ID: $COGNITO_CLIENT_ID"
+          echo "  - Cognito Domain: $COGNITO_DOMAIN"
+          
+          # Generate the runtime configuration file
+          node scripts/generate-config.js \
+            --api-gateway-url "$API_GATEWAY_URL" \
+            --aws-region "$AWS_REGION" \
+            --environment "$ENVIRONMENT" \
+            --cognito-user-pool-id "$COGNITO_USER_POOL_ID" \
+            --cognito-client-id "$COGNITO_CLIENT_ID" \
+            --cognito-domain "$COGNITO_DOMAIN" \
+            --redirect-sign-in "$REDIRECT_SIGN_IN" \
+            --redirect-sign-out "$REDIRECT_SIGN_OUT" \
+            --output "public/config.js"
+          
+          echo "✅ Runtime configuration generated successfully"
+          echo "🔍 Generated config.js content:"
+          cat public/config.js | head -20
+
       - name: Build React.js (Vite) application
         working-directory: ./frontend/react-app
         env:
@@ -393,6 +432,16 @@ jobs:
           echo "  - Sign In Redirect: $VITE_REDIRECT_SIGN_IN"
           echo "  - Sign Out Redirect: $VITE_REDIRECT_SIGN_OUT"
           
+          # Verify runtime config is present
+          echo "🔍 Checking runtime configuration..."
+          if [ -f "public/config.js" ]; then
+            echo "✅ Runtime config.js found"
+            echo "📄 Config.js preview:"
+            head -10 public/config.js
+          else
+            echo "❌ Runtime config.js not found - build will continue with fallback config"
+          fi
+          
           # Build the React.js application
           npm run build
           
@@ -406,6 +455,16 @@ jobs:
           find dist/ -type f -name "*.html" | head -10 || echo "No HTML files found"
           find dist/ -type f -name "*.js" | head -5 || echo "No JS files found"
           find dist/ -type f -name "*.css" | head -5 || echo "No CSS files found"
+          
+          # Verify config.js was included in build
+          echo "🔍 Checking if config.js was included in build:"
+          if [ -f "dist/config.js" ]; then
+            echo "✅ config.js included in build output"
+            echo "📄 Built config.js content:"
+            head -10 dist/config.js
+          else
+            echo "⚠️  config.js not found in build output - check Vite configuration"
+          fi
 
       - name: Get S3 bucket and CloudFront distribution from Terraform
         id: get-deployment-targets
