@@ -15,6 +15,9 @@ console.log('🚀 API Service initialized with:', {
 const getHeaders = (): HeadersInit => ({
   'Content-Type': 'application/json',
   'Accept': 'application/json',
+  'X-Force-Preflight': Date.now().toString(), // Force CORS preflight
+  'X-Requested-With': 'XMLHttpRequest', // Additional header to force preflight
+  'X-Cache-Buster': Math.random().toString(36).substring(7), // Random cache buster
 });
 
 // Generic API request function
@@ -28,6 +31,8 @@ const apiRequest = async <T>(
   
   const config: RequestInit = {
     headers: getHeaders(),
+    // Add cache-busting headers to prevent caching issues
+    cache: 'no-cache' as RequestCache,
     ...options,
   };
 
@@ -35,12 +40,14 @@ const apiRequest = async <T>(
     console.log(`📡 Request config:`, {
       method: config.method || 'GET',
       headers: config.headers,
+      cache: config.cache,
       body: config.body ? 'Present' : 'None'
     });
     
     const response = await fetch(url, config);
     
     console.log(`📥 Response status: ${response.status} ${response.statusText}`);
+    console.log(`📥 Response headers:`, Object.fromEntries(response.headers.entries()));
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));

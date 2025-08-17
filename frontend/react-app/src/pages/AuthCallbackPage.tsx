@@ -31,13 +31,13 @@ const AuthCallbackPage: React.FC = () => {
             }, 2000);
           } else {
             console.log('❌ AuthCallbackPage: Authentication failed after multiple attempts');
-            // Authentication failed after multiple attempts - redirect to login with error
-            navigate('/login?error=authentication_failed', { replace: true });
+            // Authentication failed after multiple attempts - redirect to home with error
+            navigate('/?error=authentication_failed', { replace: true });
           }
         }
              } catch (error) {
          console.error('❌ AuthCallbackPage: Callback error:', error);
-         navigate('/login?error=callback_error', { replace: true });
+         navigate('/?error=callback_error', { replace: true });
        }
     };
 

@@ -15,7 +15,7 @@ import {
   MenuItem,
 } from '@mui/material';
 import { TrendingUp as VolatilityIcon } from '@mui/icons-material';
-import { useStockVolatility } from '../hooks/useAPI';
+import { useStockVolatility, clearAPICache } from '../hooks/useAPI';
 import { logApiConfig } from '../config/api';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 
@@ -89,6 +89,9 @@ const StockVolatilityPage: React.FC = () => {
     
     console.log(`🔍 Attempting to fetch volatility for ${ticker} with period ${period}`);
     console.log(`🌐 Using API URL: ${getConfig('apiGatewayUrl')}`);
+    
+    // Clear cache before making request
+    clearAPICache();
     
     await fetchVolatility({ ticker, period });
   };

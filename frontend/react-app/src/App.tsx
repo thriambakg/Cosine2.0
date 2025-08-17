@@ -17,7 +17,7 @@ import StockAlertsPage from './pages/StockAlertsPage';
 import CryptoStatsPage from './pages/CryptoStatsPage';
 import OptionPricingPage from './pages/OptionPricingPage';
 import HeatmapPage from './pages/HeatmapPage';
-import LoginPage from './pages/LoginPage';
+
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import LoadingPage from './components/LoadingPage';
 
@@ -30,7 +30,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
@@ -47,7 +47,7 @@ function AppContent() {
   return (
     <Routes>
       {/* Public Routes */}
-      <Route path="/login" element={!user ? <LoginPage /> : <Navigate to="/" replace />} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       
       {/* Protected Routes */}

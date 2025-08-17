@@ -123,7 +123,7 @@ module "api_gateway" {
   enable_cors          = true
   cors_allowed_origins = ["*"]
   cors_allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-  cors_allowed_headers = ["Content-Type", "X-Amz-Date", "Authorization", "X-Api-Key", "X-Amz-Security-Token"]
+  cors_allowed_headers = ["Content-Type", "X-Amz-Date", "Authorization", "X-Api-Key", "X-Amz-Security-Token", "X-Force-Preflight", "X-Requested-With", "X-Cache-Buster"]
 
   # Disable automatic deployment - we'll create our own after integrations
   create_deployment = false
@@ -208,6 +208,15 @@ resource "aws_api_gateway_method" "stocks_volatility_get" {
   authorization = "NONE"
 }
 
+# OPTIONS method for CORS preflight requests
+resource "aws_api_gateway_method" "stocks_volatility_options" {
+  count         = module.api_gateway.cors_enabled ? 1 : 0
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.stocks_volatility.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
 
 
 
@@ -227,6 +236,20 @@ resource "aws_api_gateway_integration" "stocks_volatility_integration" {
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
   uri                     = module.stock_volatility_lambda.invoke_arn
+}
+
+# Mock integration for OPTIONS method (CORS preflight)
+resource "aws_api_gateway_integration" "stocks_volatility_options_integration" {
+  count       = module.api_gateway.cors_enabled ? 1 : 0
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.stocks_volatility.id
+  http_method = aws_api_gateway_method.stocks_volatility_options[0].http_method
+
+  type                 = "MOCK"
+  passthrough_behavior = "WHEN_NO_MATCH"
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
 }
 
 
@@ -270,6 +293,22 @@ resource "aws_api_gateway_method_response" "stocks_volatility_get_200" {
   }
 }
 
+# Method Response for OPTIONS with CORS headers
+resource "aws_api_gateway_method_response" "stocks_volatility_options_200" {
+  count       = module.api_gateway.cors_enabled ? 1 : 0
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.stocks_volatility.id
+  http_method = aws_api_gateway_method.stocks_volatility_options[0].http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Max-Age"       = true
+  }
+}
+
 
 
 
@@ -292,6 +331,26 @@ resource "aws_api_gateway_integration_response" "stocks_volatility_get_integrati
   }
 }
 
+# Integration Response for OPTIONS with CORS headers
+resource "aws_api_gateway_integration_response" "stocks_volatility_options_integration_response" {
+  count       = module.api_gateway.cors_enabled ? 1 : 0
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.stocks_volatility.id
+  http_method = aws_api_gateway_method.stocks_volatility_options[0].http_method
+  status_code = aws_api_gateway_method_response.stocks_volatility_options_200[0].status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'${join(",", module.api_gateway.cors_allowed_origins)}'"
+    "method.response.header.Access-Control-Allow-Headers" = "'${join(",", module.api_gateway.cors_allowed_headers)}'"
+    "method.response.header.Access-Control-Allow-Methods" = "'${join(",", module.api_gateway.cors_allowed_methods)}'"
+    "method.response.header.Access-Control-Max-Age"       = "'${module.api_gateway.cors_max_age}'"
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.stocks_volatility_options_integration
+  ]
+}
+
 
 
 
@@ -307,7 +366,11 @@ resource "aws_api_gateway_deployment" "main" {
     redeployment = sha1(jsonencode([
       aws_api_gateway_integration.stocks_volatility_integration.uri,
       aws_api_gateway_method.stocks_volatility_get.http_method,
-      aws_api_gateway_resource.stocks_volatility.path_part
+      aws_api_gateway_resource.stocks_volatility.path_part,
+      aws_api_gateway_method.stocks_volatility_options,
+      aws_api_gateway_integration.stocks_volatility_options_integration,
+      aws_api_gateway_method_response.stocks_volatility_options_200,
+      aws_api_gateway_integration_response.stocks_volatility_options_integration_response,
     ]))
   }
 
@@ -317,8 +380,11 @@ resource "aws_api_gateway_deployment" "main" {
 
   depends_on = [
     aws_api_gateway_integration.stocks_volatility_integration,
+    aws_api_gateway_integration.stocks_volatility_options_integration,
     aws_api_gateway_method_response.stocks_volatility_get_200,
+    aws_api_gateway_method_response.stocks_volatility_options_200,
     aws_api_gateway_integration_response.stocks_volatility_get_integration_response,
+    aws_api_gateway_integration_response.stocks_volatility_options_integration_response,
     aws_lambda_permission.stocks_volatility_api_gateway
   ]
 }

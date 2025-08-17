@@ -147,7 +147,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!isLoading && !user) {
-      navigate('/login');
+      navigate('/');
     }
   }, [user, isLoading, navigate]);
 

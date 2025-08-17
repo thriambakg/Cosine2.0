@@ -20,6 +20,12 @@ const apiCache = new Map<string, { data: any; timestamp: number; ttl: number }>(
 // Cache TTL in milliseconds (5 minutes default)
 const DEFAULT_CACHE_TTL = 5 * 60 * 1000;
 
+// Function to clear all cache
+export const clearAPICache = () => {
+  apiCache.clear();
+  console.log('🧹 API cache cleared');
+};
+
 // Generate cache key
 const generateCacheKey = (endpoint: string, params: any): string => {
   return `${endpoint}:${JSON.stringify(params)}`;
@@ -131,7 +137,8 @@ export function useAPI<T>(
 
 // Stock Volatility Hook
 export function useStockVolatility() {
-  return useAPI(api.stockVolatility.getVolatility);
+  // Temporarily disable caching for debugging
+  return useAPI(api.stockVolatility.getVolatility, 0);
 }
 
 // Portfolio Analysis Hook

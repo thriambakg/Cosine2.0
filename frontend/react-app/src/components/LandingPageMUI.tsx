@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Container,
@@ -28,12 +29,22 @@ export default function LandingPageMUI() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const { isAuthenticated } = useAuth();
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     if (isAuthenticated && typeof window !== 'undefined') {
       window.location.href = '/chat';
     }
   }, [isAuthenticated]);
+
+  // Check for error parameters and automatically open auth modal
+  useEffect(() => {
+    const error = searchParams.get('error');
+    if (error) {
+      setAuthMode('login');
+      setAuthModalOpen(true);
+    }
+  }, [searchParams]);
 
   const handleGetStarted = () => {
     setAuthMode('register');
