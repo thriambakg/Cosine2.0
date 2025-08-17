@@ -90,9 +90,9 @@ output "api_gateway" {
   description = "API Gateway configuration"
   value = {
     rest_api_id = module.api_gateway.rest_api_id
-    api_name    = module.api_gateway.api_name
-    api_url     = module.api_gateway.api_url
-    stage_url   = module.api_gateway.stage_url
+    api_name    = "cosine-api-${var.environment}"
+    api_url     = "https://${module.api_gateway.rest_api_id}.execute-api.${var.aws_region}.amazonaws.com"
+    stage_url   = module.api_gateway.stage_invoke_url
   }
 }
 
@@ -167,12 +167,12 @@ output "stock_alerts_lambda" {
 output "api_endpoints" {
   description = "Available API endpoints"
   value = {
-    chat_endpoint             = "${module.api_gateway.stage_url}/chat"
-    stock_volatility_endpoint = "${module.api_gateway.stage_url}/stocks/volatility"
-    portfolio_endpoint        = "${module.api_gateway.stage_url}/portfolio"
-    crypto_endpoint           = "${module.api_gateway.stage_url}/crypto"
-    options_endpoint          = "${module.api_gateway.stage_url}/options"
-    alerts_endpoint           = "${module.api_gateway.stage_url}/alerts"
+    chat_endpoint             = "${module.api_gateway.stage_invoke_url}/chat"
+    stock_volatility_endpoint = "${module.api_gateway.stage_invoke_url}/stocks/volatility"
+    portfolio_endpoint        = "${module.api_gateway.stage_invoke_url}/portfolio"
+    crypto_endpoint           = "${module.api_gateway.stage_invoke_url}/crypto"
+    options_endpoint          = "${module.api_gateway.stage_invoke_url}/options"
+    alerts_endpoint           = "${module.api_gateway.stage_invoke_url}/alerts"
   }
 }
 
@@ -215,7 +215,7 @@ output "deployment_summary" {
       "option-pricing",
       "stock-alerts"
     ]
-    api_base_url = module.api_gateway.stage_url
+    api_base_url = module.api_gateway.stage_invoke_url
     frontend_url = var.enable_s3_bucket ? "S3 bucket created (CloudFront disabled)" : null
   }
 }

@@ -316,12 +316,7 @@ variable "quota_settings" {
   })
   default = null
 
-  validation {
-    condition = var.quota_settings == null || contains([
-      "DAY", "WEEK", "MONTH"
-    ], var.quota_settings.period)
-    error_message = "Quota period must be one of: DAY, WEEK, MONTH."
-  }
+
 }
 
 variable "throttle_settings" {

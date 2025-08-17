@@ -302,7 +302,7 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.user_table_arn,
-          data.terraform_remote_state.base_infra.outputs.user_table_arn + "/index/*"
+          "${data.terraform_remote_state.base_infra.outputs.user_table_arn}/index/*"
         ]
       }
     ]
@@ -492,13 +492,13 @@ module "stock_alerts_lambda" {
 # API Gateway Resources
 resource "aws_api_gateway_resource" "chat" {
   rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.root_resource_id
+  parent_id   = module.api_gateway.rest_api_root_resource_id
   path_part   = "chat"
 }
 
 resource "aws_api_gateway_resource" "stocks" {
   rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.root_resource_id
+  parent_id   = module.api_gateway.rest_api_root_resource_id
   path_part   = "stocks"
 }
 
@@ -510,25 +510,25 @@ resource "aws_api_gateway_resource" "stocks_volatility" {
 
 resource "aws_api_gateway_resource" "portfolio" {
   rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.root_resource_id
+  parent_id   = module.api_gateway.rest_api_root_resource_id
   path_part   = "portfolio"
 }
 
 resource "aws_api_gateway_resource" "crypto" {
   rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.root_resource_id
+  parent_id   = module.api_gateway.rest_api_root_resource_id
   path_part   = "crypto"
 }
 
 resource "aws_api_gateway_resource" "options" {
   rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.root_resource_id
+  parent_id   = module.api_gateway.rest_api_root_resource_id
   path_part   = "options"
 }
 
 resource "aws_api_gateway_resource" "alerts" {
   rest_api_id = module.api_gateway.rest_api_id
-  parent_id   = module.api_gateway.root_resource_id
+  parent_id   = module.api_gateway.rest_api_root_resource_id
   path_part   = "alerts"
 }
 
@@ -642,7 +642,7 @@ resource "aws_lambda_permission" "chat_api_gateway" {
   action        = "lambda:InvokeFunction"
   function_name = module.chat_lambda.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
 }
 
 resource "aws_lambda_permission" "stocks_volatility_api_gateway" {
@@ -650,7 +650,7 @@ resource "aws_lambda_permission" "stocks_volatility_api_gateway" {
   action        = "lambda:InvokeFunction"
   function_name = module.stock_volatility_lambda.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
 }
 
 resource "aws_lambda_permission" "portfolio_api_gateway" {
@@ -658,7 +658,7 @@ resource "aws_lambda_permission" "portfolio_api_gateway" {
   action        = "lambda:InvokeFunction"
   function_name = module.portfolio_analysis_lambda.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
 }
 
 resource "aws_lambda_permission" "crypto_api_gateway" {
@@ -666,7 +666,7 @@ resource "aws_lambda_permission" "crypto_api_gateway" {
   action        = "lambda:InvokeFunction"
   function_name = module.crypto_stats_lambda.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
 }
 
 resource "aws_lambda_permission" "options_api_gateway" {
@@ -674,7 +674,7 @@ resource "aws_lambda_permission" "options_api_gateway" {
   action        = "lambda:InvokeFunction"
   function_name = module.option_pricing_lambda.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
 }
 
 resource "aws_lambda_permission" "alerts_api_gateway" {
@@ -682,7 +682,7 @@ resource "aws_lambda_permission" "alerts_api_gateway" {
   action        = "lambda:InvokeFunction"
   function_name = module.stock_alerts_lambda.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+  source_arn    = "${module.api_gateway.rest_api_execution_arn}/*/*"
 }
 
 # ============================================================================
