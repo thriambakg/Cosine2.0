@@ -5,8 +5,9 @@
  * This script helps set up environment variables for different environments
  */
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const ENV_TEMPLATE = `# Environment Configuration
 # Copy this file to .env.local and update with your actual values
@@ -26,6 +27,8 @@ VITE_COGNITO_CLIENT_ID=your-client-id
 VITE_COGNITO_DOMAIN=your-domain.auth.us-east-1.amazoncognito.com
 `;
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const ENV_LOCAL_PATH = path.join(__dirname, '..', '.env.local');
 
 function createEnvFile() {

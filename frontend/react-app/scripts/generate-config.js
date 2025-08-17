@@ -6,8 +6,12 @@
  * Used by the deployment pipeline to create dynamic configuration
  */
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Template for config.js
 const CONFIG_TEMPLATE = `// Runtime Configuration
@@ -98,7 +102,7 @@ function writeConfigFile(config, outputPath) {
 }
 
 // CLI usage
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
   
   if (args.includes('--help') || args.includes('-h')) {
@@ -150,4 +154,4 @@ if (require.main === module) {
   writeConfigFile(config, outputPath);
 }
 
-module.exports = { generateConfig, writeConfigFile };
+export { generateConfig, writeConfigFile };
