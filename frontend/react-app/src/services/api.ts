@@ -98,7 +98,7 @@ export const stockVolatilityAPI = {
       period: params.period || '1y',
     });
     
-    return apiRequest<StockVolatilityResponse>(`/stocks/volatility?${queryParams}`);
+    return apiRequest<StockVolatilityResponse>(`/volatility?${queryParams}`);
   },
 };
 
