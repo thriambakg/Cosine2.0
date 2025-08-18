@@ -16,29 +16,19 @@ output "rest_api_execution_arn" {
   value       = aws_api_gateway_rest_api.this.execution_arn
 }
 
-output "rest_api_root_resource_id" {
-  description = "Root resource ID of the REST API"
-  value       = aws_api_gateway_rest_api.this.root_resource_id
-}
-
-output "stage_arn" {
-  description = "ARN of the API Gateway stage"
-  value       = var.create_deployment ? aws_api_gateway_stage.this[0].arn : null
-}
-
-output "stage_name" {
-  description = "Name of the API Gateway stage"
-  value       = var.create_deployment ? aws_api_gateway_stage.this[0].stage_name : null
-}
-
-output "stage_invoke_url" {
-  description = "Invoke URL for the API Gateway stage"
-  value       = var.create_deployment ? aws_api_gateway_stage.this[0].invoke_url : null
+output "stage_url" {
+  description = "URL of the API Gateway stage"
+  value       = aws_api_gateway_stage.this.invoke_url
 }
 
 output "deployment_id" {
   description = "ID of the API Gateway deployment"
-  value       = var.create_deployment ? aws_api_gateway_deployment.this[0].id : null
+  value       = aws_api_gateway_deployment.this.id
+}
+
+output "stage_name" {
+  description = "Name of the API Gateway stage"
+  value       = aws_api_gateway_stage.this.stage_name
 }
 
 output "cloudwatch_log_group_name" {

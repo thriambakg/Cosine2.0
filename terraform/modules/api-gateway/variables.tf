@@ -5,17 +5,12 @@
 variable "api_name" {
   description = "Name of the API Gateway"
   type        = string
-
-  validation {
-    condition     = length(var.api_name) > 0 && length(var.api_name) <= 255
-    error_message = "API name must be between 1 and 255 characters."
-  }
 }
 
 variable "api_description" {
   description = "Description of the API Gateway"
   type        = string
-  default     = null
+  default     = "API Gateway for Lambda functions"
 }
 
 variable "endpoint_type" {
@@ -75,6 +70,29 @@ variable "tags" {
   default     = {}
 }
 
+# Resources configuration
+variable "resources" {
+  description = "Map of API Gateway resources to create"
+  type = map(object({
+    path_part = string
+  }))
+  default = {}
+}
+
+# Methods configuration
+variable "methods" {
+  description = "Map of API Gateway methods to create"
+  type = map(object({
+    resource_key            = string
+    http_method             = string
+    integration_type        = string # "AWS_PROXY" or "MOCK"
+    integration_http_method = string
+    lambda_arn              = optional(string)
+    request_parameters      = optional(map(bool), {})
+  }))
+  default = {}
+}
+
 # Logging Configuration
 variable "log_retention_days" {
   description = "Number of days to retain CloudWatch logs"
@@ -111,7 +129,7 @@ variable "create_deployment" {
 variable "stage_name" {
   description = "Name of the API Gateway stage"
   type        = string
-  default     = "prod"
+  default     = "production"
 }
 
 variable "deployment_triggers" {
