@@ -18,13 +18,22 @@ resource "aws_api_gateway_deployment" "this" {
   rest_api_id = aws_api_gateway_rest_api.this.id
 
   triggers = {
-    redeployment = sha1(jsonencode([
-      for resource in aws_api_gateway_resource.this : resource.id
-    ]))
+    redeployment = sha1(jsonencode(concat(
+      [for resource in aws_api_gateway_resource.this : resource.id],
+      [for method in aws_api_gateway_method.this : method.id],
+      [for integration in aws_api_gateway_integration.this : integration.id],
+      [for method_response in aws_api_gateway_method_response.this : method_response.id],
+      [for integration_response in aws_api_gateway_integration_response.this : integration_response.id]
+    )))
   }
 
   depends_on = [
-    aws_api_gateway_rest_api.this
+    aws_api_gateway_rest_api.this,
+    aws_api_gateway_resource.this,
+    aws_api_gateway_method.this,
+    aws_api_gateway_integration.this,
+    aws_api_gateway_method_response.this,
+    aws_api_gateway_integration_response.this
   ]
 
   lifecycle {
@@ -48,6 +57,14 @@ resource "aws_api_gateway_resource" "this" {
   rest_api_id = aws_api_gateway_rest_api.this.id
   parent_id   = aws_api_gateway_rest_api.this.root_resource_id
   path_part   = each.value.path_part
+
+  depends_on = [
+    aws_api_gateway_rest_api.this
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Methods - dynamically created based on var.methods
@@ -126,7 +143,7 @@ resource "aws_api_gateway_integration_response" "this" {
 resource "aws_lambda_permission" "this" {
   for_each = {
     for k, v in var.methods : k => v
-    if v.lambda_arn != null
+    if v.lambda_arn != null && v.lambda_arn != ""
   }
 
   statement_id  = "AllowExecutionFromAPIGateway"

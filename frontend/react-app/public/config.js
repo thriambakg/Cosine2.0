@@ -4,7 +4,7 @@
 
 window.COSINE_CONFIG = {
   // API Configuration
-  apiGatewayUrl: 'https://34pfnubl80.execute-api.us-east-1.amazonaws.com/production', // Production API Gateway URL
+  apiGatewayUrl: 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production', // Production API Gateway URL
   awsRegion: 'us-east-1',
   
   // Environment

@@ -4,7 +4,7 @@
 export const STAGING_CONFIG = {
   environment: 'staging' as const,
   // Use production API Gateway for now since staging doesn't exist yet
-  apiGatewayUrl: 'https://34pfnubl80.execute-api.us-east-1.amazonaws.com/production',
+  apiGatewayUrl: 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production',
   awsRegion: 'us-east-1',
   projectName: 'cosine-staging',
   

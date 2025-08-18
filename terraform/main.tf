@@ -110,7 +110,7 @@ module "api_gateway" {
     stocks = {
       path_part = "stocks"
     }
-    stocks_volatility = {
+    volatility = {
       path_part = "volatility"
     }
   }
@@ -118,8 +118,8 @@ module "api_gateway" {
   # Methods configuration
   methods = {
     # GET method for stock volatility
-    stocks_volatility_get = {
-      resource_key            = "stocks_volatility"
+    volatility_get = {
+      resource_key            = "volatility"
       http_method             = "GET"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -127,8 +127,8 @@ module "api_gateway" {
       request_parameters      = {}
     }
     # OPTIONS method for CORS preflight
-    stocks_volatility_options = {
-      resource_key            = "stocks_volatility"
+    volatility_options = {
+      resource_key            = "volatility"
       http_method             = "OPTIONS"
       integration_type        = "MOCK"
       integration_http_method = "POST"
