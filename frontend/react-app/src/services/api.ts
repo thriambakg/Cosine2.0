@@ -26,16 +26,18 @@ const apiRequest = async <T>(
   
   console.log(`🌐 Making API request to: ${url}`);
   
-  const config = {
-    headers: getHeaders(),
-  };
-
   try {
+    console.log(`📡 Request config:`, {
+      method: options.method || 'GET',
+      headers: getHeaders(),
+    });
 
-
-    console.log('config', config);
     console.log('url', url);
-    const response = await axios.get(url, {headers: config.headers});
+    
+    // Use axios.get for GET requests, axios.post for POST requests
+    const response = options.method === 'POST' 
+      ? await axios.post(url, options.body, { headers: getHeaders() })
+      : await axios.get(url, { headers: getHeaders() });
     
     console.log(`📥 Response status: ${response.status} ${response.statusText}`);
     console.log(`📥 Response headers:`, response.headers);

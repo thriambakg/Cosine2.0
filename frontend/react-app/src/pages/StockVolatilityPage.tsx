@@ -15,7 +15,7 @@ import {
   MenuItem,
 } from '@mui/material';
 import { TrendingUp as VolatilityIcon } from '@mui/icons-material';
-import { useStockVolatility, clearAPICache } from '../hooks/useAPI';
+import { useStockVolatility } from '../hooks/useAPI';
 import { logApiConfig } from '../config/api';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 
