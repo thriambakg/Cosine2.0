@@ -64,9 +64,6 @@ locals {
 locals {
   # Use main KMS key from base infrastructure if available, otherwise use null
   kms_key_arn = try(data.terraform_remote_state.base_infra.outputs.kms_key_arn, null)
-
-  # Use CloudWatch KMS key for CloudWatch logging if available, otherwise use main key
-  cloudwatch_kms_key_arn = try(data.terraform_remote_state.base_infra.outputs.cloudwatch_key_arn, local.kms_key_arn)
 }
 
 # SSL Certificate for staging HTTPS (when no custom domain)
