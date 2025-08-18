@@ -33,6 +33,7 @@ const apiRequest = async <T>(
     headers: getHeaders(),
     // Add cache-busting headers to prevent caching issues
     cache: 'no-cache' as RequestCache,
+    mode: 'cors' as RequestMode, // Explicitly set CORS mode
     ...options,
   };
 

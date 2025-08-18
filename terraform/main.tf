@@ -245,11 +245,7 @@ resource "aws_api_gateway_integration" "stocks_volatility_options_integration" {
   resource_id = aws_api_gateway_resource.stocks_volatility.id
   http_method = aws_api_gateway_method.stocks_volatility_options[0].http_method
 
-  type                 = "MOCK"
-  passthrough_behavior = "WHEN_NO_MATCH"
-  request_templates = {
-    "application/json" = "{\"statusCode\": 200}"
-  }
+  type = "MOCK"
 }
 
 
