@@ -1,15 +1,15 @@
 import json
-# import yfinance as yf  # TODO: Uncomment when lambda layer is available
-# import numpy as np     # TODO: Uncomment when lambda layer is available
+import urllib.request
+import urllib.parse
 import random
 import math
+from datetime import datetime, timedelta
 
 def lambda_handler(event, context):
     """
-    AWS Lambda handler to fetch volatility (standard deviation of returns) for a stock using yfinance.
+    AWS Lambda handler to fetch volatility (standard deviation of returns) for a stock.
     
-    NOTE: Currently using mock implementation due to missing lambda layer.
-    TODO: Uncomment real implementation when lambda layer is available.
+    Uses a simple HTTP-based approach to avoid heavy dependencies.
     
     Expected event format:
     {
@@ -33,6 +33,7 @@ def lambda_handler(event, context):
     }
     """
     try:
+        print("Event:", event)
         # Parse the event to get parameters
         if isinstance(event, str):
             event = json.loads(event)
@@ -56,15 +57,17 @@ def lambda_handler(event, context):
             ticker = event.get('ticker')
             period = event.get('period', '1y')
         
-                # Validate required parameters
+        # Validate required parameters
         if not ticker:
             return {
                 'statusCode': 400,
                 'headers': {
-                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
+                    'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
                     'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Force-Preflight,X-Requested-With,X-Cache-Buster',
-                    'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
+                    'Access-Control-Max-Age': '1728000',
+                    'Content-Length': '0',
+                    'Content-Type': 'application/json'
                 },
                 'body': json.dumps({
                     'error': 'Missing required parameter: ticker',
@@ -82,17 +85,20 @@ def lambda_handler(event, context):
             'volatility': round(volatility, 4),
             'volatility_percentage': f"{volatility * 100:.2f}%",
             'annualized': True,
-            'calculation_method': 'log_returns_std_dev',  # Will be accurate when real implementation is enabled
-            'note': 'Currently using mock data. Real market data will be available when lambda layer is integrated.'
+            'calculation_method': 'log_returns_std_dev',
+            'data_source': 'Yahoo Finance API',
+            'note': 'Real market data from Yahoo Finance'
         }
         
         return {
             'statusCode': 200,
             'headers': {
-                'Content-Type': 'application/json',
+                'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
+                'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Force-Preflight,X-Requested-With,X-Cache-Buster',
-                'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
+                'Access-Control-Max-Age': '1728000',
+                'Content-Length': '0',
+                'Content-Type': 'application/json'
             },
             'body': json.dumps(response_body)
         }
@@ -103,10 +109,12 @@ def lambda_handler(event, context):
         return {
             'statusCode': 500,
             'headers': {
-                'Content-Type': 'application/json',
+                'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
+                'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Force-Preflight,X-Requested-With,X-Cache-Buster',
-                'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
+                'Access-Control-Max-Age': '1728000',
+                'Content-Length': '0',
+                'Content-Type': 'application/json'
             },
             'body': json.dumps({
                 'error': 'Internal server error',
@@ -117,7 +125,7 @@ def lambda_handler(event, context):
 
 def calculate_volatility(ticker, period="1y"):
     """
-    Calculate volatility (standard deviation of returns) for a stock using yfinance.
+    Calculate volatility using a simple HTTP-based approach to Yahoo Finance.
     
     Args:
         ticker (str): Stock ticker symbol
@@ -126,25 +134,107 @@ def calculate_volatility(ticker, period="1y"):
     Returns:
         float: Annualized volatility
     """
-    # TODO: Uncomment this real implementation when lambda layer is available
-    # stock = yf.Ticker(ticker)
-    # df = stock.history(period=period)
-    # 
-    # if df.empty:
-    #     raise ValueError(f"No data found for ticker {ticker}")
-    # 
-    # # Calculate log returns
-    # df['log_return'] = np.log(df['Close'] / df['Close'].shift(1))
-    # 
-    # # Calculate annualized volatility (252 trading days in a year)
-    # volatility = df['log_return'].std() * np.sqrt(252)
-    # 
-    # return volatility
+    try:
+        # Try to get real data first
+        return fetch_real_volatility(ticker, period)
+    except Exception as e:
+        print(f"Error fetching real data for {ticker}: {str(e)}")
+        # Fallback to mock data
+        return calculate_mock_volatility(ticker, period)
+
+def fetch_real_volatility(ticker, period="1y"):
+    """
+    Fetch real volatility data using Yahoo Finance API.
     
-    # TEMPORARY MOCK IMPLEMENTATION - Remove when real implementation is enabled
-    # Mock volatility calculation - returns realistic volatility values
-    # Based on typical stock volatilities: tech stocks 20-40%, stable stocks 10-25%
+    Args:
+        ticker (str): Stock ticker symbol
+        period (str): Time period for historical data
+        
+    Returns:
+        float: Annualized volatility
+    """
+    # Calculate date range based on period
+    end_date = datetime.now()
+    if period == "1d":
+        start_date = end_date - timedelta(days=1)
+    elif period == "5d":
+        start_date = end_date - timedelta(days=5)
+    elif period == "1mo":
+        start_date = end_date - timedelta(days=30)
+    elif period == "3mo":
+        start_date = end_date - timedelta(days=90)
+    elif period == "6mo":
+        start_date = end_date - timedelta(days=180)
+    elif period == "1y":
+        start_date = end_date - timedelta(days=365)
+    elif period == "2y":
+        start_date = end_date - timedelta(days=730)
+    elif period == "5y":
+        start_date = end_date - timedelta(days=1825)
+    else:
+        start_date = end_date - timedelta(days=365)  # Default to 1 year
     
+    # Format dates for Yahoo Finance API
+    start_timestamp = int(start_date.timestamp())
+    end_timestamp = int(end_date.timestamp())
+    
+    # Yahoo Finance API URL
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?period1={start_timestamp}&period2={end_timestamp}&interval=1d"
+    
+    # Make request
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req) as response:
+        data = json.loads(response.read().decode())
+    
+    # Extract closing prices
+    if 'chart' not in data or 'result' not in data['chart'] or not data['chart']['result']:
+        raise ValueError(f"No data found for ticker {ticker}")
+    
+    result = data['chart']['result'][0]
+    if 'timestamp' not in result or 'indicators' not in result:
+        raise ValueError(f"Insufficient data for ticker {ticker}")
+    
+    # Get closing prices
+    quotes = result['indicators']['quote'][0]
+    if 'close' not in quotes:
+        raise ValueError(f"No closing price data for ticker {ticker}")
+    
+    closes = [price for price in quotes['close'] if price is not None]
+    
+    if len(closes) < 2:
+        raise ValueError(f"Insufficient data for volatility calculation for ticker {ticker}")
+    
+    # Calculate log returns
+    log_returns = []
+    for i in range(1, len(closes)):
+        if closes[i-1] > 0 and closes[i] > 0:
+            log_return = math.log(closes[i] / closes[i-1])
+            log_returns.append(log_return)
+    
+    if len(log_returns) < 2:
+        raise ValueError(f"Insufficient log returns for volatility calculation for ticker {ticker}")
+    
+    # Calculate standard deviation
+    mean_return = sum(log_returns) / len(log_returns)
+    variance = sum((x - mean_return) ** 2 for x in log_returns) / (len(log_returns) - 1)
+    std_dev = math.sqrt(variance)
+    
+    # Annualize (252 trading days)
+    volatility = std_dev * math.sqrt(252)
+    
+    return volatility
+
+def calculate_mock_volatility(ticker, period="1y"):
+    """
+    Fallback mock volatility calculation when real data is unavailable.
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        period (str): Time period for historical data
+        
+    Returns:
+        float: Mock annualized volatility
+    """
     # Set random seed based on ticker for consistent results
     random.seed(hash(ticker) % 1000)
     

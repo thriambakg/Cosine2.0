@@ -123,7 +123,7 @@ module "api_gateway" {
   enable_cors          = true
   cors_allowed_origins = ["*"]
   cors_allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-  cors_allowed_headers = ["Content-Type", "X-Amz-Date", "Authorization", "X-Api-Key", "X-Amz-Security-Token", "X-Force-Preflight", "X-Requested-With", "X-Cache-Buster"]
+  cors_allowed_headers = ["Content-Type", "X-Amz-Date", "Authorization", "X-Api-Key", "X-Amz-Security-Token", "X-Force-Preflight", "X-Requested-With", "X-Cache-Buster", "Accept", "Origin", "Referer", "User-Agent"]
 
   # Disable automatic deployment - we'll create our own after integrations
   create_deployment = false
@@ -247,17 +247,6 @@ resource "aws_api_gateway_integration" "stocks_volatility_options_integration" {
 
   type = "MOCK"
 }
-
-
-
-
-
-
-
-
-
-
-
 
 
 # Lambda permissions for API Gateway

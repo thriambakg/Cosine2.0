@@ -1,12 +1,8 @@
-# Lambda function dependencies
-# NOTE: These dependencies are currently provided through lambda layer
-# TODO: Ensure these are available when lambda layer is integrated
-
-# yfinance==0.2.28
-# numpy>=1.24.0
-# requests>=2.31.0
-
-# The function currently uses mock implementation and only requires:
-# - json (built-in)
-# - random (built-in)
-# - math (built-in)
+# No external dependencies required
+# Uses only built-in Python libraries:
+# - json
+# - urllib.request
+# - urllib.parse
+# - random
+# - math
+# - datetime

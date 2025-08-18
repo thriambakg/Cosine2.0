@@ -2,6 +2,7 @@
 // This service handles all API calls to the AWS API Gateway endpoints
 
 import { API_CONFIG, logApiConfig } from '../config/api';
+import axios from 'axios';
 
 const API_BASE_URL = API_CONFIG.BASE_URL;
 
@@ -12,12 +13,8 @@ console.log('🚀 API Service initialized with:', {
 });
 
 // Common headers for all API requests
-const getHeaders = (): HeadersInit => ({
-  'Content-Type': 'application/json',
-  'Accept': 'application/json',
-  'X-Force-Preflight': Date.now().toString(), // Force CORS preflight
-  'X-Requested-With': 'XMLHttpRequest', // Additional header to force preflight
-  'X-Cache-Buster': Math.random().toString(36).substring(7), // Random cache buster
+const getHeaders = () => ({
+  'Content-Type': 'application/json'
 });
 
 // Generic API request function
@@ -29,46 +26,40 @@ const apiRequest = async <T>(
   
   console.log(`🌐 Making API request to: ${url}`);
   
-  const config: RequestInit = {
+  const config = {
     headers: getHeaders(),
-    // Add cache-busting headers to prevent caching issues
-    cache: 'no-cache' as RequestCache,
-    mode: 'cors' as RequestMode, // Explicitly set CORS mode
-    ...options,
   };
 
   try {
-    console.log(`📡 Request config:`, {
-      method: config.method || 'GET',
-      headers: config.headers,
-      cache: config.cache,
-      body: config.body ? 'Present' : 'None'
-    });
-    
-    const response = await fetch(url, config);
+
+
+    console.log('config', config);
+    console.log('url', url);
+    const response = await axios.get(url, {headers: config.headers});
     
     console.log(`📥 Response status: ${response.status} ${response.statusText}`);
-    console.log(`📥 Response headers:`, Object.fromEntries(response.headers.entries()));
+    console.log(`📥 Response headers:`, response.headers);
     
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error(`❌ API Error Response:`, errorData);
-      throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+    if (response.status >= 400) {
+      console.error(`❌ API Error Response:`, response.data);
+      throw new Error(response.data?.message || `HTTP error! status: ${response.status}`);
     }
     
-    const data = await response.json();
-    console.log(`✅ API Response data:`, data);
-    return data;
+    console.log(`✅ API Response data:`, response.data);
+    return response.data;
   } catch (error) {
     console.error(`💥 API request failed for ${endpoint}:`, error);
     
     // Log additional debugging info
-    if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+    if (axios.isAxiosError(error)) {
       console.error(`🔍 Network Error Details:`, {
         url,
         baseUrl: API_BASE_URL,
         endpoint,
-        error: error.message
+        error: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data
       });
       
       // Log API configuration for debugging

@@ -91,7 +91,7 @@ const StockVolatilityPage: React.FC = () => {
     console.log(`🌐 Using API URL: ${getConfig('apiGatewayUrl')}`);
     
     // Clear cache before making request
-    clearAPICache();
+    // clearAPICache();
     
     await fetchVolatility({ ticker, period });
   };
