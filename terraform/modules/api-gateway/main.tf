@@ -139,19 +139,23 @@ resource "aws_api_gateway_integration_response" "this" {
   }
 }
 
-# Lambda permissions - dynamically created for Lambda integrations
-resource "aws_lambda_permission" "this" {
-  for_each = {
-    for k, v in var.methods : k => v
-    if v.lambda_arn != null && v.lambda_arn != ""
-  }
-
+# Lambda permissions - created for each Lambda integration
+resource "aws_lambda_permission" "stock_volatility" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
-  function_name = each.value.lambda_arn
+  function_name = var.methods["volatility_get"].lambda_arn
   principal     = "apigateway.amazonaws.com"
 
-  source_arn = "${aws_api_gateway_rest_api.this.execution_arn}/*/${each.value.http_method}/${aws_api_gateway_resource.this[each.value.resource_key].path_part}"
+  source_arn = "${aws_api_gateway_rest_api.this.execution_arn}/*/GET/volatility"
+}
+
+resource "aws_lambda_permission" "crypto_stats" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = var.methods["crypto_get"].lambda_arn
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${aws_api_gateway_rest_api.this.execution_arn}/*/GET/crypto"
 }
 
 # Data source for current region

@@ -113,6 +113,9 @@ module "api_gateway" {
     volatility = {
       path_part = "volatility"
     }
+    crypto = {
+      path_part = "crypto"
+    }
   }
 
   # Methods configuration
@@ -129,6 +132,24 @@ module "api_gateway" {
     # OPTIONS method for CORS preflight
     volatility_options = {
       resource_key            = "volatility"
+      http_method             = "OPTIONS"
+      integration_type        = "MOCK"
+      integration_http_method = "POST"
+      lambda_arn              = null
+      request_parameters      = {}
+    }
+    # GET method for crypto stats
+    crypto_get = {
+      resource_key            = "crypto"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.crypto_stats_lambda.function_arn
+      request_parameters      = {}
+    }
+    # OPTIONS method for CORS preflight
+    crypto_options = {
+      resource_key            = "crypto"
       http_method             = "OPTIONS"
       integration_type        = "MOCK"
       integration_http_method = "POST"
@@ -164,7 +185,7 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
   tags = var.common_tags
 }
 
-# Stock Volatility Lambda Function - ONLY THIS ONE IS NEEDED
+# Stock Volatility Lambda Function
 module "stock_volatility_lambda" {
   source = "./modules/lambda"
 
@@ -177,6 +198,34 @@ module "stock_volatility_lambda" {
 
   # Source directory
   source_dir = "../backend_app/src/stocks/volatility_fetch/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Crypto Stats Lambda Function
+module "crypto_stats_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-crypto-stats-${var.environment}"
+  description   = "Lambda function for cryptocurrency statistics using CoinGecko API"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/crypto/stats_fetch/app"
 
   # Environment variables
   environment_variables = {

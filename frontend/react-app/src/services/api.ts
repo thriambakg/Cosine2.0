@@ -157,18 +157,11 @@ export interface CryptoStatsResponse {
   data: Array<{
     symbol: string;
     name: string;
-    price: number;
-    change24h: number;
-    changePercentage24h: number;
-    marketCap: number;
-    volume24h: number;
-    volatility: number;
+    currentPrice: number;
+    return24h: number;
+    annualReturn: number;
+    annualizedVolatility: number;
   }>;
-  summary: {
-    totalMarketCap: number;
-    totalVolume24h: number;
-    averageVolatility: number;
-  };
 }
 
 export const cryptoStatsAPI = {
