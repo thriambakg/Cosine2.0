@@ -29,24 +29,7 @@ common_tags = {
   LastUpdated = "2025-08-01T05:00:00Z"
 }
 
-# ============================================================================
-# AUTHENTICATION & DATABASE - Configuration from Base Infrastructure
-# ============================================================================
 
-# Cognito Configuration (retrieved from base infrastructure remote state)
-# These values will be automatically populated from the base infrastructure outputs
-cognito_user_pool_id = ""
-cognito_client_id    = ""
-cognito_domain       = ""
-
-# DynamoDB Table Names (retrieved from base infrastructure remote state)
-# These values will be automatically populated from the base infrastructure outputs
-user_profiles_table_name   = ""
-security_events_table_name = ""
-user_sessions_table_name   = ""
-
-# API Gateway URL (set when backend is deployed)
-api_gateway_url = ""
 
 # ============================================================================
 # CUSTOM DOMAIN CONFIGURATION (Production Ready)
