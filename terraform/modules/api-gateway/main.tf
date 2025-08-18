@@ -22,8 +22,7 @@ resource "aws_api_gateway_deployment" "this" {
       [for resource in aws_api_gateway_resource.this : resource.id],
       [for method in aws_api_gateway_method.this : method.id],
       [for integration in aws_api_gateway_integration.this : integration.id],
-      [for method_response in aws_api_gateway_method_response.this : method_response.id],
-      [for integration_response in aws_api_gateway_integration_response.this : integration_response.id]
+      [for method_response in aws_api_gateway_method_response.this : method_response.id]
     )))
   }
 
@@ -32,8 +31,7 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_resource.this,
     aws_api_gateway_method.this,
     aws_api_gateway_integration.this,
-    aws_api_gateway_method_response.this,
-    aws_api_gateway_integration_response.this
+    aws_api_gateway_method_response.this
   ]
 
   lifecycle {
@@ -119,7 +117,7 @@ resource "aws_api_gateway_method_response" "this" {
   }
 }
 
-# Integration responses - dynamically created based on var.methods
+# Integration responses - for all methods (both Lambda and MOCK)
 resource "aws_api_gateway_integration_response" "this" {
   for_each = var.methods
 
@@ -134,9 +132,22 @@ resource "aws_api_gateway_integration_response" "this" {
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
   }
 
-  response_templates = {
+  # For MOCK integrations, we need a response template
+  response_templates = each.value.integration_type == "MOCK" ? {
+    "application/json" = "{\"statusCode\": 200}"
+    } : {
     "application/json" = ""
   }
+
+  # Add lifecycle to prevent recreation issues
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  # Ensure integration exists before creating response
+  depends_on = [
+    aws_api_gateway_integration.this
+  ]
 }
 
 # Lambda permissions - created for each Lambda integration
