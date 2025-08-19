@@ -60,3 +60,5 @@ resource "aws_lambda_function" "function" {
 
   tags = var.tags
 }
+
+

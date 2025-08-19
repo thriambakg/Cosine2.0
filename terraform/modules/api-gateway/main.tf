@@ -22,7 +22,8 @@ resource "aws_api_gateway_deployment" "this" {
       [for resource in aws_api_gateway_resource.this : resource.id],
       [for method in aws_api_gateway_method.this : method.id],
       [for integration in aws_api_gateway_integration.this : integration.id],
-      [for method_response in aws_api_gateway_method_response.this : method_response.id]
+      [for method_response in aws_api_gateway_method_response.this : method_response.id],
+      [for integration_response in aws_api_gateway_integration_response.this : integration_response.id]
     )))
   }
 
@@ -150,23 +151,16 @@ resource "aws_api_gateway_integration_response" "this" {
   ]
 }
 
-# Lambda permissions - created for each Lambda integration
-resource "aws_lambda_permission" "stock_volatility" {
-  statement_id  = "AllowExecutionFromAPIGateway"
+# Lambda permissions - dynamically created based on var.lambda_permissions
+resource "aws_lambda_permission" "lambda_permissions" {
+  for_each = var.lambda_permissions
+
+  statement_id  = "AllowExecutionFromAPIGateway_${each.key}"
   action        = "lambda:InvokeFunction"
-  function_name = var.methods["volatility_get"].lambda_arn
+  function_name = each.value.function_arn
   principal     = "apigateway.amazonaws.com"
 
-  source_arn = "${aws_api_gateway_rest_api.this.execution_arn}/*/GET/volatility"
-}
-
-resource "aws_lambda_permission" "crypto_stats" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = var.methods["crypto_get"].lambda_arn
-  principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_api_gateway_rest_api.this.execution_arn}/*/GET/crypto"
+  source_arn = "${aws_api_gateway_rest_api.this.execution_arn}/*/${each.value.http_method}/${each.value.resource_path}"
 }
 
 # Data source for current region

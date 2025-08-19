@@ -11,6 +11,7 @@ interface APIState<T> {
 // Generic API hook return type
 interface APIHookReturn<T> extends APIState<T> {
   execute: (...args: any[]) => Promise<T | null>;
+  executeForceRefresh: (...args: any[]) => Promise<T | null>;
   reset: () => void;
 }
 
@@ -26,9 +27,17 @@ export const clearAPICache = () => {
   console.log('🧹 API cache cleared');
 };
 
-// Generate cache key
+// Generate cache key with better parameter handling
 const generateCacheKey = (endpoint: string, params: any): string => {
-  return `${endpoint}:${JSON.stringify(params)}`;
+  // Sort parameters to ensure consistent cache keys
+  const sortedParams = params ? Object.keys(params)
+    .sort()
+    .reduce((result: any, key) => {
+      result[key] = params[key];
+      return result;
+    }, {}) : {};
+  
+  return `${endpoint}:${JSON.stringify(sortedParams)}`;
 };
 
 // Check if cache entry is valid
@@ -116,6 +125,63 @@ export function useAPI<T>(
     [apiFunction, cacheTTL]
   );
 
+  const executeForceRefresh = useCallback(
+    async (...args: any[]): Promise<T | null> => {
+      // Cancel previous request if still pending
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      // Create new abort controller
+      abortControllerRef.current = new AbortController();
+
+      // Generate cache key
+      const cacheKey = generateCacheKey(apiFunction.name, args);
+
+      // Force refresh - don't check cache
+      setState(prev => ({ ...prev, loading: true, error: null }));
+
+      try {
+        const result = await apiFunction(...args);
+
+        // Cache the result
+        apiCache.set(cacheKey, {
+          data: result,
+          timestamp: Date.now(),
+          ttl: cacheTTL,
+        });
+
+        setState({
+          data: result,
+          loading: false,
+          error: null,
+        });
+
+        return result;
+      } catch (error) {
+        // Don't set error if request was aborted
+        if (error instanceof Error && error.name === 'AbortError') {
+          return null;
+        }
+
+        const errorMessage = error instanceof APIError 
+          ? error.message 
+          : error instanceof Error 
+            ? error.message 
+            : 'An unexpected error occurred';
+
+        setState({
+          data: null,
+          loading: false,
+          error: errorMessage,
+        });
+
+        return null;
+      }
+    },
+    [apiFunction, cacheTTL]
+  );
+
   const reset = useCallback(() => {
     setState({
       data: null,
@@ -127,6 +193,7 @@ export function useAPI<T>(
   return {
     ...state,
     execute,
+    executeForceRefresh,
     reset,
   };
 }
@@ -146,9 +213,14 @@ export function usePortfolioAnalysis() {
   return useAPI(api.portfolioAnalysis.analyzePortfolio, 0); // No cache for portfolio analysis
 }
 
-// Crypto Stats Hook
+// Crypto Stats Hook - Short cache for real-time crypto data
 export function useCryptoStats() {
-  return useAPI(api.cryptoStats.getStats, 2 * 60 * 1000); // 2 minute cache
+  return useAPI(api.cryptoStats.getStats, 5 * 1000); // 5 second cache for real-time data
+}
+
+// Enhanced Crypto Data Hook for Dashboard - Supports multiple symbols
+export function useCryptoData() {
+  return useAPI(api.cryptoStats.getStats, 5 * 1000); // 5 second cache for real-time data
 }
 
 // Option Pricing Hook

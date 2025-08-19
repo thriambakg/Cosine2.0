@@ -14,6 +14,11 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2"
+    }
+
   }
 }
 
@@ -116,6 +121,9 @@ module "api_gateway" {
     crypto = {
       path_part = "crypto"
     }
+    dashboard = {
+      path_part = "dashboard"
+    }
   }
 
   # Methods configuration
@@ -156,6 +164,82 @@ module "api_gateway" {
       lambda_arn              = null
       request_parameters      = {}
     }
+    # User Dashboard methods
+    dashboard_get = {
+      resource_key            = "dashboard"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.function_arn
+      request_parameters      = {}
+    }
+    dashboard_put = {
+      resource_key            = "dashboard"
+      http_method             = "PUT"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.function_arn
+      request_parameters      = {}
+    }
+    dashboard_post = {
+      resource_key            = "dashboard"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.function_arn
+      request_parameters      = {}
+    }
+    dashboard_delete = {
+      resource_key            = "dashboard"
+      http_method             = "DELETE"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.function_arn
+      request_parameters      = {}
+    }
+    # OPTIONS method for CORS preflight
+    dashboard_options = {
+      resource_key            = "dashboard"
+      http_method             = "OPTIONS"
+      integration_type        = "MOCK"
+      integration_http_method = "POST"
+      lambda_arn              = null
+      request_parameters      = {}
+    }
+  }
+
+  # Lambda permissions configuration
+  lambda_permissions = {
+    stock_volatility = {
+      function_arn  = module.stock_volatility_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "volatility"
+    }
+    crypto_stats = {
+      function_arn  = module.crypto_stats_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "crypto"
+    }
+    dashboard_get = {
+      function_arn  = module.user_dashboard_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "dashboard"
+    }
+    dashboard_post = {
+      function_arn  = module.user_dashboard_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "dashboard"
+    }
+    dashboard_put = {
+      function_arn  = module.user_dashboard_lambda.function_arn
+      http_method   = "PUT"
+      resource_path = "dashboard"
+    }
+    dashboard_delete = {
+      function_arn  = module.user_dashboard_lambda.function_arn
+      http_method   = "DELETE"
+      resource_path = "dashboard"
+    }
   }
 
   tags = var.common_tags
@@ -177,6 +261,35 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
         ]
         Resource = [
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for Lambda functions to access DynamoDB
+resource "aws_iam_policy" "lambda_dynamodb_policy" {
+  name        = "${var.project_name}-lambda-dynamodb-policy-${var.environment}"
+  description = "Policy for Lambda functions to access DynamoDB"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn}/index/*"
         ]
       }
     ]
@@ -240,6 +353,38 @@ module "crypto_stats_lambda" {
 
   tags = var.common_tags
 }
+
+# User Dashboard Lambda Function
+module "user_dashboard_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-user-dashboard-${var.environment}"
+  description   = "Lambda function for user dashboard management"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 256
+
+  # Source directory
+  source_dir = "../backend_app/src/user_dashboard/app"
+
+  # Environment variables
+  environment_variables = {
+    USER_PROFILES_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
+  }
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.lambda_dynamodb_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+
+
+
 
 # ============================================================================
 # API GATEWAY RESOURCES AND INTEGRATIONS - Handled by module

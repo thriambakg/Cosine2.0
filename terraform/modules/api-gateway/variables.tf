@@ -46,3 +46,14 @@ variable "methods" {
   }))
   default = {}
 }
+
+# Lambda permissions configuration
+variable "lambda_permissions" {
+  description = "Map of Lambda permissions to create for API Gateway integration"
+  type = map(object({
+    function_arn  = string
+    http_method   = string
+    resource_path = string
+  }))
+  default = {}
+}

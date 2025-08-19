@@ -16,6 +16,7 @@ import { CurrencyBitcoin as CryptoIcon } from '@mui/icons-material';
 import { useCryptoStats } from '../hooks/useAPI';
 import { logApiConfig } from '../config/api';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
+import RefreshButton from '../components/common/RefreshButton';
 
 const CRYPTO_SYMBOLS = ["BTC", "ETH", "BNB", "ADA", "SOL", "DOT", "AVAX", "MATIC", "LINK", "UNI"];
 
@@ -80,7 +81,7 @@ const CryptoStatsPage: React.FC = () => {
   const [configValid, setConfigValid] = useState<boolean>(false);
   const [configErrors, setConfigErrors] = useState<string[]>([]);
   
-  const { data: cryptoData, loading: isLoading, error, execute: fetchCryptoStats } = useCryptoStats();
+  const { data: cryptoData, loading: isLoading, error, execute: fetchCryptoStats, executeForceRefresh: fetchCryptoStatsForce } = useCryptoStats();
 
   // Load configuration and validate on component mount
   useEffect(() => {
@@ -109,26 +110,38 @@ const CryptoStatsPage: React.FC = () => {
     initializeConfig();
   }, []);
 
-  const handleFetchCryptoStats = async () => {
+  const handleFetchCryptoStats = async (forceRefresh = false) => {
     if (!configValid) {
       console.error('❌ Configuration is invalid:', configErrors);
       return;
     }
     
-    console.log(`🔍 Attempting to fetch crypto stats for ${selectedCrypto} with timeframe ${timeframe}`);
+    console.log(`🔍 Attempting to fetch crypto stats for ${selectedCrypto} with timeframe ${timeframe}${forceRefresh ? ' (force refresh)' : ''}`);
     console.log(`🌐 Using API URL: ${getConfig('apiGatewayUrl')}`);
     
-    await fetchCryptoStats({ symbols: [selectedCrypto], timeframe });
+    try {
+      const result = forceRefresh 
+        ? await fetchCryptoStatsForce({ symbols: [selectedCrypto], timeframe })
+        : await fetchCryptoStats({ symbols: [selectedCrypto], timeframe });
+      
+      console.log('📊 Raw crypto data received:', result);
+    } catch (error) {
+      console.error('❌ Error fetching crypto stats:', error);
+    }
+  };
+
+  const handleForceRefresh = () => {
+    handleFetchCryptoStats(true);
   };
 
   const handleCryptoChange = (value: string) => {
     setSelectedCrypto(value);
-    handleFetchCryptoStats();
+    handleFetchCryptoStats(true); // Force refresh when crypto changes
   };
 
   const handleTimeframeChange = (value: string) => {
     setTimeframe(value);
-    handleFetchCryptoStats();
+    handleFetchCryptoStats(true); // Force refresh when timeframe changes
   };
 
   useEffect(() => {
@@ -224,63 +237,76 @@ const CryptoStatsPage: React.FC = () => {
              </Typography>
            </Box>
 
-           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-             <FormControl sx={{ minWidth: 200 }}>
-               <InputLabel sx={{ color: '#9ca3af' }}>Cryptocurrency</InputLabel>
-               <Select
-                 value={selectedCrypto}
-                 label="Cryptocurrency"
-                 onChange={(e) => handleCryptoChange(e.target.value)}
-                 sx={{
-                   color: 'white',
-                   '& .MuiOutlinedInput-notchedOutline': {
-                     borderColor: '#374151',
-                   },
-                   '&:hover .MuiOutlinedInput-notchedOutline': {
-                     borderColor: '#f59e0b',
-                   },
-                   '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                     borderColor: '#f59e0b',
-                   },
-                   '& .MuiSelect-icon': {
-                     color: '#9ca3af',
-                   },
-                 }}
-               >
-                 {CRYPTO_SYMBOLS.map((symbol) => (
-                   <MenuItem key={symbol} value={symbol} sx={{ color: '#1e293b' }}>
-                     {symbol}
-                   </MenuItem>
-                 ))}
-               </Select>
-             </FormControl>
-             
-             <FormControl sx={{ minWidth: 120 }}>
-               <InputLabel sx={{ color: '#9ca3af' }}>Timeframe</InputLabel>
-               <Select
-                 value={timeframe}
-                 label="Timeframe"
-                 onChange={(e) => handleTimeframeChange(e.target.value)}
-                 sx={{
-                   color: 'white',
-                   '& .MuiOutlinedInput-notchedOutline': {
-                     borderColor: '#374151',
-                   },
-                   '&:hover .MuiOutlinedInput-notchedOutline': {
-                     borderColor: '#f59e0b',
-                   },
-                   '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                     borderColor: '#f59e0b',
-                   },
-                 }}
-               >
-                 <MenuItem value="1d">1 Day</MenuItem>
-                 <MenuItem value="7d">7 Days</MenuItem>
-                 <MenuItem value="30d">30 Days</MenuItem>
-                 <MenuItem value="1y">1 Year</MenuItem>
-               </Select>
-             </FormControl>
-           </Box>
+                       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+              <FormControl sx={{ minWidth: 200 }}>
+                <InputLabel sx={{ color: '#9ca3af' }}>Cryptocurrency</InputLabel>
+                <Select
+                  value={selectedCrypto}
+                  label="Cryptocurrency"
+                  onChange={(e) => handleCryptoChange(e.target.value)}
+                  sx={{
+                    color: 'white',
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#374151',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#f59e0b',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#f59e0b',
+                    },
+                    '& .MuiSelect-icon': {
+                      color: '#9ca3af',
+                    },
+                  }}
+                >
+                  {CRYPTO_SYMBOLS.map((symbol) => (
+                    <MenuItem key={symbol} value={symbol} sx={{ color: '#1e293b' }}>
+                      {symbol}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              
+              <FormControl sx={{ minWidth: 120 }}>
+                <InputLabel sx={{ color: '#9ca3af' }}>Timeframe</InputLabel>
+                <Select
+                  value={timeframe}
+                  label="Timeframe"
+                  onChange={(e) => handleTimeframeChange(e.target.value)}
+                  sx={{
+                    color: 'white',
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#374151',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#f59e0b',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#f59e0b',
+                    },
+                  }}
+                >
+                  <MenuItem value="1d">1 Day</MenuItem>
+                  <MenuItem value="7d">7 Days</MenuItem>
+                  <MenuItem value="30d">30 Days</MenuItem>
+                  <MenuItem value="1y">1 Year</MenuItem>
+                </Select>
+              </FormControl>
+
+              <RefreshButton
+                onRefresh={handleForceRefresh}
+                loading={isLoading}
+                color="primary"
+                tooltip="Refresh crypto data"
+                sx={{
+                  color: '#f59e0b',
+                  '&:hover': {
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                  },
+                }}
+              />
+            </Box>
          </GlassCard>
 
          {/* Error Display */}
@@ -323,6 +349,13 @@ const CryptoStatsPage: React.FC = () => {
              >
                {selectedCrypto} Statistics
              </Typography>
+             
+             {/* Debug info */}
+             <Box sx={{ mb: 3, p: 2, background: 'rgba(0,0,0,0.3)', borderRadius: 1 }}>
+               <Typography variant="body2" color="#9ca3af" sx={{ fontFamily: 'monospace' }}>
+                 Debug - Raw data: {JSON.stringify(cryptoData, null, 2)}
+               </Typography>
+             </Box>
              
                            {/* Individual Crypto Stats */}
               <Typography variant="h6" sx={{ color: '#f59e0b', mb: 2, fontWeight: 600 }}>
