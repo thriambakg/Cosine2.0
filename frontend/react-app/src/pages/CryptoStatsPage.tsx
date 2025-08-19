@@ -20,12 +20,13 @@ import RefreshButton from '../components/common/RefreshButton';
 
 const CRYPTO_SYMBOLS = ["BTC", "ETH", "BNB", "ADA", "SOL", "DOT", "AVAX", "MATIC", "LINK", "UNI"];
 
-interface CryptoStats {
-  current_price: number;
-  price_change_24h: number;
-  annual_return: number;
-  volatility: number;
-}
+// TODO: Phase 3 - Uncomment when implementing dashboard features
+// interface CryptoStats {
+//   current_price: number;
+//   price_change_24h: number;
+//   annual_return: number;
+//   volatility: number;
+// }
 
 // Custom styled components for Wall Street chic
 const GlassCard = ({ children, sx = {}, ...props }: any) => (
@@ -46,34 +47,35 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
   </Card>
 );
 
-const MetricCard = ({ title, value, trend }: any) => (
-  <Box
-    sx={{
-      p: 3,
-      background: 'rgba(15, 23, 42, 0.8)',
-      border: '1px solid #374151',
-      borderRadius: '0px',
-      position: 'relative',
-      overflow: 'hidden',
-      '&::before': {
-        content: '""',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: '3px',
-        background: trend === 'up' ? '#22c55e' : trend === 'down' ? '#dc2626' : '#3b82f6',
-      }
-    }}
-  >
-    <Typography variant="body2" color="#9ca3af" sx={{ textTransform: 'uppercase', fontSize: '0.75rem', fontWeight: 600, mb: 1 }}>
-      {title}
-    </Typography>
-    <Typography variant="h4" fontWeight={700} color="white" sx={{ textTransform: 'uppercase' }}>
-      {value}
-    </Typography>
-  </Box>
-);
+// TODO: Phase 3 - Uncomment when implementing dashboard features
+// const MetricCard = ({ title, value, trend }: any) => (
+//   <Box
+//     sx={{
+//       p: 3,
+//       background: 'rgba(15, 23, 42, 0.8)',
+//       border: '1px solid #374151',
+//       borderRadius: '0px',
+//       position: 'relative',
+//       overflow: 'hidden',
+//       '&::before': {
+//         content: '""',
+//         position: 'absolute',
+//         top: 0,
+//         left: 0,
+//         right: 0,
+//         height: '3px',
+//         background: trend === 'up' ? '#22c55e' : trend === 'down' ? '#dc2626' : '#3b82f6',
+//       }
+//     }}
+//   >
+//     <Typography variant="body2" color="#9ca3af" sx={{ textTransform: 'uppercase', fontSize: '0.75rem', fontWeight: 600, mb: 1 }}>
+//       {title}
+//     </Typography>
+//     <Typography variant="h4" fontWeight={700} color="white" sx={{ textTransform: 'uppercase' }}>
+//       {value}
+//     </Typography>
+//   </Box>
+// );
 
 const CryptoStatsPage: React.FC = () => {
   const [selectedCrypto, setSelectedCrypto] = useState<string>("BTC");
