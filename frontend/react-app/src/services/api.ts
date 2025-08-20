@@ -161,6 +161,11 @@ export interface CryptoStatsResponse {
     return24h: number;
     annualReturn: number;
     annualizedVolatility: number;
+    chartData?: Array<{
+      time: string;
+      price: number;
+      value: number;
+    }>;
   }>;
 }
 

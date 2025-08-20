@@ -1,36 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Box, 
   Typography, 
-  Grid,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Card,
-  CardContent,
   Container,
   Alert,
+  Button,
+  Chip,
+  Fab,
 } from '@mui/material';
-import { CurrencyBitcoin as CryptoIcon } from '@mui/icons-material';
-import { useCryptoStats } from '../hooks/useAPI';
-import { logApiConfig } from '../config/api';
+import { CurrencyBitcoin as CryptoIcon, Add as AddIcon } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
-import RefreshButton from '../components/common/RefreshButton';
-
-const CRYPTO_SYMBOLS = ["BTC", "ETH", "BNB", "ADA", "SOL", "DOT", "AVAX", "MATIC", "LINK", "UNI"];
-
-// TODO: Phase 3 - Uncomment when implementing dashboard features
-// interface CryptoStats {
-//   current_price: number;
-//   price_change_24h: number;
-//   annual_return: number;
-//   volatility: number;
-// }
+import { logApiConfig } from '../config/api';
+import CryptoTile from '../components/CryptoTile';
+import AddCryptoModal from '../components/AddCryptoModal';
+import DashboardGrid from '../components/DashboardGrid';
 
 // Custom styled components for Wall Street chic
 const GlassCard = ({ children, sx = {}, ...props }: any) => (
-  <Card
+  <Box
     sx={{
       background: 'rgba(15, 23, 42, 0.95)',
       border: '2px solid #374151',
@@ -41,49 +28,37 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
     }}
     {...props}
   >
-    <CardContent sx={{ p: 0 }}>
-      {children}
-    </CardContent>
-  </Card>
+    {children}
+  </Box>
 );
 
-// TODO: Phase 3 - Uncomment when implementing dashboard features
-// const MetricCard = ({ title, value, trend }: any) => (
-//   <Box
-//     sx={{
-//       p: 3,
-//       background: 'rgba(15, 23, 42, 0.8)',
-//       border: '1px solid #374151',
-//       borderRadius: '0px',
-//       position: 'relative',
-//       overflow: 'hidden',
-//       '&::before': {
-//         content: '""',
-//         position: 'absolute',
-//         top: 0,
-//         left: 0,
-//         right: 0,
-//         height: '3px',
-//         background: trend === 'up' ? '#22c55e' : trend === 'down' ? '#dc2626' : '#3b82f6',
-//       }
-//     }}
-//   >
-//     <Typography variant="body2" color="#9ca3af" sx={{ textTransform: 'uppercase', fontSize: '0.75rem', fontWeight: 600, mb: 1 }}>
-//       {title}
-//     </Typography>
-//     <Typography variant="h4" fontWeight={700} color="white" sx={{ textTransform: 'uppercase' }}>
-//       {value}
-//     </Typography>
-//   </Box>
-// );
+interface CryptoTile {
+  id: string;
+  symbol: string;
+  timeframe: string;
+  displayOptions: {
+    showPrice: boolean;
+    show24hChange: boolean;
+    showAnnualReturn: boolean;
+    showVolatility: boolean;
+  };
+  autoRefresh: boolean;
+  isPinned: boolean;
+  size: { width: number; height: number };
+  position?: { x: number; y: number };
+  created_at?: string;
+}
 
 const CryptoStatsPage: React.FC = () => {
-  const [selectedCrypto, setSelectedCrypto] = useState<string>("BTC");
-  const [timeframe, setTimeframe] = useState<string>('1d');
   const [configValid, setConfigValid] = useState<boolean>(false);
   const [configErrors, setConfigErrors] = useState<string[]>([]);
+  const [tiles, setTiles] = useState<CryptoTile[]>([]);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
-  const { data: cryptoData, loading: isLoading, error, execute: fetchCryptoStats, executeForceRefresh: fetchCryptoStatsForce } = useCryptoStats();
+  // Debounced save functionality
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSaveRef = useRef<CryptoTile[] | null>(null);
 
   // Load configuration and validate on component mount
   useEffect(() => {
@@ -112,45 +87,175 @@ const CryptoStatsPage: React.FC = () => {
     initializeConfig();
   }, []);
 
-  const handleFetchCryptoStats = async (forceRefresh = false) => {
-    if (!configValid) {
-      console.error('❌ Configuration is invalid:', configErrors);
-      return;
-    }
-    
-    console.log(`🔍 Attempting to fetch crypto stats for ${selectedCrypto} with timeframe ${timeframe}${forceRefresh ? ' (force refresh)' : ''}`);
-    console.log(`🌐 Using API URL: ${getConfig('apiGatewayUrl')}`);
-    
-    try {
-      const result = forceRefresh 
-        ? await fetchCryptoStatsForce({ symbols: [selectedCrypto], timeframe })
-        : await fetchCryptoStats({ symbols: [selectedCrypto], timeframe });
-      
-      console.log('📊 Raw crypto data received:', result);
-    } catch (error) {
-      console.error('❌ Error fetching crypto stats:', error);
-    }
-  };
-
-  const handleForceRefresh = () => {
-    handleFetchCryptoStats(true);
-  };
-
-  const handleCryptoChange = (value: string) => {
-    setSelectedCrypto(value);
-    handleFetchCryptoStats(true); // Force refresh when crypto changes
-  };
-
-  const handleTimeframeChange = (value: string) => {
-    setTimeframe(value);
-    handleFetchCryptoStats(true); // Force refresh when timeframe changes
-  };
-
+  // Load user's dashboard configuration on mount
   useEffect(() => {
     if (configValid) {
-      handleFetchCryptoStats();
+      loadUserDashboard();
     }
   }, [configValid]);
+
+  // Save to localStorage immediately for persistence
+  const saveToLocalStorage = useCallback((updatedTiles: CryptoTile[]) => {
+    try {
+      localStorage.setItem('crypto-dashboard-tiles', JSON.stringify(updatedTiles));
+    } catch (error) {
+      console.error('Error saving to localStorage:', error);
+    }
+  }, []);
+
+  // Load from localStorage
+  const loadFromLocalStorage = useCallback((): CryptoTile[] | null => {
+    try {
+      const saved = localStorage.getItem('crypto-dashboard-tiles');
+      return saved ? JSON.parse(saved) : null;
+    } catch (error) {
+      console.error('Error loading from localStorage:', error);
+      return null;
+    }
+  }, []);
+
+  // Debounced save to database
+  const debouncedSaveToDatabase = useCallback((updatedTiles: CryptoTile[]) => {
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set pending save
+    pendingSaveRef.current = updatedTiles;
+
+    // Set new timeout for 2 seconds
+    saveTimeoutRef.current = setTimeout(() => {
+      if (pendingSaveRef.current) {
+        saveUserDashboard(pendingSaveRef.current);
+        pendingSaveRef.current = null;
+      }
+    }, 2000);
+  }, []);
+
+  // Save immediately on page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (pendingSaveRef.current) {
+        saveUserDashboard(pendingSaveRef.current);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+    const loadUserDashboard = async () => {
+    try {
+      setIsLoading(true);
+      
+      // First try to load from localStorage for immediate persistence
+      const cachedTiles = loadFromLocalStorage();
+      if (cachedTiles && cachedTiles.length > 0) {
+        setTiles(cachedTiles);
+        console.log('Loaded dashboard from localStorage');
+      } else {
+        // TODO: Replace with actual API call to load user dashboard
+        // For now, use default configuration
+                 const defaultTiles: CryptoTile[] = [
+           {
+             id: 'tile_1',
+             symbol: 'BTC',
+             timeframe: '1d',
+             displayOptions: {
+               showPrice: true,
+               show24hChange: true,
+               showAnnualReturn: true,
+               showVolatility: true,
+             },
+             autoRefresh: false,
+             isPinned: false,
+             size: { width: 350, height: 400 },
+             created_at: new Date().toISOString(),
+           }
+         ];
+        setTiles(defaultTiles);
+        // Save default to localStorage
+        saveToLocalStorage(defaultTiles);
+      }
+    } catch (error) {
+      console.error('Error loading dashboard:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const saveUserDashboard = async (updatedTiles: CryptoTile[]) => {
+    try {
+      // Save to localStorage immediately
+      saveToLocalStorage(updatedTiles);
+      
+      // TODO: Replace with actual API call to save user dashboard
+      console.log('Saving dashboard configuration to database:', updatedTiles);
+      // API call would go here
+    } catch (error) {
+      console.error('Error saving dashboard:', error);
+    }
+  };
+
+           const handleAddTile = (cryptoData: any) => {
+      const newTile: CryptoTile = {
+        id: `tile_${Date.now()}`,
+        symbol: cryptoData.symbol,
+        timeframe: cryptoData.timeframe,
+        displayOptions: cryptoData.displayOptions,
+        autoRefresh: cryptoData.autoRefresh,
+        isPinned: false,
+        size: { width: 350, height: 400 },
+        created_at: new Date().toISOString(),
+      };
+
+     const updatedTiles = [...tiles, newTile];
+     setTiles(updatedTiles);
+     saveToLocalStorage(updatedTiles);
+     debouncedSaveToDatabase(updatedTiles);
+   };
+
+     const handleRemoveTile = (id: string) => {
+     const updatedTiles = tiles.filter(tile => tile.id !== id);
+     setTiles(updatedTiles);
+     saveToLocalStorage(updatedTiles);
+     debouncedSaveToDatabase(updatedTiles);
+   };
+
+     const handleUpdateTile = (id: string, data: any) => {
+     const updatedTiles = tiles.map(tile => 
+       tile.id === id ? { ...tile, ...data } : tile
+     );
+     setTiles(updatedTiles);
+     saveToLocalStorage(updatedTiles);
+     debouncedSaveToDatabase(updatedTiles);
+   };
+
+           const handleSettingsChange = (id: string, settings: any) => {
+      const updatedTiles = tiles.map(tile => 
+        tile.id === id ? { ...tile, ...settings } : tile
+      );
+      setTiles(updatedTiles);
+      saveToLocalStorage(updatedTiles);
+      debouncedSaveToDatabase(updatedTiles);
+    };
+
+       const handleResizeTile = (id: string, size: { width: number; height: number }) => {
+      const updatedTiles = tiles.map(tile => 
+        tile.id === id ? { ...tile, size } : tile
+      );
+      setTiles(updatedTiles);
+      saveToLocalStorage(updatedTiles);
+      debouncedSaveToDatabase(updatedTiles);
+    };
+
+  const getExistingSymbols = () => tiles.map(tile => tile.symbol);
 
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
@@ -167,7 +272,7 @@ const CryptoStatsPage: React.FC = () => {
               letterSpacing: '1px',
             }}
           >
-            Cryptocurrency Analysis
+            Cryptocurrency Dashboard
           </Typography>
           <Typography 
             variant="body1" 
@@ -176,7 +281,7 @@ const CryptoStatsPage: React.FC = () => {
               fontSize: '1rem',
             }}
           >
-            Real-time cryptocurrency statistics and market analysis
+            Personalized cryptocurrency tracking and analysis
           </Typography>
         </Box>
 
@@ -209,237 +314,53 @@ const CryptoStatsPage: React.FC = () => {
           </GlassCard>
         )}
 
-                 {/* Crypto Selection */}
-         <GlassCard sx={{ p: 4, mb: 4 }}>
-           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-             <Box
-               sx={{
-                 width: 48,
-                 height: 48,
-                 borderRadius: '0px',
-                 background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-                 display: 'flex',
-                 alignItems: 'center',
-                 justifyContent: 'center',
-                 border: '2px solid #d97706',
-               }}
-             >
-               <CryptoIcon sx={{ color: 'white', fontSize: 24 }} />
-             </Box>
-             <Typography 
-               variant="h6" 
-               sx={{ 
-                 color: '#ffffff', 
-                 fontWeight: 600,
-                 textTransform: 'uppercase',
-                 letterSpacing: '0.5px',
-               }}
-             >
-               Cryptocurrency Statistics
+        
+
+                 {/* Dashboard Grid */}
+         {isLoading ? (
+           <Box sx={{ textAlign: 'center', py: 4 }}>
+             <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
+               Loading your dashboard...
              </Typography>
            </Box>
-
-                       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-              <FormControl sx={{ minWidth: 200 }}>
-                <InputLabel sx={{ color: '#9ca3af' }}>Cryptocurrency</InputLabel>
-                <Select
-                  value={selectedCrypto}
-                  label="Cryptocurrency"
-                  onChange={(e) => handleCryptoChange(e.target.value)}
-                  sx={{
-                    color: 'white',
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#374151',
-                    },
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#f59e0b',
-                    },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#f59e0b',
-                    },
-                    '& .MuiSelect-icon': {
-                      color: '#9ca3af',
-                    },
-                  }}
-                >
-                  {CRYPTO_SYMBOLS.map((symbol) => (
-                    <MenuItem key={symbol} value={symbol} sx={{ color: '#1e293b' }}>
-                      {symbol}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              
-              <FormControl sx={{ minWidth: 120 }}>
-                <InputLabel sx={{ color: '#9ca3af' }}>Timeframe</InputLabel>
-                <Select
-                  value={timeframe}
-                  label="Timeframe"
-                  onChange={(e) => handleTimeframeChange(e.target.value)}
-                  sx={{
-                    color: 'white',
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#374151',
-                    },
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#f59e0b',
-                    },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#f59e0b',
-                    },
-                  }}
-                >
-                  <MenuItem value="1d">1 Day</MenuItem>
-                  <MenuItem value="7d">7 Days</MenuItem>
-                  <MenuItem value="30d">30 Days</MenuItem>
-                  <MenuItem value="1y">1 Year</MenuItem>
-                </Select>
-              </FormControl>
-
-              <RefreshButton
-                onRefresh={handleForceRefresh}
-                loading={isLoading}
-                color="primary"
-                tooltip="Refresh crypto data"
-                sx={{
-                  color: '#f59e0b',
-                  '&:hover': {
-                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                  },
-                }}
-              />
-            </Box>
-         </GlassCard>
-
-         {/* Error Display */}
-         {error && (
-           <GlassCard sx={{ p: 4, mb: 4 }}>
-             <Alert severity="error" sx={{ 
-               backgroundColor: 'rgba(220, 38, 38, 0.1)',
-               border: '1px solid #dc2626',
-               color: '#fca5a5',
-               '& .MuiAlert-icon': {
-                 color: '#fca5a5',
-               }
-             }}>
-               {error}
-             </Alert>
-           </GlassCard>
+         ) : (
+                       <DashboardGrid
+              tiles={tiles}
+              onRemoveTile={handleRemoveTile}
+              onUpdateTile={handleUpdateTile}
+              onSettingsChange={handleSettingsChange}
+              onResizeTile={handleResizeTile}
+            />
          )}
 
-         {/* Loading State */}
-         {isLoading && (
-           <GlassCard sx={{ p: 4, mb: 4, textAlign: 'center' }}>
-             <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
-               Loading {selectedCrypto} data for {timeframe} timeframe...
-             </Typography>
-           </GlassCard>
-         )}
+        {/* Add Crypto Modal */}
+        <AddCryptoModal
+          open={addModalOpen}
+          onClose={() => setAddModalOpen(false)}
+          onAdd={handleAddTile}
+          existingSymbols={getExistingSymbols()}
+        />
 
-         {/* Stats Display */}
-         {cryptoData && (
-           <GlassCard sx={{ p: 4 }}>
-             <Typography 
-               variant="h6" 
-               sx={{ 
-                 color: '#ffffff', 
-                 fontWeight: 600, 
-                 mb: 3,
-                 textTransform: 'uppercase',
-                 letterSpacing: '0.5px',
-               }}
-             >
-               {selectedCrypto} Statistics
-             </Typography>
-             
-             {/* Debug info */}
-             <Box sx={{ mb: 3, p: 2, background: 'rgba(0,0,0,0.3)', borderRadius: 1 }}>
-               <Typography variant="body2" color="#9ca3af" sx={{ fontFamily: 'monospace' }}>
-                 Debug - Raw data: {JSON.stringify(cryptoData, null, 2)}
-               </Typography>
-             </Box>
-             
-                           {/* Individual Crypto Stats */}
-              <Typography variant="h6" sx={{ color: '#f59e0b', mb: 2, fontWeight: 600 }}>
-                Cryptocurrency Metrics
-              </Typography>
-              <Grid container spacing={3}>
-                {cryptoData.data.map((crypto) => (
-                  <Grid item xs={12} sm={6} md={4} key={crypto.symbol}>
-                    <Box
-                      sx={{
-                        p: 3,
-                        background: 'rgba(15, 23, 42, 0.8)',
-                        border: '1px solid #374151',
-                        borderRadius: '0px',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        '&::before': {
-                          content: '""',
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          height: '3px',
-                          background: crypto.return24h > 0 ? '#22c55e' : '#dc2626',
-                        }
-                      }}
-                    >
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                        <Typography variant="h6" color="white" fontWeight={600}>
-                          {crypto.symbol}
-                        </Typography>
-                        <Typography variant="body2" color="#9ca3af">
-                          {crypto.name}
-                        </Typography>
-                      </Box>
-                      
-                      <Typography variant="h5" color="white" fontWeight={700} sx={{ mb: 1 }}>
-                        ${crypto.currentPrice.toFixed(2)}
-                      </Typography>
-                      
-                                             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                         <Typography variant="body2" color="#9ca3af">
-                           {timeframe === '1d' ? '24h Return (%)' : 
-                            timeframe === '7d' ? '7-Day Return (%)' :
-                            timeframe === '30d' ? '30-Day Return (%)' : '1-Year Return (%)'}:
-                         </Typography>
-                         <Typography 
-                           variant="body2" 
-                           color={crypto.return24h > 0 ? '#22c55e' : '#dc2626'}
-                           fontWeight={600}
-                         >
-                           {crypto.return24h > 0 ? '+' : ''}{crypto.return24h.toFixed(2)}%
-                         </Typography>
-                       </Box>
-                      
-                                             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                         <Typography variant="body2" color="#9ca3af">
-                           Annualized Return (%):
-                         </Typography>
-                         <Typography 
-                           variant="body2" 
-                           color={crypto.annualReturn > 0 ? '#22c55e' : '#dc2626'}
-                           fontWeight={600}
-                         >
-                           {crypto.annualReturn > 0 ? '+' : ''}{crypto.annualReturn.toFixed(2)}%
-                         </Typography>
-                       </Box>
-                      
-                                             <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                         <Typography variant="body2" color="#9ca3af">
-                           {timeframe === '1d' ? 'Daily Volatility (%)' : 'Annualized Volatility (%)'}:
-                         </Typography>
-                         <Typography variant="body2" color="white" fontWeight={600}>
-                           {crypto.annualizedVolatility.toFixed(2)}%
-                         </Typography>
-                       </Box>
-                    </Box>
-                  </Grid>
-                ))}
-              </Grid>
-           </GlassCard>
-         )}
+                 {/* Floating Add Button */}
+         <Fab
+           color="primary"
+           aria-label="add tile"
+           onClick={() => setAddModalOpen(true)}
+           sx={{
+             position: 'fixed',
+             bottom: 24,
+             right: 24,
+             backgroundColor: '#f59e0b',
+             color: 'white',
+             '&:hover': {
+               backgroundColor: '#d97706',
+             },
+             zIndex: 1000,
+             boxShadow: '0 4px 20px rgba(245, 158, 11, 0.3)',
+           }}
+         >
+           <AddIcon />
+         </Fab>
       </Container>
     </Box>
   );

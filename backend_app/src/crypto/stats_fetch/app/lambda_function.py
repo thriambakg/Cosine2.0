@@ -36,7 +36,8 @@ def lambda_handler(event, context):
                         "currentPrice": stats['current_price'],
                         "return24h": stats['price_change_24h'],
                         "annualReturn": stats['annual_return'],
-                        "annualizedVolatility": stats['volatility']
+                        "annualizedVolatility": stats['volatility'],
+                        "chartData": stats['chart_data']  # Add historical data for charts
                     })
             except Exception as e:
                 print(f"Error fetching data for {symbol}: {str(e)}")
@@ -92,7 +93,7 @@ def fetch_crypto_stats(selected_crypto_symbol: str, timeframe: str = '1d') -> Di
         }.get(timeframe, 365)
 
         # Fetch historical data using direct API call
-        raw_data = fetch_histoday_data(selected_crypto_symbol, period_days)
+        raw_data = fetch_historical_data(selected_crypto_symbol, timeframe)
         if len(raw_data) < 2:
             return {"error": "Not enough data to calculate statistics"}
 
@@ -130,26 +131,46 @@ def fetch_crypto_stats(selected_crypto_symbol: str, timeframe: str = '1d') -> Di
             # Annualize volatility using 252 trading days (matching original logic)
             volatility = daily_std * math.sqrt(252) * 100.0  # Convert to percentage
         
+        # Prepare chart data
+        chart_data = prepare_chart_data(raw_data, timeframe)
+        
         return {
             "current_price": current_price,
             "price_change_24h": price_change_24h,
             "annual_return": annual_return,
-            "volatility": volatility
+            "volatility": volatility,
+            "chart_data": chart_data
         }
 
     except Exception as e:
         return {"error": f"Error fetching data for {selected_crypto_symbol}: {str(e)}"}
 
 
-def fetch_histoday_data(symbol: str, days: int) -> List[Dict[str, Any]]:
-    """Fetch daily historical data from CryptoCompare REST API (histoday)."""
-    base_url = "https://min-api.cryptocompare.com/data/v2/histoday"
-    params = {
-        "fsym": symbol,
-        "tsym": "USD",
-        "limit": max(days, 2),
-        "toTs": int(datetime.now().timestamp())
-    }
+def fetch_historical_data(symbol: str, timeframe: str) -> List[Dict[str, Any]]:
+    """Fetch historical data from CryptoCompare REST API based on timeframe."""
+    
+    # Map timeframe to API endpoint and parameters
+    if timeframe == '1d':
+        # For 1 day, fetch hourly data (24 points)
+        base_url = "https://min-api.cryptocompare.com/data/v2/histohour"
+        params = {
+            "fsym": symbol,
+            "tsym": "USD",
+            "limit": 24,
+            "toTs": int(datetime.now().timestamp())
+        }
+    else:
+        # For other timeframes, fetch daily data
+        base_url = "https://min-api.cryptocompare.com/data/v2/histoday"
+        days_map = {'7d': 7, '30d': 30, '1y': 365}
+        days = days_map.get(timeframe, 365)
+        params = {
+            "fsym": symbol,
+            "tsym": "USD",
+            "limit": days,
+            "toTs": int(datetime.now().timestamp())
+        }
+    
     url = f"{base_url}?{urllib.parse.urlencode(params)}"
 
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -162,6 +183,61 @@ def fetch_histoday_data(symbol: str, days: int) -> List[Dict[str, Any]]:
 
     data_points = payload.get("Data", {}).get("Data", [])
     return data_points
+
+def prepare_chart_data(raw_data: List[Dict[str, Any]], timeframe: str) -> List[Dict[str, Any]]:
+    """
+    Prepare historical data for charting based on timeframe.
+    Returns formatted data points with time labels and prices.
+    """
+    if not raw_data or len(raw_data) < 2:
+        return []
+    
+    # Sort data by timestamp (oldest first)
+    sorted_data = sorted(raw_data, key=lambda x: x.get('time', 0))
+    
+    chart_data = []
+    for i, point in enumerate(sorted_data):
+        # Convert timestamp to readable format
+        timestamp = point.get('time', 0)
+        close_price = point.get('close', 0)
+        
+        # Skip invalid data points
+        if not timestamp or not close_price or close_price <= 0:
+            continue
+            
+        try:
+            date_obj = datetime.fromtimestamp(timestamp)
+            
+            # Format time label based on timeframe
+            if timeframe == '1d':
+                # For 1 day, show hours (24 data points)
+                time_label = date_obj.strftime('%H:%M')
+            elif timeframe == '7d':
+                # For 7 days, show day names
+                time_label = date_obj.strftime('%a')
+            elif timeframe == '30d':
+                # For 30 days, show dates
+                time_label = date_obj.strftime('%m/%d')
+            else:  # 1y
+                # For 1 year, show month names
+                time_label = date_obj.strftime('%b')
+                
+            chart_data.append({
+                "time": time_label,
+                "price": float(close_price),
+                "value": float(close_price)  # For compatibility with Recharts
+            })
+        except (ValueError, OSError) as e:
+            # Skip invalid timestamps
+            continue
+    
+    # Limit data points for better chart performance
+    if len(chart_data) > 50:
+        # Sample data points evenly
+        step = len(chart_data) // 50
+        chart_data = chart_data[::step]
+    
+    return chart_data
 
 def get_coin_name(symbol):
     """Get coin name from symbol"""
