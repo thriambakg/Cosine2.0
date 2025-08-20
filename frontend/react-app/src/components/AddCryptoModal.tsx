@@ -12,8 +12,6 @@ import {
   Box,
   Typography,
   Chip,
-  TextField,
-  Autocomplete,
 } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 
@@ -28,8 +26,6 @@ interface AddCryptoModalProps {
       show24hChange: boolean;
       showAnnualReturn: boolean;
       showVolatility: boolean;
-      showMarketCap: boolean;
-      showVolume: boolean;
     };
     autoRefresh: boolean;
   }) => void;
@@ -62,8 +58,6 @@ const AddCryptoModal: React.FC<AddCryptoModalProps> = ({
     show24hChange: true,
     showAnnualReturn: true,
     showVolatility: true,
-    showMarketCap: false,
-    showVolume: false,
   });
   const [autoRefresh, setAutoRefresh] = useState(false);
 
@@ -87,8 +81,6 @@ const AddCryptoModal: React.FC<AddCryptoModalProps> = ({
       show24hChange: true,
       showAnnualReturn: true,
       showVolatility: true,
-      showMarketCap: false,
-      showVolume: false,
     });
     setAutoRefresh(false);
     onClose();

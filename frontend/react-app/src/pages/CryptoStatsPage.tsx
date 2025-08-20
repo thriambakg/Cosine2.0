@@ -4,11 +4,9 @@ import {
   Typography, 
   Container,
   Alert,
-  Button,
-  Chip,
   Fab,
 } from '@mui/material';
-import { CurrencyBitcoin as CryptoIcon, Add as AddIcon } from '@mui/icons-material';
+import { Add as AddIcon } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
 import CryptoTile from '../components/CryptoTile';

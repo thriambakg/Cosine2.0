@@ -62,7 +62,6 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   isPinned = false,
      size = { width: 350, height: 400 },
   onRemove,
-  onUpdate,
   onSettingsChange,
   onResize,
 }) => {
@@ -85,13 +84,13 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     if (!autoRefresh) return;
 
     const interval = setInterval(() => {
-      handleFetchData(true);
+      handleFetchData();
     }, 5 * 60 * 1000); // 5 minutes
 
     return () => clearInterval(interval);
   }, [autoRefresh, symbol, timeframe]);
 
-  const handleFetchData = async (forceRefresh = false) => {
+  const handleFetchData = async () => {
     try {
       await executeForceRefresh({ symbols: [symbol], timeframe });
     } catch (error) {
@@ -100,7 +99,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   };
 
   const handleRefresh = () => {
-    handleFetchData(true);
+    handleFetchData();
   };
 
   const handleSettingsOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -116,7 +115,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     onSettingsChange(id, { timeframe: newTimeframe });
     setTimeframeDialogOpen(false);
     // Force refresh data to get new chart data for the timeframe
-    handleFetchData(true);
+    handleFetchData();
   };
 
   const handleDisplayOptionsChange = (option: keyof typeof displayOptions) => {
@@ -191,12 +190,12 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         },
       }}
              ref={tileRef}
-       onMouseUp={(e) => {
-         if (onResize && tileRef.current) {
-           const rect = tileRef.current.getBoundingClientRect();
-           onResize(id, { width: rect.width, height: rect.height });
-         }
-       }}
+               onMouseUp={() => {
+          if (onResize && tileRef.current) {
+            const rect = tileRef.current.getBoundingClientRect();
+            onResize(id, { width: rect.width, height: rect.height });
+          }
+        }}
     >
              {/* Header with controls */}
        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
