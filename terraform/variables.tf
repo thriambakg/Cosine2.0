@@ -131,3 +131,13 @@ variable "cloudfront_aliases" {
   type        = list(string)
   default     = []
 }
+
+# ============================================================================
+# SES CONFIGURATION VARIABLES
+# ============================================================================
+
+variable "ses_from_email" {
+  description = "Verified email address to send alerts from via SES"
+  type        = string
+  default     = "noreply@cosine-ai.com"
+}

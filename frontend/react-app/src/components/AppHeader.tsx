@@ -17,6 +17,7 @@ import {
   Menu as MenuIcon,
   Notifications as BellIcon,
   NavigateNext as NavigateNextIcon,
+  AccessTime as ClockIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../store/hooks';
@@ -34,6 +35,10 @@ export default function AppHeader() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [notificationAnchorEl, setNotificationAnchorEl] = useState<null | HTMLElement>(null);
   const [notifications] = useState(3); // This would come from Redux in a real app
+  const [isClockVisible, setIsClockVisible] = useState<boolean>(() => {
+    const saved = localStorage.getItem('floating-clock-visible');
+    return saved ? JSON.parse(saved) : false; // Default to hidden
+  });
   
   const { breadcrumbs } = useAppSelector((state) => state.navigation);
 
@@ -60,6 +65,17 @@ export default function AppHeader() {
 
   const handleBreadcrumbClick = (path: string) => {
     navigate(path);
+  };
+
+  const handleClockToggle = () => {
+    const newVisibility = !isClockVisible;
+    setIsClockVisible(newVisibility);
+    localStorage.setItem('floating-clock-visible', JSON.stringify(newVisibility));
+    
+    // Dispatch a custom event to notify the FloatingClock component
+    window.dispatchEvent(new CustomEvent('clock-visibility-changed', { 
+      detail: { isVisible: newVisibility } 
+    }));
   };
 
   return (
@@ -202,8 +218,31 @@ export default function AppHeader() {
             </Box>
           </Box>
 
-          {/* Right Section - Notifications + Profile */}
+          {/* Right Section - Clock Toggle + Notifications + Profile */}
           <Box display="flex" alignItems="center" gap={1}>
+            <IconButton
+              color="inherit"
+              onClick={handleClockToggle}
+              sx={{
+                color: isClockVisible ? '#f59e0b' : '#8b8b8b',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                width: 44,
+                height: 44,
+                borderRadius: '8px',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  color: isClockVisible ? '#fbbf24' : '#ffffff',
+                  transform: 'translateY(-1px)',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                },
+              }}
+            >
+              <ClockIcon />
+            </IconButton>
+            
             <IconButton
               color="inherit"
               onClick={handleNotificationMenuOpen}

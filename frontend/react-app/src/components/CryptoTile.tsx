@@ -38,6 +38,7 @@ interface CryptoTileProps {
     show24hChange: boolean;
     showAnnualReturn: boolean;
     showVolatility: boolean;
+    showChart: boolean;
   };
   autoRefresh?: boolean;
   isPinned?: boolean;
@@ -57,6 +58,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     show24hChange: true,
     showAnnualReturn: true,
     showVolatility: true,
+    showChart: true,
   },
   autoRefresh = false,
   isPinned = false,
@@ -162,6 +164,41 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   };
 
   const { data: chartData, isRealData } = getChartData();
+
+  // Calculate appropriate Y-axis domain based on price range
+  const getYAxisDomain = () => {
+    if (!chartData || chartData.length === 0) {
+      return ['auto', 'auto'];
+    }
+
+    const prices = chartData.map(d => d.price).filter(p => p && !isNaN(p));
+    if (prices.length === 0) {
+      return ['auto', 'auto'];
+    }
+
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    const range = maxPrice - minPrice;
+    
+    // Calculate padding based on price range
+    let padding;
+    if (maxPrice < 1) {
+      // For coins under $1, use 5% padding
+      padding = range * 0.05;
+    } else if (maxPrice < 100) {
+      // For coins under $100, use 3% padding
+      padding = range * 0.03;
+    } else {
+      // For higher priced coins, use 2% padding
+      padding = range * 0.02;
+    }
+    
+    // Ensure minimum doesn't go below 0 for positive prices
+    const domainMin = Math.max(0, minPrice - padding);
+    const domainMax = maxPrice + padding;
+    
+    return [domainMin, domainMax];
+  };
 
      return (
     <Box
@@ -281,60 +318,91 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         </Box>
       )}
 
-             {/* Chart Section */}
-       {isLoading && (
-         <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-           <Typography variant="body2" color="#9ca3af">
-             Loading chart...
-           </Typography>
-         </Box>
-       )}
-               {crypto && !isLoading && !error && isRealData && chartData && chartData.length > 0 && (
-          <Box sx={{ mb: 2, height: '120px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                <XAxis 
-                  dataKey="time" 
-                  stroke="#9ca3af" 
-                  fontSize={10}
-                  tick={{ fill: '#9ca3af' }}
-                  axisLine={{ stroke: '#374151' }}
-                />
-                <YAxis 
-                  stroke="#9ca3af" 
-                  fontSize={10}
-                  tick={{ fill: '#9ca3af' }}
-                  axisLine={{ stroke: '#374151' }}
-                  domain={['dataMin - 1000', 'dataMax + 1000']}
-                />
-                <RechartsTooltip
-                  contentStyle={{
-                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                    border: '1px solid #374151',
-                    borderRadius: '4px',
-                    color: 'white'
-                  }}
-                  labelStyle={{ color: '#f59e0b' }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="price"
-                  stroke="#f59e0b"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4, fill: '#f59e0b' }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </Box>
-        )}
-        {crypto && !isLoading && !error && !isRealData && (
-          <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography variant="body2" color="#9ca3af">
-              Chart data unavailable
-            </Typography>
-          </Box>
+                           {/* Chart Section */}
+        {localDisplayOptions.showChart && (
+          <>
+            {isLoading && (
+              <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography variant="body2" color="#9ca3af">
+                  Loading chart...
+                </Typography>
+              </Box>
+            )}
+            {crypto && !isLoading && !error && isRealData && chartData && chartData.length > 0 && (
+              <Box sx={{ mb: 2, height: '120px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                    <XAxis 
+                      dataKey="time" 
+                      stroke="#9ca3af" 
+                      fontSize={10}
+                      tick={{ fill: '#9ca3af' }}
+                      axisLine={{ stroke: '#374151' }}
+                    />
+                                         <YAxis 
+                       stroke="#9ca3af" 
+                       fontSize={10}
+                       tick={{ fill: '#9ca3af' }}
+                       axisLine={{ stroke: '#374151' }}
+                       domain={getYAxisDomain()}
+                       tickFormatter={(value) => {
+                         // Format Y-axis labels based on price range
+                         if (value < 0.01) {
+                           return value.toFixed(4);
+                         } else if (value < 1) {
+                           return value.toFixed(3);
+                         } else if (value < 100) {
+                           return value.toFixed(2);
+                         } else {
+                           return value.toFixed(0);
+                         }
+                       }}
+                     />
+                                         <RechartsTooltip
+                       contentStyle={{
+                         backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                         border: '1px solid #374151',
+                         borderRadius: '4px',
+                         color: 'white'
+                       }}
+                       labelStyle={{ color: '#f59e0b' }}
+                       formatter={(value) => {
+                         // Format tooltip values based on price range
+                         const price = Number(value);
+                         let formattedPrice;
+                         if (price < 0.01) {
+                           formattedPrice = `$${price.toFixed(4)}`;
+                         } else if (price < 1) {
+                           formattedPrice = `$${price.toFixed(3)}`;
+                         } else if (price < 100) {
+                           formattedPrice = `$${price.toFixed(2)}`;
+                         } else {
+                           formattedPrice = `$${price.toFixed(0)}`;
+                         }
+                         return [formattedPrice, 'Price'];
+                       }}
+                     />
+                    <Line
+                      type="monotone"
+                      dataKey="price"
+                      stroke="#f59e0b"
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4, fill: '#f59e0b' }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Box>
+            )}
+            {crypto && !isLoading && !error && !isRealData && (
+              <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography variant="body2" color="#9ca3af">
+                  Chart data unavailable
+                </Typography>
+              </Box>
+            )}
+          </>
         )}
 
        {/* Crypto data */}
@@ -505,6 +573,15 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
                  />
                }
                label="Volatility"
+             />
+             <FormControlLabel
+               control={
+                 <Checkbox
+                   checked={localDisplayOptions.showChart}
+                   onChange={() => handleDisplayOptionsChange('showChart')}
+                 />
+               }
+               label="Price Chart"
              />
           </Box>
         </DialogContent>

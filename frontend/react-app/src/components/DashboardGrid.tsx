@@ -11,6 +11,7 @@ interface CryptoTile {
     show24hChange: boolean;
     showAnnualReturn: boolean;
     showVolatility: boolean;
+    showChart: boolean;
   };
   autoRefresh: boolean;
   isPinned: boolean;

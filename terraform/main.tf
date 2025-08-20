@@ -124,6 +124,9 @@ module "api_gateway" {
     dashboard = {
       path_part = "dashboard"
     }
+    alerts = {
+      path_part = "alerts"
+    }
   }
 
   # Methods configuration
@@ -158,6 +161,42 @@ module "api_gateway" {
     # OPTIONS method for CORS preflight
     crypto_options = {
       resource_key            = "crypto"
+      http_method             = "OPTIONS"
+      integration_type        = "MOCK"
+      integration_http_method = "POST"
+      lambda_arn              = null
+      request_parameters      = {}
+    }
+    # GET method for alerts (fetch user alerts)
+    alerts_get = {
+      resource_key            = "alerts"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.stock_alerts_lambda.function_arn
+      request_parameters      = {}
+    }
+    # POST method for alerts (create new alert)
+    alerts_post = {
+      resource_key            = "alerts"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.stock_alerts_lambda.function_arn
+      request_parameters      = {}
+    }
+    # DELETE method for alerts (delete specific alert)
+    alerts_delete = {
+      resource_key            = "alerts"
+      http_method             = "DELETE"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.stock_alerts_lambda.function_arn
+      request_parameters      = {}
+    }
+    # OPTIONS method for CORS preflight on alerts
+    alerts_options = {
+      resource_key            = "alerts"
       http_method             = "OPTIONS"
       integration_type        = "MOCK"
       integration_http_method = "POST"
@@ -240,6 +279,21 @@ module "api_gateway" {
       http_method   = "DELETE"
       resource_path = "dashboard"
     }
+    alerts_get = {
+      function_arn  = module.stock_alerts_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "alerts"
+    }
+    alerts_post = {
+      function_arn  = module.stock_alerts_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "alerts"
+    }
+    alerts_delete = {
+      function_arn  = module.stock_alerts_lambda.function_arn
+      http_method   = "DELETE"
+      resource_path = "alerts"
+    }
   }
 
   tags = var.common_tags
@@ -289,13 +343,50 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn}/index/*"
+          "${data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn}/index/*",
+          data.terraform_remote_state.base_infra.outputs.alerts_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.alerts_table_arn}/index/*"
         ]
       }
     ]
   })
 
   tags = var.common_tags
+}
+
+# IAM Policy for Lambda functions to access KMS keys
+resource "aws_iam_policy" "lambda_kms_policy" {
+  name        = "${var.project_name}-lambda-kms-policy-${var.environment}"
+  description = "Policy for Lambda functions to access KMS keys for DynamoDB encryption"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:GenerateDataKey"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# SES Module for email sending capabilities
+module "ses" {
+  source = "./modules/ses"
+
+  project_name = var.project_name
+  environment  = var.environment
+  from_email   = var.ses_from_email
+  common_tags  = var.common_tags
 }
 
 # Stock Volatility Lambda Function
@@ -376,7 +467,75 @@ module "user_dashboard_lambda" {
   # Additional IAM policies
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
-    aws_iam_policy.lambda_dynamodb_policy.arn
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Stock Alerts Lambda Function
+module "stock_alerts_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-stock-alerts-${var.environment}"
+  description   = "Lambda function for stock alert management (create, read, delete alerts)"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 256
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/alert_creation/app"
+
+  # Environment variables
+  environment_variables = {
+    USER_PROFILES_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
+    ALERTS_TABLE_NAME        = data.terraform_remote_state.base_infra.outputs.alerts_table_name
+    SES_FROM_EMAIL           = var.ses_from_email
+    ENVIRONMENT              = var.environment
+    LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    module.ses.lambda_ses_policy_arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Stock Alert Trigger Lambda Function (for processing alerts via scheduled events)
+module "stock_alert_trigger_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-stock-alert-trigger-${var.environment}"
+  description   = "Lambda function to check and trigger stock alerts (scheduled execution)"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 300 # 5 minutes for processing all alerts
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/alert_trigger/app"
+
+  # Environment variables
+  environment_variables = {
+    USER_PROFILES_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
+    ALERTS_TABLE_NAME        = data.terraform_remote_state.base_infra.outputs.alerts_table_name
+    SES_FROM_EMAIL           = var.ses_from_email
+    ENVIRONMENT              = var.environment
+    LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    module.ses.lambda_ses_policy_arn
   ]
 
   tags = var.common_tags

@@ -5,6 +5,7 @@ import { useAppDispatch } from '../store/hooks';
 import { setCurrentPage } from '../store/slices/navigationSlice';
 import AppHeader from './AppHeader';
 import AppSidebar from './AppSidebar';
+import FloatingClock from './FloatingClock';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -38,6 +39,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
       >
         {children}
       </Box>
+      
+      {/* Floating Clock */}
+      <FloatingClock />
     </Box>
   );
 }

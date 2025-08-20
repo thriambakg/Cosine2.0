@@ -228,7 +228,6 @@ export interface StockAlertRequest {
   alertType: 'price_above' | 'price_below' | 'volume_above' | 'volatility_above';
   threshold: number;
   userId: string;
-  notificationEmail?: string;
 }
 
 export interface StockAlertResponse {
@@ -248,6 +247,18 @@ export const stockAlertsAPI = {
     return apiRequest<StockAlertResponse>('/alerts', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  },
+  
+  getUserAlerts: async (userId: string): Promise<{ alerts: StockAlertResponse[] }> => {
+    return apiRequest<{ alerts: StockAlertResponse[] }>(`/alerts?userId=${userId}`, {
+      method: 'GET',
+    });
+  },
+  
+  deleteAlert: async (userId: string, alertId: string): Promise<{ message: string }> => {
+    return apiRequest<{ message: string }>(`/alerts?userId=${userId}&alertId=${alertId}`, {
+      method: 'DELETE',
     });
   },
 };

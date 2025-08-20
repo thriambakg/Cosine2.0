@@ -26,6 +26,7 @@ interface AddCryptoModalProps {
       show24hChange: boolean;
       showAnnualReturn: boolean;
       showVolatility: boolean;
+      showChart: boolean;
     };
     autoRefresh: boolean;
   }) => void;
@@ -58,6 +59,7 @@ const AddCryptoModal: React.FC<AddCryptoModalProps> = ({
     show24hChange: true,
     showAnnualReturn: true,
     showVolatility: true,
+    showChart: true,
   });
   const [autoRefresh, setAutoRefresh] = useState(false);
 
@@ -81,6 +83,7 @@ const AddCryptoModal: React.FC<AddCryptoModalProps> = ({
       show24hChange: true,
       showAnnualReturn: true,
       showVolatility: true,
+      showChart: true,
     });
     setAutoRefresh(false);
     onClose();

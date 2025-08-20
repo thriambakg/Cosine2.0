@@ -10,6 +10,7 @@ export interface CryptoTile {
     show24hChange: boolean;
     showAnnualReturn: boolean;
     showVolatility: boolean;
+    showChart: boolean;
   };
   autoRefresh: boolean;
   isPinned: boolean;
@@ -108,12 +109,13 @@ export const createDefaultDashboard = (): DashboardConfig => ({
       id: 'tile_1',
       symbol: 'BTC',
       timeframe: '1d',
-             displayOptions: {
-         showPrice: true,
-         show24hChange: true,
-         showAnnualReturn: true,
-         showVolatility: true,
-       },
+                   displayOptions: {
+        showPrice: true,
+        show24hChange: true,
+        showAnnualReturn: true,
+        showVolatility: true,
+        showChart: true,
+      },
       autoRefresh: false,
       isPinned: false,
              size: { width: 350, height: 400 },
