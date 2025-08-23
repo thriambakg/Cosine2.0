@@ -86,7 +86,7 @@ const StockAlertsPage: React.FC = () => {
         alertId: apiAlert.alertId,
         ticker: apiAlert.triggerConditions.ticker,
         price_threshold: apiAlert.triggerConditions.threshold,
-        current_price: 0, // Will be fetched separately if needed
+        current_price: apiAlert.triggerConditions.currentPrice || 0, // Use current price from API
         comparison_mode: apiAlert.triggerConditions.alertType === 'price_above' ? 'Greater Than' : 'Less Than',
         status: apiAlert.status,
         createdAt: apiAlert.createdAt
@@ -135,7 +135,7 @@ const StockAlertsPage: React.FC = () => {
         alertId: response.alertId,
         ticker: ticker.toUpperCase(),
         price_threshold: parseFloat(priceThreshold),
-        current_price: 0, // Will be fetched from API
+        current_price: response.triggerConditions.currentPrice || 0, // Use current price from API response
         comparison_mode: comparisonMode,
         status: response.status,
         createdAt: response.createdAt

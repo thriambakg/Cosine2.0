@@ -239,6 +239,7 @@ export interface StockAlertResponse {
     ticker: string;
     alertType: string;
     threshold: number;
+    currentPrice?: number;
   };
 }
 

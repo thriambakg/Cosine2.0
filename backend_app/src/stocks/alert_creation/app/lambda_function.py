@@ -7,6 +7,7 @@ from decimal import Decimal
 from botocore.exceptions import ClientError
 from typing import Dict, Any
 import logging
+import yfinance as yf
 
 # Configure logging
 logger = logging.getLogger()
@@ -19,6 +20,90 @@ user_profiles_table_name = os.environ.get('USER_PROFILES_TABLE_NAME', 'cosine-us
 
 alerts_table = dynamodb.Table(alerts_table_name)
 user_profiles_table = dynamodb.Table(user_profiles_table_name)
+
+def validate_ticker_and_get_price(ticker: str) -> Dict[str, Any]:
+    """
+    Validate that a ticker exists and return current price information
+    Returns: {'valid': bool, 'current_price': float, 'error': str}
+    """
+    try:
+        logger.info(f"=== VALIDATING TICKER ===")
+        logger.info(f"Validating ticker: {ticker}")
+        
+        # Create yfinance ticker object
+        ticker_obj = yf.Ticker(ticker)
+        
+        # Get current price
+        current_price = ticker_obj.info.get('regularMarketPrice')
+        
+        if current_price is None:
+            logger.error(f"=== TICKER VALIDATION FAILED ===")
+            logger.error(f"Could not get current price for ticker: {ticker}")
+            return {
+                'valid': False,
+                'current_price': None,
+                'error': f"Could not fetch current price for {ticker}. Please verify the ticker symbol."
+            }
+        
+        logger.info(f"=== TICKER VALIDATION SUCCESS ===")
+        logger.info(f"Ticker {ticker} is valid. Current price: ${current_price}")
+        
+        return {
+            'valid': True,
+            'current_price': float(current_price),
+            'error': None
+        }
+        
+    except Exception as e:
+        logger.error(f"=== TICKER VALIDATION ERROR ===")
+        logger.error(f"Error validating ticker {ticker}: {str(e)}")
+        return {
+            'valid': False,
+            'current_price': None,
+            'error': f"Error validating {ticker}: {str(e)}"
+        }
+
+def validate_alert_threshold(alert_type: str, threshold: float, current_price: float) -> Dict[str, Any]:
+    """
+    Validate that the alert threshold makes sense given the current price
+    Returns: {'valid': bool, 'error': str}
+    """
+    try:
+        logger.info(f"=== VALIDATING ALERT THRESHOLD ===")
+        logger.info(f"Alert type: {alert_type}, Threshold: ${threshold}, Current price: ${current_price}")
+        
+        if alert_type == 'price_above':
+            if threshold <= current_price:
+                logger.warning(f"=== THRESHOLD VALIDATION FAILED ===")
+                logger.warning(f"Price above alert threshold (${threshold}) is already met by current price (${current_price})")
+                return {
+                    'valid': False,
+                    'error': f"Alert threshold (${threshold}) is already met by current price (${current_price}). The stock is already above your target price."
+                }
+        elif alert_type == 'price_below':
+            if threshold >= current_price:
+                logger.warning(f"=== THRESHOLD VALIDATION FAILED ===")
+                logger.warning(f"Price below alert threshold (${threshold}) is already met by current price (${current_price})")
+                return {
+                    'valid': False,
+                    'error': f"Alert threshold (${threshold}) is already met by current price (${current_price}). The stock is already below your target price."
+                }
+        
+        logger.info(f"=== THRESHOLD VALIDATION SUCCESS ===")
+        logger.info(f"Alert threshold is valid for current market conditions")
+        
+        return {
+            'valid': True,
+            'error': None
+        }
+        
+    except Exception as e:
+        logger.error(f"=== THRESHOLD VALIDATION ERROR ===")
+        logger.error(f"Error validating threshold: {str(e)}")
+        return {
+            'valid': False,
+            'error': f"Error validating threshold: {str(e)}"
+        }
 
 def lambda_handler(event, context):
     """
@@ -108,17 +193,31 @@ def handle_get_alerts(event):
             if user_email in notification_emails:
                 alerts.append(alert)
         
-        # Convert to frontend format
+        # Convert to frontend format and fetch current prices
         formatted_alerts = []
         for alert in alerts:
+            # Get current price for this ticker
+            ticker = alert.get('ticker')
+            current_price = None
+            
+            try:
+                ticker_validation = validate_ticker_and_get_price(ticker)
+                if ticker_validation['valid']:
+                    current_price = ticker_validation['current_price']
+                else:
+                    logger.warning(f"Could not fetch current price for {ticker}: {ticker_validation['error']}")
+            except Exception as e:
+                logger.warning(f"Error fetching current price for {ticker}: {str(e)}")
+            
             formatted_alerts.append({
                 "alertId": alert.get('alert_id'),
                 "status": alert.get('alert_status'),
                 "createdAt": alert.get('created_at'),
                 "triggerConditions": {
-                    "ticker": alert.get('ticker'),
+                    "ticker": ticker,
                     "alertType": alert.get('alert_type'),
-                    "threshold": alert.get('threshold')
+                    "threshold": float(alert.get('threshold')) if alert.get('threshold') else None,
+                    "currentPrice": current_price
                 }
             })
         
@@ -281,10 +380,44 @@ def handle_create_alert(event):
                 "statusCode": 400,
                 "headers": {
                     "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Headers": "Content-Type", 
+                    "Access-Control-Allow-Headers": "Content-Type",
                     "Access-Control-Allow-Methods": "POST"
                 },
                 "body": json.dumps({"message": "Invalid alertType. Must be 'price_above' or 'price_below'"})
+            }
+        
+        logger.info("=== VALIDATING TICKER AND THRESHOLD ===")
+        
+        # Validate ticker and get current price
+        ticker_validation = validate_ticker_and_get_price(ticker.upper())
+        if not ticker_validation['valid']:
+            logger.error(f"=== TICKER VALIDATION FAILED ===")
+            logger.error(f"Ticker validation error: {ticker_validation['error']}")
+            return {
+                "statusCode": 400,
+                "headers": {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                    "Access-Control-Allow-Methods": "POST"
+                },
+                "body": json.dumps({"message": ticker_validation['error']})
+            }
+        
+        current_price = ticker_validation['current_price']
+        
+        # Validate alert threshold makes sense
+        threshold_validation = validate_alert_threshold(alert_type, float(threshold), current_price)
+        if not threshold_validation['valid']:
+            logger.error(f"=== THRESHOLD VALIDATION FAILED ===")
+            logger.error(f"Threshold validation error: {threshold_validation['error']}")
+            return {
+                "statusCode": 400,
+                "headers": {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                    "Access-Control-Allow-Methods": "POST"
+                },
+                "body": json.dumps({"message": threshold_validation['error']})
             }
         
         logger.info("=== FETCHING USER PROFILE ===")
@@ -371,6 +504,7 @@ def handle_create_alert(event):
                 'ticker': ticker.upper(),
                 'alert_type': alert_type,
                 'threshold': Decimal(str(threshold)), # Convert float to Decimal for DynamoDB
+                'current_price': Decimal(str(current_price)), # Store current price when alert is created
                 'notification_emails': [user_email]  # List of emails to notify
             }
             
@@ -395,7 +529,8 @@ def handle_create_alert(event):
             "triggerConditions": {
                 "ticker": ticker.upper(),
                 "alertType": alert_type,
-                "threshold": float(threshold)  # Convert back to float for JSON response
+                "threshold": float(threshold),  # Convert back to float for JSON response
+                "currentPrice": current_price
             }
         }
         
