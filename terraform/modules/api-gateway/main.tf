@@ -18,13 +18,12 @@ resource "aws_api_gateway_deployment" "this" {
   rest_api_id = aws_api_gateway_rest_api.this.id
 
   triggers = {
-    redeployment = sha1(jsonencode(concat(
-      [for resource in aws_api_gateway_resource.this : resource.id],
-      [for method in aws_api_gateway_method.this : method.id],
-      [for integration in aws_api_gateway_integration.this : integration.id],
-      [for method_response in aws_api_gateway_method_response.this : method_response.id],
-      [for integration_response in aws_api_gateway_integration_response.this : integration_response.id]
-    )))
+    redeployment = sha1(jsonencode({
+      trigger      = var.deployment_trigger,
+      resources    = sort([for resource in aws_api_gateway_resource.this : resource.id]),
+      methods      = sort([for method in aws_api_gateway_method.this : "${method.resource_id}:${method.http_method}"]),
+      integrations = sort([for integration in aws_api_gateway_integration.this : "${integration.resource_id}:${integration.http_method}"])
+    }))
   }
 
   depends_on = [
@@ -32,7 +31,8 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_resource.this,
     aws_api_gateway_method.this,
     aws_api_gateway_integration.this,
-    aws_api_gateway_method_response.this
+    aws_api_gateway_method_response.this,
+    aws_api_gateway_integration_response.this
   ]
 
   lifecycle {
@@ -76,6 +76,10 @@ resource "aws_api_gateway_method" "this" {
   authorization = "NONE"
 
   request_parameters = each.value.request_parameters
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Integrations - dynamically created based on var.methods
@@ -96,6 +100,14 @@ resource "aws_api_gateway_integration" "this" {
   } : null
 
   passthrough_behavior = each.value.integration_type == "MOCK" ? "WHEN_NO_MATCH" : null
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  depends_on = [
+    aws_api_gateway_method.this
+  ]
 }
 
 # Method responses - dynamically created based on var.methods
@@ -117,6 +129,14 @@ resource "aws_api_gateway_method_response" "this" {
   response_models = {
     "application/json" = "Empty"
   }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  depends_on = [
+    aws_api_gateway_method.this
+  ]
 }
 
 # Integration responses - for all methods (both Lambda and MOCK)
@@ -147,9 +167,10 @@ resource "aws_api_gateway_integration_response" "this" {
     create_before_destroy = true
   }
 
-  # Ensure integration exists before creating response
+  # Ensure all dependencies exist before creating response
   depends_on = [
-    aws_api_gateway_integration.this
+    aws_api_gateway_integration.this,
+    aws_api_gateway_method_response.this
   ]
 }
 

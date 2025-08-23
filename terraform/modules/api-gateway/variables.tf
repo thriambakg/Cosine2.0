@@ -57,3 +57,10 @@ variable "lambda_permissions" {
   }))
   default = {}
 }
+
+# Deployment trigger variable
+variable "deployment_trigger" {
+  description = "Trigger for API Gateway deployment (change this to force redeployment)"
+  type        = string
+  default     = "1"
+}
