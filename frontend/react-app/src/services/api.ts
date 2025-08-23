@@ -34,10 +34,15 @@ const apiRequest = async <T>(
 
     console.log('url', url);
     
-    // Use axios.get for GET requests, axios.post for POST requests
-    const response = options.method === 'POST' 
-      ? await axios.post(url, options.body, { headers: getHeaders() })
-      : await axios.get(url, { headers: getHeaders() });
+    // Use appropriate axios method based on HTTP method
+    let response;
+    if (options.method === 'POST') {
+      response = await axios.post(url, options.body, { headers: getHeaders() });
+    } else if (options.method === 'DELETE') {
+      response = await axios.delete(url, { headers: getHeaders() });
+    } else {
+      response = await axios.get(url, { headers: getHeaders() });
+    }
     
     console.log(`📥 Response status: ${response.status} ${response.statusText}`);
     console.log(`📥 Response headers:`, response.headers);

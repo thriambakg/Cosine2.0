@@ -112,9 +112,6 @@ module "api_gateway" {
 
   # Resources configuration
   resources = {
-    stocks = {
-      path_part = "stocks"
-    }
     volatility = {
       path_part = "volatility"
     }
@@ -140,15 +137,6 @@ module "api_gateway" {
       lambda_arn              = module.stock_volatility_lambda.function_arn
       request_parameters      = {}
     }
-    # OPTIONS method for CORS preflight
-    volatility_options = {
-      resource_key            = "volatility"
-      http_method             = "OPTIONS"
-      integration_type        = "MOCK"
-      integration_http_method = "POST"
-      lambda_arn              = null
-      request_parameters      = {}
-    }
     # GET method for crypto stats
     crypto_get = {
       resource_key            = "crypto"
@@ -156,15 +144,6 @@ module "api_gateway" {
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
       lambda_arn              = module.crypto_stats_lambda.function_arn
-      request_parameters      = {}
-    }
-    # OPTIONS method for CORS preflight
-    crypto_options = {
-      resource_key            = "crypto"
-      http_method             = "OPTIONS"
-      integration_type        = "MOCK"
-      integration_http_method = "POST"
-      lambda_arn              = null
       request_parameters      = {}
     }
     # GET method for alerts (fetch user alerts)
@@ -192,15 +171,6 @@ module "api_gateway" {
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
       lambda_arn              = module.stock_alerts_lambda.function_arn
-      request_parameters      = {}
-    }
-    # OPTIONS method for CORS preflight on alerts
-    alerts_options = {
-      resource_key            = "alerts"
-      http_method             = "OPTIONS"
-      integration_type        = "MOCK"
-      integration_http_method = "POST"
-      lambda_arn              = null
       request_parameters      = {}
     }
     # User Dashboard methods
@@ -234,15 +204,6 @@ module "api_gateway" {
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
       lambda_arn              = module.user_dashboard_lambda.function_arn
-      request_parameters      = {}
-    }
-    # OPTIONS method for CORS preflight
-    dashboard_options = {
-      resource_key            = "dashboard"
-      http_method             = "OPTIONS"
-      integration_type        = "MOCK"
-      integration_http_method = "POST"
-      lambda_arn              = null
       request_parameters      = {}
     }
   }
@@ -299,7 +260,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "1"
+  deployment_trigger = "2"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager

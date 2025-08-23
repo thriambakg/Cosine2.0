@@ -18,12 +18,7 @@ resource "aws_api_gateway_deployment" "this" {
   rest_api_id = aws_api_gateway_rest_api.this.id
 
   triggers = {
-    redeployment = sha1(jsonencode({
-      trigger      = var.deployment_trigger,
-      resources    = sort([for resource in aws_api_gateway_resource.this : resource.id]),
-      methods      = sort([for method in aws_api_gateway_method.this : "${method.resource_id}:${method.http_method}"]),
-      integrations = sort([for integration in aws_api_gateway_integration.this : "${integration.resource_id}:${integration.http_method}"])
-    }))
+    redeployment = var.deployment_trigger
   }
 
   depends_on = [
@@ -32,7 +27,8 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_method.this,
     aws_api_gateway_integration.this,
     aws_api_gateway_method_response.this,
-    aws_api_gateway_integration_response.this
+    aws_api_gateway_integration_response.this,
+    module.options_integrations
   ]
 
   lifecycle {
@@ -188,3 +184,15 @@ resource "aws_lambda_permission" "lambda_permissions" {
 
 # Data source for current region
 data "aws_region" "current" {}
+
+# OPTIONS Integrations Module
+module "options_integrations" {
+  source = "./options-integrations"
+
+  rest_api_id = aws_api_gateway_rest_api.this.id
+  resources = {
+    for key, resource in aws_api_gateway_resource.this : key => {
+      resource_id = resource.id
+    }
+  }
+}

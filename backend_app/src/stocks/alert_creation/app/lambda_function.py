@@ -1,13 +1,14 @@
 import json
 import boto3
 import os
+import urllib.request
+import urllib.parse
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from botocore.exceptions import ClientError
 from typing import Dict, Any
 import logging
-import yfinance as yf
 
 # Configure logging
 logger = logging.getLogger()
@@ -23,27 +24,72 @@ user_profiles_table = dynamodb.Table(user_profiles_table_name)
 
 def validate_ticker_and_get_price(ticker: str) -> Dict[str, Any]:
     """
-    Validate that a ticker exists and return current price information
+    Validate that a ticker exists and return current price information using direct HTTP requests
     Returns: {'valid': bool, 'current_price': float, 'error': str}
     """
     try:
         logger.info(f"=== VALIDATING TICKER ===")
         logger.info(f"Validating ticker: {ticker}")
         
-        # Create yfinance ticker object
-        ticker_obj = yf.Ticker(ticker)
+        # Calculate date range for recent data (last 5 days)
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=5)
         
-        # Get current price
-        current_price = ticker_obj.info.get('regularMarketPrice')
+        # Format dates for Yahoo Finance API
+        start_timestamp = int(start_date.timestamp())
+        end_timestamp = int(end_date.timestamp())
         
-        if current_price is None:
+        # Yahoo Finance API URL
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?period1={start_timestamp}&period2={end_timestamp}&interval=1d"
+        
+        # Make request
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode())
+        
+        # Extract current price from the response
+        if 'chart' not in data or 'result' not in data['chart'] or not data['chart']['result']:
             logger.error(f"=== TICKER VALIDATION FAILED ===")
-            logger.error(f"Could not get current price for ticker: {ticker}")
+            logger.error(f"No data found for ticker: {ticker}")
+            return {
+                'valid': False,
+                'current_price': None,
+                'error': f"Could not fetch data for {ticker}. Please verify the ticker symbol."
+            }
+        
+        result = data['chart']['result'][0]
+        if 'indicators' not in result:
+            logger.error(f"=== TICKER VALIDATION FAILED ===")
+            logger.error(f"Insufficient data for ticker: {ticker}")
+            return {
+                'valid': False,
+                'current_price': None,
+                'error': f"Could not fetch price data for {ticker}. Please verify the ticker symbol."
+            }
+        
+        # Get closing prices
+        quotes = result['indicators']['quote'][0]
+        if 'close' not in quotes:
+            logger.error(f"=== TICKER VALIDATION FAILED ===")
+            logger.error(f"No closing price data for ticker: {ticker}")
+            return {
+                'valid': False,
+                'current_price': None,
+                'error': f"Could not fetch price data for {ticker}. Please verify the ticker symbol."
+            }
+        
+        # Get the most recent closing price
+        closes = [price for price in quotes['close'] if price is not None]
+        if not closes:
+            logger.error(f"=== TICKER VALIDATION FAILED ===")
+            logger.error(f"No valid closing prices for ticker: {ticker}")
             return {
                 'valid': False,
                 'current_price': None,
                 'error': f"Could not fetch current price for {ticker}. Please verify the ticker symbol."
             }
+        
+        current_price = closes[-1]  # Most recent closing price
         
         logger.info(f"=== TICKER VALIDATION SUCCESS ===")
         logger.info(f"Ticker {ticker} is valid. Current price: ${current_price}")
@@ -293,14 +339,21 @@ def handle_delete_alert(event):
         notification_emails.remove(user_email)
         
         if len(notification_emails) == 0:
-            # If no emails left, delete the entire alert
-            alerts_table.delete_item(
+            # If no emails left, set TTL to expire in 24 hours instead of deleting immediately
+            # This allows for potential recovery and avoids race conditions
+            expires_at = int((datetime.utcnow() + timedelta(hours=24)).timestamp())
+            alerts_table.update_item(
                 Key={
                     'alert_status': alert.get('alert_status'),
                     'created_at': alert.get('created_at')
+                },
+                UpdateExpression='SET notification_emails = :emails, expires_at = :expires_at',
+                ExpressionAttributeValues={
+                    ':emails': notification_emails,
+                    ':expires_at': expires_at
                 }
             )
-            logger.info(f"Deleted alert {alert_id} as no emails remain")
+            logger.info(f"Set TTL for alert {alert_id} as no emails remain. Will expire in 24 hours.")
         else:
             # Update the alert with remaining emails
             alerts_table.update_item(
@@ -505,7 +558,8 @@ def handle_create_alert(event):
                 'alert_type': alert_type,
                 'threshold': Decimal(str(threshold)), # Convert float to Decimal for DynamoDB
                 'current_price': Decimal(str(current_price)), # Store current price when alert is created
-                'notification_emails': [user_email]  # List of emails to notify
+                'notification_emails': [user_email],  # List of emails to notify
+                'user_email': user_email  # Store user email for GSI queries
             }
             
             logger.info(f"=== NEW ALERT PAYLOAD ===")
@@ -632,9 +686,10 @@ def update_alert_with_new_email(alert: Dict[str, Any], new_email: str) -> bool:
                     'alert_status': alert['alert_status'],
                     'created_at': alert['created_at']
                 },
-                'UpdateExpression': 'SET notification_emails = :emails',
+                'UpdateExpression': 'SET notification_emails = :emails, user_email = :user_email',
                 'ExpressionAttributeValues': {
-                    ':emails': notification_emails
+                    ':emails': notification_emails,
+                    ':user_email': new_email  # Update with the new user's email for GSI
                 }
             }
             

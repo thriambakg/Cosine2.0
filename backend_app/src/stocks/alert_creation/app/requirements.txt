@@ -2,7 +2,6 @@
 # Real implementation dependencies:
 
 boto3>=1.26.0
-yfinance>=0.2.28
 requests>=2.31.0
 
 # Built-in modules used:
@@ -11,3 +10,5 @@ requests>=2.31.0
 # - decimal
 # - uuid
 # - logging
+# - urllib.request
+# - urllib.parse
