@@ -3,6 +3,7 @@ import boto3
 import os
 from uuid import uuid4
 from datetime import datetime
+from decimal import Decimal
 from botocore.exceptions import ClientError
 from typing import Dict, Any
 import logging
@@ -329,10 +330,10 @@ def handle_create_alert(event):
             }
         
         logger.info("=== CHECKING FOR EXISTING ALERT ===")
-        logger.info(f"Searching for identical alert - ticker: {ticker.upper()}, alert_type: {alert_type}, threshold: {float(threshold)}")
+        logger.info(f"Searching for identical alert - ticker: {ticker.upper()}, alert_type: {alert_type}, threshold: {threshold}")
         
         # Check if an identical alert already exists
-        existing_alert = find_identical_alert(ticker.upper(), alert_type, float(threshold))
+        existing_alert = find_identical_alert(ticker.upper(), alert_type, threshold)
         
         if existing_alert:
             logger.info(f"=== EXISTING ALERT FOUND ===")
@@ -369,7 +370,7 @@ def handle_create_alert(event):
                 'alert_id': alert_id,
                 'ticker': ticker.upper(),
                 'alert_type': alert_type,
-                'threshold': float(threshold),
+                'threshold': Decimal(str(threshold)), # Convert float to Decimal for DynamoDB
                 'notification_emails': [user_email]  # List of emails to notify
             }
             
@@ -394,7 +395,7 @@ def handle_create_alert(event):
             "triggerConditions": {
                 "ticker": ticker.upper(),
                 "alertType": alert_type,
-                "threshold": float(threshold)
+                "threshold": float(threshold)  # Convert back to float for JSON response
             }
         }
         
@@ -427,7 +428,7 @@ def handle_create_alert(event):
             "body": json.dumps({"message": "Internal server error"})
         }
 
-def find_identical_alert(ticker: str, alert_type: str, threshold: float) -> Dict[str, Any]:
+def find_identical_alert(ticker: str, alert_type: str, threshold) -> Dict[str, Any]:
     """
     Find an existing alert with identical ticker, alert_type, and threshold
     """
@@ -443,7 +444,7 @@ def find_identical_alert(ticker: str, alert_type: str, threshold: float) -> Dict
                 ':status': 'active',
                 ':ticker': ticker,
                 ':alert_type': alert_type,
-                ':threshold': threshold
+                ':threshold': Decimal(str(threshold)) # Convert float to Decimal for DynamoDB
             }
         }
         
