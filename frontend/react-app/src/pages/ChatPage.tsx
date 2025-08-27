@@ -166,7 +166,6 @@ export default function ChatPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -266,7 +265,6 @@ export default function ChatPage() {
   const handleWebSocketMessage = useCallback((data: WebSocketMessage) => {
     switch (data.type) {
       case 'connection_established':
-        setSessionId(data.session_id || null);
         console.log('🔗 Session established:', data.session_id);
         break;
 
