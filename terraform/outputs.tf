@@ -89,6 +89,54 @@ output "api_endpoints" {
   }
 }
 
+# WebSocket API Gateway Outputs
+output "websocket_api" {
+  description = "WebSocket API Gateway configuration"
+  value = {
+    api_id            = module.websocket_api.api_id
+    api_arn           = module.websocket_api.api_arn
+    api_execution_arn = module.websocket_api.api_execution_arn
+    stage_url         = module.websocket_api.stage_url
+    deployment_id     = module.websocket_api.deployment_id
+    stage_name        = module.websocket_api.stage_name
+  }
+}
+
+# WebSocket Lambda Function Outputs
+output "websocket_connection_lambda" {
+  description = "Information about the WebSocket connection manager Lambda function"
+  value = {
+    function_name = module.websocket_connection_lambda.function_name
+    function_arn  = module.websocket_connection_lambda.function_arn
+    invoke_arn    = module.websocket_connection_lambda.invoke_arn
+    role_arn      = module.websocket_connection_lambda.execution_role_arn
+    role_name     = module.websocket_connection_lambda.execution_role_name
+  }
+}
+
+output "websocket_message_lambda" {
+  description = "Information about the WebSocket message processor Lambda function"
+  value = {
+    function_name = module.websocket_message_lambda.function_name
+    function_arn  = module.websocket_message_lambda.function_arn
+    invoke_arn    = module.websocket_message_lambda.invoke_arn
+    role_arn      = module.websocket_message_lambda.execution_role_arn
+    role_name     = module.websocket_message_lambda.execution_role_name
+  }
+}
+
+# Chat Agent Lambda Function Outputs
+output "chat_agent_lambda" {
+  description = "Information about the chat agent Lambda function"
+  value = {
+    function_name = module.chat_agent_lambda.function_name
+    function_arn  = module.chat_agent_lambda.function_arn
+    invoke_arn    = module.chat_agent_lambda.invoke_arn
+    role_arn      = module.chat_agent_lambda.execution_role_arn
+    role_name     = module.chat_agent_lambda.execution_role_name
+  }
+}
+
 # Summary Output
 output "deployment_summary" {
   description = "Summary of deployed resources"

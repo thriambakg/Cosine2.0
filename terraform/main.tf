@@ -309,7 +309,11 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
           data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn,
           "${data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn}/index/*",
           data.terraform_remote_state.base_infra.outputs.alerts_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.alerts_table_arn}/index/*"
+          "${data.terraform_remote_state.base_infra.outputs.alerts_table_arn}/index/*",
+          data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn}/index/*",
+          data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*"
         ]
       }
     ]
@@ -335,6 +339,52 @@ resource "aws_iam_policy" "lambda_kms_policy" {
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for Lambda functions to invoke other Lambda functions
+resource "aws_iam_policy" "lambda_invoke_policy" {
+  name        = "${var.project_name}-lambda-invoke-policy-${var.environment}"
+  description = "Policy for Lambda functions to invoke other Lambda functions"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = [
+          "arn:aws:lambda:${var.aws_region}:*:function:${var.project_name}-chat-agent-${var.environment}"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for Lambda functions to manage WebSocket connections
+resource "aws_iam_policy" "lambda_websocket_policy" {
+  name        = "${var.project_name}-lambda-websocket-policy-${var.environment}"
+  description = "Policy for Lambda functions to manage WebSocket connections"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:ManageConnections"
+        ]
+        Resource = [
+          "${module.websocket_api.api_execution_arn}/*"
         ]
       }
     ]
@@ -505,9 +555,119 @@ module "stock_alert_trigger_lambda" {
   tags = var.common_tags
 }
 
+# Chat Agent Lambda Function
+module "chat_agent_lambda" {
+  source = "./modules/lambda"
 
+  function_name = "${var.project_name}-chat-agent-${var.environment}"
+  description   = "Lambda function for chat agent with financial analysis capabilities"
+  handler       = "lambda_handler.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 1024
 
+  # Source directory
+  source_dir = "../backend_app/src/Chat"
 
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# WebSocket Connection Manager Lambda Function
+module "websocket_connection_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-websocket-connection-${var.environment}"
+  description   = "Lambda function for WebSocket connection management"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 256
+
+  # Source directory
+  source_dir = "../backend_app/src/websocket/connection_manager/app"
+
+  # Environment variables
+  environment_variables = {
+    CHAT_CONNECTIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name
+    CHAT_SESSIONS_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    WEBSOCKET_ENDPOINT          = module.websocket_api.stage_url
+    WEBSOCKET_API_ID            = module.websocket_api.api_id
+    ENVIRONMENT                 = var.environment
+    LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_websocket_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# WebSocket Message Processor Lambda Function
+module "websocket_message_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-websocket-message-${var.environment}"
+  description   = "Lambda function for WebSocket message processing"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/websocket/message_processor/app"
+
+  # Environment variables
+  environment_variables = {
+    CHAT_CONNECTIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name
+    CHAT_SESSIONS_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    CHAT_AGENT_FUNCTION_NAME    = "${var.project_name}-chat-agent-${var.environment}"
+    WEBSOCKET_ENDPOINT          = module.websocket_api.stage_url
+    WEBSOCKET_API_ID            = module.websocket_api.api_id
+    ENVIRONMENT                 = var.environment
+    LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_invoke_policy.arn,
+    aws_iam_policy.lambda_websocket_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# WebSocket API Gateway
+module "websocket_api" {
+  source = "./modules/websocket-api"
+
+  api_name        = "${var.project_name}-websocket-api-${var.environment}"
+  api_description = "WebSocket API for real-time chat functionality"
+  stage_name      = var.environment
+
+  connection_lambda_arn  = module.websocket_connection_lambda.function_arn
+  connection_lambda_name = module.websocket_connection_lambda.function_name
+  message_lambda_arn     = module.websocket_message_lambda.function_arn
+  message_lambda_name    = module.websocket_message_lambda.function_name
+
+  tags = var.common_tags
+}
 
 # ============================================================================
 # API GATEWAY RESOURCES AND INTEGRATIONS - Handled by module

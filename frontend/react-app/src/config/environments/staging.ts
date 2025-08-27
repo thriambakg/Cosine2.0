@@ -3,14 +3,15 @@
 
 export const STAGING_CONFIG = {
   environment: 'staging' as const,
-  // Use production API Gateway for now since staging doesn't exist yet
-  apiGatewayUrl: 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production',
+  apiGatewayUrl: 'https://your-actual-staging-api-gateway-id.execute-api.us-east-1.amazonaws.com/staging',
+  websocketUrl: 'wss://your-actual-staging-websocket-api-id.execute-api.us-east-1.amazonaws.com/staging',
   awsRegion: 'us-east-1',
   projectName: 'cosine-staging',
   
-  // TODO: Add your actual staging API Gateway URL here when staging environment is created
+  // Add your actual staging API Gateway URL here
   // You can get this from Terraform outputs or AWS Console
   // Example: 'https://abc123def.execute-api.us-east-1.amazonaws.com/staging'
+  // WebSocket URL example: 'wss://def456ghi.execute-api.us-east-1.amazonaws.com/staging'
 };
 
 export default STAGING_CONFIG;

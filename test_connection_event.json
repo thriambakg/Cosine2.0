@@ -1,0 +1,9 @@
+{
+  "requestContext": {
+    "routeKey": "$connect",
+    "connectionId": "test-connection-123"
+  },
+  "queryStringParameters": {
+    "userId": "test-user-123"
+  }
+}

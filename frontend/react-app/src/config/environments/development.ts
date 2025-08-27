@@ -3,15 +3,15 @@
 
 export const DEVELOPMENT_CONFIG = {
   environment: 'development' as const,
-  // Use production API Gateway for development testing
-  apiGatewayUrl: 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production',
+  apiGatewayUrl: 'https://your-actual-development-api-gateway-id.execute-api.us-east-1.amazonaws.com/development',
+  websocketUrl: 'wss://your-actual-development-websocket-api-id.execute-api.us-east-1.amazonaws.com/development',
   awsRegion: 'us-east-1',
-  projectName: 'cosine-dev',
+  projectName: 'cosine-development',
   
-  // For local development, you can:
-  // 1. Use production API Gateway (current setup)
-  // 2. Run a local API server on localhost:3001
-  // 3. Use staging API Gateway for testing
+  // Add your actual development API Gateway URL here
+  // You can get this from Terraform outputs or AWS Console
+  // Example: 'https://ghi789jkl.execute-api.us-east-1.amazonaws.com/development'
+  // WebSocket URL example: 'wss://jkl012mno.execute-api.us-east-1.amazonaws.com/development'
 };
 
 export default DEVELOPMENT_CONFIG;

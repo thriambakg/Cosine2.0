@@ -8,6 +8,7 @@ import { PRODUCTION_CONFIG } from './environments/production';
 export interface EnvironmentConfig {
   environment: 'development' | 'staging' | 'production';
   apiGatewayUrl: string;
+  websocketUrl?: string;
   awsRegion: string;
   cognitoUserPoolId?: string;
   cognitoClientId?: string;
@@ -28,6 +29,7 @@ const getRuntimeConfig = () => {
     console.log('🔧 Runtime config found:', window.COSINE_CONFIG);
     return {
       apiGatewayUrl: window.COSINE_CONFIG.apiGatewayUrl,
+      websocketUrl: window.COSINE_CONFIG.websocketUrl,
       awsRegion: window.COSINE_CONFIG.awsRegion,
       environment: window.COSINE_CONFIG.environment,
       cognitoUserPoolId: window.COSINE_CONFIG.cognitoUserPoolId,
@@ -98,10 +100,43 @@ const getAwsRegion = (): string => {
     return runtimeConfig.awsRegion;
   }
   
-  return process.env.NEXT_PUBLIC_AWS_REGION || 
-         process.env.VITE_AWS_REGION || 
-         ENVIRONMENT_CONFIGS[getCurrentEnvironment()]?.awsRegion || 
-         'us-east-1';
+  // Check for explicit AWS region
+  const explicitRegion = process.env.NEXT_PUBLIC_AWS_REGION || process.env.VITE_AWS_REGION;
+  if (explicitRegion && !explicitRegion.includes('{{')) {
+    return explicitRegion;
+  }
+  
+  // Fall back to environment-specific config
+  const env = getCurrentEnvironment();
+  return ENVIRONMENT_CONFIGS[env]?.awsRegion || ENVIRONMENT_CONFIGS.development.awsRegion;
+};
+
+// Get WebSocket URL from runtime config or environment variables
+const getWebSocketUrl = (): string | undefined => {
+  // Check runtime config first (highest priority)
+  const runtimeConfig = getRuntimeConfig();
+  if (runtimeConfig?.websocketUrl && !runtimeConfig.websocketUrl.includes('{{')) {
+    console.log('🔌 Using WebSocket URL from runtime config:', runtimeConfig.websocketUrl);
+    return runtimeConfig.websocketUrl;
+  }
+  
+  // Check for explicit WebSocket URL
+  const explicitUrl = process.env.NEXT_PUBLIC_WEBSOCKET_URL || process.env.VITE_WEBSOCKET_URL;
+  if (explicitUrl && !explicitUrl.includes('your-')) {
+    console.log('🔌 Using WebSocket URL from environment variable:', explicitUrl);
+    return explicitUrl;
+  }
+  
+  // Fall back to environment-specific config
+  const env = getCurrentEnvironment();
+  const envUrl = ENVIRONMENT_CONFIGS[env]?.websocketUrl;
+  if (envUrl) {
+    console.log('🔌 Using WebSocket URL from environment config:', envUrl, '(environment:', env, ')');
+    return envUrl;
+  }
+  
+  console.log('🔌 No WebSocket URL configured for environment:', env);
+  return undefined;
 };
 
 // Get Cognito configuration from runtime config or environment variables
@@ -131,6 +166,7 @@ export const getEnvironmentConfig = (): EnvironmentConfig => {
   return {
     environment: environment as 'development' | 'staging' | 'production',
     apiGatewayUrl: getApiGatewayUrl(),
+    websocketUrl: getWebSocketUrl(),
     awsRegion: getAwsRegion(),
     cognitoUserPoolId: cognitoConfig.userPoolId,
     cognitoClientId: cognitoConfig.clientId,
@@ -147,6 +183,7 @@ export const logEnvironmentConfig = () => {
   console.log('🌍 Environment Configuration:');
   console.log('Environment:', ENV_CONFIG.environment);
   console.log('API Gateway URL:', ENV_CONFIG.apiGatewayUrl);
+  console.log('WebSocket URL:', ENV_CONFIG.websocketUrl || 'Not configured');
   console.log('AWS Region:', ENV_CONFIG.awsRegion);
   console.log('Project Name:', ENV_CONFIG.projectName);
   console.log('Cognito User Pool ID:', ENV_CONFIG.cognitoUserPoolId || 'Not configured');

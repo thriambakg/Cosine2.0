@@ -2,6 +2,7 @@
 
 interface CosineConfig {
   apiGatewayUrl: string;
+  websocketUrl?: string;
   awsRegion: string;
   environment: string;
   cognitoUserPoolId?: string;

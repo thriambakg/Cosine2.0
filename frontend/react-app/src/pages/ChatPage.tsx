@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { ENV_CONFIG } from '@/config/environment';
 import {
   Box,
   Typography,
@@ -17,6 +18,7 @@ import {
   CircularProgress,
   Card,
   CardContent,
+  Alert,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -24,9 +26,10 @@ import {
   Person as PersonIcon,
   CloudUpload as UploadIcon,
   InsertDriveFile as FileIcon,
-
   Settings as SettingsIcon,
   MoreVert as MoreVertIcon,
+  WifiOff as WifiOffIcon,
+  Wifi as WifiIcon,
 } from '@mui/icons-material';
 
 interface Message {
@@ -35,6 +38,8 @@ interface Message {
   sender: 'user' | 'bot';
   timestamp: Date;
   files?: UploadedFile[];
+  messageId?: string; // For tracking message delivery
+  status?: 'sending' | 'sent' | 'delivered' | 'error';
 }
 
 interface UploadedFile {
@@ -42,6 +47,15 @@ interface UploadedFile {
   type: string;
   size: number;
   content: string;
+}
+
+interface WebSocketMessage {
+  type: 'connection_established' | 'message_received' | 'ai_response' | 'error';
+  message_id?: string;
+  session_id?: string;
+  content?: string;
+  message?: string;
+  timestamp?: string;
 }
 
 // Custom styled components for Wall Street chic
@@ -63,7 +77,7 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
   </Card>
 );
 
-const MessageBubble = ({ isUser, children, ...props }: any) => (
+const MessageBubble = ({ isUser, children, status, ...props }: any) => (
   <Box
     sx={{
       p: 2,
@@ -85,6 +99,14 @@ const MessageBubble = ({ isUser, children, ...props }: any) => (
     {...props}
   >
     {children}
+    {isUser && status && (
+      <Box sx={{ position: 'absolute', bottom: 4, right: 4 }}>
+        {status === 'sending' && <CircularProgress size={12} sx={{ color: '#9ca3af' }} />}
+        {status === 'sent' && <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '10px' }}>✓</Typography>}
+        {status === 'delivered' && <Typography variant="caption" sx={{ color: '#22c55e', fontSize: '10px' }}>✓✓</Typography>}
+        {status === 'error' && <Typography variant="caption" sx={{ color: '#ef4444', fontSize: '10px' }}>✗</Typography>}
+      </Box>
+    )}
   </Box>
 );
 
@@ -142,14 +164,159 @@ export default function ChatPage() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
   const [isDragging, setIsDragging] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const websocketRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const maxReconnectAttempts = 5;
 
   useEffect(() => {
     if (!isLoading && !user) {
       navigate('/');
     }
   }, [user, isLoading, navigate]);
+
+  // WebSocket connection management
+  const connectWebSocket = useCallback(() => {
+    if (!user?.id || !ENV_CONFIG.websocketUrl) {
+      console.error('Cannot connect: missing user ID or WebSocket URL');
+      setConnectionError('Missing user ID or WebSocket URL');
+      return;
+    }
+
+    try {
+      setConnectionStatus('connecting');
+      setConnectionError(null);
+
+      // Create WebSocket URL with user ID as query parameter
+      const wsUrl = `${ENV_CONFIG.websocketUrl}?userId=${user.id}`;
+      console.log('🔌 Connecting to WebSocket:', wsUrl);
+
+      const ws = new WebSocket(wsUrl);
+      websocketRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('✅ WebSocket connected');
+        setConnectionStatus('connected');
+        reconnectAttemptsRef.current = 0;
+        
+        // Send a first message to establish the connection and get welcome message
+        const firstMessage = {
+          type: 'chat',
+          message: 'Hello',
+          is_first_message: true,
+          model: 'claude-3-sonnet',
+          files: []
+        };
+        
+        try {
+          ws.send(JSON.stringify(firstMessage));
+          console.log('📤 Sent first message to establish connection');
+        } catch (error) {
+          console.error('Error sending first message:', error);
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data: WebSocketMessage = JSON.parse(event.data);
+          console.log('📨 Received WebSocket message:', data);
+          handleWebSocketMessage(data);
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+
+      ws.onclose = (event) => {
+        console.log('❌ WebSocket disconnected:', event.code, event.reason);
+        setConnectionStatus('disconnected');
+        
+        // Attempt to reconnect if not a normal closure
+        if (event.code !== 1000 && reconnectAttemptsRef.current < maxReconnectAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
+          console.log(`🔄 Attempting to reconnect in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1}/${maxReconnectAttempts})`);
+          
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectAttemptsRef.current++;
+            connectWebSocket();
+          }, delay);
+        } else if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+          setConnectionError('Failed to reconnect after multiple attempts');
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('❌ WebSocket error:', error);
+        setConnectionStatus('error');
+        setConnectionError('WebSocket connection error');
+      };
+
+    } catch (error) {
+      console.error('Error creating WebSocket connection:', error);
+      setConnectionStatus('error');
+      setConnectionError('Failed to create WebSocket connection');
+    }
+  }, [user?.id]);
+
+  const handleWebSocketMessage = useCallback((data: WebSocketMessage) => {
+    switch (data.type) {
+      case 'connection_established':
+        setSessionId(data.session_id || null);
+        console.log('🔗 Session established:', data.session_id);
+        break;
+
+      case 'message_received':
+        // Update message status to delivered
+        setMessages(prev => prev.map(msg => 
+          msg.messageId === data.message_id 
+            ? { ...msg, status: 'delivered' as const }
+            : msg
+        ));
+        break;
+
+      case 'ai_response':
+        // Add AI response to messages
+        const aiMessage: Message = {
+          id: data.message_id || `ai_${Date.now()}`,
+          text: data.content || 'No response content',
+          sender: 'bot',
+          timestamp: new Date(data.timestamp || Date.now()),
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        setIsLoadingChat(false);
+        break;
+
+      case 'error':
+        console.error('WebSocket error message:', data.message);
+        setConnectionError(data.message || 'Unknown error');
+        setIsLoadingChat(false);
+        break;
+
+      default:
+        console.warn('Unknown WebSocket message type:', data.type);
+    }
+  }, []);
+
+  // Connect to WebSocket when user is available
+  useEffect(() => {
+    if (user?.id && ENV_CONFIG.websocketUrl) {
+      connectWebSocket();
+    }
+
+    return () => {
+      if (websocketRef.current) {
+        websocketRef.current.close();
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, [user?.id, ENV_CONFIG.websocketUrl, connectWebSocket]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -211,14 +378,17 @@ export default function ChatPage() {
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() && uploadedFiles.length === 0) return;
-    if (isLoadingChat) return;
+    if (isLoadingChat || connectionStatus !== 'connected') return;
 
+    const messageId = `msg_${Date.now()}`;
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: messageId,
       text: inputMessage || (uploadedFiles.length > 0 ? `📁 Uploaded ${uploadedFiles.length} file(s): ${uploadedFiles.map(f => f.name).join(', ')}` : ''),
       sender: 'user',
       timestamp: new Date(),
       files: uploadedFiles,
+      messageId,
+      status: 'sending',
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -226,23 +396,77 @@ export default function ChatPage() {
     setUploadedFiles([]);
     setIsLoadingChat(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: 'Thank you for your message! I\'m here to help with your financial analysis and portfolio optimization. How can I assist you today?',
-        sender: 'bot',
-        timestamp: new Date(),
+    // Send message via WebSocket
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      const messageData = {
+        type: 'chat',
+        message: userMessage.text,
+        model: selectedModel,
+        files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
       };
-      setMessages((prev) => [...prev, botMessage]);
+
+      try {
+        websocketRef.current.send(JSON.stringify(messageData));
+        
+        // Update message status to sent
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, status: 'sent' as const }
+            : msg
+        ));
+      } catch (error) {
+        console.error('Error sending message:', error);
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, status: 'error' as const }
+            : msg
+        ));
+        setIsLoadingChat(false);
+      }
+    } else {
+      console.error('WebSocket not connected');
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId 
+          ? { ...msg, status: 'error' as const }
+          : msg
+      ));
       setIsLoadingChat(false);
-    }, 2000);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
+    }
+  };
+
+  const getConnectionStatusIcon = () => {
+    switch (connectionStatus) {
+      case 'connected':
+        return <WifiIcon sx={{ color: '#22c55e' }} />;
+      case 'connecting':
+        return <CircularProgress size={20} sx={{ color: '#3b82f6' }} />;
+      case 'disconnected':
+      case 'error':
+        return <WifiOffIcon sx={{ color: '#ef4444' }} />;
+      default:
+        return <WifiOffIcon sx={{ color: '#9ca3af' }} />;
+    }
+  };
+
+  const getConnectionStatusText = () => {
+    switch (connectionStatus) {
+      case 'connected':
+        return 'Connected';
+      case 'connecting':
+        return 'Connecting...';
+      case 'disconnected':
+        return 'Disconnected';
+      case 'error':
+        return 'Connection Error';
+      default:
+        return 'Unknown';
     }
   };
 
@@ -276,7 +500,15 @@ export default function ChatPage() {
               </Typography>
             </Box>
           </Box>
-          <Box display="flex" alignItems="center" gap={1}>
+          <Box display="flex" alignItems="center" gap={2}>
+            {/* Connection Status */}
+            <Box display="flex" alignItems="center" gap={1}>
+              {getConnectionStatusIcon()}
+              <Typography variant="body2" color="white" sx={{ textTransform: 'uppercase' }}>
+                {getConnectionStatusText()}
+              </Typography>
+            </Box>
+            
             <FormControl size="small" sx={{ minWidth: 150 }}>
               <InputLabel sx={{ color: '#9ca3af' }}>AI Model</InputLabel>
               <Select
@@ -310,6 +542,22 @@ export default function ChatPage() {
         </Box>
       </GlassCard>
 
+      {/* Connection Error Alert */}
+      {connectionError && (
+        <Alert 
+          severity="error" 
+          sx={{ 
+            m: 2, 
+            backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+            border: '1px solid #ef4444',
+            color: '#ef4444'
+          }}
+          onClose={() => setConnectionError(null)}
+        >
+          {connectionError}
+        </Alert>
+      )}
+
       {/* Messages */}
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
         <Stack spacing={2}>
@@ -319,7 +567,7 @@ export default function ChatPage() {
                 {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}
               </Avatar>
               <Box sx={{ flex: 1 }}>
-                <MessageBubble isUser={message.sender === 'user'}>
+                <MessageBubble isUser={message.sender === 'user'} status={message.status}>
                   <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
                     {message.text}
                   </Typography>
@@ -424,6 +672,7 @@ export default function ChatPage() {
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Ask me anything about finance, stocks, or portfolio analysis..."
+            disabled={connectionStatus !== 'connected'}
             sx={{
               '& .MuiOutlinedInput-root': {
                 color: 'white',
@@ -437,6 +686,9 @@ export default function ChatPage() {
                 '&.Mui-focused fieldset': {
                   borderColor: '#22c55e',
                 },
+                '&.Mui-disabled': {
+                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                },
               },
               '& .MuiInputBase-input::placeholder': {
                 color: '#9ca3af',
@@ -447,7 +699,7 @@ export default function ChatPage() {
           <Button
             variant="contained"
             onClick={handleSendMessage}
-            disabled={isLoadingChat || (!inputMessage.trim() && uploadedFiles.length === 0)}
+            disabled={isLoadingChat || (!inputMessage.trim() && uploadedFiles.length === 0) || connectionStatus !== 'connected'}
             sx={{
               bgcolor: '#22c55e',
               color: 'white',
