@@ -11,3 +11,12 @@ AVD-AWS-0054
 # 1. Staging environments don't require domain certificates (cost optimization)
 # 2. Production environments will have certificates and redirect HTTP to HTTPS
 # 3. The ALB configuration is designed to be secure when certificates are available
+
+# ECR Repository Tags - Mutable for development workflow
+# Rule: AVD-AWS-0031 - Repository tags are mutable
+# Note: This is acceptable for development because:
+# 1. We need to overwrite the 'latest' tag during development iterations
+# 2. The ECR repository is private and only accessible to our AWS account
+# 3. We use timestamped tags for production deployments
+# 4. The container images are built from our controlled source code
+AVD-AWS-0031
