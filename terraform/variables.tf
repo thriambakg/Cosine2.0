@@ -141,3 +141,13 @@ variable "ses_from_email" {
   type        = string
   default     = "noreply@cosine-ai.com"
 }
+
+# ============================================================================
+# CHAT AGENT CONTAINER CONFIGURATION
+# ============================================================================
+
+variable "chat_agent_image_uri" {
+  description = "Full ECR image URI for the chat agent container (including tag). If empty, uses latest tag."
+  type        = string
+  default     = ""
+}

@@ -21,6 +21,8 @@ resource "aws_ecr_repository" "frontend" {
 
   lifecycle {
     ignore_changes = [name]
+    # Force recreation when image_tag_mutability changes
+    create_before_destroy = true
   }
 }
 

@@ -97,12 +97,19 @@ jobs:
           export ENVIRONMENT=${{ needs.determine-environment.outputs.environment }}
           export AWS_REGION=us-east-1
           
-          # Run the build script
-          ./scripts/build-chat-agent-container.sh
+          # Run the build script and capture output
+          BUILD_OUTPUT=$(./scripts/build-chat-agent-container.sh 2>&1)
+          echo "$BUILD_OUTPUT"
           
-          # Get the ECR image URI for output
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ECR_IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/cosine-chat-agent-${{ needs.determine-environment.outputs.environment }}:latest"
+          # Extract the primary image URI from the build output
+          # The script outputs "Primary Image URI: <uri>" at the end
+          ECR_IMAGE_URI=$(echo "$BUILD_OUTPUT" | grep "Primary Image URI:" | cut -d' ' -f4-)
+          
+          if [ -z "$ECR_IMAGE_URI" ]; then
+            echo "Failed to extract ECR image URI from build output"
+            exit 1
+          fi
+          
           echo "ecr-image-uri=$ECR_IMAGE_URI" >> $GITHUB_OUTPUT
           echo "Built and pushed: $ECR_IMAGE_URI"
 
@@ -118,6 +125,8 @@ jobs:
       force_apply: ${{ github.event.inputs.force_apply == 'true' }}
       base_infra_dependency: true
       has_lambda_layer: false
+      terraform_vars: |
+        chat_agent_image_uri = "${{ needs.build-chat-agent-container.outputs.ecr-image-uri }}"
     secrets:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
