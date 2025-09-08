@@ -153,6 +153,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     }
     
     try:
+        # Debug logging to see the full event structure
+        logger.info(f"🔍 DEBUG: Full event received: {json.dumps(event, default=str)}")
+        logger.info(f"🔍 DEBUG: Event keys: {list(event.keys())}")
+        
         # Handle OPTIONS request for CORS preflight
         if event.get('httpMethod') == 'OPTIONS':
             return {
@@ -163,6 +167,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Parse request body
         try:
+            logger.info(f"🔍 DEBUG: Raw event body: {event.get('body')}")
+            logger.info(f"🔍 DEBUG: Body type: {type(event.get('body'))}")
+            
             if 'body' in event and event['body']:
                 if isinstance(event['body'], str):
                     event_body = json.loads(event['body'])
@@ -170,7 +177,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     event_body = event['body']
             else:
                 event_body = {}
-        except json.JSONDecodeError:
+                
+            logger.info(f"🔍 DEBUG: Parsed event_body: {event_body}")
+        except json.JSONDecodeError as e:
+            logger.error(f"🔍 DEBUG: JSON decode error: {e}")
             return {
                 'statusCode': 400,
                 'headers': cors_headers,
@@ -304,13 +314,22 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         Agent response with proper formatting
     """
     try:
+        # Debug logging to see what we're receiving
+        logger.info(f"🔍 DEBUG: event_body received: {event_body}")
+        logger.info(f"🔍 DEBUG: event_body type: {type(event_body)}")
+        logger.info(f"🔍 DEBUG: event_body keys: {list(event_body.keys()) if isinstance(event_body, dict) else 'Not a dict'}")
+        
         # Lazy load the financial agent
         financial_agent, _, FinancialTools = get_financial_agent()
         
         user_message = event_body.get('message', '').strip()
         session_id = event_body.get('session_id', 'default')
         
+        logger.info(f"🔍 DEBUG: extracted user_message: '{user_message}'")
+        logger.info(f"🔍 DEBUG: extracted session_id: '{session_id}'")
+        
         if not user_message:
+            logger.error(f"🔍 DEBUG: No message found in event_body: {event_body}")
             return {
                 'statusCode': 400,
                 'body': {
