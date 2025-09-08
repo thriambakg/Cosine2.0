@@ -1,26 +1,110 @@
+# Fix OpenTelemetry context issue in Lambda environment - MUST be first
 import os
+os.environ.setdefault('OTEL_SDK_DISABLED', 'true')
+os.environ.setdefault('OTEL_PYTHON_DISABLED_INSTRUMENTATIONS', 'all')
+os.environ.setdefault('OTEL_PYTHON_CONTEXT', 'contextvars_context')
+
 import json
-import requests
+import logging
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-from strands import Agent
-from strands.models import BedrockModel
-from typing import Dict, Any, List, Optional
-import yfinance as yf
-import numpy as np
-import pandas as pd
 
-# Import all necessary tools from strands_tools
+# Configure logging
+logger = logging.getLogger()
+
+# Try to import requests - this should be available in the layer
 try:
-    from strands_tools import http_request
-    # Try to import other available tools
-    from strands_tools import calculator
-    calculator_available = True
-except ImportError:
-    calculator_available = False
-    print("Calculator tool not available, using custom implementation")
+    import requests
+    logger.info("Successfully imported requests from layer")
+except ImportError as e:
+    logger.error(f"Failed to import requests: {e}")
+    # Try to add layer paths to sys.path
+    import sys
+    import os
+    layer_paths = ['/opt/python', '/opt/python/lib/python3.11/site-packages', '/opt/python/lib/python3.11/dist-packages']
+    for path in layer_paths:
+        if os.path.exists(path) and path not in sys.path:
+            sys.path.insert(0, path)
+            logger.info(f"Added {path} to sys.path")
+    
+    # Try importing again
+    try:
+        import requests
+        logger.info("Successfully imported requests after adding layer paths")
+    except ImportError as e2:
+        logger.error(f"Still failed to import requests after path adjustment: {e2}")
+        raise
 
-# Import Strands tool decorator
+# Try to import dotenv - this should be available in the layer
+try:
+    from dotenv import load_dotenv
+    logger.info("Successfully imported dotenv from layer")
+except ImportError as e:
+    logger.error(f"Failed to import dotenv: {e}")
+    # Try to add layer paths to sys.path if not already done
+    if '/opt/python' not in sys.path:
+        layer_paths = ['/opt/python', '/opt/python/lib/python3.11/site-packages', '/opt/python/lib/python3.11/dist-packages']
+        for path in layer_paths:
+            if os.path.exists(path) and path not in sys.path:
+                sys.path.insert(0, path)
+                logger.info(f"Added {path} to sys.path")
+    
+    # Try importing again
+    try:
+        from dotenv import load_dotenv
+        logger.info("Successfully imported dotenv after adding layer paths")
+    except ImportError as e2:
+        logger.error(f"Still failed to import dotenv after path adjustment: {e2}")
+        raise
+
+# OpenTelemetry environment variables are set in Terraform to disable instrumentation
+
+# Import the Strands Agents SDK from the Lambda layer
+try:
+    from strands import Agent
+    from strands.models import BedrockModel
+    logger.info("Successfully imported Strands Agents SDK from layer")
+except ImportError as e:
+    logger.error(f"Failed to import Strands Agents SDK: {e}")
+    raise
+except Exception as e:
+    logger.error(f"Error importing Strands Agents SDK: {e}")
+    raise
+
+from typing import Dict, Any, List, Optional
+
+# Import financial data libraries from the layer
+try:
+    import yfinance as yf
+    import numpy as np
+    import pandas as pd
+    logger.info("Successfully imported financial libraries (yfinance, numpy, pandas) from layer")
+except ImportError as e:
+    logger.error(f"Failed to import financial libraries: {e}")
+    raise
+
+# Connection pooling for better performance
+_requests_session = None
+
+def get_requests_session():
+    """Get or create a requests session with connection pooling"""
+    global _requests_session
+    if _requests_session is None:
+        _requests_session = requests.Session()
+        # Configure connection pooling
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10,
+            pool_maxsize=20,
+            max_retries=3
+        )
+        _requests_session.mount('http://', adapter)
+        _requests_session.mount('https://', adapter)
+    return _requests_session
+
+# Import tools from strands-agents-tools (available in Lambda layer)
+from strands_tools import http_request
+from strands_tools import calculator
+
+# Import the tool decorator from Strands (available in Lambda layer)
 from strands import tool
 
 # Import our custom financial calculator tool module

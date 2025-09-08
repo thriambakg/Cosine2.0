@@ -6,7 +6,18 @@ correlation analysis, cointegration testing, and risk metrics.
 from typing import Dict, Any, List
 import json
 import re
-from strands.types.tools import ToolResult, ToolUse
+import logging
+
+# Configure logging
+logger = logging.getLogger()
+
+# Import Strands types (available in Lambda layer)
+try:
+    from strands.types.tools import ToolResult, ToolUse
+    logger.info("Successfully imported Strands types from layer")
+except ImportError as e:
+    logger.error(f"Failed to import Strands types: {e}")
+    raise
 
 # Tool specification following Strands pattern
 TOOL_SPEC = {

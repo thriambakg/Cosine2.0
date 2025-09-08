@@ -2,19 +2,134 @@
 AWS Lambda handler for Cosine Financial Analysis Agent
 Focused on API Gateway integration and business logic only
 Resource configuration handled by Terraform
+Updated for layer v8 compatibility
 """
 
 import json
 import os
 import logging
+import sys
 from typing import Dict, Any
+
+# Fix OpenTelemetry context issue in Lambda environment
+os.environ.setdefault('OTEL_SDK_DISABLED', 'true')
+os.environ.setdefault('OTEL_PYTHON_DISABLED_INSTRUMENTATIONS', 'all')
+os.environ.setdefault('OTEL_PYTHON_CONTEXT', 'contextvars_context')
 
 # Configure logging for Lambda
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
-# Import the financial agent functionality
-from agent import financial_agent, analyze_stock, FinancialTools
+# Log Python path and layer accessibility
+logger.info(f"Python executable: {sys.executable}")
+logger.info(f"Python path: {sys.path}")
+logger.info(f"Current working directory: {os.getcwd()}")
+
+# Enhanced layer debugging
+logger.info("🔍 LAYER DEBUGGING START")
+logger.info(f"Current sys.path: {sys.path}")
+
+# Check all possible layer paths
+layer_paths = [
+    '/opt/python', 
+    '/opt/python/lib/python3.11/site-packages', 
+    '/opt/python/lib/python3.11/dist-packages',
+    '/opt/python/lib/python3.11',
+    '/opt/python/lib'
+]
+
+logger.info("🔍 Checking layer paths:")
+for path in layer_paths:
+    if os.path.exists(path):
+        logger.info(f"✅ Layer path exists: {path}")
+        try:
+            contents = os.listdir(path)
+            logger.info(f"   Contents ({len(contents)} items): {contents[:10]}...")
+            # Check specifically for requests module
+            if 'requests' in contents:
+                logger.info(f"   ✅ requests module found in {path}")
+            else:
+                logger.warning(f"   ❌ requests module NOT found in {path}")
+        except Exception as e:
+            logger.warning(f"   ❌ Could not list contents of {path}: {e}")
+    else:
+        logger.warning(f"❌ Layer path not found: {path}")
+
+# Check if any layer paths are in sys.path
+logger.info("🔍 Checking sys.path for layer paths:")
+for path in sys.path:
+    if '/opt/python' in path:
+        logger.info(f"✅ Layer path in sys.path: {path}")
+        if os.path.exists(path):
+            logger.info(f"   ✅ Path exists and is accessible")
+        else:
+            logger.warning(f"   ❌ Path in sys.path but doesn't exist: {path}")
+
+# Try to import requests directly to test layer accessibility
+logger.info("🔍 Testing requests import:")
+try:
+    import requests
+    logger.info("✅ Successfully imported requests from layer")
+    logger.info(f"   requests version: {requests.__version__}")
+    logger.info(f"   requests location: {requests.__file__}")
+except ImportError as e:
+    logger.error(f"❌ Failed to import requests: {e}")
+    
+    # Try to add layer paths to sys.path
+    logger.info("🔍 Attempting to add layer paths to sys.path:")
+    for path in layer_paths:
+        if os.path.exists(path) and path not in sys.path:
+            sys.path.insert(0, path)
+            logger.info(f"   Added {path} to sys.path")
+    
+    # Try importing again
+    logger.info("🔍 Retrying requests import after path adjustment:")
+    try:
+        import requests
+        logger.info("✅ Successfully imported requests after adding layer paths")
+        logger.info(f"   requests version: {requests.__version__}")
+        logger.info(f"   requests location: {requests.__file__}")
+    except ImportError as e2:
+        logger.error(f"❌ Still failed to import requests after path adjustment: {e2}")
+        
+        # Final attempt - check if we can find any Python packages at all
+        logger.info("🔍 Final check - looking for any Python packages:")
+        for path in sys.path:
+            if os.path.exists(path):
+                try:
+                    contents = os.listdir(path)
+                    python_packages = [item for item in contents if os.path.isdir(os.path.join(path, item)) and not item.startswith('.')]
+                    if python_packages:
+                        logger.info(f"   Found packages in {path}: {python_packages[:5]}...")
+                    else:
+                        logger.info(f"   No packages found in {path}")
+                except Exception as e3:
+                    logger.warning(f"   Could not list {path}: {e3}")
+
+logger.info("🔍 LAYER DEBUGGING END")
+
+# Global variables for lazy loading and connection pooling
+_financial_agent = None
+_analyze_stock = None
+_financial_tools = None
+
+def get_financial_agent():
+    """Lazy load the financial agent to improve cold start performance"""
+    global _financial_agent, _analyze_stock, _financial_tools
+    
+    if _financial_agent is None:
+        logger.info("Loading financial agent (first time)")
+        try:
+            from agent import financial_agent, analyze_stock, FinancialTools
+            _financial_agent = financial_agent
+            _analyze_stock = analyze_stock
+            _financial_tools = FinancialTools
+            logger.info("Financial agent loaded successfully")
+        except Exception as e:
+            logger.error(f"Error loading financial agent: {str(e)}")
+            raise
+    
+    return _financial_agent, _analyze_stock, _financial_tools
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -80,6 +195,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif action == 'calculate_correlation':
             result = handle_correlation_analysis(event_body)
         elif action == 'health':
+            # Lazy load for health check
+            _, _, FinancialTools = get_financial_agent()
             result = {
                 'statusCode': 200,
                 'body': {
@@ -127,6 +244,9 @@ def handle_stock_analysis(event_body: Dict[str, Any]) -> Dict[str, Any]:
         Analysis results with proper error handling
     """
     try:
+        # Lazy load the financial agent
+        _, analyze_stock, FinancialTools = get_financial_agent()
+        
         stock_symbol = event_body.get('symbol', '').upper()
         user_question = event_body.get('question', '')
         
@@ -180,10 +300,13 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         event_body: Request body containing the user message
         
-    Returns:
+    Returns: --
         Agent response with proper formatting
     """
     try:
+        # Lazy load the financial agent
+        financial_agent, _, FinancialTools = get_financial_agent()
+        
         user_message = event_body.get('message', '').strip()
         session_id = event_body.get('session_id', 'default')
         
@@ -230,6 +353,9 @@ def handle_portfolio_analysis(event_body: Dict[str, Any]) -> Dict[str, Any]:
         Portfolio analysis results
     """
     try:
+        # Lazy load the financial tools
+        _, _, FinancialTools = get_financial_agent()
+        
         portfolio_data = event_body.get('portfolio', [])
         period = event_body.get('period', '1y')
         
@@ -289,6 +415,9 @@ def handle_correlation_analysis(event_body: Dict[str, Any]) -> Dict[str, Any]:
         Correlation analysis results
     """
     try:
+        # Lazy load the financial tools
+        _, _, FinancialTools = get_financial_agent()
+        
         tickers = event_body.get('tickers', [])
         period = event_body.get('period', '1y')
         

@@ -61,7 +61,6 @@ on:
         required: false
         default: false
         type: boolean
-
 # Add required permissions for checking workflow runs
 permissions:
   actions: read
@@ -744,3 +743,4 @@ jobs:
           echo "💡 CloudFront distributions can take up to 15 minutes to fully propagate"
           echo "💡 Check the frontend URL manually: $URL"
           echo "💡 Monitor CloudFront distribution in AWS console for propagation status"
+
