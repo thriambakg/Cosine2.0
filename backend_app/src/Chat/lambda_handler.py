@@ -52,16 +52,30 @@ def get_financial_agent():
     global _financial_agent, _analyze_stock, _financial_tools
     
     if _financial_agent is None:
-        logger.info("Loading financial agent (first time)")
+        logger.info("🔍 DEBUG: Loading financial agent (first time)")
         try:
+            logger.info("🔍 DEBUG: Attempting to import agent module...")
             from agent import financial_agent, analyze_stock, FinancialTools
+            logger.info("🔍 DEBUG: Successfully imported agent module")
+            
             _financial_agent = financial_agent
             _analyze_stock = analyze_stock
             _financial_tools = FinancialTools
-            logger.info("Financial agent loaded successfully")
-        except Exception as e:
-            logger.error(f"Error loading financial agent: {str(e)}")
+            logger.info("🔍 DEBUG: Financial agent loaded successfully")
+        except ImportError as e:
+            logger.error(f"🔍 DEBUG: Import error loading financial agent: {str(e)}")
+            logger.error(f"🔍 DEBUG: Import error type: {type(e)}")
+            import traceback
+            logger.error(f"🔍 DEBUG: Import error traceback: {traceback.format_exc()}")
             raise
+        except Exception as e:
+            logger.error(f"🔍 DEBUG: General error loading financial agent: {str(e)}")
+            logger.error(f"🔍 DEBUG: Error type: {type(e)}")
+            import traceback
+            logger.error(f"🔍 DEBUG: Error traceback: {traceback.format_exc()}")
+            raise
+    else:
+        logger.info("🔍 DEBUG: Financial agent already loaded, returning cached version")
     
     return _financial_agent, _analyze_stock, _financial_tools
 
@@ -139,32 +153,56 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"🔍 DEBUG: event_body keys: {list(event_body.keys()) if isinstance(event_body, dict) else 'Not a dict'}")
         
         # Route to appropriate handler
-        if action == 'analyze_stock':
-            result = handle_stock_analysis(event_body)
-        elif action == 'chat':
-            result = handle_chat_message(event_body)
-        elif action == 'analyze_portfolio':
-            result = handle_portfolio_analysis(event_body)
-        elif action == 'calculate_correlation':
-            result = handle_correlation_analysis(event_body)
-        elif action == 'health':
-            # Lazy load for health check
-            _, _, FinancialTools = get_financial_agent()
-            result = {
-                'statusCode': 200,
-                'body': {
-                    'status': 'healthy',
-                    'service': 'Cosine Financial Analysis Agent',
-                    'version': '1.0.0',
-                    'timestamp': FinancialTools.get_current_timestamp()
+        logger.info(f"🔍 DEBUG: About to route to handler for action: {action}")
+        
+        try:
+            if action == 'analyze_stock':
+                logger.info("🔍 DEBUG: Routing to stock analysis handler")
+                result = handle_stock_analysis(event_body)
+            elif action == 'chat':
+                logger.info("🔍 DEBUG: Routing to chat message handler")
+                result = handle_chat_message(event_body)
+            elif action == 'analyze_portfolio':
+                logger.info("🔍 DEBUG: Routing to portfolio analysis handler")
+                result = handle_portfolio_analysis(event_body)
+            elif action == 'calculate_correlation':
+                logger.info("🔍 DEBUG: Routing to correlation analysis handler")
+                result = handle_correlation_analysis(event_body)
+            elif action == 'health':
+                logger.info("🔍 DEBUG: Routing to health check handler")
+                # Lazy load for health check
+                _, _, FinancialTools = get_financial_agent()
+                result = {
+                    'statusCode': 200,
+                    'body': {
+                        'status': 'healthy',
+                        'service': 'Cosine Financial Analysis Agent',
+                        'version': '1.0.0',
+                        'timestamp': FinancialTools.get_current_timestamp()
+                    }
                 }
-            }
-        else:
+            else:
+                logger.info(f"🔍 DEBUG: Invalid action: {action}")
+                result = {
+                    'statusCode': 400,
+                    'body': {
+                        'error': 'Invalid action',
+                        'message': f'Action "{action}" is not supported. Available actions: analyze_stock, chat, analyze_portfolio, calculate_correlation, health'
+                    }
+                }
+            
+            logger.info(f"🔍 DEBUG: Handler completed, result: {result}")
+            
+        except Exception as handler_error:
+            logger.error(f"🔍 DEBUG: Error in handler routing: {str(handler_error)}")
+            logger.error(f"🔍 DEBUG: Handler error type: {type(handler_error)}")
+            import traceback
+            logger.error(f"🔍 DEBUG: Handler error traceback: {traceback.format_exc()}")
             result = {
-                'statusCode': 400,
+                'statusCode': 500,
                 'body': {
-                    'error': 'Invalid action',
-                    'message': f'Action "{action}" is not supported. Available actions: analyze_stock, chat, analyze_portfolio, calculate_correlation, health'
+                    'error': 'Handler execution failed',
+                    'message': str(handler_error)
                 }
             }
         
@@ -258,12 +296,14 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         # Debug logging to see what we're receiving
-        logger.info(f"🔍 DEBUG: event_body received: {event_body}")
+        logger.info(f"🔍 DEBUG: handle_chat_message called with event_body: {event_body}")
         logger.info(f"🔍 DEBUG: event_body type: {type(event_body)}")
         logger.info(f"🔍 DEBUG: event_body keys: {list(event_body.keys()) if isinstance(event_body, dict) else 'Not a dict'}")
         
         # Lazy load the financial agent
+        logger.info("🔍 DEBUG: About to call get_financial_agent()")
         financial_agent, _, FinancialTools = get_financial_agent()
+        logger.info("🔍 DEBUG: Successfully got financial agent")
         
         # Extract message from various possible locations
         user_message = None
