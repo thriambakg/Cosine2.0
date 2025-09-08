@@ -85,7 +85,8 @@ output "stock_volatility_lambda" {
 output "api_endpoints" {
   description = "Available API endpoints"
   value = {
-    stock_volatility_endpoint = "${module.api_gateway.stage_url}/stocks/volatility"
+    stock_volatility_endpoint = "${module.api_gateway.stage_url}/volatility"
+    chat_endpoint             = "${module.api_gateway.stage_url}/chat"
   }
 }
 
@@ -129,11 +130,13 @@ output "websocket_message_lambda" {
 output "chat_agent_lambda" {
   description = "Information about the chat agent Lambda function"
   value = {
-    function_name = module.chat_agent_lambda.function_name
-    function_arn  = module.chat_agent_lambda.function_arn
-    invoke_arn    = module.chat_agent_lambda.invoke_arn
-    role_arn      = module.chat_agent_lambda.execution_role_arn
-    role_name     = module.chat_agent_lambda.execution_role_name
+    function_name           = aws_lambda_function.chat_agent.function_name
+    function_arn            = aws_lambda_function.chat_agent.arn
+    invoke_arn              = aws_lambda_function.chat_agent.invoke_arn
+    role_arn                = aws_iam_role.chat_agent_execution_role.arn
+    role_name               = aws_iam_role.chat_agent_execution_role.name
+    memory_size             = 1536
+    provisioned_concurrency = 0 # Removed for now
   }
 }
 

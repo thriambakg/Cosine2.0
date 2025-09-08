@@ -2,7 +2,7 @@
 # modules/ecr/main.tf
 
 resource "aws_ecr_repository" "frontend" {
-  name                 = "${var.project_name}-frontend-${var.environment}"
+  name                 = "${var.project_name}-${var.repository_name}-${var.environment}"
   image_tag_mutability = "IMMUTABLE"
   force_delete         = true # Allow deletion even with images
 
@@ -16,7 +16,7 @@ resource "aws_ecr_repository" "frontend" {
   }
 
   tags = merge(var.tags, {
-    Name = "${var.project_name}-frontend-ecr-${var.environment}"
+    Name = "${var.project_name}-${var.repository_name}-ecr-${var.environment}"
   })
 
   lifecycle {

@@ -21,3 +21,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "repository_name" {
+  description = "Name of the ECR repository (defaults to 'frontend')"
+  type        = string
+  default     = "frontend"
+}

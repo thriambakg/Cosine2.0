@@ -555,33 +555,82 @@ module "stock_alert_trigger_lambda" {
   tags = var.common_tags
 }
 
-# Chat Agent Lambda Function
-module "chat_agent_lambda" {
-  source = "./modules/lambda"
+# ECR Repository for Chat Agent Container
+module "chat_agent_ecr" {
+  source = "./modules/ecr"
 
-  function_name = "${var.project_name}-chat-agent-${var.environment}"
-  description   = "Lambda function for chat agent with financial analysis capabilities"
-  handler       = "lambda_handler.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 60
-  memory_size   = 1024
+  project_name = var.project_name
+  environment  = var.environment
+  kms_key_arn  = data.terraform_remote_state.base_infra.outputs.kms_key_arn
+  tags         = var.common_tags
 
-  # Source directory
-  source_dir = "../backend_app/src/Chat"
+  # Override the repository name for chat agent
+  repository_name = "chat-agent"
+}
 
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-  }
+# Chat Agent Lambda Function (Custom deployment with dependencies)
+resource "aws_iam_role" "chat_agent_execution_role" {
+  name = "${var.project_name}-chat-agent-${var.environment}-execution-role"
 
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn
-  ]
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
 
   tags = var.common_tags
 }
+
+# Basic execution policy attachment
+resource "aws_iam_role_policy_attachment" "chat_agent_basic_execution" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Attach additional IAM policies
+resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.lambda_secrets_policy.arn
+}
+
+# Chat Agent Lambda Function (Container-based)
+resource "aws_lambda_function" "chat_agent" {
+  function_name = "${var.project_name}-chat-agent-${var.environment}"
+  description   = "Lambda function for chat agent with financial analysis capabilities - Container-based deployment"
+  role          = aws_iam_role.chat_agent_execution_role.arn
+  timeout       = 60
+  memory_size   = 1024 # Memory for chat agent processing
+
+  # Container-based deployment
+  package_type = "Image"
+  image_uri    = "${module.chat_agent_ecr.repository_url}:latest"
+
+  environment {
+    variables = {
+      ENVIRONMENT                 = var.environment
+      LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
+      USER_PROFILES_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
+      ALERTS_TABLE_NAME           = data.terraform_remote_state.base_infra.outputs.alerts_table_name
+      CHAT_CONNECTIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name
+      CHAT_SESSIONS_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    }
+  }
+
+  tags = var.common_tags
+
+  # Force update when layer changes
+  depends_on = [data.terraform_remote_state.base_infra]
+}
+
+# Note: Provisioned concurrency removed for now due to complexity with $LATEST
+# Can be added later using AWS CLI or console after Lambda is deployed
 
 # WebSocket Connection Manager Lambda Function
 module "websocket_connection_lambda" {
