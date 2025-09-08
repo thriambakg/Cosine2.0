@@ -110,14 +110,34 @@ jobs:
           echo "🔍 Making build script executable..."
           chmod +x scripts/build-chat-agent-container.sh
           
+          echo "🔍 Testing script syntax..."
+          bash -n scripts/build-chat-agent-container.sh || echo "❌ Script has syntax errors"
+          
+          echo "🔍 Checking script dependencies..."
+          echo "AWS CLI version: $(aws --version)"
+          echo "Docker version: $(docker --version)"
+          
           echo "🔍 Running build script..."
           # Run the build script and capture output
+          set +e  # Don't exit on error
           BUILD_OUTPUT=$(./scripts/build-chat-agent-container.sh 2>&1)
           BUILD_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
           
           echo "🔍 Build script exit code: $BUILD_EXIT_CODE"
           echo "🔍 Build script output:"
           echo "$BUILD_OUTPUT"
+          
+          # Also try to run the script directly to see any immediate errors
+          echo "🔍 Testing script execution step by step..."
+          echo "Testing if script can start..."
+          timeout 10s bash -c 'source scripts/build-chat-agent-container.sh; echo "Script sourced successfully"' || echo "Script sourcing failed"
+          
+          echo "🔍 Running build script directly to see errors:"
+          echo "Starting script execution..."
+          ./scripts/build-chat-agent-container.sh
+          SCRIPT_EXIT_CODE=$?
+          echo "Script completed with exit code: $SCRIPT_EXIT_CODE"
           
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
             echo "❌ Build script failed with exit code: $BUILD_EXIT_CODE"

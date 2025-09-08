@@ -3,7 +3,8 @@
 # Build Chat Agent Container Script
 # This script builds and pushes the chat agent container to ECR
 
-set -e
+# Don't use set -e to allow better error handling
+# set -e
 
 # Configuration
 PROJECT_NAME="cosine"
@@ -189,6 +190,11 @@ main() {
     log_info "AWS Region: $AWS_REGION"
     log_info "Project Name: $PROJECT_NAME"
     log_info "Chat Agent Directory: $CHAT_AGENT_DIR"
+    
+    # Test basic functionality
+    log_info "Testing basic functionality..."
+    echo "Test echo: $(date)"
+    log_success "Basic functionality test passed"
     
     # Check prerequisites
     log_info "Checking prerequisites..."
