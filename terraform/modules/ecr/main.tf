@@ -3,7 +3,7 @@
 
 resource "aws_ecr_repository" "frontend" {
   name                 = "${var.project_name}-${var.repository_name}-${var.environment}"
-  image_tag_mutability = "IMMUTABLE"
+  image_tag_mutability = "MUTABLE"
   force_delete         = true # Allow deletion even with images
 
   image_scanning_configuration {
