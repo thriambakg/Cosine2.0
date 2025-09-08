@@ -2,7 +2,7 @@
 AWS Lambda handler for Cosine Financial Analysis Agent
 Focused on API Gateway integration and business logic only
 Resource configuration handled by Terraform
-Updated for layer v8 compatibility
+Updated for container deployment
 """
 
 import json
@@ -20,93 +20,27 @@ os.environ.setdefault('OTEL_PYTHON_CONTEXT', 'contextvars_context')
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
-# Log Python path and layer accessibility
-logger.info(f"Python executable: {sys.executable}")
-logger.info(f"Python path: {sys.path}")
-logger.info(f"Current working directory: {os.getcwd()}")
-
-# Enhanced layer debugging
-logger.info("🔍 LAYER DEBUGGING START")
-logger.info(f"Current sys.path: {sys.path}")
-
-# Check all possible layer paths
-layer_paths = [
-    '/opt/python', 
-    '/opt/python/lib/python3.11/site-packages', 
-    '/opt/python/lib/python3.11/dist-packages',
-    '/opt/python/lib/python3.11',
-    '/opt/python/lib'
-]
-
-logger.info("🔍 Checking layer paths:")
-for path in layer_paths:
-    if os.path.exists(path):
-        logger.info(f"✅ Layer path exists: {path}")
-        try:
-            contents = os.listdir(path)
-            logger.info(f"   Contents ({len(contents)} items): {contents[:10]}...")
-            # Check specifically for requests module
-            if 'requests' in contents:
-                logger.info(f"   ✅ requests module found in {path}")
-            else:
-                logger.warning(f"   ❌ requests module NOT found in {path}")
-        except Exception as e:
-            logger.warning(f"   ❌ Could not list contents of {path}: {e}")
-    else:
-        logger.warning(f"❌ Layer path not found: {path}")
-
-# Check if any layer paths are in sys.path
-logger.info("🔍 Checking sys.path for layer paths:")
-for path in sys.path:
-    if '/opt/python' in path:
-        logger.info(f"✅ Layer path in sys.path: {path}")
-        if os.path.exists(path):
-            logger.info(f"   ✅ Path exists and is accessible")
-        else:
-            logger.warning(f"   ❌ Path in sys.path but doesn't exist: {path}")
-
-# Try to import requests directly to test layer accessibility
-logger.info("🔍 Testing requests import:")
+# Simple import test
+logger.info("🔍 Testing imports...")
 try:
     import requests
-    logger.info("✅ Successfully imported requests from layer")
-    logger.info(f"   requests version: {requests.__version__}")
-    logger.info(f"   requests location: {requests.__file__}")
+    logger.info("✅ requests imported successfully")
 except ImportError as e:
     logger.error(f"❌ Failed to import requests: {e}")
-    
-    # Try to add layer paths to sys.path
-    logger.info("🔍 Attempting to add layer paths to sys.path:")
-    for path in layer_paths:
-        if os.path.exists(path) and path not in sys.path:
-            sys.path.insert(0, path)
-            logger.info(f"   Added {path} to sys.path")
-    
-    # Try importing again
-    logger.info("🔍 Retrying requests import after path adjustment:")
-    try:
-        import requests
-        logger.info("✅ Successfully imported requests after adding layer paths")
-        logger.info(f"   requests version: {requests.__version__}")
-        logger.info(f"   requests location: {requests.__file__}")
-    except ImportError as e2:
-        logger.error(f"❌ Still failed to import requests after path adjustment: {e2}")
-        
-        # Final attempt - check if we can find any Python packages at all
-        logger.info("🔍 Final check - looking for any Python packages:")
-        for path in sys.path:
-            if os.path.exists(path):
-                try:
-                    contents = os.listdir(path)
-                    python_packages = [item for item in contents if os.path.isdir(os.path.join(path, item)) and not item.startswith('.')]
-                    if python_packages:
-                        logger.info(f"   Found packages in {path}: {python_packages[:5]}...")
-                    else:
-                        logger.info(f"   No packages found in {path}")
-                except Exception as e3:
-                    logger.warning(f"   Could not list {path}: {e3}")
 
-logger.info("🔍 LAYER DEBUGGING END")
+try:
+    import numpy
+    logger.info("✅ numpy imported successfully")
+except ImportError as e:
+    logger.error(f"❌ Failed to import numpy: {e}")
+
+try:
+    import pandas
+    logger.info("✅ pandas imported successfully")
+except ImportError as e:
+    logger.error(f"❌ Failed to import pandas: {e}")
+
+logger.info("🔍 Import test completed")
 
 # Global variables for lazy loading and connection pooling
 _financial_agent = None
@@ -165,35 +99,44 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'body': json.dumps({'message': 'CORS preflight successful'})
             }
         
-        # Parse request body
-        try:
+        # Parse request body - handle both direct event and nested body
+        event_body = {}
+        
+        # Check if this is a direct event (no 'body' wrapper)
+        if 'action' in event:
+            logger.info("🔍 DEBUG: Direct event structure detected")
+            event_body = event
+        elif 'body' in event and event['body']:
+            logger.info("🔍 DEBUG: Event with body wrapper detected")
             logger.info(f"🔍 DEBUG: Raw event body: {event.get('body')}")
             logger.info(f"🔍 DEBUG: Body type: {type(event.get('body'))}")
             
-            if 'body' in event and event['body']:
+            try:
                 if isinstance(event['body'], str):
                     event_body = json.loads(event['body'])
                 else:
                     event_body = event['body']
-            else:
-                event_body = {}
-                
-            logger.info(f"🔍 DEBUG: Parsed event_body: {event_body}")
-        except json.JSONDecodeError as e:
-            logger.error(f"🔍 DEBUG: JSON decode error: {e}")
-            return {
-                'statusCode': 400,
-                'headers': cors_headers,
-                'body': json.dumps({
-                    'error': 'Invalid JSON in request body',
-                    'message': 'Please provide valid JSON in the request body'
-                })
-            }
+                logger.info(f"🔍 DEBUG: Parsed event_body: {event_body}")
+            except json.JSONDecodeError as e:
+                logger.error(f"🔍 DEBUG: JSON decode error: {e}")
+                return {
+                    'statusCode': 400,
+                    'headers': cors_headers,
+                    'body': json.dumps({
+                        'error': 'Invalid JSON in request body',
+                        'message': 'Please provide valid JSON in the request body'
+                    })
+                }
+        else:
+            logger.warning("🔍 DEBUG: No body or action found in event")
+            event_body = event
         
         # Extract action from request
         action = event_body.get('action', event.get('pathParameters', {}).get('action', 'chat'))
         
         logger.info(f"Processing action: {action}")
+        logger.info(f"🔍 DEBUG: Final event_body structure: {json.dumps(event_body, default=str)}")
+        logger.info(f"🔍 DEBUG: event_body keys: {list(event_body.keys()) if isinstance(event_body, dict) else 'Not a dict'}")
         
         # Route to appropriate handler
         if action == 'analyze_stock':
@@ -310,7 +253,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
     Args:
         event_body: Request body containing the user message
         
-    Returns: --
+    Returns:
         Agent response with proper formatting
     """
     try:
@@ -322,11 +265,40 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         # Lazy load the financial agent
         financial_agent, _, FinancialTools = get_financial_agent()
         
-        user_message = event_body.get('message', '').strip()
-        session_id = event_body.get('session_id', 'default')
+        # Extract message from various possible locations
+        user_message = None
+        session_id = 'default'
         
-        logger.info(f"🔍 DEBUG: extracted user_message: '{user_message}'")
-        logger.info(f"🔍 DEBUG: extracted session_id: '{session_id}'")
+        # Try different possible message locations
+        if 'message' in event_body:
+            user_message = event_body.get('message', '').strip()
+            logger.info(f"🔍 DEBUG: Found message in 'message' field: '{user_message}'")
+        elif 'text' in event_body:
+            user_message = event_body.get('text', '').strip()
+            logger.info(f"🔍 DEBUG: Found message in 'text' field: '{user_message}'")
+        elif 'content' in event_body:
+            user_message = event_body.get('content', '').strip()
+            logger.info(f"🔍 DEBUG: Found message in 'content' field: '{user_message}'")
+        else:
+            # Check if there's a nested structure
+            if 'body' in event_body and isinstance(event_body['body'], dict):
+                nested_body = event_body['body']
+                if 'message' in nested_body:
+                    user_message = nested_body.get('message', '').strip()
+                    logger.info(f"🔍 DEBUG: Found message in nested 'body.message' field: '{user_message}'")
+        
+        # Extract session_id from various possible locations
+        if 'session_id' in event_body:
+            session_id = event_body.get('session_id', 'default')
+        elif 'sessionId' in event_body:
+            session_id = event_body.get('sessionId', 'default')
+        elif 'context' in event_body and isinstance(event_body['context'], dict):
+            context = event_body['context']
+            if 'sessionId' in context:
+                session_id = context.get('sessionId', 'default')
+        
+        logger.info(f"🔍 DEBUG: Final extracted user_message: '{user_message}'")
+        logger.info(f"🔍 DEBUG: Final extracted session_id: '{session_id}'")
         
         if not user_message:
             logger.error(f"🔍 DEBUG: No message found in event_body: {event_body}")
@@ -334,7 +306,11 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 400,
                 'body': {
                     'error': 'Message is required',
-                    'message': 'Please provide a message in the request body'
+                    'message': 'Please provide a message in the request body',
+                    'debug_info': {
+                        'received_keys': list(event_body.keys()) if isinstance(event_body, dict) else 'Not a dict',
+                        'event_body': event_body
+                    }
                 }
             }
         
@@ -505,6 +481,20 @@ def test_lambda_locally():
             'body': json.dumps({
                 'action': 'health'
             })
+        },
+        # Test event that matches the WebSocket Lambda payload structure
+        {
+            'body': json.dumps({
+                'action': 'chat',
+                'message': 'Hello, this is a test message',
+                'userId': 'test-user-123',
+                'model': 'claude-3-sonnet',
+                'files': [],
+                'context': {
+                    'currentPage': 'chat',
+                    'sessionId': 'test-session-123'
+                }
+            })
         }
     ]
     
@@ -515,5 +505,27 @@ def test_lambda_locally():
         print(f"Status: {result['statusCode']}")
         print(f"Response: {result['body']}")
 
+# Simple test for manual Lambda testing
+def test_simple_event():
+    """Simple test event for manual Lambda testing"""
+    test_event = {
+        "action": "chat",
+        "message": "Hello, this is a test message",
+        "userId": "test-user-123",
+        "model": "claude-3-sonnet",
+        "files": [],
+        "context": {
+            "currentPage": "chat",
+            "sessionId": "test-session-123"
+        }
+    }
+    
+    print("🧪 Testing with simple event structure...")
+    result = lambda_handler(test_event, None)
+    print(f"Status: {result['statusCode']}")
+    print(f"Response: {result['body']}")
+
 if __name__ == "__main__":
-    test_lambda_locally()
+    # Uncomment the line you want to test:
+    test_lambda_locally()  # Test with body wrapper
+    # test_simple_event()   # Test with direct event structure
