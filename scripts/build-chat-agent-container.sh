@@ -38,9 +38,10 @@ log_error() {
 # Get AWS Account ID
 get_aws_account_id() {
     log_info "Getting AWS Account ID..."
-    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-    if [ -z "$AWS_ACCOUNT_ID" ]; then
-        log_error "Failed to get AWS Account ID"
+    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$AWS_ACCOUNT_ID" ]; then
+        log_error "Failed to get AWS Account ID. Please check AWS credentials."
+        log_error "Run 'aws configure' or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
         exit 1
     fi
     log_success "AWS Account ID: $AWS_ACCOUNT_ID"
@@ -68,11 +69,22 @@ set_ecr_variables() {
 # Login to ECR
 login_to_ecr() {
     log_info "Logging in to ECR..."
-    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+    log_info "ECR Registry: $ECR_REGISTRY"
+    log_info "AWS Region: $AWS_REGION"
+    
+    # Get ECR login password
+    ECR_PASSWORD=$(aws ecr get-login-password --region $AWS_REGION 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$ECR_PASSWORD" ]; then
+        log_error "Failed to get ECR login password. Please check AWS credentials and region."
+        exit 1
+    fi
+    
+    # Login to ECR
+    echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin $ECR_REGISTRY 2>/dev/null
     if [ $? -eq 0 ]; then
         log_success "Successfully logged in to ECR"
     else
-        log_error "Failed to login to ECR"
+        log_error "Failed to login to ECR. Please check Docker is running and ECR repository exists."
         exit 1
     fi
 }
@@ -175,13 +187,52 @@ main() {
     log_info "Starting chat agent container build process..."
     log_info "Environment: $ENVIRONMENT"
     log_info "AWS Region: $AWS_REGION"
+    log_info "Project Name: $PROJECT_NAME"
+    log_info "Chat Agent Directory: $CHAT_AGENT_DIR"
     
+    # Check prerequisites
+    log_info "Checking prerequisites..."
+    
+    # Check if AWS CLI is available
+    if ! command -v aws &> /dev/null; then
+        log_error "AWS CLI is not installed or not in PATH"
+        exit 1
+    fi
+    
+    # Check if Docker is available
+    if ! command -v docker &> /dev/null; then
+        log_error "Docker is not installed or not in PATH"
+        exit 1
+    fi
+    
+    # Check if Docker is running
+    if ! docker info &> /dev/null; then
+        log_error "Docker is not running. Please start Docker daemon."
+        exit 1
+    fi
+    
+    log_success "Prerequisites check passed"
+    
+    # Execute build steps
+    log_info "Step 1: Getting AWS Account ID..."
     get_aws_account_id
+    
+    log_info "Step 2: Setting ECR variables..."
     set_ecr_variables
+    
+    log_info "Step 3: Logging in to ECR..."
     login_to_ecr
+    
+    log_info "Step 4: Building Docker image..."
     build_docker_image
+    
+    log_info "Step 5: Tagging Docker image..."
     tag_docker_image
+    
+    log_info "Step 6: Pushing Docker image..."
     push_docker_image
+    
+    log_info "Step 7: Verifying ECR image..."
     verify_ecr_image
     
     log_success "Chat agent container build and push completed successfully!"

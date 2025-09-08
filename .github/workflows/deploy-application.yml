@@ -97,19 +97,45 @@ jobs:
           export ENVIRONMENT=${{ needs.determine-environment.outputs.environment }}
           export AWS_REGION=us-east-1
           
+          echo "🔍 Environment variables:"
+          echo "ENVIRONMENT=$ENVIRONMENT"
+          echo "AWS_REGION=$AWS_REGION"
+          
+          echo "🔍 Checking AWS credentials..."
+          aws sts get-caller-identity || echo "❌ AWS credentials not available"
+          
+          echo "🔍 Checking if build script exists..."
+          ls -la scripts/build-chat-agent-container.sh || echo "❌ Build script not found"
+          
+          echo "🔍 Making build script executable..."
+          chmod +x scripts/build-chat-agent-container.sh
+          
+          echo "🔍 Running build script..."
           # Run the build script and capture output
           BUILD_OUTPUT=$(./scripts/build-chat-agent-container.sh 2>&1)
+          BUILD_EXIT_CODE=$?
+          
+          echo "🔍 Build script exit code: $BUILD_EXIT_CODE"
+          echo "🔍 Build script output:"
           echo "$BUILD_OUTPUT"
+          
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "❌ Build script failed with exit code: $BUILD_EXIT_CODE"
+            exit 1
+          fi
           
           # Extract the primary image URI from the build output
           # The script outputs "Primary Image URI: <uri>" at the end
           ECR_IMAGE_URI=$(echo "$BUILD_OUTPUT" | grep "Primary Image URI:" | cut -d' ' -f4-)
           
           if [ -z "$ECR_IMAGE_URI" ]; then
-            echo "Failed to extract ECR image URI from build output"
+            echo "❌ Failed to extract ECR image URI from build output"
+            echo "Available output lines:"
+            echo "$BUILD_OUTPUT" | grep -E "(Image URI|Primary|Latest)"
             exit 1
           fi
           
+          echo "✅ Extracted ECR image URI: $ECR_IMAGE_URI"
           echo "ecr-image-uri=$ECR_IMAGE_URI" >> $GITHUB_OUTPUT
           echo "Built and pushed: $ECR_IMAGE_URI"
 
