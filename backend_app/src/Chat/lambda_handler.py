@@ -9,6 +9,7 @@ import json
 import os
 import logging
 import sys
+import time
 from typing import Dict, Any
 
 # Fix OpenTelemetry context issue in Lambda environment
@@ -46,6 +47,8 @@ logger.info("🔍 Import test completed")
 _financial_agent = None
 _analyze_stock = None
 _financial_tools = None
+_session_manager = None
+_context_aware_agent = None
 
 def get_financial_agent():
     """Lazy load the financial agent to improve cold start performance"""
@@ -78,6 +81,48 @@ def get_financial_agent():
         logger.info("🔍 DEBUG: Financial agent already loaded, returning cached version")
     
     return _financial_agent, _analyze_stock, _financial_tools
+
+def get_session_manager():
+    """Lazy load the session manager"""
+    global _session_manager
+    
+    if _session_manager is None:
+        logger.info("🔍 DEBUG: Loading session manager (first time)")
+        try:
+            from session_manager import session_manager
+            _session_manager = session_manager
+            logger.info("🔍 DEBUG: Session manager loaded successfully")
+        except ImportError as e:
+            logger.error(f"🔍 DEBUG: Import error loading session manager: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"🔍 DEBUG: General error loading session manager: {str(e)}")
+            raise
+    else:
+        logger.info("🔍 DEBUG: Session manager already loaded, returning cached version")
+    
+    return _session_manager
+
+def get_context_aware_agent():
+    """Lazy load the context-aware agent system"""
+    global _context_aware_agent
+    
+    if _context_aware_agent is None:
+        logger.info("🔍 DEBUG: Loading context-aware agent (first time)")
+        try:
+            from context_aware_agent import context_aware_agent
+            _context_aware_agent = context_aware_agent
+            logger.info("🔍 DEBUG: Context-aware agent loaded successfully")
+        except ImportError as e:
+            logger.error(f"🔍 DEBUG: Import error loading context-aware agent: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"🔍 DEBUG: General error loading context-aware agent: {str(e)}")
+            raise
+    else:
+        logger.info("🔍 DEBUG: Context-aware agent already loaded, returning cached version")
+    
+    return _context_aware_agent
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -298,10 +343,10 @@ def handle_stock_analysis(event_body: Dict[str, Any]) -> Dict[str, Any]:
 
 def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Handle general chat messages with the financial agent
+    Handle general chat messages with session-aware financial agent
     
     Args:
-        event_body: Request body containing the user message
+        event_body: Request body containing the user message and session info
         
     Returns:
         Agent response with proper formatting
@@ -313,10 +358,14 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"🔍 DEBUG: event_body type: {type(event_body)}")
         logger.info(f"🔍 DEBUG: event_body keys: {list(event_body.keys()) if isinstance(event_body, dict) else 'Not a dict'}")
         
-        # Lazy load the financial agent
-        logger.info("🔍 DEBUG: About to call get_financial_agent()")
-        financial_agent, _, FinancialTools = get_financial_agent()
-        logger.info("🔍 DEBUG: Successfully got financial agent")
+        # Lazy load session management components
+        logger.info("🔍 DEBUG: About to call get_session_manager()")
+        session_manager = get_session_manager()
+        logger.info("🔍 DEBUG: Successfully got session manager")
+        
+        logger.info("🔍 DEBUG: About to call get_context_aware_agent()")
+        context_aware_agent = get_context_aware_agent()
+        logger.info("🔍 DEBUG: Successfully got context-aware agent")
         
         # Extract message from various possible locations
         logger.info("🔍 DEBUG: Starting message extraction")
@@ -329,6 +378,9 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         if 'message' in event_body:
             user_message = event_body.get('message', '').strip()
             logger.info(f"🔍 DEBUG: Found message in 'message' field: '{user_message}'")
+        elif 'prompt' in event_body:
+            user_message = event_body.get('prompt', '').strip()
+            logger.info(f"🔍 DEBUG: Found message in 'prompt' field: '{user_message}'")
         elif 'text' in event_body:
             user_message = event_body.get('text', '').strip()
             logger.info(f"🔍 DEBUG: Found message in 'text' field: '{user_message}'")
@@ -344,32 +396,48 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 if 'message' in nested_body:
                     user_message = nested_body.get('message', '').strip()
                     logger.info(f"🔍 DEBUG: Found message in nested 'body.message' field: '{user_message}'")
+                elif 'prompt' in nested_body:
+                    user_message = nested_body.get('prompt', '').strip()
+                    logger.info(f"🔍 DEBUG: Found message in nested 'body.prompt' field: '{user_message}'")
                 else:
-                    logger.info("🔍 DEBUG: No 'message' field in nested body")
+                    logger.info("🔍 DEBUG: No 'message' or 'prompt' field in nested body")
             else:
                 logger.info("🔍 DEBUG: No 'body' field or body is not a dict")
         
-        # Extract session_id from various possible locations
-        logger.info("🔍 DEBUG: Checking for session_id in various fields...")
+        # Extract session_id and user_id from various possible locations
+        logger.info("🔍 DEBUG: Checking for session_id and user_id in various fields...")
+        session_id = None
+        user_id = None
+        
         if 'session_id' in event_body:
-            session_id = event_body.get('session_id', 'default')
+            session_id = event_body.get('session_id', '').strip()
             logger.info(f"🔍 DEBUG: Found session_id in 'session_id' field: '{session_id}'")
         elif 'sessionId' in event_body:
-            session_id = event_body.get('sessionId', 'default')
+            session_id = event_body.get('sessionId', '').strip()
             logger.info(f"🔍 DEBUG: Found session_id in 'sessionId' field: '{session_id}'")
         elif 'context' in event_body and isinstance(event_body['context'], dict):
             context = event_body['context']
             logger.info(f"🔍 DEBUG: Found 'context' field, checking for sessionId...")
             if 'sessionId' in context:
-                session_id = context.get('sessionId', 'default')
+                session_id = context.get('sessionId', '').strip()
                 logger.info(f"🔍 DEBUG: Found session_id in 'context.sessionId' field: '{session_id}'")
-            else:
-                logger.info("🔍 DEBUG: No 'sessionId' field in context")
-        else:
-            logger.info("🔍 DEBUG: No session_id found, using default")
+        
+        # Extract user_id
+        if 'userId' in event_body:
+            user_id = event_body.get('userId', '').strip()
+            logger.info(f"🔍 DEBUG: Found user_id in 'userId' field: '{user_id}'")
+        elif 'user_id' in event_body:
+            user_id = event_body.get('user_id', '').strip()
+            logger.info(f"🔍 DEBUG: Found user_id in 'user_id' field: '{user_id}'")
+        elif 'context' in event_body and isinstance(event_body['context'], dict):
+            context = event_body['context']
+            if 'userId' in context:
+                user_id = context.get('userId', '').strip()
+                logger.info(f"🔍 DEBUG: Found user_id in 'context.userId' field: '{user_id}'")
         
         logger.info(f"🔍 DEBUG: Final extracted user_message: '{user_message}'")
         logger.info(f"🔍 DEBUG: Final extracted session_id: '{session_id}'")
+        logger.info(f"🔍 DEBUG: Final extracted user_id: '{user_id}'")
         
         if not user_message:
             logger.error(f"🔍 DEBUG: No message found in event_body: {event_body}")
@@ -385,26 +453,62 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 }
             }
         
-        # Process message with the existing financial agent
-        logger.info(f"🔍 DEBUG: About to process message with financial agent")
+        # Handle session management
+        session_context = None
+        if session_id and user_id:
+            # Get existing session context
+            logger.info(f"🔍 DEBUG: Retrieving session context for session {session_id}")
+            session_context = session_manager.get_session_context(session_id, user_id)
+            
+            if not session_context:
+                logger.warning(f"🔍 DEBUG: Session {session_id} not found, creating new session")
+                # Create new session with webpage context
+                page_context = event_body.get('context', {})
+                session_id = session_manager.create_session(user_id, page_context)
+                session_context = session_manager.get_session_context(session_id, user_id)
+        else:
+            # Fallback to default session for backward compatibility
+            logger.info("🔍 DEBUG: No session_id or user_id provided, using default session")
+            session_id = 'default'
+            user_id = 'default'
+        
+        # Get session-aware agent
+        if session_context:
+            logger.info(f"🔍 DEBUG: Getting session-aware agent for session {session_id}")
+            agent = context_aware_agent.get_session_agent(session_context)
+        else:
+            # Fallback to base agent
+            logger.info("🔍 DEBUG: Using base financial agent as fallback")
+            agent, _, FinancialTools = get_financial_agent()
+        
+        # Process message with session-aware agent
+        logger.info(f"🔍 DEBUG: About to process message with session-aware agent")
         logger.info(f"🔍 DEBUG: Message: '{user_message}'")
         logger.info(f"🔍 DEBUG: Session ID: '{session_id}'")
         
         try:
-            logger.info("🔍 DEBUG: Calling financial_agent()...")
-            agent_response = financial_agent(user_message)
+            logger.info("🔍 DEBUG: Calling session-aware agent...")
+            agent_response = agent(user_message)
             logger.info(f"🔍 DEBUG: Agent response received: {agent_response}")
+            
+            # Update session context with new conversation
+            if session_context and user_id:
+                logger.info(f"🔍 DEBUG: Updating session context for session {session_id}")
+                session_manager.update_session_context(
+                    session_id, user_id, user_message, agent_response
+                )
             
             return {
                 'statusCode': 200,
                 'body': {
                     'response': agent_response,
                     'session_id': session_id,
-                    'timestamp': FinancialTools.get_current_timestamp()
+                    'user_id': user_id,
+                    'timestamp': int(time.time())
                 }
             }
         except Exception as agent_error:
-            logger.error(f"🔍 DEBUG: Error in financial_agent(): {str(agent_error)}")
+            logger.error(f"🔍 DEBUG: Error in session-aware agent(): {str(agent_error)}")
             logger.error(f"🔍 DEBUG: Agent error type: {type(agent_error)}")
             import traceback
             logger.error(f"🔍 DEBUG: Agent error traceback: {traceback.format_exc()}")
