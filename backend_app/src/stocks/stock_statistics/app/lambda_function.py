@@ -21,7 +21,6 @@ def calculate_correlation(tickers, period="1y"):
     # Fetch historical data for the given tickers
     stock_data = yf.download(tickers, period=period)['Close']
     
-    
     # Ensure that the data is not empty
     if stock_data.empty:
         raise ValueError(f"Could not retrieve data for {', '.join(tickers)}")
