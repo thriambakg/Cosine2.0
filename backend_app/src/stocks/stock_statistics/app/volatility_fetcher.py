@@ -5,6 +5,7 @@ def fetch_volatility(ticker, period="1y"):
     """
     Fetch volatility (standard deviation of returns) for a stock using yfinance.
     """
+    
     stock = yf.Ticker(ticker)
     df = stock.history(period=period)
     df['log_return'] = np.log(df['Close'] / df['Close'].shift(1))
