@@ -12,6 +12,7 @@ import { logApiConfig } from '../config/api';
 import CryptoTile from '../components/CryptoTile';
 import AddCryptoModal from '../components/AddCryptoModal';
 import DashboardGrid from '../components/DashboardGrid';
+import { UnifiedTile } from '../types/dashboardTypes';
 
 // Custom styled components for Wall Street chic
 const GlassCard = ({ children, sx = {}, ...props }: any) => (
@@ -257,6 +258,23 @@ const CryptoStatsPage: React.FC = () => {
 
   const getExistingSymbols = () => tiles.map(tile => tile.symbol);
 
+  // Convert CryptoTile[] to UnifiedTile[]
+  const convertToUnifiedTiles = (cryptoTiles: CryptoTile[]): UnifiedTile[] => {
+    return cryptoTiles.map(tile => ({
+      id: tile.id,
+      type: 'crypto' as const,
+      title: `${tile.symbol} Stats`,
+      symbol: tile.symbol,
+      timeframe: tile.timeframe,
+      size: tile.size,
+      position: tile.position,
+      isPinned: tile.isPinned,
+      dashboard_id: 'main',
+      created_at: tile.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }));
+  };
+
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth="xl">
@@ -325,7 +343,7 @@ const CryptoStatsPage: React.FC = () => {
            </Box>
          ) : (
                        <DashboardGrid
-              tiles={tiles}
+              tiles={convertToUnifiedTiles(tiles)}
               onRemoveTile={handleRemoveTile}
               onUpdateTile={handleUpdateTile}
               onSettingsChange={handleSettingsChange}

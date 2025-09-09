@@ -59,27 +59,6 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
   </Box>
 );
 
-// Enhanced tile interface
-interface UnifiedTile {
-  id: string;
-  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated';
-  title: string;
-  symbol?: string; // For crypto/stock tiles
-  timeframe?: string; // For crypto/stock tiles
-  displayOptions: {
-    showPrice: boolean;
-    show24hChange: boolean;
-    showAnnualReturn: boolean;
-    showVolatility: boolean;
-    showChart: boolean;
-  };
-  autoRefresh: boolean;
-  isPinned: boolean;
-  size: { width: number; height: number };
-  position?: { x: number; y: number };
-  created_at?: string;
-  dashboard_id: string;
-}
 
 // Tile type definitions for the selection interface
 interface TileTypeDefinition {
@@ -160,13 +139,11 @@ const UnifiedDashboardPage: React.FC = () => {
     createTab,
     closeTab,
     activateTab,
-    renameTab,
     editTab,
     createGroup,
     editGroup,
     addTabToGroup,
     removeTabFromGroup,
-    toggleGroupCollapse,
     dissolveGroup,
     reorderTab,
     reorderGroup,
@@ -507,34 +484,6 @@ const UnifiedDashboardPage: React.FC = () => {
     updateDashboardTiles(updatedTiles);
   };
 
-  // Render tile based on type
-  const renderTile = (tile: UnifiedTile) => {
-    switch (tile.type) {
-      case 'crypto':
-        return (
-          <CryptoTile
-            key={tile.id}
-            id={tile.id}
-            symbol={tile.symbol || 'BTC'}
-            timeframe={tile.timeframe || '1d'}
-            size={tile.size}
-            onRemove={() => handleRemoveTile(tile.id)}
-            onUpdate={(data) => handleUpdateTile(tile.id, data)}
-            onSettingsChange={(settings) => handleSettingsChange(tile.id, settings)}
-            onResize={(size) => handleResizeTile(tile.id, size)}
-          />
-        );
-      default:
-        return (
-          <PlaceholderTile
-            key={tile.id}
-            tile={tile}
-            tileType={tileTypes.find(t => t.id === tile.type)}
-            onRemove={() => handleRemoveTile(tile.id)}
-          />
-        );
-    }
-  };
 
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh' }}>

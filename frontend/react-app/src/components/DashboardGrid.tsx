@@ -69,6 +69,9 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
             key={tile.id}
             tile={tile}
             onRemove={onRemoveTile}
+            onUpdate={onUpdateTile}
+            onSettingsChange={onSettingsChange}
+            onResize={onResizeTile}
           />
         );
     }
