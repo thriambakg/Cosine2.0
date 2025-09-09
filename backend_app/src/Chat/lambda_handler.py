@@ -34,7 +34,6 @@ try:
 except ImportError as e:
     logger.error(f"❌ Failed to import numpy: {e}")
 
-
 try:
     import pandas
     logger.info("✅ pandas imported successfully")
