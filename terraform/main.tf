@@ -600,6 +600,34 @@ resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
   policy_arn = aws_iam_policy.lambda_secrets_policy.arn
 }
 
+# Bedrock policy for chat agent
+resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
+  name = "${var.project_name}-chat-agent-bedrock-policy-${var.environment}"
+  role = aws_iam_role.chat_agent_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
+        ]
+        Resource = [
+          "arn:aws:bedrock:*::foundation-model/us.amazon.claude-3-5-sonnet-20241022-v2:0",
+          "arn:aws:bedrock:*::foundation-model/us.amazon.claude-3-5-haiku-20241022-v1:0",
+          "arn:aws:bedrock:*::foundation-model/us.amazon.claude-3-opus-20240229-v1:0",
+          "arn:aws:bedrock:*::foundation-model/us.amazon.claude-3-sonnet-20240229-v1:0",
+          "arn:aws:bedrock:*::foundation-model/us.amazon.claude-3-haiku-20240307-v1:0",
+          "arn:aws:bedrock:*::foundation-model/us.amazon.nova-lite-v1:0",
+          "arn:aws:bedrock:*::foundation-model/us.amazon.nova-pro-v1:0"
+        ]
+      }
+    ]
+  })
+}
+
 # Chat Agent Lambda Function (Container-based)
 resource "aws_lambda_function" "chat_agent" {
   function_name = "${var.project_name}-chat-agent-${var.environment}"
