@@ -47,6 +47,7 @@ def validate_ticker_and_get_price(ticker: str) -> Dict[str, Any]:
         with urllib.request.urlopen(req) as response:
             data = json.loads(response.read().decode())
         
+        
         # Extract current price from the response
         if 'chart' not in data or 'result' not in data['chart'] or not data['chart']['result']:
             logger.error(f"=== TICKER VALIDATION FAILED ===")
