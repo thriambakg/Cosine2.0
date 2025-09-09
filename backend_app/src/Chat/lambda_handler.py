@@ -161,7 +161,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 result = handle_stock_analysis(event_body)
             elif action == 'chat':
                 logger.info("🔍 DEBUG: Routing to chat message handler")
+                logger.info("🔍 DEBUG: About to call handle_chat_message function")
                 result = handle_chat_message(event_body)
+                logger.info("🔍 DEBUG: handle_chat_message function returned")
             elif action == 'analyze_portfolio':
                 logger.info("🔍 DEBUG: Routing to portfolio analysis handler")
                 result = handle_portfolio_analysis(event_body)
