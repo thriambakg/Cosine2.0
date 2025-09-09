@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { DashboardTab, DashboardGroup, Dashboard, TabManagementState } from '../types/dashboardTypes';
+import { DashboardTab, DashboardGroup, Dashboard, TabManagementState, UnifiedTile } from '../types/dashboardTypes';
 
 interface UseTabManagementOptions {
   userId: string;

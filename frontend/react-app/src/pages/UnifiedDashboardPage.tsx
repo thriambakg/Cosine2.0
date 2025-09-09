@@ -13,11 +13,9 @@ import {
   TextField,
   Grid,
   Card,
-  CardContent,
   CardActionArea,
   Chip,
-  IconButton,
-  Tooltip
+  IconButton
 } from '@mui/material';
 import { 
   Add as AddIcon, 
@@ -42,7 +40,7 @@ import PlaceholderTile from '../components/PlaceholderTile';
 
 // Import tab management hook and types
 import { useTabManagement } from '../hooks/useTabManagement';
-import { UnifiedTile, Dashboard } from '../types/dashboardTypes';
+import { UnifiedTile } from '../types/dashboardTypes';
 
 // Custom styled components for Wall Street chic
 const GlassCard = ({ children, sx = {}, ...props }: any) => (
@@ -157,7 +155,6 @@ const UnifiedDashboardPage: React.FC = () => {
   const {
     tabs,
     tabGroups,
-    activeTab,
     activeDashboard,
     activeTabId,
     createTab,
@@ -482,7 +479,7 @@ const UnifiedDashboardPage: React.FC = () => {
     updateDashboardTiles(updatedTiles);
   };
 
-  const getExistingSymbols = () => tiles.map(tile => tile.symbol).filter(Boolean);
+  const getExistingSymbols = () => tiles.map(tile => tile.symbol).filter((symbol): symbol is string => Boolean(symbol));
 
   const handleRemoveTile = (id: string) => {
     const updatedTiles = tiles.filter(tile => tile.id !== id);
@@ -517,7 +514,10 @@ const UnifiedDashboardPage: React.FC = () => {
         return (
           <CryptoTile
             key={tile.id}
-            tile={tile}
+            id={tile.id}
+            symbol={tile.symbol || 'BTC'}
+            timeframe={tile.timeframe || '1d'}
+            size={tile.size}
             onRemove={() => handleRemoveTile(tile.id)}
             onUpdate={(data) => handleUpdateTile(tile.id, data)}
             onSettingsChange={(settings) => handleSettingsChange(tile.id, settings)}
@@ -531,9 +531,6 @@ const UnifiedDashboardPage: React.FC = () => {
             tile={tile}
             tileType={tileTypes.find(t => t.id === tile.type)}
             onRemove={() => handleRemoveTile(tile.id)}
-            onUpdate={(data) => handleUpdateTile(tile.id, data)}
-            onSettingsChange={(settings) => handleSettingsChange(tile.id, settings)}
-            onResize={(size) => handleResizeTile(tile.id, size)}
           />
         );
     }
@@ -549,7 +546,6 @@ const UnifiedDashboardPage: React.FC = () => {
         onTabCreate={handleCreateTab}
         onTabClose={closeTab}
         onTabActivate={activateTab}
-        onTabRename={renameTab}
         onTabEdit={editTab}
         onTabGroup={addTabToGroup}
         onTabUngroup={removeTabFromGroup}
@@ -557,7 +553,6 @@ const UnifiedDashboardPage: React.FC = () => {
         onTabUnpin={handleTabUnpin}
         onGroupCreate={handleCreateGroup}
         onGroupEdit={editGroup}
-        onGroupToggle={toggleGroupCollapse}
         onGroupDissolve={dissolveGroup}
         onTabReorder={reorderTab}
         onGroupReorder={reorderGroup}

@@ -7,7 +7,6 @@ import { store } from './store/store';
 
 // Import your existing components (we'll copy them over)
 import LandingPageMUI from './components/LandingPageMUI';
-import DashboardMUI from './components/DashboardMUI';
 import AppLayout from './components/AppLayout';
 import ChatPage from './pages/ChatPage';
 import Robinhood from './pages/Robinhood';

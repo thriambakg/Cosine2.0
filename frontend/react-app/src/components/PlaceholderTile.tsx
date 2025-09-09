@@ -6,7 +6,6 @@ import {
   CardContent,
   IconButton,
   Chip,
-  Tooltip,
   Menu,
   MenuItem,
   ListItemIcon,
@@ -50,10 +49,7 @@ interface PlaceholderTileProps {
 const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
   tile,
   tileType,
-  onRemove,
-  onUpdate,
-  onSettingsChange,
-  onResize
+  onRemove
 }) => {
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);

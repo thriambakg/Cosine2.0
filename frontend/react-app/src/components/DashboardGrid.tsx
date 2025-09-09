@@ -1,26 +1,11 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 import CryptoTile from './CryptoTile';
-
-interface CryptoTile {
-  id: string;
-  symbol: string;
-  timeframe: string;
-  displayOptions: {
-    showPrice: boolean;
-    show24hChange: boolean;
-    showAnnualReturn: boolean;
-    showVolatility: boolean;
-    showChart: boolean;
-  };
-  autoRefresh: boolean;
-  isPinned: boolean;
-  size: { width: number; height: number };
-  position?: { x: number; y: number };
-}
+import PlaceholderTile from './PlaceholderTile';
+import { UnifiedTile } from '../types/dashboardTypes';
 
 interface DashboardGridProps {
-  tiles: CryptoTile[];
+  tiles: UnifiedTile[];
   onRemoveTile: (id: string) => void;
   onUpdateTile: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;
@@ -53,7 +38,7 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
         }}
       >
         <Typography variant="h6" color="#9ca3af" sx={{ mb: 2 }}>
-          No cryptocurrency tiles added yet
+          No tiles added yet
         </Typography>
         <Typography variant="body2" color="#6b7280">
           Click the "Add Tile" button to start building your dashboard
@@ -61,6 +46,33 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
       </Box>
     );
   }
+
+  const renderTile = (tile: UnifiedTile) => {
+    switch (tile.type) {
+      case 'crypto':
+        return (
+          <CryptoTile
+            key={tile.id}
+            id={tile.id}
+            symbol={tile.symbol || 'BTC'}
+            timeframe={tile.timeframe || '1d'}
+            size={tile.size}
+            onRemove={onRemoveTile}
+            onUpdate={onUpdateTile}
+            onSettingsChange={onSettingsChange}
+            onResize={onResizeTile}
+          />
+        );
+      default:
+        return (
+          <PlaceholderTile
+            key={tile.id}
+            tile={tile}
+            onRemove={onRemoveTile}
+          />
+        );
+    }
+  };
 
   return (
     <Box
@@ -73,19 +85,7 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
     >
       {sortedTiles.map((tile) => (
         <Box key={tile.id}>
-          <CryptoTile
-            id={tile.id}
-            symbol={tile.symbol}
-            timeframe={tile.timeframe}
-            displayOptions={tile.displayOptions}
-            autoRefresh={tile.autoRefresh}
-            isPinned={tile.isPinned}
-            size={tile.size}
-            onRemove={onRemoveTile}
-            onUpdate={onUpdateTile}
-            onSettingsChange={onSettingsChange}
-            onResize={onResizeTile}
-          />
+          {renderTile(tile)}
         </Box>
       ))}
     </Box>
