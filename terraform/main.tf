@@ -627,7 +627,12 @@ resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
           "arn:aws:bedrock:*::foundation-model/us.amazon.claude-3-sonnet-20240229-v1:0",
           "arn:aws:bedrock:*::foundation-model/us.amazon.claude-3-haiku-20240307-v1:0",
           "arn:aws:bedrock:*::foundation-model/us.amazon.nova-lite-v1:0",
-          "arn:aws:bedrock:*::foundation-model/us.amazon.nova-pro-v1:0"
+          "arn:aws:bedrock:*::foundation-model/us.amazon.nova-pro-v1:0",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-opus-20240229-v1:0",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
         ]
       }
     ]

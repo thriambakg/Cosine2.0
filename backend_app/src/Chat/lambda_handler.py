@@ -491,17 +491,35 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             agent_response = agent(user_message)
             logger.info(f"🔍 DEBUG: Agent response received: {agent_response}")
             
+            # Extract the actual response content from AgentResult
+            response_content = ""
+            if hasattr(agent_response, 'message') and hasattr(agent_response.message, 'content'):
+                # Handle structured content (list of content blocks)
+                if isinstance(agent_response.message.content, list):
+                    for content_block in agent_response.message.content:
+                        if hasattr(content_block, 'text'):
+                            response_content += content_block.text
+                        elif isinstance(content_block, str):
+                            response_content += content_block
+                else:
+                    response_content = str(agent_response.message.content)
+            else:
+                # Fallback: convert to string
+                response_content = str(agent_response)
+            
+            logger.info(f"🔍 DEBUG: Extracted response content: {response_content}")
+            
             # Update session context with new conversation
             if session_context and user_id:
                 logger.info(f"🔍 DEBUG: Updating session context for session {session_id}")
                 session_manager.update_session_context(
-                    session_id, user_id, user_message, agent_response
+                    session_id, user_id, user_message, response_content
                 )
             
             return {
                 'statusCode': 200,
                 'body': {
-                    'response': agent_response,
+                    'response': response_content,
                     'session_id': session_id,
                     'user_id': user_id,
                     'timestamp': int(time.time())
