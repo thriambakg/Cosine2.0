@@ -92,6 +92,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         HTTP response with CORS headers for API Gateway
     """
     
+    logger.info("🔍 DEBUG: lambda_handler function called")
+    logger.info(f"🔍 DEBUG: event type: {type(event)}")
+    logger.info(f"🔍 DEBUG: event keys: {list(event.keys()) if isinstance(event, dict) else 'Not a dict'}")
+    
     # CORS headers for API Gateway responses
     cors_headers = {
         'Access-Control-Allow-Origin': '*',
@@ -99,6 +103,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
         'Content-Type': 'application/json'
     }
+    
+    logger.info("🔍 DEBUG: About to start event processing")
     
     try:
         # Debug logging to see the full event structure
