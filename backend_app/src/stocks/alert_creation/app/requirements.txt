@@ -1,8 +1,6 @@
 # Lambda function dependencies for stock alerts
-# Real implementation dependencies:
-
-boto3>=1.26.0
-requests>=2.31.0
+# Note: boto3 and requests are provided by the core layer
+# Only include dependencies not in the core layer
 
 # Built-in modules used:
 # - json
@@ -12,3 +10,5 @@ requests>=2.31.0
 # - logging
 # - urllib.request
 # - urllib.parse
+
+# No additional dependencies required
