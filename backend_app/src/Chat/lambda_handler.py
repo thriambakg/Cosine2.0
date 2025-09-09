@@ -264,10 +264,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         # Format response for API Gateway
+        logger.info(f"🔍 DEBUG: About to serialize result body: {result['body']}")
+        logger.info(f"🔍 DEBUG: Result body type: {type(result['body'])}")
+        
+        try:
+            serialized_body = json.dumps(result['body'])
+            logger.info(f"🔍 DEBUG: Successfully serialized body: {serialized_body}")
+        except Exception as serialization_error:
+            logger.error(f"🔍 DEBUG: JSON serialization error: {str(serialization_error)}")
+            logger.error(f"🔍 DEBUG: Serialization error type: {type(serialization_error)}")
+            # Try to identify which field is causing the issue
+            for key, value in result['body'].items():
+                try:
+                    json.dumps(value)
+                    logger.info(f"🔍 DEBUG: Field '{key}' serializes successfully")
+                except Exception as field_error:
+                    logger.error(f"🔍 DEBUG: Field '{key}' serialization error: {str(field_error)}")
+                    logger.error(f"🔍 DEBUG: Field '{key}' value type: {type(value)}")
+                    logger.error(f"🔍 DEBUG: Field '{key}' value: {value}")
+            raise serialization_error
+        
         return {
             'statusCode': result['statusCode'],
             'headers': cors_headers,
-            'body': json.dumps(result['body'])
+            'body': serialized_body
         }
         
     except Exception as e:
@@ -508,6 +528,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 response_content = str(agent_response)
             
             logger.info(f"🔍 DEBUG: Extracted response content: {response_content}")
+            logger.info(f"🔍 DEBUG: Response content type: {type(response_content)}")
             
             # Update session context with new conversation
             if session_context and user_id:
@@ -516,14 +537,19 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                     session_id, user_id, user_message, response_content
                 )
             
+            response_body = {
+                'response': response_content,
+                'session_id': session_id,
+                'user_id': user_id,
+                'timestamp': int(time.time())
+            }
+            
+            logger.info(f"🔍 DEBUG: Response body being returned: {response_body}")
+            logger.info(f"🔍 DEBUG: Response body type: {type(response_body)}")
+            
             return {
                 'statusCode': 200,
-                'body': {
-                    'response': response_content,
-                    'session_id': session_id,
-                    'user_id': user_id,
-                    'timestamp': int(time.time())
-                }
+                'body': response_body
             }
         except Exception as agent_error:
             logger.error(f"🔍 DEBUG: Error in session-aware agent(): {str(agent_error)}")

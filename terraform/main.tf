@@ -423,6 +423,12 @@ module "stock_volatility_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
+  # Attach core and financial layers
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+
   # Additional IAM policies
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn
@@ -451,6 +457,9 @@ module "crypto_stats_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+
   # Additional IAM policies
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn
@@ -477,6 +486,9 @@ module "user_dashboard_lambda" {
   environment_variables = {
     USER_PROFILES_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
   }
+
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
 
   # Additional IAM policies
   additional_policy_arns = [
@@ -511,6 +523,9 @@ module "stock_alerts_lambda" {
     LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+
   # Additional IAM policies
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
@@ -544,6 +559,9 @@ module "stock_alert_trigger_lambda" {
     ENVIRONMENT              = var.environment
     LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
   }
+
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
 
   # Additional IAM policies
   additional_policy_arns = [
@@ -703,6 +721,9 @@ module "websocket_connection_lambda" {
     LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+
   # Additional IAM policies
   additional_policy_arns = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
@@ -737,6 +758,9 @@ module "websocket_message_lambda" {
     ENVIRONMENT                 = var.environment
     LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
   }
+
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
 
   # Additional IAM policies
   additional_policy_arns = [
@@ -843,4 +867,109 @@ module "cloudfront" {
   tags = var.common_tags
 
   depends_on = [data.aws_s3_bucket.static_hosting]
+}
+
+# Stock Data Lambda Function
+module "stock_data_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-stock-data-${var.environment}"
+  description   = "Lambda function for comprehensive stock data retrieval using yfinance"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/stock_data/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Attach core and financial layers
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Stock Statistics Lambda Function (Updated to use financial layer)
+module "stock_statistics_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-stock-statistics-${var.environment}"
+  description   = "Lambda function for portfolio analysis and stock statistics using yfinance"
+  handler       = "lambda_function.lambda_function"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/stock_statistics/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Attach core and financial layers
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Volatility Fetch Lambda Function (Updated to use financial layer)
+module "volatility_fetch_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-volatility-fetch-${var.environment}"
+  description   = "Lambda function for stock volatility calculation using yfinance"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 256
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/volatility_fetch/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Attach core and financial layers
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
 }

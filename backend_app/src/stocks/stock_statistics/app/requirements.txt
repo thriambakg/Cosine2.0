@@ -1,15 +1,6 @@
 # Lambda function dependencies for portfolio analysis
-# NOTE: Currently using mock implementation - minimal dependencies required
+# Note: boto3 is provided by the core layer
+# Note: yfinance, numpy, and pandas are provided by the financial layer
+# Only include dependencies not in either layer
 
-# For future real implementation:
-# boto3>=1.26.0
-# yfinance>=0.2.28
-# numpy>=1.24.0
-# pandas>=2.0.0
-# scipy>=1.10.0
-
-# Current implementation only requires built-in modules:
-# - json
-# - random
-# - math
-# - boto3 (for DynamoDB access)
+# No additional dependencies required

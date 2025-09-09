@@ -1,4 +1,4 @@
-# Volatility Fetch Lambda Dependencies
+# Stock Data Lambda Dependencies
 # Note: boto3 is provided by the core layer
 # Note: yfinance, numpy, and pandas are provided by the financial layer
 # Only include dependencies not in either layer

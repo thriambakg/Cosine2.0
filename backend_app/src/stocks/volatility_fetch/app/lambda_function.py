@@ -1,9 +1,13 @@
 import json
-import urllib.request
-import urllib.parse
-import random
-import math
+import yfinance as yf
+import numpy as np
+import pandas as pd
+import logging
 from datetime import datetime, timedelta
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def lambda_handler(event, context):
     """
@@ -125,7 +129,7 @@ def lambda_handler(event, context):
 
 def calculate_volatility(ticker, period="1y"):
     """
-    Calculate volatility using a simple HTTP-based approach to Yahoo Finance.
+    Calculate volatility using yfinance library.
     
     Args:
         ticker (str): Stock ticker symbol
@@ -135,16 +139,16 @@ def calculate_volatility(ticker, period="1y"):
         float: Annualized volatility
     """
     try:
-        # Try to get real data first
+        # Use yfinance to get real data
         return fetch_real_volatility(ticker, period)
     except Exception as e:
-        print(f"Error fetching real data for {ticker}: {str(e)}")
+        logger.error(f"Error fetching real data for {ticker}: {str(e)}")
         # Fallback to mock data
         return calculate_mock_volatility(ticker, period)
 
 def fetch_real_volatility(ticker, period="1y"):
     """
-    Fetch real volatility data using Yahoo Finance API.
+    Fetch real volatility data using yfinance library.
     
     Args:
         ticker (str): Stock ticker symbol
@@ -153,76 +157,35 @@ def fetch_real_volatility(ticker, period="1y"):
     Returns:
         float: Annualized volatility
     """
-    # Calculate date range based on period
-    end_date = datetime.now()
-    if period == "1d":
-        start_date = end_date - timedelta(days=1)
-    elif period == "5d":
-        start_date = end_date - timedelta(days=5)
-    elif period == "1mo":
-        start_date = end_date - timedelta(days=30)
-    elif period == "3mo":
-        start_date = end_date - timedelta(days=90)
-    elif period == "6mo":
-        start_date = end_date - timedelta(days=180)
-    elif period == "1y":
-        start_date = end_date - timedelta(days=365)
-    elif period == "2y":
-        start_date = end_date - timedelta(days=730)
-    elif period == "5y":
-        start_date = end_date - timedelta(days=1825)
-    else:
-        start_date = end_date - timedelta(days=365)  # Default to 1 year
-    
-    # Format dates for Yahoo Finance API
-    start_timestamp = int(start_date.timestamp())
-    end_timestamp = int(end_date.timestamp())
-    
-    # Yahoo Finance API URL
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?period1={start_timestamp}&period2={end_timestamp}&interval=1d"
-    
-    # Make request
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req) as response:
-        data = json.loads(response.read().decode())
-    
-    # Extract closing prices
-    if 'chart' not in data or 'result' not in data['chart'] or not data['chart']['result']:
-        raise ValueError(f"No data found for ticker {ticker}")
-    
-    result = data['chart']['result'][0]
-    if 'timestamp' not in result or 'indicators' not in result:
-        raise ValueError(f"Insufficient data for ticker {ticker}")
-    
-    # Get closing prices
-    quotes = result['indicators']['quote'][0]
-    if 'close' not in quotes:
-        raise ValueError(f"No closing price data for ticker {ticker}")
-    
-    closes = [price for price in quotes['close'] if price is not None]
-    
-    if len(closes) < 2:
-        raise ValueError(f"Insufficient data for volatility calculation for ticker {ticker}")
-    
-    # Calculate log returns
-    log_returns = []
-    for i in range(1, len(closes)):
-        if closes[i-1] > 0 and closes[i] > 0:
-            log_return = math.log(closes[i] / closes[i-1])
-            log_returns.append(log_return)
-    
-    if len(log_returns) < 2:
-        raise ValueError(f"Insufficient log returns for volatility calculation for ticker {ticker}")
-    
-    # Calculate standard deviation
-    mean_return = sum(log_returns) / len(log_returns)
-    variance = sum((x - mean_return) ** 2 for x in log_returns) / (len(log_returns) - 1)
-    std_dev = math.sqrt(variance)
-    
-    # Annualize (252 trading days)
-    volatility = std_dev * math.sqrt(252)
-    
-    return volatility
+    try:
+        # Create yfinance Ticker object
+        stock = yf.Ticker(ticker)
+        
+        # Get historical data
+        hist = stock.history(period=period)
+        
+        if hist.empty:
+            raise ValueError(f"No data found for ticker {ticker}")
+        
+        # Calculate log returns
+        closes = hist['Close'].dropna()
+        if len(closes) < 2:
+            raise ValueError(f"Insufficient data for volatility calculation for ticker {ticker}")
+        
+        # Calculate log returns
+        log_returns = np.log(closes / closes.shift(1)).dropna()
+        
+        if len(log_returns) < 2:
+            raise ValueError(f"Insufficient log returns for volatility calculation for ticker {ticker}")
+        
+        # Calculate annualized volatility (252 trading days)
+        volatility = log_returns.std() * np.sqrt(252)
+        
+        return volatility
+        
+    except Exception as e:
+        logger.error(f"Error fetching volatility data for {ticker}: {str(e)}")
+        raise
 
 def calculate_mock_volatility(ticker, period="1y"):
     """
@@ -236,7 +199,7 @@ def calculate_mock_volatility(ticker, period="1y"):
         float: Mock annualized volatility
     """
     # Set random seed based on ticker for consistent results
-    random.seed(hash(ticker) % 1000)
+    np.random.seed(hash(ticker) % 1000)
     
     # Different volatility ranges for different types of stocks
     high_vol_tickers = ['TSLA', 'GME', 'AMC', 'NVDA', 'BITCOIN', 'BTC']
@@ -244,13 +207,13 @@ def calculate_mock_volatility(ticker, period="1y"):
     
     if ticker.upper() in high_vol_tickers:
         # High volatility stocks: 25-50%
-        base_volatility = 0.25 + random.random() * 0.25
+        base_volatility = 0.25 + np.random.random() * 0.25
     elif ticker.upper() in low_vol_tickers:
         # Low volatility stocks: 10-25%
-        base_volatility = 0.10 + random.random() * 0.15
+        base_volatility = 0.10 + np.random.random() * 0.15
     else:
         # Average volatility stocks: 15-35%
-        base_volatility = 0.15 + random.random() * 0.20
+        base_volatility = 0.15 + np.random.random() * 0.20
     
     # Add some period-based adjustment
     period_multiplier = {

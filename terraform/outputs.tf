@@ -140,6 +140,36 @@ output "chat_agent_lambda" {
   }
 }
 
+# Stock Data Lambda Function
+output "stock_data_lambda" {
+  description = "Information about the stock data Lambda function"
+  value = {
+    function_name = module.stock_data_lambda.function_name
+    function_arn  = module.stock_data_lambda.function_arn
+    invoke_arn    = module.stock_data_lambda.invoke_arn
+  }
+}
+
+# Stock Statistics Lambda Function
+output "stock_statistics_lambda" {
+  description = "Information about the stock statistics Lambda function"
+  value = {
+    function_name = module.stock_statistics_lambda.function_name
+    function_arn  = module.stock_statistics_lambda.function_arn
+    invoke_arn    = module.stock_statistics_lambda.invoke_arn
+  }
+}
+
+# Volatility Fetch Lambda Function
+output "volatility_fetch_lambda" {
+  description = "Information about the volatility fetch Lambda function"
+  value = {
+    function_name = module.volatility_fetch_lambda.function_name
+    function_arn  = module.volatility_fetch_lambda.function_arn
+    invoke_arn    = module.volatility_fetch_lambda.invoke_arn
+  }
+}
+
 # Summary Output
 output "deployment_summary" {
   description = "Summary of deployed resources"
