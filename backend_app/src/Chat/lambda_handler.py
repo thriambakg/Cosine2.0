@@ -306,10 +306,13 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         logger.info("🔍 DEBUG: Successfully got financial agent")
         
         # Extract message from various possible locations
+        logger.info("🔍 DEBUG: Starting message extraction")
         user_message = None
         session_id = 'default'
         
         # Try different possible message locations
+        logger.info("🔍 DEBUG: Checking for message in various fields...")
+        
         if 'message' in event_body:
             user_message = event_body.get('message', '').strip()
             logger.info(f"🔍 DEBUG: Found message in 'message' field: '{user_message}'")
@@ -321,21 +324,36 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             logger.info(f"🔍 DEBUG: Found message in 'content' field: '{user_message}'")
         else:
             # Check if there's a nested structure
+            logger.info("🔍 DEBUG: No message in top-level fields, checking nested structure...")
             if 'body' in event_body and isinstance(event_body['body'], dict):
                 nested_body = event_body['body']
+                logger.info(f"🔍 DEBUG: Found 'body' field, checking nested fields: {list(nested_body.keys())}")
                 if 'message' in nested_body:
                     user_message = nested_body.get('message', '').strip()
                     logger.info(f"🔍 DEBUG: Found message in nested 'body.message' field: '{user_message}'")
+                else:
+                    logger.info("🔍 DEBUG: No 'message' field in nested body")
+            else:
+                logger.info("🔍 DEBUG: No 'body' field or body is not a dict")
         
         # Extract session_id from various possible locations
+        logger.info("🔍 DEBUG: Checking for session_id in various fields...")
         if 'session_id' in event_body:
             session_id = event_body.get('session_id', 'default')
+            logger.info(f"🔍 DEBUG: Found session_id in 'session_id' field: '{session_id}'")
         elif 'sessionId' in event_body:
             session_id = event_body.get('sessionId', 'default')
+            logger.info(f"🔍 DEBUG: Found session_id in 'sessionId' field: '{session_id}'")
         elif 'context' in event_body and isinstance(event_body['context'], dict):
             context = event_body['context']
+            logger.info(f"🔍 DEBUG: Found 'context' field, checking for sessionId...")
             if 'sessionId' in context:
                 session_id = context.get('sessionId', 'default')
+                logger.info(f"🔍 DEBUG: Found session_id in 'context.sessionId' field: '{session_id}'")
+            else:
+                logger.info("🔍 DEBUG: No 'sessionId' field in context")
+        else:
+            logger.info("🔍 DEBUG: No session_id found, using default")
         
         logger.info(f"🔍 DEBUG: Final extracted user_message: '{user_message}'")
         logger.info(f"🔍 DEBUG: Final extracted session_id: '{session_id}'")
@@ -355,17 +373,35 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             }
         
         # Process message with the existing financial agent
-        logger.info(f"Processing chat message for session: {session_id}")
-        agent_response = financial_agent(user_message)
+        logger.info(f"🔍 DEBUG: About to process message with financial agent")
+        logger.info(f"🔍 DEBUG: Message: '{user_message}'")
+        logger.info(f"🔍 DEBUG: Session ID: '{session_id}'")
         
-        return {
-            'statusCode': 200,
-            'body': {
-                'response': agent_response,
-                'session_id': session_id,
-                'timestamp': FinancialTools.get_current_timestamp()
+        try:
+            logger.info("🔍 DEBUG: Calling financial_agent()...")
+            agent_response = financial_agent(user_message)
+            logger.info(f"🔍 DEBUG: Agent response received: {agent_response}")
+            
+            return {
+                'statusCode': 200,
+                'body': {
+                    'response': agent_response,
+                    'session_id': session_id,
+                    'timestamp': FinancialTools.get_current_timestamp()
+                }
             }
-        }
+        except Exception as agent_error:
+            logger.error(f"🔍 DEBUG: Error in financial_agent(): {str(agent_error)}")
+            logger.error(f"🔍 DEBUG: Agent error type: {type(agent_error)}")
+            import traceback
+            logger.error(f"🔍 DEBUG: Agent error traceback: {traceback.format_exc()}")
+            return {
+                'statusCode': 500,
+                'body': {
+                    'error': 'Agent execution failed',
+                    'message': str(agent_error)
+                }
+            }
         
     except Exception as e:
         logger.error(f"Error in chat processing: {str(e)}")
