@@ -266,6 +266,8 @@ const CryptoStatsPage: React.FC = () => {
       title: `${tile.symbol} Stats`,
       symbol: tile.symbol,
       timeframe: tile.timeframe,
+      displayOptions: tile.displayOptions,
+      autoRefresh: tile.autoRefresh,
       size: tile.size,
       position: tile.position,
       isPinned: tile.isPinned,

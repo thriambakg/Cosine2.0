@@ -28,15 +28,11 @@ import {
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
-import CryptoTile from '../components/CryptoTile';
 import DashboardGrid from '../components/DashboardGrid';
 import AddCryptoModal from '../components/AddCryptoModal';
 import DashboardTabBar from '../components/DashboardTabBar';
 import NewTabDialog from '../components/NewTabDialog';
 import NewGroupDialog from '../components/NewGroupDialog';
-
-// Import placeholder tile components (to be created)
-import PlaceholderTile from '../components/PlaceholderTile';
 
 // Import tab management hook and types
 import { useTabManagement } from '../hooks/useTabManagement';
