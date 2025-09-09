@@ -294,6 +294,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Agent response with proper formatting
     """
+    logger.info("🔍 DEBUG: handle_chat_message function called")
     try:
         # Debug logging to see what we're receiving
         logger.info(f"🔍 DEBUG: handle_chat_message called with event_body: {event_body}")
@@ -404,12 +405,16 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             }
         
     except Exception as e:
-        logger.error(f"Error in chat processing: {str(e)}")
+        logger.error(f"🔍 DEBUG: Error in chat processing: {str(e)}")
+        logger.error(f"🔍 DEBUG: Error type: {type(e)}")
+        import traceback
+        logger.error(f"🔍 DEBUG: Error traceback: {traceback.format_exc()}")
         return {
             'statusCode': 500,
             'body': {
                 'error': 'Chat processing failed',
-                'message': str(e)
+                'message': str(e),
+                'error_type': str(type(e))
             }
         }
 
