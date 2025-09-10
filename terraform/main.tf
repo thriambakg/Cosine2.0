@@ -457,8 +457,11 @@ module "crypto_stats_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
-  # Attach core layer
-  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  # Attach core and crypto layers
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.crypto_layer_arn
+  ]
 
   # Additional IAM policies
   additional_policy_arns = [

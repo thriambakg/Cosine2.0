@@ -2,13 +2,13 @@ import json
 import math
 from datetime import datetime
 from typing import List, Dict, Any
-import urllib.request
-import urllib.parse
+import ccxt
+import cryptocompare
 
 def lambda_handler(event, context):
     """
-    Lambda function to fetch cryptocurrency statistics without external dependencies.
-    Calls CryptoCompare REST API directly and computes simple stats using stdlib only.
+    Lambda function to fetch cryptocurrency statistics using crypto libraries.
+    Uses cryptocompare library with fallback to direct API calls.
     """
     try:
         # Parse query parameters
@@ -79,9 +79,9 @@ def lambda_handler(event, context):
 
 def fetch_crypto_stats(selected_crypto_symbol: str, timeframe: str = '1d') -> Dict[str, Any]:
     """
-    Fetch cryptocurrency statistics by calling CryptoCompare REST endpoints.
-    Uses only Python stdlib to keep the deployment package lightweight.
-    Matches the exact calculation logic from the original cryptocompare implementation.
+    Fetch cryptocurrency statistics using cryptocompare library.
+    Uses crypto libraries with fallback to direct API calls for reliability.
+    Matches the exact calculation logic from the original implementation.
     """
     try:
         # Map timeframe to period in days (default to 365 days like original)
@@ -147,7 +147,46 @@ def fetch_crypto_stats(selected_crypto_symbol: str, timeframe: str = '1d') -> Di
 
 
 def fetch_historical_data(symbol: str, timeframe: str) -> List[Dict[str, Any]]:
-    """Fetch historical data from CryptoCompare REST API based on timeframe."""
+    """Fetch historical data using cryptocompare library."""
+    
+    try:
+        # Map timeframe to cryptocompare parameters
+        if timeframe == '1d':
+            # For 1 day, fetch hourly data (24 points)
+            data = cryptocompare.get_historical_price_hour(symbol, 'USD', limit=24)
+        else:
+            # For other timeframes, fetch daily data
+            days_map = {'7d': 7, '30d': 30, '1y': 365}
+            days = days_map.get(timeframe, 365)
+            data = cryptocompare.get_historical_price_day(symbol, 'USD', limit=days)
+        
+        if not data:
+            raise RuntimeError(f"No data returned for {symbol}")
+        
+        # Convert to expected format
+        data_points = []
+        for point in data:
+            data_points.append({
+                'time': int(point['time']),
+                'close': float(point['close']),
+                'high': float(point['high']),
+                'low': float(point['low']),
+                'open': float(point['open']),
+                'volumefrom': float(point['volumefrom']),
+                'volumeto': float(point['volumeto'])
+            })
+        
+        return data_points
+        
+    except Exception as e:
+        print(f"Error fetching data for {symbol}: {str(e)}")
+        # Fallback to direct API call if library fails
+        return fetch_historical_data_fallback(symbol, timeframe)
+
+def fetch_historical_data_fallback(symbol: str, timeframe: str) -> List[Dict[str, Any]]:
+    """Fallback function using direct HTTP calls to CryptoCompare API."""
+    import urllib.request
+    import urllib.parse
     
     # Map timeframe to API endpoint and parameters
     if timeframe == '1d':
