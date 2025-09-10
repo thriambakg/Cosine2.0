@@ -230,3 +230,4 @@ def calculate_mock_volatility(ticker, period="1y"):
     }.get(period, 1.0)
     
     return base_volatility * period_multiplier
+    
