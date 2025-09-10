@@ -13,8 +13,8 @@ numpy>=1.24.0,<2.0.0
 pandas>=2.0.0,<3.0.0
 
 # Cryptocurrency data processing
-ccxt>=4.0.0
-cryptocompare>=0.7.4
+ccxt>=4.0.0,<5.0.0
+cryptocompare>=0.7.4,<0.8.0
 
 # Strands Agents framework
 strands-agents==1.7.1
