@@ -423,7 +423,7 @@ module "stock_volatility_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
-  # Attach core and financial layers
+  # Attach core, numpy, and financial layers
   layers = [
     data.terraform_remote_state.base_infra.outputs.core_layer_arn,
     data.terraform_remote_state.base_infra.outputs.financial_layer_arn
