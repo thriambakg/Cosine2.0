@@ -1,3 +1,8 @@
+import os
+# Set OpenBLAS to use a compatible CPU architecture for Lambda
+# This prevents the libopenblas64_p-r0-15028c96.3.21.so error
+os.environ['OPENBLAS_CORETYPE'] = 'Haswell'
+
 import yfinance as yf
 import numpy as np
 import pandas as pd
