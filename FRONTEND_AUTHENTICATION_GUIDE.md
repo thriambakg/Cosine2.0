@@ -8,6 +8,7 @@ Your infrastructure now supports complete user authentication with AWS Cognito a
 
 ### ✅ What's Already Configured
 
+
 **Authentication (AWS Cognito):**
 - ✅ User Pool with username/email/password authentication
 - ✅ Google OAuth integration (requires manual credential setup in console)
