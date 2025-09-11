@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 import logging
 from datetime import datetime, timedelta
+import requests
+import time
+import random
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -193,6 +196,163 @@ def fetch_stock_data(ticker, period="1y"):
         # Return mock data as fallback
         return generate_mock_stock_data(ticker, period)
 
+def fetch_stock_data_fallback(ticker, period="1y"):
+    """
+    Fallback method using direct HTTP calls to Yahoo Finance when yfinance library fails.
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        period (str): Time period for historical data
+        
+    Returns:
+        dict: Stock statistics matching crypto stats format
+    """
+    try:
+        logger.info(f"=== Using fallback HTTP method for {ticker} ===")
+        
+        # Add random delay to avoid rate limiting
+        delay = random.uniform(0.5, 2.0)
+        logger.info(f"Adding {delay:.2f}s delay to avoid rate limiting")
+        time.sleep(delay)
+        
+        # Yahoo Finance API endpoints
+        base_url = "https://query1.finance.yahoo.com/v8/finance/chart"
+        
+        # Map period to Yahoo Finance parameters
+        period_map = {
+            '1d': '1d',
+            '7d': '5d', 
+            '30d': '1mo',
+            '1y': '1y'
+        }
+        
+        yahoo_period = period_map.get(period, '1y')
+        interval = '1d' if period in ['30d', '1y'] else '1m'
+        
+        # Construct URL
+        url = f"{base_url}/{ticker}?period1=-1&period2=9999999999&interval={interval}&includePrePost=true&events=div%2Csplit"
+        
+        logger.info(f"Making HTTP request to: {url}")
+        
+        # Make request with headers to mimic browser
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        logger.info(f"HTTP response status: {response.status_code}")
+        
+        if response.status_code != 200:
+            logger.error(f"HTTP request failed with status {response.status_code}")
+            return {"error": f"HTTP request failed: {response.status_code}"}
+        
+        data = response.json()
+        logger.info(f"Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+        
+        # Parse Yahoo Finance response
+        if 'chart' not in data or not data['chart']['result']:
+            logger.error("No chart data in response")
+            return {"error": f"No chart data available for {ticker}"}
+        
+        result = data['chart']['result'][0]
+        meta = result.get('meta', {})
+        timestamps = result.get('timestamp', [])
+        quotes = result.get('indicators', {}).get('quote', [{}])[0]
+        
+        if not timestamps or not quotes.get('close'):
+            logger.error("No price data in response")
+            return {"error": f"No price data available for {ticker}"}
+        
+        # Extract price data
+        closes = quotes.get('close', [])
+        opens = quotes.get('open', [])
+        highs = quotes.get('high', [])
+        lows = quotes.get('low', [])
+        volumes = quotes.get('volume', [])
+        
+        # Filter out None values and create DataFrame
+        valid_data = []
+        for i, timestamp in enumerate(timestamps):
+            if (i < len(closes) and closes[i] is not None and 
+                i < len(opens) and opens[i] is not None):
+                valid_data.append({
+                    'timestamp': timestamp,
+                    'open': opens[i],
+                    'high': highs[i] if i < len(highs) and highs[i] is not None else opens[i],
+                    'low': lows[i] if i < len(lows) and lows[i] is not None else opens[i],
+                    'close': closes[i],
+                    'volume': volumes[i] if i < len(volumes) and volumes[i] is not None else 0
+                })
+        
+        if not valid_data:
+            logger.error("No valid price data found")
+            return {"error": f"No valid price data for {ticker}"}
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(valid_data)
+        df['date'] = pd.to_datetime(df['timestamp'], unit='s')
+        df = df.set_index('date')
+        
+        logger.info(f"Created DataFrame with {len(df)} rows")
+        logger.info(f"Date range: {df.index.min()} to {df.index.max()}")
+        
+        # Calculate statistics
+        current_price = df['close'].iloc[-1]
+        previous_close = df['close'].iloc[-2] if len(df) > 1 else current_price
+        
+        # Calculate returns
+        price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
+        
+        start_price = df['close'].iloc[0]
+        annual_return = ((current_price - start_price) / start_price) * 100.0
+        
+        # Calculate 7-day return
+        if len(df) >= 7:
+            week_ago_price = df['close'].iloc[-7]
+            week_return = ((current_price - week_ago_price) / week_ago_price) * 100.0
+        else:
+            week_return = annual_return
+        
+        # Calculate volatility
+        log_returns = np.log(df['close'] / df['close'].shift(1)).dropna()
+        if len(log_returns) > 1:
+            daily_std = log_returns.std()
+            volatility = daily_std * np.sqrt(252) * 100.0
+        else:
+            volatility = 0.0
+        
+        # Prepare chart data
+        chart_data = []
+        for date, row in df.iterrows():
+            chart_data.append({
+                'time': int(date.timestamp()),
+                'close': round(row['close'], 2)
+            })
+        
+        result = {
+            "current_price": round(current_price, 2),
+            "price_change_24h": round(price_change_24h, 2),
+            "week_return": round(week_return, 2),
+            "annual_return": round(annual_return, 2),
+            "volatility": round(volatility, 2),
+            "chart_data": chart_data
+        }
+        
+        logger.info(f"=== Fallback method successful for {ticker} ===")
+        return result
+        
+    except Exception as e:
+        logger.error(f"=== ERROR in fallback method for {ticker} ===")
+        logger.error(f"Exception: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return {"error": f"Fallback method failed for {ticker}: {str(e)}"}
+
 def fetch_stock_stats(ticker, period="1y"):
     """
     Fetch stock statistics in the same format as crypto stats lambda for tile compatibility.
@@ -218,10 +378,24 @@ def fetch_stock_stats(ticker, period="1y"):
             logger.info(f"Info retrieved for {ticker}: {type(info)}, keys: {list(info.keys()) if isinstance(info, dict) else 'Not a dict'}")
         except Exception as info_error:
             logger.warning(f"Failed to get info for {ticker}: {str(info_error)}")
+            # If info fails due to rate limiting, try fallback method
+            if "429" in str(info_error) or "Too Many Requests" in str(info_error):
+                logger.info(f"Rate limiting detected, switching to fallback method for {ticker}")
+                return fetch_stock_data_fallback(ticker, period)
         
         # Get historical data with detailed logging
         logger.info(f"Attempting to get historical data for {ticker} with period {period}")
-        hist = stock.history(period=period)
+        try:
+            hist = stock.history(period=period)
+        except Exception as hist_error:
+            logger.error(f"yfinance history failed for {ticker}: {str(hist_error)}")
+            # If history fails due to rate limiting or other issues, try fallback
+            if ("429" in str(hist_error) or "Too Many Requests" in str(hist_error) or 
+                "Expecting value" in str(hist_error) or "No price data" in str(hist_error)):
+                logger.info(f"yfinance failed, switching to fallback method for {ticker}")
+                return fetch_stock_data_fallback(ticker, period)
+            else:
+                raise hist_error
         
         logger.info(f"Historical data type: {type(hist)}")
         logger.info(f"Historical data shape: {hist.shape if hasattr(hist, 'shape') else 'No shape attribute'}")
@@ -310,6 +484,19 @@ def fetch_stock_stats(ticker, period="1y"):
         logger.error(f"Exception details: {repr(e)}")
         import traceback
         logger.error(f"Full traceback: {traceback.format_exc()}")
+        
+        # Try fallback method if yfinance completely fails
+        logger.info(f"Attempting fallback method for {ticker} due to yfinance failure")
+        try:
+            fallback_result = fetch_stock_data_fallback(ticker, period)
+            if 'error' not in fallback_result:
+                logger.info(f"Fallback method succeeded for {ticker}")
+                return fallback_result
+            else:
+                logger.error(f"Fallback method also failed for {ticker}: {fallback_result.get('error')}")
+        except Exception as fallback_error:
+            logger.error(f"Fallback method exception for {ticker}: {str(fallback_error)}")
+        
         return {"error": f"Error fetching data for {ticker}: {str(e)}"}
 
 def prepare_chart_data(hist_data, period):
