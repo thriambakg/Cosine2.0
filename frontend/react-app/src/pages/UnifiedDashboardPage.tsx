@@ -34,6 +34,7 @@ import AddStockModal from '../components/AddStockModal';
 import DashboardTabBar from '../components/DashboardTabBar';
 import NewTabDialog from '../components/NewTabDialog';
 import NewGroupDialog from '../components/NewGroupDialog';
+import CacheManager from '../components/CacheManager';
 
 // Import tab management hook and types
 import { useTabManagement } from '../hooks/useTabManagement';

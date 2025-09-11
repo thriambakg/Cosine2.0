@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -28,6 +28,7 @@ import {
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { useCryptoStats } from '../hooks/useAPI';
+import { useTileCache } from '../hooks/useDashboardCache';
 
 interface CryptoTileProps {
   id: string;
@@ -76,12 +77,29 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
   const tileRef = useRef<HTMLDivElement>(null);
 
-  const { data: cryptoData, loading: isLoading, error, executeForceRefresh } = useCryptoStats();
+  // Get the API hook for fetching data
+  const { executeForceRefresh } = useCryptoStats();
+  
+  // Memoize the fetch function to prevent constant re-renders
+  const fetchCryptoData = useCallback(async () => {
+    return await executeForceRefresh({ symbols: [symbol], timeframe });
+  }, [executeForceRefresh, symbol, timeframe]);
+  
+  const { data: cryptoData, loading: isLoading, error, refresh } = useTileCache(
+    id,
+    'crypto',
+    fetchCryptoData,
+    [symbol, timeframe], // Cache parameters
+    {
+      ttl: 5 * 60 * 1000, // 5 minutes cache
+      useSessionStorage: true, // Persist across tab switches
+      enabled: true,
+      forceRefresh: false, // Don't force refresh on mount
+    }
+  );
 
-  // Fetch data on mount and when timeframe changes
-  useEffect(() => {
-    handleFetchData();
-  }, [symbol, timeframe]);
+  // Note: Data fetching is now handled by the cache hook
+  // No need to fetch on mount unless cache is empty
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -96,14 +114,14 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
 
   const handleFetchData = async () => {
     try {
-      await executeForceRefresh({ symbols: [symbol], timeframe });
+      await refresh();
     } catch (error) {
       console.error(`Error fetching data for ${symbol}:`, error);
     }
   };
 
   const handleRefresh = () => {
-    handleFetchData();
+    refresh(); // Use the cache refresh method
   };
 
   const handleSettingsOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -119,7 +137,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     onSettingsChange(id, { timeframe: newTimeframe });
     setTimeframeDialogOpen(false);
     // Force refresh data to get new chart data for the timeframe
-    handleFetchData();
+    refresh();
   };
 
   const handleDisplayOptionsChange = (option: keyof typeof displayOptions) => {

@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   TextField, 
-  Button, 
   Autocomplete, 
   Typography, 
   Box,
@@ -13,9 +12,12 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
-import { TrendingUp as VolatilityIcon } from '@mui/icons-material';
+import { TrendingUp as VolatilityIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import { useStockVolatility } from '../hooks/useAPI';
+import { useAPICache } from '../hooks/useDashboardCache';
 import { logApiConfig } from '../config/api';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 
@@ -50,7 +52,26 @@ const StockVolatilityPage: React.FC = () => {
   const [configValid, setConfigValid] = useState<boolean>(false);
   const [configErrors, setConfigErrors] = useState<string[]>([]);
   
-  const { data: volatilityData, loading: isLoading, error, execute: fetchVolatility } = useStockVolatility();
+  // Get the API hook for fetching data
+  const { executeForceRefresh } = useStockVolatility();
+  
+  // Memoize the fetch function to prevent constant re-renders
+  const fetchVolatilityData = useCallback(async () => {
+    if (!ticker) throw new Error('No ticker selected');
+    return await executeForceRefresh({ ticker, period });
+  }, [executeForceRefresh, ticker, period]);
+  
+  // Use the new flexible cache system
+  const { data: volatilityData, loading: isLoading, error, refresh } = useAPICache(
+    'stock-volatility',
+    fetchVolatilityData,
+    [ticker || '', period], // Cache parameters
+    {
+      ttl: 5 * 60 * 1000, // 5 minutes cache
+      useSessionStorage: true, // Persist across navigation
+      enabled: !!ticker, // Only enable when ticker is selected
+    }
+  );
 
   // Load configuration and validate on component mount
   useEffect(() => {
@@ -79,7 +100,8 @@ const StockVolatilityPage: React.FC = () => {
     initializeConfig();
   }, []);
 
-  const handleFetchVolatility = async () => {
+  // Manual refresh function for the refresh button
+  const handleManualRefresh = async () => {
     if (!ticker) return;
     
     if (!configValid) {
@@ -87,13 +109,8 @@ const StockVolatilityPage: React.FC = () => {
       return;
     }
     
-    console.log(`🔍 Attempting to fetch volatility for ${ticker} with period ${period}`);
-    console.log(`🌐 Using API URL: ${getConfig('apiGatewayUrl')}`);
-    
-    // Clear cache before making request
-    // clearAPICache();
-    
-    await fetchVolatility({ ticker, period });
+    console.log(`🔄 Manual refresh for ${ticker} with period ${period}`);
+    await refresh();
   };
 
   const getVolatilityLevel = (vol: number) => {
@@ -160,33 +177,66 @@ const StockVolatilityPage: React.FC = () => {
         )}
 
         {/* Input Section */}
-        <GlassCard sx={{ p: 4, mb: 4 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-            <Box
-              sx={{
-                width: 48,
-                height: 48,
-                borderRadius: '0px',
-                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: '2px solid #1d4ed8',
-              }}
-            >
-              <VolatilityIcon sx={{ color: 'white', fontSize: 24 }} />
+        <GlassCard sx={{ p: 4, mb: 4, position: 'relative' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box
+                sx={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: '0px',
+                  background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '2px solid #1d4ed8',
+                }}
+              >
+                <VolatilityIcon sx={{ color: 'white', fontSize: 24 }} />
+              </Box>
+              <Typography 
+                variant="h6" 
+                sx={{ 
+                  color: '#ffffff', 
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                Select Stock
+              </Typography>
             </Box>
-            <Typography 
-              variant="h6" 
-              sx={{ 
-                color: '#ffffff', 
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-              }}
-            >
-              Select Stock
-            </Typography>
+            
+            {/* Small refresh button in the corner */}
+            <Tooltip title={!ticker ? "Select a stock to refresh" : "Refresh data"}>
+              <span>
+                <IconButton
+                  onClick={handleManualRefresh}
+                  disabled={!ticker || isLoading}
+                  sx={{
+                    color: '#9ca3af',
+                    '&:hover': {
+                      color: '#3b82f6',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                    '&:disabled': {
+                      color: '#6b7280',
+                    },
+                  }}
+                >
+                  <RefreshIcon 
+                    sx={{ 
+                      fontSize: 20,
+                      animation: isLoading ? 'spin 1s linear infinite' : 'none',
+                      '@keyframes spin': {
+                        '0%': { transform: 'rotate(0deg)' },
+                        '100%': { transform: 'rotate(360deg)' },
+                      },
+                    }} 
+                  />
+                </IconButton>
+              </span>
+            </Tooltip>
           </Box>
           
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -226,7 +276,7 @@ const StockVolatilityPage: React.FC = () => {
               autoSelect
             />
             
-            <FormControl sx={{ minWidth: 120 }}>
+            <FormControl sx={{ minWidth: 200, flexGrow: 1 }}>
               <InputLabel sx={{ color: '#9ca3af' }}>Period</InputLabel>
               <Select
                 value={period}
@@ -256,34 +306,6 @@ const StockVolatilityPage: React.FC = () => {
                 <MenuItem value="max">Max</MenuItem>
               </Select>
             </FormControl>
-            
-            <Button 
-              variant="contained" 
-              onClick={handleFetchVolatility}
-              disabled={!ticker || isLoading}
-              sx={{
-                height: '56px',
-                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                color: '#ffffff',
-                borderRadius: '0px',
-                textTransform: 'uppercase',
-                fontWeight: 700,
-                border: '2px solid #1d4ed8',
-                px: 4,
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%)',
-                  border: '2px solid #1e40af',
-                  transform: 'translateY(-1px)',
-                  boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
-                },
-                '&:disabled': {
-                  background: 'rgba(59, 130, 246, 0.3)',
-                  border: '2px solid rgba(59, 130, 246, 0.3)',
-                }
-              }}
-            >
-              {isLoading ? 'Analyzing...' : 'Fetch Volatility'}
-            </Button>
           </Box>
         </GlassCard>
 

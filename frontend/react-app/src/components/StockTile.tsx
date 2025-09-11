@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -29,6 +29,7 @@ import {
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { useStockData } from '../hooks/useAPI';
+import { useTileCache } from '../hooks/useDashboardCache';
 
 interface StockTileProps {
   id: string;
@@ -77,12 +78,29 @@ const StockTile: React.FC<StockTileProps> = ({
   const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
   const tileRef = useRef<HTMLDivElement>(null);
 
-  const { data: stockData, loading: isLoading, error, executeForceRefresh } = useStockData();
+  // Get the API hook for fetching data
+  const { executeForceRefresh } = useStockData();
+  
+  // Memoize the fetch function to prevent constant re-renders
+  const fetchStockData = useCallback(async () => {
+    return await executeForceRefresh({ ticker: symbol, period: timeframe });
+  }, [executeForceRefresh, symbol, timeframe]);
+  
+  const { data: stockData, loading: isLoading, error, refresh } = useTileCache(
+    id,
+    'stock',
+    fetchStockData,
+    [symbol, timeframe], // Cache parameters
+    {
+      ttl: 5 * 60 * 1000, // 5 minutes cache for stock data (same as crypto)
+      useSessionStorage: true, // Persist across tab switches
+      enabled: true,
+      forceRefresh: false, // Don't force refresh on mount
+    }
+  );
 
-  // Fetch data on mount and when timeframe changes
-  useEffect(() => {
-    handleFetchData();
-  }, [symbol, timeframe]);
+  // Note: Data fetching is now handled by the cache hook
+  // No need to fetch on mount unless cache is empty
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -97,7 +115,7 @@ const StockTile: React.FC<StockTileProps> = ({
 
   const handleFetchData = async () => {
     try {
-      await executeForceRefresh({ ticker: symbol, period: timeframe });
+      await refresh();
     } catch (error) {
       console.error(`Error fetching data for ${symbol}:`, error);
     }
