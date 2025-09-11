@@ -23,8 +23,8 @@ interface AddStockModalProps {
     timeframe: string;
     displayOptions: {
       showPrice: boolean;
+      showPriceMarker: boolean;
       show24hChange: boolean;
-      showWeekReturn: boolean;
       showAnnualReturn: boolean;
       showVolatility: boolean;
       showChart: boolean;
@@ -58,8 +58,8 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1d');
   const [displayOptions, setDisplayOptions] = useState({
     showPrice: true,
+    showPriceMarker: false,
     show24hChange: true,
-    showWeekReturn: true,
     showAnnualReturn: true,
     showVolatility: true,
     showChart: true,
@@ -83,8 +83,8 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
     setSelectedTimeframe('1d');
     setDisplayOptions({
       showPrice: true,
+      showPriceMarker: false,
       show24hChange: true,
-      showWeekReturn: true,
       showAnnualReturn: true,
       showVolatility: true,
       showChart: true,

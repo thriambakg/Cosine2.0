@@ -35,6 +35,7 @@ interface CryptoTileProps {
   timeframe: string;
   displayOptions?: {
     showPrice: boolean;
+    showPriceMarker: boolean;
     show24hChange: boolean;
     showAnnualReturn: boolean;
     showVolatility: boolean;
@@ -55,6 +56,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   timeframe,
   displayOptions = {
     showPrice: true,
+    showPriceMarker: false,
     show24hChange: true,
     showAnnualReturn: true,
     showVolatility: true,
@@ -204,9 +206,14 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   const getTimeframeReturn = () => {
     if (!crypto) return 0;
     
-    // For crypto, we use return24h for all timeframes as it represents the period return
-    // The crypto API already provides the appropriate return for the selected timeframe
-    return crypto.return24h || 0;
+    // Use the appropriate return based on timeframe
+    switch (timeframe) {
+      case '1d': return crypto.return24h || 0; // 24h change
+      case '7d': return crypto.annualReturn || 0; // Period return (7 days)
+      case '30d': return crypto.annualReturn || 0; // Period return (30 days)
+      case '1y': return crypto.annualReturn || 0; // Period return (1 year)
+      default: return crypto.return24h || 0;
+    }
   };
 
   // Get timeframe label for price marker
@@ -400,6 +407,11 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
                          color: 'white'
                        }}
                        labelStyle={{ color: '#f59e0b' }}
+                       labelFormatter={(value) => {
+                         // Find the data point and return the formatted time label
+                         const dataPoint = chartData.find(d => d.time === value);
+                         return dataPoint?.time || value;
+                       }}
                        formatter={(value) => {
                          // Format tooltip values based on price range
                          const price = Number(value);
@@ -442,25 +454,27 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
        {crypto && !isLoading && !error && (
          <Box>
            {localDisplayOptions.showPrice && (
-             <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1 }}>
+             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                <Typography variant="h5" color="white" fontWeight={700}>
                  ${crypto.currentPrice.toFixed(2)}
                </Typography>
-               <Typography
-                 variant="caption"
-                 sx={{
-                   color: getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626',
-                   fontWeight: 600,
-                   fontSize: '0.75rem',
-                   backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                   px: 1,
-                   py: 0.25,
-                   borderRadius: '4px',
-                   border: `1px solid ${getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626'}`
-                 }}
-               >
-                 {getTimeframeReturn() >= 0 ? '+' : ''}{getTimeframeReturn().toFixed(2)}% ({getTimeframeLabel()})
-               </Typography>
+               {localDisplayOptions.showPriceMarker && (
+                 <Typography
+                   variant="caption"
+                   sx={{
+                     color: getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626',
+                     fontWeight: 600,
+                     fontSize: '0.75rem',
+                     backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                     px: 1,
+                     py: 0.25,
+                     borderRadius: '4px',
+                     border: `1px solid ${getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626'}`
+                   }}
+                 >
+                   {getTimeframeReturn() >= 0 ? '+' : ''}{getTimeframeReturn().toFixed(2)}% ({getTimeframeLabel()})
+                 </Typography>
+               )}
              </Box>
            )}
 
@@ -473,10 +487,10 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
               </Typography>
               <Typography
                 variant="body2"
-                color={crypto.return24h > 0 ? '#22c55e' : '#dc2626'}
+                color={getTimeframeReturn() > 0 ? '#22c55e' : '#dc2626'}
                 fontWeight={600}
               >
-                {crypto.return24h > 0 ? '+' : ''}{crypto.return24h.toFixed(2)}%
+                {getTimeframeReturn() > 0 ? '+' : ''}{getTimeframeReturn().toFixed(2)}%
               </Typography>
             </Box>
           )}
@@ -596,6 +610,15 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
                 />
               }
               label="Current Price"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={localDisplayOptions.showPriceMarker}
+                  onChange={() => handleDisplayOptionsChange('showPriceMarker')}
+                />
+              }
+              label="Price Change Marker"
             />
             <FormControlLabel
               control={

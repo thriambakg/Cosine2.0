@@ -313,16 +313,26 @@ def fetch_stock_data_fallback(ticker, period="1y"):
         
         # Calculate statistics
         current_price = df['close'].iloc[-1]
+        start_price = df['close'].iloc[0]
         
-        # Calculate 24h return (last 2 data points)
-        if len(df) >= 2:
-            previous_close = df['close'].iloc[-2]
-            price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
+        # Calculate 24h return based on timeframe
+        if period == '1d':
+            # For 1d timeframe, calculate 24h return from 24 hours ago (1440 minutes)
+            if len(df) >= 1440:
+                price_24h_ago = df['close'].iloc[-1440]
+                price_change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100.0
+            else:
+                # If not enough data, use period return
+                price_change_24h = ((current_price - start_price) / start_price) * 100.0
         else:
-            price_change_24h = 0.0
+            # For other timeframes, use last 2 data points
+            if len(df) >= 2:
+                previous_close = df['close'].iloc[-2]
+                price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
+            else:
+                price_change_24h = 0.0
         
         # Calculate period return (from start to current)
-        start_price = df['close'].iloc[0]
         period_return = ((current_price - start_price) / start_price) * 100.0
         
         # Calculate 7-day return (last 7 data points or appropriate for timeframe)
@@ -487,8 +497,18 @@ def fetch_stock_stats(ticker, period="1y"):
         
         logger.info(f"Current price: {current_price}, Previous close: {previous_close}")
         
-        # Calculate 24h price change (current vs previous day)
-        price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
+        # Calculate 24h price change based on timeframe
+        if period == '1d':
+            # For 1d timeframe, calculate 24h return from 24 hours ago (1440 minutes)
+            if len(hist) >= 1440:
+                price_24h_ago = hist['Close'].iloc[-1440]
+                price_change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100.0
+            else:
+                # If not enough data, use period return
+                price_change_24h = ((current_price - start_price) / start_price) * 100.0
+        else:
+            # For other timeframes, use previous day calculation
+            price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
         logger.info(f"24h price change: {price_change_24h}%")
         
         # Calculate annual return (from start of period to current)

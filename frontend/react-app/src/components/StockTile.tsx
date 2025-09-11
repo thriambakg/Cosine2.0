@@ -36,8 +36,8 @@ interface StockTileProps {
   timeframe: string;
   displayOptions?: {
     showPrice: boolean;
+    showPriceMarker: boolean;
     show24hChange: boolean;
-    showWeekReturn: boolean;
     showAnnualReturn: boolean;
     showVolatility: boolean;
     showChart: boolean;
@@ -57,8 +57,8 @@ const StockTile: React.FC<StockTileProps> = ({
   timeframe,
   displayOptions = {
     showPrice: true,
+    showPriceMarker: false,
     show24hChange: true,
-    showWeekReturn: true,
     showAnnualReturn: true,
     showVolatility: true,
     showChart: true,
@@ -421,6 +421,11 @@ const StockTile: React.FC<StockTileProps> = ({
                       color: 'white'
                     }}
                     labelStyle={{ color: getChartColor() }}
+                    labelFormatter={(value) => {
+                      // Find the data point and return the formatted time label
+                      const dataPoint = chartData.find(d => d.time === value);
+                      return dataPoint?.timeLabel || new Date(value * 1000).toLocaleString();
+                    }}
                     formatter={(value) => {
                       // Format tooltip values based on price range
                       const price = Number(value);
@@ -461,57 +466,47 @@ const StockTile: React.FC<StockTileProps> = ({
       {stockData && !isLoading && !error && (
         <Box>
           {localDisplayOptions.showPrice && (
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
               <Typography variant="h5" color="white" fontWeight={700}>
                 ${stockData.current_price ? stockData.current_price.toFixed(2) : '--'}
               </Typography>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626',
-                  fontWeight: 600,
-                  fontSize: '0.75rem',
-                  backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                  px: 1,
-                  py: 0.25,
-                  borderRadius: '4px',
-                  border: `1px solid ${getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626'}`
-                }}
-              >
-                {getTimeframeReturn() >= 0 ? '+' : ''}{getTimeframeReturn().toFixed(2)}% ({getTimeframeLabel()})
-              </Typography>
+              {localDisplayOptions.showPriceMarker && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626',
+                    fontWeight: 600,
+                    fontSize: '0.75rem',
+                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    px: 1,
+                    py: 0.25,
+                    borderRadius: '4px',
+                    border: `1px solid ${getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626'}`
+                  }}
+                >
+                  {getTimeframeReturn() >= 0 ? '+' : ''}{getTimeframeReturn().toFixed(2)}% ({getTimeframeLabel()})
+                </Typography>
+              )}
             </Box>
           )}
 
           {localDisplayOptions.show24hChange && (
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="body2" color="#9ca3af">
-                24h Change (%):
+                {timeframe === '1d' ? '24h Return (%)' :
+                 timeframe === '7d' ? '7-Day Return (%)' :
+                 timeframe === '30d' ? '30-Day Return (%)' : '1-Year Return (%)'}:
               </Typography>
               <Typography
                 variant="body2"
-                color={stockData.price_change_24h >= 0 ? '#22c55e' : '#dc2626'}
+                color={getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626'}
                 fontWeight={600}
               >
-                {stockData.price_change_24h ? `${stockData.price_change_24h >= 0 ? '+' : ''}${stockData.price_change_24h.toFixed(2)}%` : '--%'}
+                {getTimeframeReturn() ? `${getTimeframeReturn() >= 0 ? '+' : ''}${getTimeframeReturn().toFixed(2)}%` : '--%'}
               </Typography>
             </Box>
           )}
 
-          {localDisplayOptions.showWeekReturn && (
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-              <Typography variant="body2" color="#9ca3af">
-                7-Day Return (%):
-              </Typography>
-              <Typography
-                variant="body2"
-                color={stockData.week_return >= 0 ? '#22c55e' : '#dc2626'}
-                fontWeight={600}
-              >
-                {stockData.week_return ? `${stockData.week_return >= 0 ? '+' : ''}${stockData.week_return.toFixed(2)}%` : '--%'}
-              </Typography>
-            </Box>
-          )}
 
           {localDisplayOptions.showAnnualReturn && (
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
@@ -632,20 +627,20 @@ const StockTile: React.FC<StockTileProps> = ({
             <FormControlLabel
               control={
                 <Checkbox
+                  checked={localDisplayOptions.showPriceMarker}
+                  onChange={() => handleDisplayOptionsChange('showPriceMarker')}
+                />
+              }
+              label="Price Change Marker"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
                   checked={localDisplayOptions.show24hChange}
                   onChange={() => handleDisplayOptionsChange('show24hChange')}
                 />
               }
               label="24h Change"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.showWeekReturn}
-                  onChange={() => handleDisplayOptionsChange('showWeekReturn')}
-                />
-              }
-              label="7-Day Return"
             />
             <FormControlLabel
               control={
