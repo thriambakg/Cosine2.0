@@ -108,6 +108,38 @@ export const stockVolatilityAPI = {
 };
 
 // ============================================================================
+// STOCK DATA API (Comprehensive stock statistics and chart data)
+// ============================================================================
+
+export interface StockDataRequest {
+  ticker: string;
+  period?: string; // defaults to "1y"
+}
+
+export interface StockDataResponse {
+  current_price: number;
+  price_change_24h: number;
+  week_return: number;
+  annual_return: number;
+  volatility: number;
+  chart_data: Array<{
+    time: number;
+    close: number;
+  }>;
+}
+
+export const stockDataAPI = {
+  getStockData: async (params: StockDataRequest): Promise<StockDataResponse> => {
+    const queryParams = new URLSearchParams({
+      ticker: params.ticker,
+      period: params.period || '1y',
+    });
+    
+    return apiRequest<StockDataResponse>(`/stock-data?${queryParams}`);
+  },
+};
+
+// ============================================================================
 // PORTFOLIO ANALYSIS API
 // ============================================================================
 
@@ -361,6 +393,7 @@ export const handleAPIError = (error: any, endpoint: string): never => {
 // Export all APIs as a single object for easy importing
 export const api = {
   stockVolatility: stockVolatilityAPI,
+  stockData: stockDataAPI,
   portfolioAnalysis: portfolioAnalysisAPI,
   cryptoStats: cryptoStatsAPI,
   optionPricing: optionPricingAPI,

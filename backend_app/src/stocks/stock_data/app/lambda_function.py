@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def lambda_handler(event, context):
     """
-    AWS Lambda handler to fetch comprehensive stock data using yfinance library.
+    AWS Lambda handler to fetch stock statistics in crypto stats format for tile compatibility.
     
     Expected event format:
     {
@@ -19,12 +19,11 @@ def lambda_handler(event, context):
         "period": "1y"  # optional, defaults to "1y"
     }
     
-    Returns comprehensive stock data including:
-    - Current price and change
-    - Historical data for charts
-    - Technical indicators
-    - Company information
-    - Advanced analytics
+    Returns stock statistics matching crypto stats format:
+    - Current price and 24h change
+    - 7-day and annual returns
+    - Volatility
+    - Chart data for visualization
     """
     try:
         logger.info(f"Event received: {event}")
@@ -67,8 +66,24 @@ def lambda_handler(event, context):
                 })
             }
         
-        # Fetch comprehensive stock data using yfinance
-        stock_data = fetch_stock_data(ticker, period)
+        # Fetch stock statistics in crypto stats format for tile compatibility
+        stock_stats = fetch_stock_stats(ticker, period)
+        
+        if 'error' in stock_stats:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
+                    'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Max-Age': '1728000',
+                    'Content-Type': 'application/json'
+                },
+                'body': json.dumps({
+                    'error': stock_stats['error'],
+                    'ticker': ticker.upper()
+                })
+            }
         
         return {
             'statusCode': 200,
@@ -79,7 +94,7 @@ def lambda_handler(event, context):
                 'Access-Control-Max-Age': '1728000',
                 'Content-Type': 'application/json'
             },
-            'body': json.dumps(stock_data)
+            'body': json.dumps(stock_stats)
         }
         
     except Exception as e:
@@ -149,6 +164,108 @@ def fetch_stock_data(ticker, period="1y"):
         logger.error(f"Error fetching stock data for {ticker}: {str(e)}")
         # Return mock data as fallback
         return generate_mock_stock_data(ticker, period)
+
+def fetch_stock_stats(ticker, period="1y"):
+    """
+    Fetch stock statistics in the same format as crypto stats lambda for tile compatibility.
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        period (str): Time period for historical data
+        
+    Returns:
+        dict: Stock statistics matching crypto stats format
+    """
+    try:
+        logger.info(f"Fetching stock stats for {ticker} with period {period}")
+        
+        # Create yfinance Ticker object
+        stock = yf.Ticker(ticker)
+        
+        # Get historical data
+        hist = stock.history(period=period)
+        
+        if hist.empty:
+            return {"error": f"No data found for ticker {ticker}"}
+        
+        # Get current price and previous close
+        current_price = hist['Close'].iloc[-1]
+        previous_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+        
+        # Calculate 24h price change (current vs previous day)
+        price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
+        
+        # Calculate annual return (from start of period to current)
+        start_price = hist['Close'].iloc[0]
+        annual_return = ((current_price - start_price) / start_price) * 100.0
+        
+        # Calculate 7-day return
+        if len(hist) >= 7:
+            week_ago_price = hist['Close'].iloc[-7]
+            week_return = ((current_price - week_ago_price) / week_ago_price) * 100.0
+        else:
+            week_return = annual_return  # Fallback to annual return if not enough data
+        
+        # Calculate volatility (standard deviation of daily log returns)
+        log_returns = np.log(hist['Close'] / hist['Close'].shift(1)).dropna()
+        if len(log_returns) > 1:
+            daily_std = log_returns.std()
+            volatility = daily_std * np.sqrt(252) * 100.0  # Annualized volatility in percentage
+        else:
+            volatility = 0.0
+        
+        # Prepare chart data in the same format as crypto stats
+        chart_data = prepare_chart_data(hist, period)
+        
+        return {
+            "current_price": round(current_price, 2),
+            "price_change_24h": round(price_change_24h, 2),
+            "week_return": round(week_return, 2),
+            "annual_return": round(annual_return, 2),
+            "volatility": round(volatility, 2),
+            "chart_data": chart_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching stock stats for {ticker}: {str(e)}")
+        return {"error": f"Error fetching data for {ticker}: {str(e)}"}
+
+def prepare_chart_data(hist_data, period):
+    """
+    Prepare chart data in the same format as crypto stats lambda.
+    
+    Args:
+        hist_data: Historical data from yfinance
+        period: Time period
+        
+    Returns:
+        list: Chart data points
+    """
+    try:
+        chart_data = []
+        
+        # Limit data points based on period for performance
+        max_points = {
+            '1d': 24,    # Hourly data
+            '7d': 7,     # Daily data
+            '30d': 30,   # Daily data
+            '1y': 365    # Daily data
+        }.get(period, 365)
+        
+        # Take the last max_points data points
+        recent_data = hist_data.tail(max_points)
+        
+        for date, row in recent_data.iterrows():
+            chart_data.append({
+                'time': int(date.timestamp()),
+                'close': round(row['Close'], 2)
+            })
+        
+        return chart_data
+        
+    except Exception as e:
+        logger.error(f"Error preparing chart data: {str(e)}")
+        return []
 
 def fetch_quote_data(stock, ticker):
     """Fetch current quote data for a stock using yfinance."""

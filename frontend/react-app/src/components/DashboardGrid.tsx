@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 import CryptoTile from './CryptoTile';
+import StockTile from './StockTile';
 import PlaceholderTile from './PlaceholderTile';
 import { UnifiedTile } from '../types/dashboardTypes';
 
@@ -55,6 +56,20 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
             key={tile.id}
             id={tile.id}
             symbol={tile.symbol || 'BTC'}
+            timeframe={tile.timeframe || '1d'}
+            size={tile.size}
+            onRemove={onRemoveTile}
+            onUpdate={onUpdateTile}
+            onSettingsChange={onSettingsChange}
+            onResize={onResizeTile}
+          />
+        );
+      case 'stock':
+        return (
+          <StockTile
+            key={tile.id}
+            id={tile.id}
+            symbol={tile.symbol || 'AAPL'}
             timeframe={tile.timeframe || '1d'}
             size={tile.size}
             onRemove={onRemoveTile}

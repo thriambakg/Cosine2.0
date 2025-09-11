@@ -118,6 +118,9 @@ module "api_gateway" {
     crypto = {
       path_part = "crypto"
     }
+    stock_data = {
+      path_part = "stock-data"
+    }
     dashboard = {
       path_part = "dashboard"
     }
@@ -144,6 +147,15 @@ module "api_gateway" {
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
       lambda_arn              = module.crypto_stats_lambda.function_arn
+      request_parameters      = {}
+    }
+    # GET method for stock data (comprehensive stock statistics and chart data)
+    stock_data_get = {
+      resource_key            = "stock_data"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.stock_data_lambda.function_arn
       request_parameters      = {}
     }
     # GET method for alerts (fetch user alerts)
@@ -220,6 +232,11 @@ module "api_gateway" {
       http_method   = "GET"
       resource_path = "crypto"
     }
+    stock_data = {
+      function_arn  = module.stock_data_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "stock-data"
+    }
     dashboard_get = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "GET"
@@ -260,7 +277,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "2"
+  deployment_trigger = "3"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager

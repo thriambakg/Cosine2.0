@@ -30,6 +30,7 @@ import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
 import DashboardGrid from '../components/DashboardGrid';
 import AddCryptoModal from '../components/AddCryptoModal';
+import AddStockModal from '../components/AddStockModal';
 import DashboardTabBar from '../components/DashboardTabBar';
 import NewTabDialog from '../components/NewTabDialog';
 import NewGroupDialog from '../components/NewGroupDialog';
@@ -87,7 +88,7 @@ const tileTypes: TileTypeDefinition[] = [
     icon: <AccountBalanceIcon />,
     color: '#10b981',
     isAvailable: true,
-    placeholder: true
+    placeholder: false
   },
   {
     id: 'portfolio',
@@ -154,6 +155,7 @@ const UnifiedDashboardPage: React.FC = () => {
 
   // Dialog states
   const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
   const [newTabDialogOpen, setNewTabDialogOpen] = useState(false);
   const [newGroupDialogOpen, setNewGroupDialogOpen] = useState(false);
 
@@ -348,6 +350,13 @@ const UnifiedDashboardPage: React.FC = () => {
       return;
     }
     
+    // If stock tile, use the new AddStockModal
+    if (tileType.id === 'stock') {
+      setStockModalOpen(true);
+      setAddTileStep('closed');
+      return;
+    }
+    
     // For other tile types, use the multi-step flow
     setSelectedTileType(tileType);
     setAddTileStep('configuration');
@@ -442,6 +451,26 @@ const UnifiedDashboardPage: React.FC = () => {
       timeframe: cryptoData.timeframe,
       displayOptions: cryptoData.displayOptions,
       autoRefresh: cryptoData.autoRefresh,
+      isPinned: false,
+      size: { width: 350, height: 400 },
+      dashboard_id: activeDashboard?.id || 'main',
+      created_at: new Date().toISOString(),
+    };
+
+    const updatedTiles = [...tiles, newTile];
+    updateDashboardTiles(updatedTiles);
+  };
+
+  // Handle stock tile addition using the new AddStockModal
+  const handleAddStockTile = (stockData: any) => {
+    const newTile: UnifiedTile = {
+      id: `tile_${Date.now()}`,
+      type: 'stock',
+      title: stockData.symbol,
+      symbol: stockData.symbol,
+      timeframe: stockData.timeframe,
+      displayOptions: stockData.displayOptions,
+      autoRefresh: stockData.autoRefresh,
       isPinned: false,
       size: { width: 350, height: 400 },
       dashboard_id: activeDashboard?.id || 'main',
@@ -794,6 +823,14 @@ const UnifiedDashboardPage: React.FC = () => {
           open={cryptoModalOpen}
           onClose={() => setCryptoModalOpen(false)}
           onAdd={handleAddCryptoTile}
+          existingSymbols={getExistingSymbols()}
+        />
+
+        {/* Add Stock Modal (new component) */}
+        <AddStockModal
+          open={stockModalOpen}
+          onClose={() => setStockModalOpen(false)}
+          onAdd={handleAddStockTile}
           existingSymbols={getExistingSymbols()}
         />
 

@@ -208,6 +208,12 @@ export function useStockVolatility() {
   return useAPI(api.stockVolatility.getVolatility, 0);
 }
 
+// Stock Data Hook (Comprehensive stock statistics and chart data)
+export function useStockData() {
+  // Short cache for real-time stock data
+  return useAPI(api.stockData.getStockData, 30 * 1000); // 30 second cache
+}
+
 // Portfolio Analysis Hook
 export function usePortfolioAnalysis() {
   return useAPI(api.portfolioAnalysis.analyzePortfolio, 0); // No cache for portfolio analysis

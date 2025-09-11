@@ -25,17 +25,19 @@ import {
   AutoAwesome as AutoRefreshIcon,
   Visibility as VisibilityIcon,
   Timeline as TimelineIcon,
+  TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
-import { useCryptoStats } from '../hooks/useAPI';
+import { useStockData } from '../hooks/useAPI';
 
-interface CryptoTileProps {
+interface StockTileProps {
   id: string;
   symbol: string;
   timeframe: string;
   displayOptions?: {
     showPrice: boolean;
     show24hChange: boolean;
+    showWeekReturn: boolean;
     showAnnualReturn: boolean;
     showVolatility: boolean;
     showChart: boolean;
@@ -49,20 +51,21 @@ interface CryptoTileProps {
   onResize?: (id: string, size: { width: number; height: number }) => void;
 }
 
-const CryptoTile: React.FC<CryptoTileProps> = ({
+const StockTile: React.FC<StockTileProps> = ({
   id,
   symbol,
   timeframe,
   displayOptions = {
     showPrice: true,
     show24hChange: true,
+    showWeekReturn: true,
     showAnnualReturn: true,
     showVolatility: true,
     showChart: true,
   },
   autoRefresh = false,
   isPinned = false,
-     size = { width: 350, height: 400 },
+  size = { width: 350, height: 400 },
   onRemove,
   onSettingsChange,
   onResize,
@@ -74,7 +77,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
   const tileRef = useRef<HTMLDivElement>(null);
 
-  const { data: cryptoData, loading: isLoading, error, executeForceRefresh } = useCryptoStats();
+  const { data: stockData, loading: isLoading, error, executeForceRefresh } = useStockData();
 
   // Fetch data on mount and when timeframe changes
   useEffect(() => {
@@ -94,7 +97,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
 
   const handleFetchData = async () => {
     try {
-      await executeForceRefresh({ symbols: [symbol], timeframe });
+      await executeForceRefresh({ ticker: symbol, period: timeframe });
     } catch (error) {
       console.error(`Error fetching data for ${symbol}:`, error);
     }
@@ -143,24 +146,29 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     }
   };
 
-    const crypto = cryptoData?.data?.find((c: any) => c.symbol === symbol);
-
   // Timeframe descriptions for tooltips
   const timeframeDescriptions = {
-    '1d': '1 Day - Shows 24-hour price movement and daily volatility',
+    '1d': '1 Day - Shows daily price movement and intraday volatility',
     '7d': '7 Days - Shows weekly trends and short-term momentum',
     '30d': '30 Days - Shows monthly performance and medium-term patterns',
     '1y': '1 Year - Shows annual trends and long-term market behavior'
   };
 
-  // Get chart data from API response
+  // Process chart data from stock API
   const getChartData = () => {
-    if (crypto?.chartData && Array.isArray(crypto.chartData) && crypto.chartData.length > 0) {
-      return { data: crypto.chartData, isRealData: true };
+    if (!stockData || !stockData.chart_data || stockData.chart_data.length === 0) {
+      return { data: [], isRealData: false };
     }
-    
-    // No fallback data - show unavailable message
-    return { data: [], isRealData: false };
+
+    // Transform chart data to match the expected format
+    const transformedData = stockData.chart_data.map((point: any) => ({
+      time: point.time,
+      price: point.close,
+      // Add formatted date for tooltips
+      date: new Date(point.time * 1000).toLocaleDateString()
+    }));
+
+    return { data: transformedData, isRealData: true };
   };
 
   const { data: chartData, isRealData } = getChartData();
@@ -182,14 +190,14 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     
     // Calculate padding based on price range
     let padding;
-    if (maxPrice < 1) {
-      // For coins under $1, use 5% padding
+    if (maxPrice < 10) {
+      // For stocks under $10, use 5% padding
       padding = range * 0.05;
     } else if (maxPrice < 100) {
-      // For coins under $100, use 3% padding
+      // For stocks under $100, use 3% padding
       padding = range * 0.03;
     } else {
-      // For higher priced coins, use 2% padding
+      // For higher priced stocks, use 2% padding
       padding = range * 0.02;
     }
     
@@ -200,7 +208,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     return [domainMin, domainMax];
   };
 
-     return (
+  return (
     <Box
       sx={{
         p: 3,
@@ -211,11 +219,11 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         overflow: 'hidden',
         width: size.width,
         height: size.height,
-                 resize: 'both',
-         minWidth: 300,
-         minHeight: 350,
-         maxWidth: 600,
-         maxHeight: 600,
+        resize: 'both',
+        minWidth: 300,
+        minHeight: 350,
+        maxWidth: 600,
+        maxHeight: 600,
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -223,61 +231,56 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
           left: 0,
           right: 0,
           height: '3px',
-          background: (crypto?.return24h ?? 0) > 0 ? '#22c55e' : '#dc2626',
+          background: stockData?.volatility ? '#10b981' : '#dc2626',
         },
       }}
-             ref={tileRef}
-               onMouseUp={() => {
-          if (onResize && tileRef.current) {
-            const rect = tileRef.current.getBoundingClientRect();
-            onResize(id, { width: rect.width, height: rect.height });
-          }
-        }}
+      ref={tileRef}
+      onMouseUp={() => {
+        if (onResize && tileRef.current) {
+          const rect = tileRef.current.getBoundingClientRect();
+          onResize(id, { width: rect.width, height: rect.height });
+        }
+      }}
     >
-             {/* Header with controls */}
-       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-           {/* Crypto Symbol */}
-           <Typography 
-             variant="h4" 
-             sx={{ 
-               color: '#f59e0b', 
-               fontWeight: 700, 
-               fontFamily: 'monospace',
-               mr: 1,
-               fontSize: '1.5rem'
-             }}
-           >
-             ₿
-           </Typography>
-           <Typography variant="h6" color="white" fontWeight={600}>
-             {symbol}
-           </Typography>
-           <Tooltip title={timeframeDescriptions[timeframe as keyof typeof timeframeDescriptions]}>
-             <Chip
-               label={timeframe.toUpperCase()}
-               size="small"
-               sx={{
-                 backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                 color: '#f59e0b',
-                 border: '1px solid #f59e0b',
-                 fontSize: '0.75rem',
-                 height: '20px',
-                 cursor: 'help'
-               }}
-             />
-           </Tooltip>
-           {isPinned && (
-             <Tooltip title="Pinned to top">
-               <PinIcon sx={{ color: '#f59e0b', fontSize: 16 }} />
-             </Tooltip>
-           )}
-           {autoRefresh && (
-             <Tooltip title="Auto-refresh enabled">
-               <AutoRefreshIcon sx={{ color: '#22c55e', fontSize: 16 }} />
-             </Tooltip>
-           )}
-         </Box>
+      {/* Header with controls */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {/* Stock Market Symbol */}
+          <TrendingUpIcon 
+            sx={{ 
+              color: '#10b981', 
+              fontSize: '1.5rem',
+              mr: 1
+            }} 
+          />
+          <Typography variant="h6" color="white" fontWeight={600}>
+            {symbol}
+          </Typography>
+          <Tooltip title={timeframeDescriptions[timeframe as keyof typeof timeframeDescriptions]}>
+            <Chip
+              label={timeframe.toUpperCase()}
+              size="small"
+              sx={{
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                color: '#10b981',
+                border: '1px solid #10b981',
+                fontSize: '0.75rem',
+                height: '20px',
+                cursor: 'help'
+              }}
+            />
+          </Tooltip>
+          {isPinned && (
+            <Tooltip title="Pinned to top">
+              <PinIcon sx={{ color: '#10b981', fontSize: 16 }} />
+            </Tooltip>
+          )}
+          {autoRefresh && (
+            <Tooltip title="Auto-refresh enabled">
+              <AutoRefreshIcon sx={{ color: '#22c55e', fontSize: 16 }} />
+            </Tooltip>
+          )}
+        </Box>
 
         <Box sx={{ display: 'flex', gap: 0.5 }}>
           <Tooltip title="Refresh data">
@@ -285,7 +288,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
               size="small"
               onClick={handleRefresh}
               disabled={isLoading}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#f59e0b' } }}
+              sx={{ color: '#9ca3af', '&:hover': { color: '#10b981' } }}
             >
               <RefreshIcon sx={{ fontSize: 18 }} />
             </IconButton>
@@ -295,7 +298,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
             <IconButton
               size="small"
               onClick={handleSettingsOpen}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#f59e0b' } }}
+              sx={{ color: '#9ca3af', '&:hover': { color: '#10b981' } }}
             >
               <SettingsIcon sx={{ fontSize: 18 }} />
             </IconButton>
@@ -331,115 +334,124 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         </Box>
       )}
 
-                           {/* Chart Section */}
-        {localDisplayOptions.showChart && (
-          <>
-            {isLoading && (
-              <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography variant="body2" color="#9ca3af">
-                  Loading chart...
-                </Typography>
-              </Box>
-            )}
-            {crypto && !isLoading && !error && isRealData && chartData && chartData.length > 0 && (
-              <Box sx={{ mb: 2, height: '120px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                    <XAxis 
-                      dataKey="time" 
-                      stroke="#9ca3af" 
-                      fontSize={10}
-                      tick={{ fill: '#9ca3af' }}
-                      axisLine={{ stroke: '#374151' }}
-                    />
-                                         <YAxis 
-                       stroke="#9ca3af" 
-                       fontSize={10}
-                       tick={{ fill: '#9ca3af' }}
-                       axisLine={{ stroke: '#374151' }}
-                       domain={getYAxisDomain()}
-                       tickFormatter={(value) => {
-                         // Format Y-axis labels based on price range
-                         if (value < 0.01) {
-                           return value.toFixed(4);
-                         } else if (value < 1) {
-                           return value.toFixed(3);
-                         } else if (value < 100) {
-                           return value.toFixed(2);
-                         } else {
-                           return value.toFixed(0);
-                         }
-                       }}
-                     />
-                                         <RechartsTooltip
-                       contentStyle={{
-                         backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                         border: '1px solid #374151',
-                         borderRadius: '4px',
-                         color: 'white'
-                       }}
-                       labelStyle={{ color: '#f59e0b' }}
-                       formatter={(value) => {
-                         // Format tooltip values based on price range
-                         const price = Number(value);
-                         let formattedPrice;
-                         if (price < 0.01) {
-                           formattedPrice = `$${price.toFixed(4)}`;
-                         } else if (price < 1) {
-                           formattedPrice = `$${price.toFixed(3)}`;
-                         } else if (price < 100) {
-                           formattedPrice = `$${price.toFixed(2)}`;
-                         } else {
-                           formattedPrice = `$${price.toFixed(0)}`;
-                         }
-                         return [formattedPrice, 'Price'];
-                       }}
-                     />
-                    <Line
-                      type="monotone"
-                      dataKey="price"
-                      stroke="#f59e0b"
-                      strokeWidth={2}
-                      dot={false}
-                      activeDot={{ r: 4, fill: '#f59e0b' }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </Box>
-            )}
-            {crypto && !isLoading && !error && !isRealData && (
-              <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography variant="body2" color="#9ca3af">
-                  Chart data unavailable
-                </Typography>
-              </Box>
-            )}
-          </>
-        )}
+      {/* Chart Section */}
+      {localDisplayOptions.showChart && (
+        <>
+          {isLoading && (
+            <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography variant="body2" color="#9ca3af">
+                Loading chart...
+              </Typography>
+            </Box>
+          )}
+          {stockData && !isLoading && !error && isRealData && chartData && chartData.length > 0 && (
+            <Box sx={{ mb: 2, height: '120px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="#9ca3af" 
+                    fontSize={10}
+                    tick={{ fill: '#9ca3af' }}
+                    axisLine={{ stroke: '#374151' }}
+                  />
+                  <YAxis 
+                    stroke="#9ca3af" 
+                    fontSize={10}
+                    tick={{ fill: '#9ca3af' }}
+                    axisLine={{ stroke: '#374151' }}
+                    domain={getYAxisDomain()}
+                    tickFormatter={(value) => {
+                      // Format Y-axis labels based on price range
+                      if (value < 1) {
+                        return value.toFixed(2);
+                      } else if (value < 100) {
+                        return value.toFixed(1);
+                      } else {
+                        return value.toFixed(0);
+                      }
+                    }}
+                  />
+                  <RechartsTooltip
+                    contentStyle={{
+                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                      border: '1px solid #374151',
+                      borderRadius: '4px',
+                      color: 'white'
+                    }}
+                    labelStyle={{ color: '#10b981' }}
+                    formatter={(value) => {
+                      // Format tooltip values based on price range
+                      const price = Number(value);
+                      let formattedPrice;
+                      if (price < 1) {
+                        formattedPrice = `$${price.toFixed(2)}`;
+                      } else if (price < 100) {
+                        formattedPrice = `$${price.toFixed(1)}`;
+                      } else {
+                        formattedPrice = `$${price.toFixed(0)}`;
+                      }
+                      return [formattedPrice, 'Price'];
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="price"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, fill: '#10b981' }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </Box>
+          )}
+          {stockData && !isLoading && !error && !isRealData && (
+            <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography variant="body2" color="#9ca3af">
+                Chart data unavailable
+              </Typography>
+            </Box>
+          )}
+        </>
+      )}
 
-       {/* Crypto data */}
-       {crypto && !isLoading && !error && (
-         <Box>
-           {localDisplayOptions.showPrice && (
-             <Typography variant="h5" color="white" fontWeight={700} sx={{ mb: 1 }}>
-               ${crypto.currentPrice.toFixed(2)}
-             </Typography>
-           )}
+      {/* Stock data */}
+      {stockData && !isLoading && !error && (
+        <Box>
+          {localDisplayOptions.showPrice && (
+            <Typography variant="h5" color="white" fontWeight={700} sx={{ mb: 1 }}>
+              ${stockData.current_price ? stockData.current_price.toFixed(2) : '--'}
+            </Typography>
+          )}
 
           {localDisplayOptions.show24hChange && (
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="body2" color="#9ca3af">
-                {timeframe === '1d' ? '24h Return (%)' :
-                 timeframe === '7d' ? '7-Day Return (%)' :
-                 timeframe === '30d' ? '30-Day Return (%)' : '1-Year Return (%)'}:
+                24h Change (%):
               </Typography>
               <Typography
                 variant="body2"
-                color={crypto.return24h > 0 ? '#22c55e' : '#dc2626'}
+                color={stockData.price_change_24h >= 0 ? '#22c55e' : '#dc2626'}
                 fontWeight={600}
               >
-                {crypto.return24h > 0 ? '+' : ''}{crypto.return24h.toFixed(2)}%
+                {stockData.price_change_24h ? `${stockData.price_change_24h >= 0 ? '+' : ''}${stockData.price_change_24h.toFixed(2)}%` : '--%'}
+              </Typography>
+            </Box>
+          )}
+
+          {localDisplayOptions.showWeekReturn && (
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="body2" color="#9ca3af">
+                7-Day Return (%):
+              </Typography>
+              <Typography
+                variant="body2"
+                color={stockData.week_return >= 0 ? '#22c55e' : '#dc2626'}
+                fontWeight={600}
+              >
+                {stockData.week_return ? `${stockData.week_return >= 0 ? '+' : ''}${stockData.week_return.toFixed(2)}%` : '--%'}
               </Typography>
             </Box>
           )}
@@ -451,10 +463,10 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
               </Typography>
               <Typography
                 variant="body2"
-                color={crypto.annualReturn > 0 ? '#22c55e' : '#dc2626'}
+                color={stockData.annual_return >= 0 ? '#22c55e' : '#dc2626'}
                 fontWeight={600}
               >
-                {crypto.annualReturn > 0 ? '+' : ''}{crypto.annualReturn.toFixed(2)}%
+                {stockData.annual_return ? `${stockData.annual_return >= 0 ? '+' : ''}${stockData.annual_return.toFixed(2)}%` : '--%'}
               </Typography>
             </Box>
           )}
@@ -462,15 +474,15 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
           {localDisplayOptions.showVolatility && (
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="body2" color="#9ca3af">
-                {timeframe === '1d' ? 'Daily Volatility (%)' : 'Annualized Volatility (%)'}:
+                Annualized Volatility (%):
               </Typography>
               <Typography variant="body2" color="white" fontWeight={600}>
-                {crypto.annualizedVolatility.toFixed(2)}%
+                {stockData.volatility ? `${stockData.volatility.toFixed(2)}%` : '--'}
               </Typography>
             </Box>
-                     )}
-         </Box>
-       )}
+          )}
+        </Box>
+      )}
 
       {/* Settings Menu */}
       <Menu
@@ -572,30 +584,39 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
             <FormControlLabel
               control={
                 <Checkbox
+                  checked={localDisplayOptions.showWeekReturn}
+                  onChange={() => handleDisplayOptionsChange('showWeekReturn')}
+                />
+              }
+              label="7-Day Return"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
                   checked={localDisplayOptions.showAnnualReturn}
                   onChange={() => handleDisplayOptionsChange('showAnnualReturn')}
                 />
               }
               label="Annual Return"
             />
-                         <FormControlLabel
-               control={
-                 <Checkbox
-                   checked={localDisplayOptions.showVolatility}
-                   onChange={() => handleDisplayOptionsChange('showVolatility')}
-                 />
-               }
-               label="Volatility"
-             />
-             <FormControlLabel
-               control={
-                 <Checkbox
-                   checked={localDisplayOptions.showChart}
-                   onChange={() => handleDisplayOptionsChange('showChart')}
-                 />
-               }
-               label="Price Chart"
-             />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={localDisplayOptions.showVolatility}
+                  onChange={() => handleDisplayOptionsChange('showVolatility')}
+                />
+              }
+              label="Volatility"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={localDisplayOptions.showChart}
+                  onChange={() => handleDisplayOptionsChange('showChart')}
+                />
+              }
+              label="Price Chart"
+            />
           </Box>
         </DialogContent>
         <DialogActions>
@@ -606,4 +627,4 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   );
 };
 
-export default CryptoTile;
+export default StockTile;
