@@ -26,31 +26,45 @@ def lambda_handler(event, context):
     - Chart data for visualization
     """
     try:
+        logger.info(f"=== LAMBDA HANDLER START ===")
         logger.info(f"Event received: {event}")
+        logger.info(f"Event type: {type(event)}")
         
         # Parse the event to get parameters
         if isinstance(event, str):
+            logger.info("Event is string, parsing JSON")
             event = json.loads(event)
+            logger.info(f"Parsed event: {event}")
         
         # Extract parameters from event
+        ticker = None
+        period = '1y'
+        
         if event.get('queryStringParameters'):
-            # GET request with query parameters
+            logger.info("Extracting from queryStringParameters")
             ticker = event['queryStringParameters'].get('ticker')
             period = event['queryStringParameters'].get('period', '1y')
+            logger.info(f"From queryStringParameters - ticker: {ticker}, period: {period}")
         elif event.get('body'):
-            # POST request with body
+            logger.info("Extracting from body")
             body = event['body']
             if isinstance(body, str):
+                logger.info("Body is string, parsing JSON")
                 body = json.loads(body)
             ticker = body.get('ticker')
             period = body.get('period', '1y')
+            logger.info(f"From body - ticker: {ticker}, period: {period}")
         else:
-            # Direct event parameters (fallback)
+            logger.info("Extracting from direct event parameters")
             ticker = event.get('ticker')
             period = event.get('period', '1y')
+            logger.info(f"From direct params - ticker: {ticker}, period: {period}")
+        
+        logger.info(f"Final extracted values - ticker: {ticker}, period: {period}")
         
         # Validate required parameters
         if not ticker:
+            logger.error("No ticker provided")
             return {
                 'statusCode': 400,
                 'headers': {
@@ -66,10 +80,16 @@ def lambda_handler(event, context):
                 })
             }
         
+        logger.info(f"Calling fetch_stock_stats with ticker={ticker}, period={period}")
+        
         # Fetch stock statistics in crypto stats format for tile compatibility
         stock_stats = fetch_stock_stats(ticker, period)
         
+        logger.info(f"fetch_stock_stats returned: {stock_stats}")
+        logger.info(f"Result type: {type(stock_stats)}")
+        
         if 'error' in stock_stats:
+            logger.error(f"Error in stock_stats: {stock_stats['error']}")
             return {
                 'statusCode': 400,
                 'headers': {
@@ -85,6 +105,9 @@ def lambda_handler(event, context):
                 })
             }
         
+        logger.info(f"=== LAMBDA HANDLER SUCCESS ===")
+        logger.info(f"Returning successful response for {ticker}")
+        
         return {
             'statusCode': 200,
             'headers': {
@@ -98,7 +121,12 @@ def lambda_handler(event, context):
         }
         
     except Exception as e:
-        logger.error(f"Error fetching stock data: {str(e)}")
+        logger.error(f"=== LAMBDA HANDLER ERROR ===")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception message: {str(e)}")
+        logger.error(f"Exception details: {repr(e)}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         
         return {
             'statusCode': 500,
@@ -177,47 +205,92 @@ def fetch_stock_stats(ticker, period="1y"):
         dict: Stock statistics matching crypto stats format
     """
     try:
-        logger.info(f"Fetching stock stats for {ticker} with period {period}")
+        logger.info(f"=== Starting fetch_stock_stats for {ticker} with period {period} ===")
         
         # Create yfinance Ticker object
+        logger.info(f"Creating yfinance Ticker object for {ticker}")
         stock = yf.Ticker(ticker)
         
-        # Get historical data
+        # Try to get basic info first
+        try:
+            logger.info(f"Attempting to get info for {ticker}")
+            info = stock.info
+            logger.info(f"Info retrieved for {ticker}: {type(info)}, keys: {list(info.keys()) if isinstance(info, dict) else 'Not a dict'}")
+        except Exception as info_error:
+            logger.warning(f"Failed to get info for {ticker}: {str(info_error)}")
+        
+        # Get historical data with detailed logging
+        logger.info(f"Attempting to get historical data for {ticker} with period {period}")
         hist = stock.history(period=period)
         
+        logger.info(f"Historical data type: {type(hist)}")
+        logger.info(f"Historical data shape: {hist.shape if hasattr(hist, 'shape') else 'No shape attribute'}")
+        logger.info(f"Historical data empty: {hist.empty if hasattr(hist, 'empty') else 'No empty attribute'}")
+        
+        if hasattr(hist, 'columns'):
+            logger.info(f"Historical data columns: {list(hist.columns)}")
+        
+        if hasattr(hist, 'index'):
+            logger.info(f"Historical data index type: {type(hist.index)}")
+            logger.info(f"Historical data index length: {len(hist.index)}")
+        
         if hist.empty:
+            logger.error(f"No data found for ticker {ticker} with period {period}")
             return {"error": f"No data found for ticker {ticker}"}
         
+        # Log first few rows of data
+        logger.info(f"First 3 rows of historical data:\n{hist.head(3)}")
+        logger.info(f"Last 3 rows of historical data:\n{hist.tail(3)}")
+        
+        # Check for Close column specifically
+        if 'Close' not in hist.columns:
+            logger.error(f"Close column not found in historical data for {ticker}. Available columns: {list(hist.columns)}")
+            return {"error": f"Close price data not available for {ticker}"}
+        
         # Get current price and previous close
+        logger.info(f"Getting current price and previous close for {ticker}")
         current_price = hist['Close'].iloc[-1]
         previous_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
         
+        logger.info(f"Current price: {current_price}, Previous close: {previous_close}")
+        
         # Calculate 24h price change (current vs previous day)
         price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
+        logger.info(f"24h price change: {price_change_24h}%")
         
         # Calculate annual return (from start of period to current)
         start_price = hist['Close'].iloc[0]
         annual_return = ((current_price - start_price) / start_price) * 100.0
+        logger.info(f"Annual return: {annual_return}% (start: {start_price}, current: {current_price})")
         
         # Calculate 7-day return
         if len(hist) >= 7:
             week_ago_price = hist['Close'].iloc[-7]
             week_return = ((current_price - week_ago_price) / week_ago_price) * 100.0
+            logger.info(f"7-day return: {week_return}% (week ago: {week_ago_price})")
         else:
             week_return = annual_return  # Fallback to annual return if not enough data
+            logger.info(f"7-day return: {week_return}% (fallback to annual return, insufficient data)")
         
         # Calculate volatility (standard deviation of daily log returns)
+        logger.info(f"Calculating volatility for {ticker}")
         log_returns = np.log(hist['Close'] / hist['Close'].shift(1)).dropna()
+        logger.info(f"Log returns calculated, length: {len(log_returns)}")
+        
         if len(log_returns) > 1:
             daily_std = log_returns.std()
             volatility = daily_std * np.sqrt(252) * 100.0  # Annualized volatility in percentage
+            logger.info(f"Volatility calculated: {volatility}%")
         else:
             volatility = 0.0
+            logger.warning(f"Insufficient data for volatility calculation for {ticker}")
         
         # Prepare chart data in the same format as crypto stats
+        logger.info(f"Preparing chart data for {ticker}")
         chart_data = prepare_chart_data(hist, period)
+        logger.info(f"Chart data prepared, {len(chart_data)} data points")
         
-        return {
+        result = {
             "current_price": round(current_price, 2),
             "price_change_24h": round(price_change_24h, 2),
             "week_return": round(week_return, 2),
@@ -226,8 +299,17 @@ def fetch_stock_stats(ticker, period="1y"):
             "chart_data": chart_data
         }
         
+        logger.info(f"=== Successfully completed fetch_stock_stats for {ticker} ===")
+        logger.info(f"Result: {result}")
+        return result
+        
     except Exception as e:
-        logger.error(f"Error fetching stock stats for {ticker}: {str(e)}")
+        logger.error(f"=== ERROR in fetch_stock_stats for {ticker} ===")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception message: {str(e)}")
+        logger.error(f"Exception details: {repr(e)}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return {"error": f"Error fetching data for {ticker}: {str(e)}"}
 
 def prepare_chart_data(hist_data, period):
@@ -242,6 +324,10 @@ def prepare_chart_data(hist_data, period):
         list: Chart data points
     """
     try:
+        logger.info(f"=== Starting prepare_chart_data for period {period} ===")
+        logger.info(f"Input hist_data type: {type(hist_data)}")
+        logger.info(f"Input hist_data shape: {hist_data.shape if hasattr(hist_data, 'shape') else 'No shape'}")
+        
         chart_data = []
         
         # Limit data points based on period for performance
@@ -252,19 +338,53 @@ def prepare_chart_data(hist_data, period):
             '1y': 365    # Daily data
         }.get(period, 365)
         
+        logger.info(f"Max points for period {period}: {max_points}")
+        
         # Take the last max_points data points
         recent_data = hist_data.tail(max_points)
+        logger.info(f"Recent data shape: {recent_data.shape}")
+        logger.info(f"Recent data index type: {type(recent_data.index)}")
         
-        for date, row in recent_data.iterrows():
-            chart_data.append({
-                'time': int(date.timestamp()),
-                'close': round(row['Close'], 2)
-            })
+        for i, (date, row) in enumerate(recent_data.iterrows()):
+            try:
+                logger.info(f"Processing row {i}: date={date}, type={type(date)}")
+                logger.info(f"Row data: {row}")
+                
+                # Convert date to timestamp
+                if hasattr(date, 'timestamp'):
+                    timestamp = int(date.timestamp())
+                else:
+                    # Fallback for different date types
+                    import pandas as pd
+                    if isinstance(date, pd.Timestamp):
+                        timestamp = int(date.timestamp())
+                    else:
+                        logger.error(f"Unsupported date type: {type(date)}")
+                        continue
+                
+                close_price = round(row['Close'], 2)
+                
+                chart_data.append({
+                    'time': timestamp,
+                    'close': close_price
+                })
+                
+                logger.info(f"Added data point: time={timestamp}, close={close_price}")
+                
+            except Exception as row_error:
+                logger.error(f"Error processing row {i}: {str(row_error)}")
+                logger.error(f"Row data: {row}")
+                continue
         
+        logger.info(f"=== Completed prepare_chart_data, returning {len(chart_data)} data points ===")
         return chart_data
         
     except Exception as e:
-        logger.error(f"Error preparing chart data: {str(e)}")
+        logger.error(f"=== ERROR in prepare_chart_data ===")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception message: {str(e)}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return []
 
 def fetch_quote_data(stock, ticker):
