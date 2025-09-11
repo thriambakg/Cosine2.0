@@ -547,7 +547,7 @@ const UnifiedDashboardPage: React.FC = () => {
               letterSpacing: '1px',
             }}
           >
-            Unified Dashboard
+            {activeDashboard?.name || 'Dashboard'}
           </Typography>
           <Typography 
             variant="body1" 
@@ -556,7 +556,7 @@ const UnifiedDashboardPage: React.FC = () => {
               fontSize: '1rem',
             }}
           >
-            Your personalized financial command center
+            {activeDashboard?.name ? `Your ${activeDashboard.name.toLowerCase()} workspace` : 'Your personalized financial command center'}
           </Typography>
         </Box>
 
