@@ -165,10 +165,21 @@ const StockTile: React.FC<StockTileProps> = ({
       time: point.time,
       price: point.close,
       // Add formatted date for tooltips
-      date: new Date(point.time * 1000).toLocaleDateString()
+      date: new Date(point.time * 1000).toLocaleDateString(),
+      // Add time label if available
+      timeLabel: point.time_label || new Date(point.time * 1000).toLocaleTimeString()
     }));
 
     return { data: transformedData, isRealData: true };
+  };
+
+  // Get chart color based on returns
+  const getChartColor = () => {
+    if (!stockData) return '#10b981'; // Default green
+    
+    // Use the most recent return for color determination
+    const returnValue = stockData.price_change_24h || stockData.week_return || stockData.annual_return || 0;
+    return returnValue >= 0 ? '#22c55e' : '#dc2626'; // Green for positive, red for negative
   };
 
   const { data: chartData, isRealData } = getChartData();
@@ -355,6 +366,10 @@ const StockTile: React.FC<StockTileProps> = ({
                     fontSize={10}
                     tick={{ fill: '#9ca3af' }}
                     axisLine={{ stroke: '#374151' }}
+                    tickFormatter={(value) => {
+                      const dataPoint = chartData.find(d => d.time === value);
+                      return dataPoint?.timeLabel || new Date(value * 1000).toLocaleTimeString();
+                    }}
                   />
                   <YAxis 
                     stroke="#9ca3af" 
@@ -380,7 +395,7 @@ const StockTile: React.FC<StockTileProps> = ({
                       borderRadius: '4px',
                       color: 'white'
                     }}
-                    labelStyle={{ color: '#10b981' }}
+                    labelStyle={{ color: getChartColor() }}
                     formatter={(value) => {
                       // Format tooltip values based on price range
                       const price = Number(value);
@@ -398,10 +413,10 @@ const StockTile: React.FC<StockTileProps> = ({
                   <Line
                     type="monotone"
                     dataKey="price"
-                    stroke="#10b981"
+                    stroke={getChartColor()}
                     strokeWidth={2}
                     dot={false}
-                    activeDot={{ r: 4, fill: '#10b981' }}
+                    activeDot={{ r: 4, fill: getChartColor() }}
                   />
                 </LineChart>
               </ResponsiveContainer>

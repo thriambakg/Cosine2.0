@@ -218,19 +218,29 @@ def fetch_stock_data_fallback(ticker, period="1y"):
         # Yahoo Finance API endpoints
         base_url = "https://query1.finance.yahoo.com/v8/finance/chart"
         
-        # Map period to Yahoo Finance parameters
+        # Map period to Yahoo Finance parameters and calculate proper date ranges
+        import time as time_module
+        from datetime import datetime, timedelta
+        
+        now = datetime.now()
         period_map = {
-            '1d': '1d',
-            '7d': '5d', 
-            '30d': '1mo',
-            '1y': '1y'
+            '1d': {'days': 1, 'interval': '1m'},
+            '7d': {'days': 7, 'interval': '1h'},
+            '30d': {'days': 30, 'interval': '1d'},
+            '1y': {'days': 365, 'interval': '1d'}
         }
         
-        yahoo_period = period_map.get(period, '1y')
-        interval = '1d' if period in ['30d', '1y'] else '1m'
+        period_config = period_map.get(period, period_map['1y'])
+        days_back = period_config['days']
+        interval = period_config['interval']
         
-        # Construct URL
-        url = f"{base_url}/{ticker}?period1=-1&period2=9999999999&interval={interval}&includePrePost=true&events=div%2Csplit"
+        # Calculate proper date range
+        start_date = now - timedelta(days=days_back)
+        period1 = int(start_date.timestamp())
+        period2 = int(now.timestamp())
+        
+        # Construct URL with proper date range
+        url = f"{base_url}/{ticker}?period1={period1}&period2={period2}&interval={interval}&includePrePost=true&events=div%2Csplit"
         
         logger.info(f"Making HTTP request to: {url}")
         
@@ -303,34 +313,83 @@ def fetch_stock_data_fallback(ticker, period="1y"):
         
         # Calculate statistics
         current_price = df['close'].iloc[-1]
-        previous_close = df['close'].iloc[-2] if len(df) > 1 else current_price
         
-        # Calculate returns
-        price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
+        # Calculate 24h return (last 2 data points)
+        if len(df) >= 2:
+            previous_close = df['close'].iloc[-2]
+            price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
+        else:
+            price_change_24h = 0.0
         
+        # Calculate period return (from start to current)
         start_price = df['close'].iloc[0]
-        annual_return = ((current_price - start_price) / start_price) * 100.0
+        period_return = ((current_price - start_price) / start_price) * 100.0
         
-        # Calculate 7-day return
-        if len(df) >= 7:
-            week_ago_price = df['close'].iloc[-7]
+        # Calculate 7-day return (last 7 data points or appropriate for timeframe)
+        if period == '1d':
+            # For 1d, use last 2 hours (120 minutes) as "7-day" equivalent
+            week_points = min(120, len(df) - 1)
+        elif period == '7d':
+            # For 7d, use last 7 hours
+            week_points = min(7, len(df) - 1)
+        elif period == '30d':
+            # For 30d, use last 7 days
+            week_points = min(7, len(df) - 1)
+        else:  # 1y
+            # For 1y, use last 7 days
+            week_points = min(7, len(df) - 1)
+        
+        if len(df) > week_points:
+            week_ago_price = df['close'].iloc[-week_points-1]
             week_return = ((current_price - week_ago_price) / week_ago_price) * 100.0
         else:
-            week_return = annual_return
+            week_return = period_return
         
-        # Calculate volatility
+        # For annualized return, scale based on period
+        if period == '1d':
+            annual_return = period_return * 365  # Scale daily return to annual
+        elif period == '7d':
+            annual_return = period_return * (365/7)  # Scale weekly return to annual
+        elif period == '30d':
+            annual_return = period_return * (365/30)  # Scale monthly return to annual
+        else:  # 1y
+            annual_return = period_return  # Already annual
+        
+        # Calculate volatility (annualized)
         log_returns = np.log(df['close'] / df['close'].shift(1)).dropna()
         if len(log_returns) > 1:
-            daily_std = log_returns.std()
-            volatility = daily_std * np.sqrt(252) * 100.0
+            if period == '1d':
+                # For 1d data (minute intervals), scale to daily volatility
+                volatility = log_returns.std() * np.sqrt(1440) * 100.0  # 1440 minutes in a day
+            elif period == '7d':
+                # For 7d data (hourly intervals), scale to daily volatility
+                volatility = log_returns.std() * np.sqrt(24) * 100.0  # 24 hours in a day
+            else:
+                # For daily data, standard annualized volatility
+                volatility = log_returns.std() * np.sqrt(252) * 100.0  # 252 trading days
         else:
             volatility = 0.0
         
-        # Prepare chart data
+        # Prepare chart data with proper formatting
         chart_data = []
         for date, row in df.iterrows():
+            # Format timestamp to match crypto chart format
+            if period == '1d':
+                # For 1d, show time (HH:MM)
+                time_label = date.strftime('%H:%M')
+            elif period == '7d':
+                # For 7d, show day and time
+                time_label = date.strftime('%m/%d %H:%M')
+            elif period == '30d':
+                # For 30d, show month/day
+                time_label = date.strftime('%m/%d')
+            else:  # 1y
+                # For 1y, show month/year
+                time_label = date.strftime('%m/%y')
+            
             chart_data.append({
                 'time': int(date.timestamp()),
+                'time_label': time_label,
                 'close': round(row['close'], 2)
             })
         
@@ -437,23 +496,43 @@ def fetch_stock_stats(ticker, period="1y"):
         annual_return = ((current_price - start_price) / start_price) * 100.0
         logger.info(f"Annual return: {annual_return}% (start: {start_price}, current: {current_price})")
         
-        # Calculate 7-day return
-        if len(hist) >= 7:
-            week_ago_price = hist['Close'].iloc[-7]
+        # Calculate 7-day return (appropriate for timeframe)
+        if period == '1d':
+            # For 1d, use last 2 hours (120 minutes) as "7-day" equivalent
+            week_points = min(120, len(hist) - 1)
+        elif period == '7d':
+            # For 7d, use last 7 hours
+            week_points = min(7, len(hist) - 1)
+        elif period == '30d':
+            # For 30d, use last 7 days
+            week_points = min(7, len(hist) - 1)
+        else:  # 1y
+            # For 1y, use last 7 days
+            week_points = min(7, len(hist) - 1)
+        
+        if len(hist) > week_points:
+            week_ago_price = hist['Close'].iloc[-week_points-1]
             week_return = ((current_price - week_ago_price) / week_ago_price) * 100.0
             logger.info(f"7-day return: {week_return}% (week ago: {week_ago_price})")
         else:
             week_return = annual_return  # Fallback to annual return if not enough data
             logger.info(f"7-day return: {week_return}% (fallback to annual return, insufficient data)")
         
-        # Calculate volatility (standard deviation of daily log returns)
+        # Calculate volatility (annualized based on period)
         logger.info(f"Calculating volatility for {ticker}")
         log_returns = np.log(hist['Close'] / hist['Close'].shift(1)).dropna()
         logger.info(f"Log returns calculated, length: {len(log_returns)}")
         
         if len(log_returns) > 1:
-            daily_std = log_returns.std()
-            volatility = daily_std * np.sqrt(252) * 100.0  # Annualized volatility in percentage
+            if period == '1d':
+                # For 1d data (minute intervals), scale to daily volatility
+                volatility = log_returns.std() * np.sqrt(1440) * 100.0  # 1440 minutes in a day
+            elif period == '7d':
+                # For 7d data (hourly intervals), scale to daily volatility
+                volatility = log_returns.std() * np.sqrt(24) * 100.0  # 24 hours in a day
+            else:
+                # For daily data, standard annualized volatility
+                volatility = log_returns.std() * np.sqrt(252) * 100.0  # 252 trading days
             logger.info(f"Volatility calculated: {volatility}%")
         else:
             volatility = 0.0
@@ -551,12 +630,27 @@ def prepare_chart_data(hist_data, period):
                 
                 close_price = round(row['Close'], 2)
                 
+                # Format time label based on period
+                if period == '1d':
+                    # For 1d, show time (HH:MM)
+                    time_label = date.strftime('%H:%M')
+                elif period == '7d':
+                    # For 7d, show day and time
+                    time_label = date.strftime('%m/%d %H:%M')
+                elif period == '30d':
+                    # For 30d, show month/day
+                    time_label = date.strftime('%m/%d')
+                else:  # 1y
+                    # For 1y, show month/year
+                    time_label = date.strftime('%m/%y')
+                
                 chart_data.append({
                     'time': timestamp,
+                    'time_label': time_label,
                     'close': close_price
                 })
                 
-                logger.info(f"Added data point: time={timestamp}, close={close_price}")
+                logger.info(f"Added data point: time={timestamp}, time_label={time_label}, close={close_price}")
                 
             except Exception as row_error:
                 logger.error(f"Error processing row {i}: {str(row_error)}")
