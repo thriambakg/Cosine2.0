@@ -182,6 +182,31 @@ const StockTile: React.FC<StockTileProps> = ({
     return returnValue >= 0 ? '#22c55e' : '#dc2626'; // Green for positive, red for negative
   };
 
+  // Get timeframe-based return value for price marker
+  const getTimeframeReturn = () => {
+    if (!stockData) return 0;
+    
+    // Return the appropriate return based on timeframe
+    switch (timeframe) {
+      case '1d': return stockData.price_change_24h || 0;
+      case '7d': return stockData.week_return || 0;
+      case '30d': return stockData.week_return || 0; // Use week return for 30d as well
+      case '1y': return stockData.annual_return || 0;
+      default: return stockData.price_change_24h || 0;
+    }
+  };
+
+  // Get timeframe label for price marker
+  const getTimeframeLabel = () => {
+    switch (timeframe) {
+      case '1d': return '24h';
+      case '7d': return '7d';
+      case '30d': return '30d';
+      case '1y': return '1y';
+      default: return '24h';
+    }
+  };
+
   const { data: chartData, isRealData } = getChartData();
 
   // Calculate appropriate Y-axis domain based on price range
@@ -436,9 +461,26 @@ const StockTile: React.FC<StockTileProps> = ({
       {stockData && !isLoading && !error && (
         <Box>
           {localDisplayOptions.showPrice && (
-            <Typography variant="h5" color="white" fontWeight={700} sx={{ mb: 1 }}>
-              ${stockData.current_price ? stockData.current_price.toFixed(2) : '--'}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1 }}>
+              <Typography variant="h5" color="white" fontWeight={700}>
+                ${stockData.current_price ? stockData.current_price.toFixed(2) : '--'}
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626',
+                  fontWeight: 600,
+                  fontSize: '0.75rem',
+                  backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                  px: 1,
+                  py: 0.25,
+                  borderRadius: '4px',
+                  border: `1px solid ${getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626'}`
+                }}
+              >
+                {getTimeframeReturn() >= 0 ? '+' : ''}{getTimeframeReturn().toFixed(2)}% ({getTimeframeLabel()})
+              </Typography>
+            </Box>
           )}
 
           {localDisplayOptions.show24hChange && (

@@ -200,6 +200,26 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     return [domainMin, domainMax];
   };
 
+  // Get timeframe-based return value for price marker
+  const getTimeframeReturn = () => {
+    if (!crypto) return 0;
+    
+    // For crypto, we use return24h for all timeframes as it represents the period return
+    // The crypto API already provides the appropriate return for the selected timeframe
+    return crypto.return24h || 0;
+  };
+
+  // Get timeframe label for price marker
+  const getTimeframeLabel = () => {
+    switch (timeframe) {
+      case '1d': return '24h';
+      case '7d': return '7d';
+      case '30d': return '30d';
+      case '1y': return '1y';
+      default: return '24h';
+    }
+  };
+
      return (
     <Box
       sx={{
@@ -422,9 +442,26 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
        {crypto && !isLoading && !error && (
          <Box>
            {localDisplayOptions.showPrice && (
-             <Typography variant="h5" color="white" fontWeight={700} sx={{ mb: 1 }}>
-               ${crypto.currentPrice.toFixed(2)}
-             </Typography>
+             <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1 }}>
+               <Typography variant="h5" color="white" fontWeight={700}>
+                 ${crypto.currentPrice.toFixed(2)}
+               </Typography>
+               <Typography
+                 variant="caption"
+                 sx={{
+                   color: getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626',
+                   fontWeight: 600,
+                   fontSize: '0.75rem',
+                   backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                   px: 1,
+                   py: 0.25,
+                   borderRadius: '4px',
+                   border: `1px solid ${getTimeframeReturn() >= 0 ? '#22c55e' : '#dc2626'}`
+                 }}
+               >
+                 {getTimeframeReturn() >= 0 ? '+' : ''}{getTimeframeReturn().toFixed(2)}% ({getTimeframeLabel()})
+               </Typography>
+             </Box>
            )}
 
           {localDisplayOptions.show24hChange && (
