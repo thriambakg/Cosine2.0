@@ -633,6 +633,7 @@ def lambda_handler(event, context):
                 'details': str(e)
             })
         }
+        
     except Exception as e:
         logger.error(f"Lambda handler error: {e}")
         return {
