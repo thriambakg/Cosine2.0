@@ -2,10 +2,21 @@
 # modules/lambda/main.tf
 
 # Data source for creating zip file from source directory
+# IMPROVED: Better change detection and path handling
 data "archive_file" "lambda_zip" {
   type        = "zip"
   source_dir  = var.source_dir
   output_path = "${var.source_dir}/deployment.zip"
+
+  # Exclude files that shouldn't trigger rebuilds
+  excludes = [
+    "deployment.zip", # Exclude the output file itself
+    "__pycache__/**", # Exclude Python cache files
+    "*.pyc",          # Exclude compiled Python files
+    ".git/**",        # Exclude git files if present
+    ".DS_Store",      # Exclude macOS files
+    "Thumbs.db"       # Exclude Windows files
+  ]
 }
 
 # IAM Role for Lambda execution
@@ -63,4 +74,28 @@ resource "aws_lambda_function" "function" {
   tags = var.tags
 }
 
+# Outputs
+output "function_name" {
+  description = "Name of the Lambda function"
+  value       = aws_lambda_function.function.function_name
+}
 
+output "function_arn" {
+  description = "ARN of the Lambda function"
+  value       = aws_lambda_function.function.arn
+}
+
+output "function_invoke_arn" {
+  description = "Invoke ARN of the Lambda function"
+  value       = aws_lambda_function.function.invoke_arn
+}
+
+output "source_code_hash" {
+  description = "Base64-encoded SHA256 hash of the deployment package"
+  value       = aws_lambda_function.function.source_code_hash
+}
+
+output "deployment_package_path" {
+  description = "Path to the deployment package"
+  value       = data.archive_file.lambda_zip.output_path
+}
