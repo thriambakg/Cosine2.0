@@ -979,8 +979,8 @@ module "portfolio_wrapper_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    ENVIRONMENT                      = var.environment
+    LOG_LEVEL                        = var.environment == "development" ? "DEBUG" : "INFO"
     PORTFOLIO_ANALYSIS_FUNCTION_NAME = module.portfolio_analysis_lambda.function_name
   }
 
@@ -1118,8 +1118,8 @@ module "robinhood_integration_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    ENVIRONMENT                      = var.environment
+    LOG_LEVEL                        = var.environment == "development" ? "DEBUG" : "INFO"
     PORTFOLIO_ANALYSIS_FUNCTION_NAME = module.portfolio_analysis_lambda.function_name
   }
 
