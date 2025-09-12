@@ -44,6 +44,9 @@ data "terraform_remote_state" "base_infra" {
   }
 }
 
+# Data source for current AWS account ID
+data "aws_caller_identity" "current" {}
+
 # Data sources for account and region info - Not needed for minimal setup
 # These can be added back if needed for future features
 
