@@ -404,28 +404,6 @@ resource "aws_iam_policy" "lambda_kms_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for Lambda functions to invoke other Lambda functions
-resource "aws_iam_policy" "lambda_invoke_policy" {
-  name        = "${var.project_name}-lambda-invoke-policy-${var.environment}"
-  description = "Policy for Lambda functions to invoke other Lambda functions"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "lambda:InvokeFunction"
-        ]
-        Resource = [
-          "arn:aws:lambda:${var.aws_region}:*:function:${var.project_name}-chat-agent-${var.environment}"
-        ]
-      }
-    ]
-  })
-
-  tags = var.common_tags
-}
 
 # IAM Policy for Lambda functions to manage WebSocket connections
 resource "aws_iam_policy" "lambda_websocket_policy" {
