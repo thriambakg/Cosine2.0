@@ -10,10 +10,74 @@ import pandas as pd
 import logging
 from datetime import datetime
 import volatility_fetcher as fv
+import requests
+import time
+import random
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def fetch_stock_data_fallback(ticker, period="1y"):
+    """
+    Fallback method to fetch stock data directly from Yahoo Finance API
+    when yfinance fails due to rate limiting or other issues.
+    """
+    try:
+        # Add random delay to avoid rate limiting
+        time.sleep(random.uniform(0.5, 1.5))
+        
+        # Yahoo Finance API endpoint
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        
+        # Set period parameters
+        period_map = {
+            "1d": {"range": "1d", "interval": "1m"},
+            "7d": {"range": "7d", "interval": "1d"},
+            "30d": {"range": "30d", "interval": "1d"},
+            "1y": {"range": "1y", "interval": "1d"},
+            "6mo": {"range": "6mo", "interval": "1d"}
+        }
+        
+        params = period_map.get(period, period_map["1y"])
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        if 'chart' not in data or not data['chart']['result']:
+            raise Exception(f"No data found for {ticker}")
+        
+        result = data['chart']['result'][0]
+        timestamps = result['timestamp']
+        quotes = result['indicators']['quote'][0]
+        closes = quotes['close']
+        
+        # Create DataFrame
+        df = pd.DataFrame({
+            'Close': closes,
+            'Date': [datetime.fromtimestamp(ts) for ts in timestamps]
+        })
+        df = df.set_index('Date').dropna()
+        
+        if df.empty:
+            raise Exception(f"No price data found for {ticker}")
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"Fallback method failed for {ticker}: {e}")
+        raise
 
 def calculate_correlation(tickers, period="1y"):
     """
@@ -26,20 +90,156 @@ def calculate_correlation(tickers, period="1y"):
     Returns:
     pd.DataFrame: A correlation matrix of stock returns.
     """
-    # Fetch historical data for the given tickers
-    stock_data = yf.download(tickers, period=period)['Close']
+    # Try yfinance first, then fallback
+    try:
+        stock_data = yf.download(tickers, period=period)['Close']
+        if not stock_data.empty:
+            daily_returns = stock_data.pct_change().dropna()
+            return daily_returns.corr()
+    except Exception as e:
+        logger.warning(f"yfinance failed for correlation calculation: {e}")
     
-    # Ensure that the data is not empty
-    if stock_data.empty:
-        raise ValueError(f"Could not retrieve data for {', '.join(tickers)}")
-
-    # Calculate daily returns for each stock
-    daily_returns = stock_data.pct_change().dropna()
-
-    # Calculate the correlation matrix for the daily returns
+    # Fallback: fetch each ticker individually
+    stock_data_list = []
+    for ticker in tickers:
+        try:
+            df = fetch_stock_data_fallback(ticker, period)
+            stock_data_list.append(df)
+        except Exception as e:
+            logger.error(f"Failed to fetch data for {ticker}: {e}")
+            raise ValueError(f"Could not retrieve data for {ticker}")
+    
+    # Combine data and calculate correlation
+    combined_data = pd.concat([df['Close'] for df in stock_data_list], axis=1, keys=tickers)
+    daily_returns = combined_data.pct_change().dropna()
     correlation_matrix = daily_returns.corr()
-
+    
     return correlation_matrix
+
+def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
+    """
+    Calculate comprehensive portfolio metrics including risk and return analysis.
+    
+    Args:
+    portfolio_tuples (list): List of tuples with (stock_ticker, number_of_shares, current_price)
+    period (str): Analysis period
+    
+    Returns:
+    dict: Portfolio metrics including total value, expected return, volatility, Sharpe ratio
+    """
+    try:
+        logger.info(f"Calculating portfolio metrics for {len(portfolio_tuples)} positions")
+        
+        # Extract tickers and calculate weights
+        tickers = [ticker for ticker, _, _ in portfolio_tuples]
+        total_portfolio_value = sum(shares * price for _, shares, price in portfolio_tuples)
+        
+        # Calculate weights
+        weights = {}
+        stock_details = {}
+        
+        for ticker, shares, price in portfolio_tuples:
+            position_value = shares * price
+            weight = position_value / total_portfolio_value
+            weights[ticker] = weight
+            
+            stock_details[ticker] = {
+                'shares': shares,
+                'current_price': price,
+                'total_value': position_value,
+                'weight': weight,
+                'annual_return': 0.0,  # Will be calculated below
+                'annual_volatility': 0.0  # Will be calculated below
+            }
+        
+        # Fetch historical data for all tickers with fallback
+        stock_data_dict = {}
+        for ticker in tickers:
+            try:
+                # Try yfinance first
+                stock = yf.Ticker(ticker)
+                df = stock.history(period=period)
+                
+                if df.empty:
+                    raise Exception("Empty data from yfinance")
+                    
+                stock_data_dict[ticker] = df
+                logger.info(f"Successfully fetched data for {ticker} using yfinance")
+                
+            except Exception as e:
+                logger.warning(f"yfinance failed for {ticker}: {e}, trying fallback")
+                try:
+                    df = fetch_stock_data_fallback(ticker, period)
+                    stock_data_dict[ticker] = df
+                    logger.info(f"Successfully fetched data for {ticker} using fallback")
+                except Exception as fallback_error:
+                    logger.error(f"Both yfinance and fallback failed for {ticker}: {fallback_error}")
+                    raise Exception(f"No stock data could be retrieved. Check stock tickers.")
+        
+        # Calculate individual stock metrics
+        annual_returns = []
+        volatilities = []
+        
+        for ticker in tickers:
+            df = stock_data_dict[ticker]
+            
+            # Calculate annual return
+            if len(df) > 1:
+                total_return = (df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1
+                annual_return = total_return * (252 / len(df))  # Annualized
+            else:
+                annual_return = 0.0
+            
+            # Calculate volatility
+            if len(df) > 1:
+                log_returns = np.log(df['Close'] / df['Close'].shift(1)).dropna()
+                volatility = log_returns.std() * np.sqrt(252)  # Annualized
+            else:
+                volatility = 0.0
+            
+            annual_returns.append(annual_return)
+            volatilities.append(volatility)
+            
+            # Update stock details
+            stock_details[ticker]['annual_return'] = annual_return * 100  # Convert to percentage
+            stock_details[ticker]['annual_volatility'] = volatility * 100  # Convert to percentage
+        
+        # Calculate portfolio metrics
+        portfolio_expected_return = sum(weights[ticker] * annual_returns[i] for i, ticker in enumerate(tickers)) * 100
+        
+        # Calculate portfolio volatility using correlation matrix
+        try:
+            correlation_matrix = calculate_correlation(tickers, period)
+            portfolio_variance = 0
+            for i, ticker1 in enumerate(tickers):
+                for j, ticker2 in enumerate(tickers):
+                    portfolio_variance += (weights[ticker1] * weights[ticker2] * 
+                                         volatilities[i] * volatilities[j] * 
+                                         correlation_matrix.iloc[i, j])
+            portfolio_volatility = np.sqrt(portfolio_variance) * 100
+        except Exception as e:
+            logger.warning(f"Correlation calculation failed: {e}, using simplified volatility")
+            # Simplified volatility calculation (assumes no correlation)
+            portfolio_variance = sum(weights[ticker] * (volatilities[i] ** 2) 
+                                   for i, ticker in enumerate(tickers))
+            portfolio_volatility = np.sqrt(portfolio_variance) * 100
+        
+        # Calculate Sharpe ratio (assuming risk-free rate of 2%)
+        risk_free_rate = 0.02
+        sharpe_ratio = (portfolio_expected_return/100 - risk_free_rate) / (portfolio_volatility/100) if portfolio_volatility > 0 else 0
+        
+        return {
+            'total_portfolio_value': total_portfolio_value,
+            'portfolio_expected_return': portfolio_expected_return,
+            'portfolio_volatility': portfolio_volatility,
+            'sharpe_ratio': sharpe_ratio,
+            'stock_details': stock_details,
+            'individual_stocks': tickers
+        }
+        
+    except Exception as e:
+        logger.error(f"Portfolio metrics calculation failed: {e}")
+        raise Exception(f"Failed to calculate portfolio metrics: {str(e)}")
 
 def calculate_portfolio_variance(portfolio_weights, annual_volatilities, correlation_matrix):
     """
