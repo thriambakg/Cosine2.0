@@ -22,3 +22,13 @@ output "execution_role_name" {
   description = "Name of the Lambda execution role"
   value       = aws_iam_role.lambda_execution_role.name
 }
+
+output "source_code_hash" {
+  description = "Base64-encoded SHA256 hash of the deployment package"
+  value       = aws_lambda_function.function.source_code_hash
+}
+
+output "deployment_package_path" {
+  description = "Path to the deployment package"
+  value       = data.archive_file.lambda_zip.output_path
+}
