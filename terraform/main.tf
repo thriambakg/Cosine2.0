@@ -303,7 +303,7 @@ module "api_gateway" {
 # IAM Policy for Lambda functions to access Secrets Manager
 resource "aws_iam_policy" "lambda_secrets_policy" {
   name        = "${var.project_name}-lambda-secrets-policy-${var.environment}"
-  description = "Policy for Lambda functions to access Secrets Manager"
+  description = "Policy for Lambda functions to access Secrets Manager and CloudWatch Logs"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -316,6 +316,19 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
         ]
         Resource = [
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams"
+        ]
+        Resource = [
+          "arn:aws:logs:*:*:*"
         ]
       }
     ]

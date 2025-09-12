@@ -18,6 +18,11 @@ import random
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Use print statements for debugging since CloudWatch Logs permissions may be limited
+def debug_print(message):
+    """Print function that works even if CloudWatch Logs permissions are limited"""
+    print(f"[DEBUG] {message}")
+
 def fetch_stock_data_fallback(ticker, period="1y"):
     """
     Fallback method to fetch stock data directly from Yahoo Finance API
@@ -191,7 +196,7 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
     dict: Portfolio metrics including total value, expected return, volatility, Sharpe ratio
     """
     try:
-        logger.info(f"Calculating portfolio metrics for {len(portfolio_tuples)} positions")
+        debug_print(f"Calculating portfolio metrics for {len(portfolio_tuples)} positions")
         
         # Extract tickers and calculate weights
         tickers = [ticker for ticker, _, _ in portfolio_tuples]
@@ -217,38 +222,38 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
         
         # Fetch historical data for all tickers with fallback
         stock_data_dict = {}
-        logger.info(f"Starting data fetch for tickers: {tickers}")
+        debug_print(f"Starting data fetch for tickers: {tickers}")
         
         for ticker in tickers:
-            logger.info(f"Processing ticker: {ticker}")
+            debug_print(f"Processing ticker: {ticker}")
             try:
                 # Try yfinance first
-                logger.info(f"Attempting yfinance fetch for {ticker} with period: {period}")
+                debug_print(f"Attempting yfinance fetch for {ticker} with period: {period}")
                 stock = yf.Ticker(ticker)
                 df = stock.history(period=period)
                 
-                logger.info(f"yfinance response for {ticker}: shape={df.shape}, columns={list(df.columns)}")
+                debug_print(f"yfinance response for {ticker}: shape={df.shape}, columns={list(df.columns)}")
                 
                 if df.empty:
-                    logger.warning(f"Empty DataFrame returned from yfinance for {ticker}")
+                    debug_print(f"Empty DataFrame returned from yfinance for {ticker}")
                     raise Exception("Empty data from yfinance")
                     
                 stock_data_dict[ticker] = df
-                logger.info(f"Successfully fetched data for {ticker} using yfinance: {len(df)} records")
+                debug_print(f"Successfully fetched data for {ticker} using yfinance: {len(df)} records")
                 
             except Exception as e:
-                logger.error(f"yfinance failed for {ticker}: {str(e)} (type: {type(e).__name__})")
-                logger.info(f"Attempting fallback method for {ticker}")
+                debug_print(f"yfinance failed for {ticker}: {str(e)} (type: {type(e).__name__})")
+                debug_print(f"Attempting fallback method for {ticker}")
                 try:
                     df = fetch_stock_data_fallback(ticker, period)
                     stock_data_dict[ticker] = df
-                    logger.info(f"Successfully fetched data for {ticker} using fallback: {len(df)} records")
+                    debug_print(f"Successfully fetched data for {ticker} using fallback: {len(df)} records")
                 except Exception as fallback_error:
-                    logger.error(f"Fallback method failed for {ticker}: {str(fallback_error)} (type: {type(fallback_error).__name__})")
-                    logger.error(f"Both yfinance and fallback failed for {ticker}")
+                    debug_print(f"Fallback method failed for {ticker}: {str(fallback_error)} (type: {type(fallback_error).__name__})")
+                    debug_print(f"Both yfinance and fallback failed for {ticker}")
                     raise Exception(f"No stock data could be retrieved for {ticker}. Check ticker symbol.")
         
-        logger.info(f"Successfully fetched data for {len(stock_data_dict)} out of {len(tickers)} tickers")
+        debug_print(f"Successfully fetched data for {len(stock_data_dict)} out of {len(tickers)} tickers")
         
         # Calculate individual stock metrics
         annual_returns = []
@@ -463,22 +468,22 @@ def lambda_handler(event, context):
     Returns:
         dict: HTTP response with portfolio analysis or error
     """
-    logger.info("=== Portfolio Analysis Lambda Handler Started ===")
-    logger.info(f"Event keys: {list(event.keys())}")
-    logger.info(f"HTTP Method: {event.get('httpMethod', 'Unknown')}")
+    debug_print("=== Portfolio Analysis Lambda Handler Started ===")
+    debug_print(f"Event keys: {list(event.keys())}")
+    debug_print(f"HTTP Method: {event.get('httpMethod', 'Unknown')}")
     
     try:
         # Parse request body
-        logger.info("Parsing request body")
+        debug_print("Parsing request body")
         if isinstance(event.get('body'), str):
             body = json.loads(event['body'])
-            logger.info("Successfully parsed JSON body")
+            debug_print("Successfully parsed JSON body")
         else:
             body = event.get('body', {})
-            logger.info("Using body as-is (not JSON string)")
+            debug_print("Using body as-is (not JSON string)")
         
-        logger.info(f"Request body keys: {list(body.keys())}")
-        logger.info(f"Request body: {json.dumps(body, indent=2)}")
+        debug_print(f"Request body keys: {list(body.keys())}")
+        debug_print(f"Request body: {json.dumps(body, indent=2)}")
         
         # CORS headers
         headers = {
@@ -558,13 +563,13 @@ def lambda_handler(event, context):
                 }
         
         # Calculate portfolio metrics
-        logger.info(f"Starting portfolio analysis with {len(portfolio_tuples)} positions, period: {period}")
-        logger.info(f"Portfolio tuples: {portfolio_tuples}")
+        debug_print(f"Starting portfolio analysis with {len(portfolio_tuples)} positions, period: {period}")
+        debug_print(f"Portfolio tuples: {portfolio_tuples}")
         
         try:
             portfolio_metrics = calculate_portfolio_metrics(portfolio_tuples, period)
-            logger.info("Portfolio metrics calculation completed successfully")
-            logger.info(f"Portfolio metrics keys: {list(portfolio_metrics.keys())}")
+            debug_print("Portfolio metrics calculation completed successfully")
+            debug_print(f"Portfolio metrics keys: {list(portfolio_metrics.keys())}")
         except Exception as calc_error:
             logger.error(f"Portfolio metrics calculation failed: {str(calc_error)} (type: {type(calc_error).__name__})")
             return {
