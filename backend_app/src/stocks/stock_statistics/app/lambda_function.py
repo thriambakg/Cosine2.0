@@ -3,11 +3,14 @@ import os
 # This prevents the libopenblas64_p-r0-15028c96.3.21.so error
 os.environ['OPENBLAS_CORETYPE'] = 'Haswell'
 
+import json
 import yfinance as yf
 import numpy as np
 import pandas as pd
 import logging
+from datetime import datetime
 import volatility_fetcher as fv
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -158,47 +161,229 @@ def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.05):
         'individual_stocks': stock_tickers
     }
 
-def lambda_function(portfolio_tuples,period="1y"):
+def lambda_handler(event, context):
     """
-    Main function to process portfolio tuples and print results.
+    AWS Lambda handler for portfolio analysis
+    
+    Supports two use cases:
+    1. Robinhood Integration: Receives portfolio data from Robinhood lambda
+    2. Standalone Tool: Receives manual portfolio configuration from frontend
+    
+    Args:
+        event: API Gateway event containing portfolio data
+        context: Lambda context object
+        
+    Returns:
+        dict: HTTP response with portfolio analysis or error
+    """
+    try:
+        # Parse request body
+        if isinstance(event.get('body'), str):
+            body = json.loads(event['body'])
+        else:
+            body = event.get('body', {})
+        
+        # CORS headers
+        headers = {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+        }
+        
+        # Handle preflight requests
+        if event.get('httpMethod') == 'OPTIONS':
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': ''
+            }
+        
+        # Validate input
+        portfolio_data = body.get('portfolio_data')
+        period = body.get('period', '1y')
+        analysis_type = body.get('analysis_type', 'standalone')  # 'robinhood' or 'standalone'
+        
+        if not portfolio_data:
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'Portfolio data is required',
+                    'details': 'Provide portfolio_data as list of [ticker, shares, price] tuples'
+                })
+            }
+        
+        # Validate portfolio data format
+        if not isinstance(portfolio_data, list):
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'Portfolio data must be a list',
+                    'details': 'Expected format: [["AAPL", 10, 190.50], ["GOOGL", 5, 125.75]]'
+                })
+            }
+        
+        # Validate each portfolio entry
+        portfolio_tuples = []
+        for i, entry in enumerate(portfolio_data):
+            if not isinstance(entry, list) or len(entry) != 3:
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': f'Invalid portfolio entry at index {i}',
+                        'details': 'Each entry must be [ticker, shares, price]'
+                    })
+                }
+            
+            ticker, shares, price = entry
+            try:
+                shares = float(shares)
+                price = float(price)
+                portfolio_tuples.append((str(ticker).upper(), shares, price))
+            except (ValueError, TypeError):
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': f'Invalid data types at index {i}',
+                        'details': 'Shares and price must be numbers'
+                    })
+                }
+        
+        # Calculate portfolio metrics
+        logger.info(f"Analyzing portfolio with {len(portfolio_tuples)} positions, period: {period}")
+        portfolio_metrics = calculate_portfolio_metrics(portfolio_tuples, period)
+        
+        if portfolio_metrics is None:
+            return {
+                'statusCode': 500,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'Failed to calculate portfolio metrics',
+                    'details': 'Check that all stock tickers are valid and data is available'
+                })
+            }
+        
+        # Prepare response
+        response_data = {
+            'success': True,
+            'analysis_type': analysis_type,
+            'period': period,
+            'portfolio_metrics': portfolio_metrics,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Add metadata based on analysis type
+        if analysis_type == 'robinhood':
+            response_data['source'] = 'robinhood_integration'
+            response_data['positions_count'] = len(portfolio_tuples)
+        else:
+            response_data['source'] = 'standalone_tool'
+            response_data['positions_count'] = len(portfolio_tuples)
+        
+        return {
+            'statusCode': 200,
+            'headers': headers,
+            'body': json.dumps(response_data)
+        }
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}")
+        return {
+            'statusCode': 400,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': 'Invalid JSON in request body',
+                'details': str(e)
+            })
+        }
+    except Exception as e:
+        logger.error(f"Lambda handler error: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': 'Internal server error',
+                'details': str(e)
+            })
+        }
+
+def lambda_function(portfolio_tuples, period="1y"):
+    """
+    Legacy function for direct portfolio analysis (used by Robinhood integration)
     
     Args:
     portfolio_tuples (list): List of tuples with (stock_ticker, number_of_shares, current_price)
+    period (str): Analysis period
     """
     try:
         # Calculate portfolio metrics
-        portfolio_metrics = calculate_portfolio_metrics(portfolio_tuples,period)
-        
-        # # Print formatted results
-        # print("\n--- Portfolio Analysis ---")
-        # print(f"Total Portfolio Value: ${portfolio_metrics['total_portfolio_value']:,.2f}")
-        # print(f"Portfolio Expected Annual Return: {portfolio_metrics['portfolio_expected_return']:.2f}%")
-        # print(f"Portfolio Volatility (Risk): {portfolio_metrics['portfolio_volatility']:.2f}%")
-        # print(f"Sharpe Ratio: {portfolio_metrics['sharpe_ratio']:.2f}")
-        
-        # print("\nIndividual Stock Details:")
-        # for ticker, details in portfolio_metrics['stock_details'].items():
-        #     print(f"\n{ticker}:")
-        #     print(f"  Shares: {details['shares']}")
-        #     print(f"  Current Price: ${details['current_price']:.2f}")
-        #     print(f"  Total Value: ${details['shares'] * details['current_price']:,.2f}")
-        #     print(f"  Weight: {details['weight']*100:.2f}%")
-        #     print(f"  Annual Return: {details['annual_return']*100:.2f}%")
-        #     print(f"  Annual Volatility: {details['annual_volatility']*100:.2f}%")
+        portfolio_metrics = calculate_portfolio_metrics(portfolio_tuples, period)
         
         return portfolio_metrics
     
     except Exception as e:
-        print(f"Error calculating portfolio metrics: {e}")
         logger.error(f"Portfolio calculation failed: {e}")
         return None
 
-# # Allow direct script execution for testing
-# if __name__ == "__main__":
-#     # Example usage for testing
-#     test_portfolio = [
-#         ('AAPL', 10, 190.50),  # ticker, shares, current price
-#         ('GOOGL', 5, 125.75),
-#         ('MSFT', 7, 340.20)
-#     ]
-#     main(test_portfolio)
+# Allow direct script execution for testing
+if __name__ == "__main__":
+    # Test the lambda handler with a sample portfolio
+    test_event = {
+        'httpMethod': 'POST',
+        'body': json.dumps({
+            'portfolio_data': [
+                ['AAPL', 10, 190.50],  # ticker, shares, current price
+                ['GOOGL', 5, 125.75],
+                ['MSFT', 7, 340.20]
+            ],
+            'period': '1y',
+            'analysis_type': 'standalone'
+        })
+    }
+    
+    # Test standalone analysis
+    print("Testing Standalone Portfolio Analysis:")
+    print("=" * 50)
+    result = lambda_handler(test_event, None)
+    print(f"Status Code: {result['statusCode']}")
+    if result['statusCode'] == 200:
+        response_body = json.loads(result['body'])
+        metrics = response_body['portfolio_metrics']
+        print(f"Total Portfolio Value: ${metrics['total_portfolio_value']:,.2f}")
+        print(f"Expected Return: {metrics['portfolio_expected_return']:.2f}%")
+        print(f"Volatility: {metrics['portfolio_volatility']:.2f}%")
+        print(f"Sharpe Ratio: {metrics['sharpe_ratio']:.2f}")
+    else:
+        print(f"Error: {result['body']}")
+    
+    # Test Robinhood analysis type
+    print("\nTesting Robinhood Integration Format:")
+    print("=" * 50)
+    test_event['body'] = json.dumps({
+        'portfolio_data': [
+            ['TSLA', 3, 240.85],
+            ['AMZN', 2, 145.30]
+        ],
+        'period': '6mo',
+        'analysis_type': 'robinhood'
+    })
+    
+    result = lambda_handler(test_event, None)
+    print(f"Status Code: {result['statusCode']}")
+    if result['statusCode'] == 200:
+        response_body = json.loads(result['body'])
+        print(f"Analysis Type: {response_body['analysis_type']}")
+        print(f"Source: {response_body['source']}")
+        print(f"Positions: {response_body['positions_count']}")
+    else:
+        print(f"Error: {result['body']}")

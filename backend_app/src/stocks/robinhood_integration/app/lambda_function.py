@@ -159,8 +159,36 @@ def handle_portfolio_analysis(body: Dict[str, Any], headers: Dict[str, str]) -> 
         # Get analysis period from request (default to 1 year)
         period = body.get('period', '1y')
         
-        # Use existing portfolio analysis logic
-        portfolio_analysis = calculate_portfolio_metrics(portfolio_positions, period)
+        # Get portfolio analysis function name from environment
+        portfolio_function_name = os.environ.get('PORTFOLIO_ANALYSIS_FUNCTION_NAME')
+        if not portfolio_function_name:
+            raise Exception('PORTFOLIO_ANALYSIS_FUNCTION_NAME environment variable not set')
+        
+        # Use direct Lambda invocation for portfolio analysis
+        import boto3
+        lambda_client = boto3.client('lambda')
+        
+        # Prepare payload for portfolio analysis lambda
+        payload = {
+            'portfolio_data': portfolio_positions,
+            'period': period,
+            'analysis_type': 'robinhood'
+        }
+        
+        # Invoke portfolio analysis lambda directly
+        response = lambda_client.invoke(
+            FunctionName=portfolio_function_name,
+            InvocationType='RequestResponse',
+            Payload=json.dumps(payload)
+        )
+        
+        # Parse response
+        response_payload = json.loads(response['Payload'].read())
+        
+        if response_payload.get('statusCode') == 200:
+            portfolio_analysis = json.loads(response_payload['body'])['portfolio_metrics']
+        else:
+            raise Exception(f"Portfolio analysis failed: {response_payload}")
         
         # Get account info for additional context
         account_info = robinhood_service.get_account_info()

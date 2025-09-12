@@ -1,0 +1,154 @@
+"""
+Portfolio Analysis Wrapper Lambda
+Simple wrapper that receives frontend requests and invokes the portfolio analysis lambda directly
+"""
+
+import json
+import os
+import boto3
+import logging
+from typing import Dict, Any
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    AWS Lambda handler for portfolio analysis wrapper
+    
+    Args:
+        event: API Gateway event containing portfolio data
+        context: Lambda context object
+        
+    Returns:
+        dict: HTTP response with portfolio analysis results
+    """
+    try:
+        # Parse request body
+        if isinstance(event.get('body'), str):
+            body = json.loads(event['body'])
+        else:
+            body = event.get('body', {})
+        
+        # CORS headers
+        headers = {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+        }
+        
+        # Handle preflight requests
+        if event.get('httpMethod') == 'OPTIONS':
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': ''
+            }
+        
+        # Validate input
+        portfolio_data = body.get('portfolio_data')
+        period = body.get('period', '1y')
+        
+        if not portfolio_data:
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'Portfolio data is required',
+                    'details': 'Provide portfolio_data as list of [ticker, shares, price] tuples'
+                })
+            }
+        
+        # Get portfolio analysis function name from environment
+        portfolio_function_name = os.environ.get('PORTFOLIO_ANALYSIS_FUNCTION_NAME')
+        if not portfolio_function_name:
+            raise Exception('PORTFOLIO_ANALYSIS_FUNCTION_NAME environment variable not set')
+        
+        # Invoke portfolio analysis lambda directly
+        lambda_client = boto3.client('lambda')
+        
+        payload = {
+            'portfolio_data': portfolio_data,
+            'period': period,
+            'analysis_type': 'standalone'
+        }
+        
+        logger.info(f"Invoking portfolio analysis lambda '{portfolio_function_name}' with {len(portfolio_data)} positions")
+        
+        response = lambda_client.invoke(
+            FunctionName=portfolio_function_name,
+            InvocationType='RequestResponse',
+            Payload=json.dumps(payload)
+        )
+        
+        # Parse response
+        response_payload = json.loads(response['Payload'].read())
+        
+        if response_payload.get('statusCode') == 200:
+            # Return the portfolio metrics directly
+            portfolio_metrics = json.loads(response_payload['body'])['portfolio_metrics']
+            
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': json.dumps({
+                    'success': True,
+                    'portfolio_metrics': portfolio_metrics,
+                    'timestamp': response_payload.get('timestamp')
+                })
+            }
+        else:
+            return {
+                'statusCode': response_payload.get('statusCode', 500),
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'Portfolio analysis failed',
+                    'details': response_payload.get('body', 'Unknown error')
+                })
+            }
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}")
+        return {
+            'statusCode': 400,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': 'Invalid JSON in request body',
+                'details': str(e)
+            })
+        }
+    except Exception as e:
+        logger.error(f"Lambda handler error: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': 'Internal server error',
+                'details': str(e)
+            })
+        }
+
+# For local testing
+if __name__ == "__main__":
+    test_event = {
+        'httpMethod': 'POST',
+        'body': json.dumps({
+            'portfolio_data': [
+                ['AAPL', 10, 190.50],
+                ['GOOGL', 5, 125.75],
+                ['MSFT', 7, 340.20]
+            ],
+            'period': '1y'
+        })
+    }
+    
+    result = lambda_handler(test_event, None)
+    print(json.dumps(result, indent=2))

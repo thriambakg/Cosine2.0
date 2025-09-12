@@ -121,6 +121,9 @@ module "api_gateway" {
     stock_data = {
       path_part = "stock-data"
     }
+    portfolio = {
+      path_part = "portfolio"
+    }
     dashboard = {
       path_part = "dashboard"
     }
@@ -156,6 +159,15 @@ module "api_gateway" {
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
       lambda_arn              = module.stock_data_lambda.function_arn
+      request_parameters      = {}
+    }
+    # POST method for portfolio analysis (wrapper)
+    portfolio_post = {
+      resource_key            = "portfolio"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.portfolio_wrapper_lambda.function_arn
       request_parameters      = {}
     }
     # GET method for alerts (fetch user alerts)
@@ -237,6 +249,11 @@ module "api_gateway" {
       http_method   = "GET"
       resource_path = "stock-data"
     }
+    portfolio = {
+      function_arn  = module.portfolio_wrapper_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "portfolio"
+    }
     dashboard_get = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "GET"
@@ -277,7 +294,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "3"
+  deployment_trigger = "4"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -296,6 +313,29 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
         ]
         Resource = [
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for Lambda functions to invoke other Lambda functions
+resource "aws_iam_policy" "lambda_invoke_policy" {
+  name        = "${var.project_name}-lambda-invoke-policy-${var.environment}"
+  description = "Policy for Lambda functions to invoke other Lambda functions"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = [
+          "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-*-${var.environment}"
         ]
       }
     ]
@@ -889,6 +929,74 @@ module "cloudfront" {
   depends_on = [data.aws_s3_bucket.static_hosting]
 }
 
+# Portfolio Analysis Lambda Function (Internal - no API Gateway)
+module "portfolio_analysis_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-portfolio-analysis-${var.environment}"
+  description   = "Lambda function for portfolio risk analysis and metrics calculation"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 1024
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/stock_statistics/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Attach core and financial layers
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Portfolio Wrapper Lambda Function (Frontend API)
+module "portfolio_wrapper_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-portfolio-wrapper-${var.environment}"
+  description   = "Lambda function wrapper for frontend portfolio analysis requests"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/portfolio_wrapper/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    PORTFOLIO_ANALYSIS_FUNCTION_NAME = module.portfolio_analysis_lambda.function_name
+  }
+
+  # Attach core layer only
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies for Lambda invocation
+  additional_policy_arns = [
+    aws_iam_policy.lambda_invoke_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
 # Stock Data Lambda Function
 module "stock_data_lambda" {
   source = "./modules/lambda"
@@ -989,6 +1097,43 @@ module "volatility_fetch_lambda" {
   additional_policy_arns = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Robinhood Integration Lambda Function
+module "robinhood_integration_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-robinhood-integration-${var.environment}"
+  description   = "Lambda function for Robinhood API integration and portfolio analysis"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/robinhood_integration/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    PORTFOLIO_ANALYSIS_FUNCTION_NAME = module.portfolio_analysis_lambda.function_name
+  }
+
+  # Attach core and financial layers
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_invoke_policy.arn
   ]
 
   tags = var.common_tags

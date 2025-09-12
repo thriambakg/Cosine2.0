@@ -144,31 +144,35 @@ export const stockDataAPI = {
 // ============================================================================
 
 export interface PortfolioAnalysisRequest {
-  stocks: Array<{
-    ticker: string;
-    shares: number;
-    purchasePrice: number;
-  }>;
-  riskTolerance?: 'low' | 'medium' | 'high';
+  portfolio_data: Array<[string, number, number]>; // [ticker, shares, current_price]
+  period?: '1d' | '7d' | '30d' | '1y' | '6mo';
+  analysis_type?: 'standalone' | 'robinhood';
 }
 
 export interface PortfolioAnalysisResponse {
-  totalValue: number;
-  totalReturn: number;
-  totalReturnPercentage: number;
-  portfolioRisk: number;
-  sharpeRatio: number;
-  maxDrawdown: number;
-  diversificationScore: number;
-  recommendations: string[];
-  stockAnalysis: Array<{
-    ticker: string;
-    currentValue: number;
-    return: number;
-    returnPercentage: number;
-    weight: number;
-    risk: number;
-  }>;
+  success: boolean;
+  analysis_type: 'standalone' | 'robinhood';
+  period: string;
+  portfolio_metrics: {
+    total_portfolio_value: number;
+    portfolio_expected_return: number; // percentage
+    portfolio_volatility: number; // percentage
+    sharpe_ratio: number;
+    stock_details: {
+      [ticker: string]: {
+        shares: number;
+        current_price: number;
+        total_value: number;
+        annual_return: number;
+        annual_volatility: number;
+        weight: number;
+      };
+    };
+    individual_stocks: string[];
+  };
+  source: 'standalone_tool' | 'robinhood_integration';
+  positions_count: number;
+  timestamp: string;
 }
 
 export const portfolioAnalysisAPI = {
