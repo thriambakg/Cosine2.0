@@ -23,12 +23,17 @@ def fetch_stock_data_fallback(ticker, period="1y"):
     Fallback method to fetch stock data directly from Yahoo Finance API
     when yfinance fails due to rate limiting or other issues.
     """
+    logger.info(f"Starting fallback method for {ticker} with period: {period}")
+    
     try:
         # Add random delay to avoid rate limiting
-        time.sleep(random.uniform(0.5, 1.5))
+        delay = random.uniform(0.5, 1.5)
+        logger.info(f"Adding {delay:.2f}s delay before API call")
+        time.sleep(delay)
         
         # Yahoo Finance API endpoint
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        logger.info(f"Fallback API URL: {url}")
         
         # Set period parameters
         period_map = {
@@ -40,6 +45,7 @@ def fetch_stock_data_fallback(ticker, period="1y"):
         }
         
         params = period_map.get(period, period_map["1y"])
+        logger.info(f"Fallback API params: {params}")
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -50,33 +56,90 @@ def fetch_stock_data_fallback(ticker, period="1y"):
             'Upgrade-Insecure-Requests': '1',
         }
         
+        logger.info(f"Making fallback API request for {ticker}")
         response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        logger.info(f"Fallback API response status: {response.status_code}")
+        logger.info(f"Fallback API response headers: {dict(response.headers)}")
+        
+        if response.status_code != 200:
+            logger.error(f"Fallback API returned non-200 status: {response.status_code}")
+            logger.error(f"Response text: {response.text[:500]}...")
+        
         response.raise_for_status()
         
-        data = response.json()
+        # Parse JSON response
+        try:
+            data = response.json()
+            logger.info(f"Fallback API JSON parsed successfully for {ticker}")
+        except Exception as json_error:
+            logger.error(f"Failed to parse JSON response for {ticker}: {json_error}")
+            logger.error(f"Response text: {response.text[:500]}...")
+            raise
         
-        if 'chart' not in data or not data['chart']['result']:
+        # Validate response structure
+        if 'chart' not in data:
+            logger.error(f"No 'chart' key in response for {ticker}")
+            logger.error(f"Response keys: {list(data.keys())}")
+            raise Exception(f"No chart data found for {ticker}")
+        
+        if not data['chart']['result']:
+            logger.error(f"Empty result in chart data for {ticker}")
+            logger.error(f"Chart data: {data['chart']}")
             raise Exception(f"No data found for {ticker}")
         
         result = data['chart']['result'][0]
+        logger.info(f"Chart result keys: {list(result.keys())}")
+        
+        # Extract data
+        if 'timestamp' not in result:
+            logger.error(f"No timestamp data for {ticker}")
+            raise Exception(f"No timestamp data for {ticker}")
+        
+        if 'indicators' not in result or 'quote' not in result['indicators']:
+            logger.error(f"No quote data for {ticker}")
+            raise Exception(f"No quote data for {ticker}")
+        
         timestamps = result['timestamp']
         quotes = result['indicators']['quote'][0]
         closes = quotes['close']
         
+        logger.info(f"Extracted {len(timestamps)} timestamps and {len(closes)} close prices for {ticker}")
+        
+        # Validate data
+        if not timestamps or not closes:
+            logger.error(f"Empty timestamps or close prices for {ticker}")
+            raise Exception(f"No price data found for {ticker}")
+        
+        # Filter out None values
+        valid_data = [(ts, close) for ts, close in zip(timestamps, closes) if close is not None]
+        logger.info(f"Valid data points for {ticker}: {len(valid_data)} out of {len(timestamps)}")
+        
+        if not valid_data:
+            logger.error(f"No valid price data for {ticker}")
+            raise Exception(f"No valid price data found for {ticker}")
+        
         # Create DataFrame
         df = pd.DataFrame({
-            'Close': closes,
-            'Date': [datetime.fromtimestamp(ts) for ts in timestamps]
+            'Close': [close for _, close in valid_data],
+            'Date': [datetime.fromtimestamp(ts) for ts, _ in valid_data]
         })
         df = df.set_index('Date').dropna()
         
+        logger.info(f"Created DataFrame for {ticker}: shape={df.shape}")
+        
         if df.empty:
+            logger.error(f"Empty DataFrame after processing for {ticker}")
             raise Exception(f"No price data found for {ticker}")
         
+        logger.info(f"Fallback method successful for {ticker}: {len(df)} records")
         return df
         
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request error in fallback method for {ticker}: {e}")
+        raise Exception(f"Network error fetching data for {ticker}: {str(e)}")
     except Exception as e:
-        logger.error(f"Fallback method failed for {ticker}: {e}")
+        logger.error(f"Fallback method failed for {ticker}: {str(e)} (type: {type(e).__name__})")
         raise
 
 def calculate_correlation(tickers, period="1y"):
@@ -154,27 +217,38 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
         
         # Fetch historical data for all tickers with fallback
         stock_data_dict = {}
+        logger.info(f"Starting data fetch for tickers: {tickers}")
+        
         for ticker in tickers:
+            logger.info(f"Processing ticker: {ticker}")
             try:
                 # Try yfinance first
+                logger.info(f"Attempting yfinance fetch for {ticker} with period: {period}")
                 stock = yf.Ticker(ticker)
                 df = stock.history(period=period)
                 
+                logger.info(f"yfinance response for {ticker}: shape={df.shape}, columns={list(df.columns)}")
+                
                 if df.empty:
+                    logger.warning(f"Empty DataFrame returned from yfinance for {ticker}")
                     raise Exception("Empty data from yfinance")
                     
                 stock_data_dict[ticker] = df
-                logger.info(f"Successfully fetched data for {ticker} using yfinance")
+                logger.info(f"Successfully fetched data for {ticker} using yfinance: {len(df)} records")
                 
             except Exception as e:
-                logger.warning(f"yfinance failed for {ticker}: {e}, trying fallback")
+                logger.error(f"yfinance failed for {ticker}: {str(e)} (type: {type(e).__name__})")
+                logger.info(f"Attempting fallback method for {ticker}")
                 try:
                     df = fetch_stock_data_fallback(ticker, period)
                     stock_data_dict[ticker] = df
-                    logger.info(f"Successfully fetched data for {ticker} using fallback")
+                    logger.info(f"Successfully fetched data for {ticker} using fallback: {len(df)} records")
                 except Exception as fallback_error:
-                    logger.error(f"Both yfinance and fallback failed for {ticker}: {fallback_error}")
-                    raise Exception(f"No stock data could be retrieved. Check stock tickers.")
+                    logger.error(f"Fallback method failed for {ticker}: {str(fallback_error)} (type: {type(fallback_error).__name__})")
+                    logger.error(f"Both yfinance and fallback failed for {ticker}")
+                    raise Exception(f"No stock data could be retrieved for {ticker}. Check ticker symbol.")
+        
+        logger.info(f"Successfully fetched data for {len(stock_data_dict)} out of {len(tickers)} tickers")
         
         # Calculate individual stock metrics
         annual_returns = []
@@ -376,12 +450,22 @@ def lambda_handler(event, context):
     Returns:
         dict: HTTP response with portfolio analysis or error
     """
+    logger.info("=== Portfolio Analysis Lambda Handler Started ===")
+    logger.info(f"Event keys: {list(event.keys())}")
+    logger.info(f"HTTP Method: {event.get('httpMethod', 'Unknown')}")
+    
     try:
         # Parse request body
+        logger.info("Parsing request body")
         if isinstance(event.get('body'), str):
             body = json.loads(event['body'])
+            logger.info("Successfully parsed JSON body")
         else:
             body = event.get('body', {})
+            logger.info("Using body as-is (not JSON string)")
+        
+        logger.info(f"Request body keys: {list(body.keys())}")
+        logger.info(f"Request body: {json.dumps(body, indent=2)}")
         
         # CORS headers
         headers = {
@@ -393,6 +477,7 @@ def lambda_handler(event, context):
         
         # Handle preflight requests
         if event.get('httpMethod') == 'OPTIONS':
+            logger.info("Handling OPTIONS preflight request")
             return {
                 'statusCode': 200,
                 'headers': headers,
@@ -400,11 +485,17 @@ def lambda_handler(event, context):
             }
         
         # Validate input
+        logger.info("Validating input parameters")
         portfolio_data = body.get('portfolio_data')
         period = body.get('period', '1y')
         analysis_type = body.get('analysis_type', 'standalone')  # 'robinhood' or 'standalone'
         
+        logger.info(f"Portfolio data: {portfolio_data}")
+        logger.info(f"Period: {period}")
+        logger.info(f"Analysis type: {analysis_type}")
+        
         if not portfolio_data:
+            logger.error("No portfolio data provided")
             return {
                 'statusCode': 400,
                 'headers': headers,
@@ -454,10 +545,26 @@ def lambda_handler(event, context):
                 }
         
         # Calculate portfolio metrics
-        logger.info(f"Analyzing portfolio with {len(portfolio_tuples)} positions, period: {period}")
-        portfolio_metrics = calculate_portfolio_metrics(portfolio_tuples, period)
+        logger.info(f"Starting portfolio analysis with {len(portfolio_tuples)} positions, period: {period}")
+        logger.info(f"Portfolio tuples: {portfolio_tuples}")
+        
+        try:
+            portfolio_metrics = calculate_portfolio_metrics(portfolio_tuples, period)
+            logger.info("Portfolio metrics calculation completed successfully")
+            logger.info(f"Portfolio metrics keys: {list(portfolio_metrics.keys())}")
+        except Exception as calc_error:
+            logger.error(f"Portfolio metrics calculation failed: {str(calc_error)} (type: {type(calc_error).__name__})")
+            return {
+                'statusCode': 500,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'Failed to calculate portfolio metrics',
+                    'details': f'Calculation error: {str(calc_error)}'
+                })
+            }
         
         if portfolio_metrics is None:
+            logger.error("Portfolio metrics returned None")
             return {
                 'statusCode': 500,
                 'headers': headers,
@@ -468,6 +575,7 @@ def lambda_handler(event, context):
             }
         
         # Prepare response
+        logger.info("Preparing response data")
         response_data = {
             'success': True,
             'analysis_type': analysis_type,
@@ -484,11 +592,20 @@ def lambda_handler(event, context):
             response_data['source'] = 'standalone_tool'
             response_data['positions_count'] = len(portfolio_tuples)
         
-        return {
+        logger.info(f"Response prepared successfully for {analysis_type} analysis")
+        logger.info(f"Total portfolio value: ${portfolio_metrics['total_portfolio_value']:,.2f}")
+        logger.info(f"Expected return: {portfolio_metrics['portfolio_expected_return']:.2f}%")
+        logger.info(f"Volatility: {portfolio_metrics['portfolio_volatility']:.2f}%")
+        logger.info(f"Sharpe ratio: {portfolio_metrics['sharpe_ratio']:.2f}")
+        
+        response = {
             'statusCode': 200,
             'headers': headers,
             'body': json.dumps(response_data)
         }
+        
+        logger.info("=== Portfolio Analysis Lambda Handler Completed Successfully ===")
+        return response
         
     except json.JSONDecodeError as e:
         logger.error(f"JSON decode error: {e}")
