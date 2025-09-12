@@ -282,21 +282,34 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
         portfolio_expected_return = sum(weights[ticker] * annual_returns[i] for i, ticker in enumerate(tickers)) * 100
         
         # Calculate portfolio volatility using correlation matrix
-        try:
-            correlation_matrix = calculate_correlation(tickers, period)
-            portfolio_variance = 0
-            for i, ticker1 in enumerate(tickers):
-                for j, ticker2 in enumerate(tickers):
-                    portfolio_variance += (weights[ticker1] * weights[ticker2] * 
-                                         volatilities[i] * volatilities[j] * 
-                                         correlation_matrix.iloc[i, j])
-            portfolio_volatility = np.sqrt(portfolio_variance) * 100
-        except Exception as e:
-            logger.warning(f"Correlation calculation failed: {e}, using simplified volatility")
-            # Simplified volatility calculation (assumes no correlation)
-            portfolio_variance = sum(weights[ticker] * (volatilities[i] ** 2) 
-                                   for i, ticker in enumerate(tickers))
-            portfolio_volatility = np.sqrt(portfolio_variance) * 100
+        # TEMPORARY: Skip correlation calculation to test individual ticker fetching
+        logger.info("TEMPORARY: Skipping correlation calculation, using simplified volatility")
+        # Simplified volatility calculation (assumes no correlation)
+        portfolio_variance = sum(weights[ticker] * (volatilities[i] ** 2) 
+                               for i, ticker in enumerate(tickers))
+        portfolio_volatility = np.sqrt(portfolio_variance) * 100
+        logger.info("Portfolio volatility calculated using simplified method")
+        
+        # TODO: Re-enable correlation calculation once individual ticker fetching is confirmed working
+        # try:
+        #     logger.info("Attempting correlation matrix calculation")
+        #     correlation_matrix = calculate_correlation(tickers, period)
+        #     logger.info("Correlation matrix calculated successfully")
+        #     portfolio_variance = 0
+        #     for i, ticker1 in enumerate(tickers):
+        #         for j, ticker2 in enumerate(tickers):
+        #             portfolio_variance += (weights[ticker1] * weights[ticker2] * 
+        #                                  volatilities[i] * volatilities[j] * 
+        #                                  correlation_matrix.iloc[i, j])
+        #     portfolio_volatility = np.sqrt(portfolio_variance) * 100
+        #     logger.info("Portfolio volatility calculated with correlation matrix")
+        # except Exception as e:
+        #     logger.warning(f"Correlation calculation failed: {e}, using simplified volatility")
+        #     # Simplified volatility calculation (assumes no correlation)
+        #     portfolio_variance = sum(weights[ticker] * (volatilities[i] ** 2) 
+        #                            for i, ticker in enumerate(tickers))
+        #     portfolio_volatility = np.sqrt(portfolio_variance) * 100
+        #     logger.info("Portfolio volatility calculated using simplified method")
         
         # Calculate Sharpe ratio (assuming risk-free rate of 2%)
         risk_free_rate = 0.02
