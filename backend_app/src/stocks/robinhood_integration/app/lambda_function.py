@@ -168,18 +168,24 @@ def handle_portfolio_analysis(body: Dict[str, Any], headers: Dict[str, str]) -> 
         import boto3
         lambda_client = boto3.client('lambda')
         
-        # Prepare payload for portfolio analysis lambda
-        payload = {
-            'portfolio_data': portfolio_positions,
-            'period': period,
-            'analysis_type': 'robinhood'
+        # Create API Gateway event format for the portfolio analysis lambda
+        api_gateway_event = {
+            'httpMethod': 'POST',
+            'body': json.dumps({
+                'portfolio_data': portfolio_positions,
+                'period': period,
+                'analysis_type': 'robinhood'
+            }),
+            'headers': {
+                'Content-Type': 'application/json'
+            }
         }
         
         # Invoke portfolio analysis lambda directly
         response = lambda_client.invoke(
             FunctionName=portfolio_function_name,
             InvocationType='RequestResponse',
-            Payload=json.dumps(payload)
+            Payload=json.dumps(api_gateway_event)
         )
         
         # Parse response

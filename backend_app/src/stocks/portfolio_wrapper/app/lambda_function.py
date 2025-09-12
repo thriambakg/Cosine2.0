@@ -69,10 +69,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Invoke portfolio analysis lambda directly
         lambda_client = boto3.client('lambda')
         
-        payload = {
-            'portfolio_data': portfolio_data,
-            'period': period,
-            'analysis_type': 'standalone'
+        # Create API Gateway event format for the portfolio analysis lambda
+        api_gateway_event = {
+            'httpMethod': 'POST',
+            'body': json.dumps({
+                'portfolio_data': portfolio_data,
+                'period': period,
+                'analysis_type': 'standalone'
+            }),
+            'headers': {
+                'Content-Type': 'application/json'
+            }
         }
         
         logger.info(f"Invoking portfolio analysis lambda '{portfolio_function_name}' with {len(portfolio_data)} positions")
@@ -80,7 +87,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         response = lambda_client.invoke(
             FunctionName=portfolio_function_name,
             InvocationType='RequestResponse',
-            Payload=json.dumps(payload)
+            Payload=json.dumps(api_gateway_event)
         )
         
         # Parse response

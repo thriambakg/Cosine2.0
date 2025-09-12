@@ -14,13 +14,16 @@ import {
   IconButton,
   Paper,
   Chip,
+  Alert,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
   Add as AddIcon,
   Calculate as CalculateIcon,
-
 } from '@mui/icons-material';
+import { usePortfolioAnalysis } from '../hooks/useAPI';
+
+// Force refresh - updated at 2025-01-10T00:00:00.000Z
 
 interface PortfolioEntry {
   stock: string;
@@ -47,7 +50,10 @@ interface PortfolioResults {
 export default function PortfolioRisk() {
   const [entries, setEntries] = useState<PortfolioEntry[]>([{ stock: '', shares: 0 }]);
   const [results, setResults] = useState<PortfolioResults | null>(null);
-  const [isCalculating, setIsCalculating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Use the portfolio analysis hook - updated to use real API
+  const { execute: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
 
   const addEntry = () => {
     setEntries([...entries, { stock: '', shares: 0 }]);
@@ -64,33 +70,35 @@ export default function PortfolioRisk() {
   };
 
   const calculateRisk = async () => {
-    setIsCalculating(true);
+    setError(null);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const mockResults: PortfolioResults = {
-      total_portfolio_value: 100000,
-      portfolio_expected_return: 8.5,
-      portfolio_volatility: 15.2,
-      sharpe_ratio: 0.56,
-      stock_details: entries.reduce((acc, entry) => {
-        if (entry.stock) {
-          acc[entry.stock] = {
-            weight: Math.random() * 0.4 + 0.1,
-            annual_return: Math.random() * 20 - 5,
-            annual_volatility: Math.random() * 30 + 10,
-            shares: entry.shares,
-            current_price: Math.random() * 1000 + 50,
-            total_value: entry.shares * (Math.random() * 1000 + 50)
-          };
-        }
-        return acc;
-      }, {} as PortfolioResults['stock_details'])
-    };
-    
-    setResults(mockResults);
-    setIsCalculating(false);
+    try {
+      // Prepare portfolio data for API call
+      const portfolioData = entries
+        .filter(entry => entry.stock && entry.shares > 0)
+        .map(entry => [entry.stock, entry.shares, 0] as [string, number, number]); // Price will be fetched by API
+      
+      if (portfolioData.length === 0) {
+        setError('Please add at least one stock with shares > 0');
+        return;
+      }
+      
+      // Call the portfolio analysis API
+      const response = await analyzePortfolio({
+        portfolio_data: portfolioData,
+        period: '1y',
+        analysis_type: 'standalone'
+      });
+      
+      if (response.success) {
+        setResults(response.portfolio_metrics);
+      } else {
+        setError('Failed to analyze portfolio. Please check your stock tickers.');
+      }
+    } catch (err) {
+      console.error('Portfolio analysis error:', err);
+      setError(apiError || 'An error occurred while analyzing your portfolio. Please try again.');
+    }
   };
 
   const getRiskLevel = (volatility: number) => {
@@ -219,11 +227,11 @@ export default function PortfolioRisk() {
                    color: '#ffffff',
                  },
                  '& input[type=number]::-webkit-outer-spin-button, & input[type=number]::-webkit-inner-spin-button': {
-                   '-webkit-appearance': 'none',
+                   WebkitAppearance: 'none',
                    margin: 0,
                  },
                  '& input[type=number]': {
-                   '-moz-appearance': 'textfield',
+                   MozAppearance: 'textfield',
                  },
                }}
              />
@@ -266,9 +274,9 @@ export default function PortfolioRisk() {
           </Button>
           <Button
             variant="contained"
-            startIcon={isCalculating ? <CalculateIcon /> : <CalculateIcon />}
+            startIcon={<CalculateIcon />}
             onClick={calculateRisk}
-            disabled={isCalculating || entries.some(e => !e.stock || e.shares <= 0)}
+            disabled={isLoading || entries.some(e => !e.stock || e.shares <= 0)}
             sx={{
               background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
               color: '#ffffff',
@@ -282,10 +290,27 @@ export default function PortfolioRisk() {
               },
             }}
           >
-            {isCalculating ? 'Calculating...' : 'Calculate Risk'}
+            {isLoading ? 'Calculating...' : 'Calculate Risk'}
           </Button>
         </Box>
       </Paper>
+
+      {/* Error Display */}
+      {error && (
+        <Alert 
+          severity="error" 
+          sx={{ 
+            mb: 3,
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.2)',
+            '& .MuiAlert-message': {
+              color: '#ef4444',
+            },
+          }}
+        >
+          {error}
+        </Alert>
+      )}
 
       {/* Results Section */}
       {results && (
