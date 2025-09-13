@@ -385,6 +385,12 @@ def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.05):
     debug_print(f"Attempting to fetch data for {stock_tickers}")
     try:
         stock_data = yf.download(stock_tickers, period=period)['Close']
+        debug_print(f"yf.download response shape: {stock_data.shape}, empty: {stock_data.empty}")
+        
+        if stock_data.empty:
+            debug_print("yf.download returned empty data, triggering fallback")
+            raise Exception("yf.download returned empty data")
+            
         debug_print(f"Successfully downloaded data for {stock_tickers} using yf.download")
         logger.info(f"Successfully downloaded data for {stock_tickers}")
     except Exception as e:
