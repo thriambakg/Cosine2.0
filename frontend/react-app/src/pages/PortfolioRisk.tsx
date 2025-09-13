@@ -90,7 +90,9 @@ export default function PortfolioRisk() {
         analysis_type: 'standalone'
       });
       
-      if (response.success) {
+      console.log('Portfolio analysis response:', response);
+      
+      if (response && response.success) {
         setResults(response.portfolio_metrics);
       } else {
         setError('Failed to analyze portfolio. Please check your stock tickers.');

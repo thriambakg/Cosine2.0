@@ -24,6 +24,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         dict: HTTP response with portfolio analysis results
     """
+    logger.info("=== Portfolio Wrapper Lambda Handler Started ===")
+    logger.info(f"Event keys: {list(event.keys())}")
+    logger.info(f"HTTP Method: {event.get('httpMethod', 'Unknown')}")
+    logger.info(f"Headers: {event.get('headers', {})}")
+    
     try:
         # Parse request body
         if isinstance(event.get('body'), str):
@@ -92,19 +97,33 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Parse response
         response_payload = json.loads(response['Payload'].read())
+        logger.info(f"Portfolio analysis lambda response: {json.dumps(response_payload, indent=2)}")
         
         if response_payload.get('statusCode') == 200:
             # Parse the response body from the portfolio analysis lambda
-            portfolio_response = json.loads(response_payload['body'])
-            logger.info(f"Portfolio analysis response keys: {list(portfolio_response.keys())}")
-            
-            # Return the complete response from the portfolio analysis lambda
-            return {
-                'statusCode': 200,
-                'headers': headers,
-                'body': response_payload['body']  # Return the original body as-is
-            }
+            try:
+                portfolio_response = json.loads(response_payload['body'])
+                logger.info(f"Portfolio analysis response keys: {list(portfolio_response.keys())}")
+                
+                # Return the complete response from the portfolio analysis lambda
+                return {
+                    'statusCode': 200,
+                    'headers': headers,
+                    'body': response_payload['body']  # Return the original body as-is
+                }
+            except Exception as parse_error:
+                logger.error(f"Error parsing portfolio response body: {parse_error}")
+                logger.error(f"Raw response body: {response_payload.get('body', 'No body')}")
+                return {
+                    'statusCode': 500,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'Failed to parse portfolio analysis response',
+                        'details': str(parse_error)
+                    })
+                }
         else:
+            logger.error(f"Portfolio analysis lambda returned non-200 status: {response_payload.get('statusCode')}")
             return {
                 'statusCode': response_payload.get('statusCode', 500),
                 'headers': headers,
@@ -129,6 +148,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Lambda handler error: {e}")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error details: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return {
             'statusCode': 500,
             'headers': {
@@ -137,7 +160,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             },
             'body': json.dumps({
                 'error': 'Internal server error',
-                'details': str(e)
+                'details': str(e),
+                'error_type': type(e).__name__
             })
         }
 

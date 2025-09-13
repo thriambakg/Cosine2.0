@@ -655,6 +655,10 @@ def lambda_handler(event, context):
             'body': json.dumps(response_data)
         }
         
+        debug_print(f"Returning response with statusCode: {response['statusCode']}")
+        debug_print(f"Response body length: {len(response['body'])} characters")
+        debug_print(f"Response data keys: {list(response_data.keys())}")
+        
         logger.info("=== Portfolio Analysis Lambda Handler Completed Successfully ===")
         return response
         
