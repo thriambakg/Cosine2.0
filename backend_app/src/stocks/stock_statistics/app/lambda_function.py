@@ -223,6 +223,7 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
         # Fetch historical data for all tickers with fallback
         stock_data_dict = {}
         debug_print(f"Starting data fetch for tickers: {tickers}")
+        debug_print(f"About to enter ticker loop for {len(tickers)} tickers")
         
         for ticker in tickers:
             debug_print(f"Processing ticker: {ticker}")
@@ -380,13 +381,32 @@ def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.05):
     # Calculate total portfolio value
     total_portfolio_value = sum([shares * price for _, shares, price in portfolio_tuples])
     
-    # Download historical stock data
+    # Download historical stock data with fallback
+    debug_print(f"Attempting to fetch data for {stock_tickers}")
     try:
         stock_data = yf.download(stock_tickers, period=period)['Close']
+        debug_print(f"Successfully downloaded data for {stock_tickers} using yf.download")
         logger.info(f"Successfully downloaded data for {stock_tickers}")
     except Exception as e:
+        debug_print(f"yf.download failed: {e}, trying individual ticker fallback")
         logger.error(f"Error downloading stock data: {e}")
-        raise ValueError(f"Error downloading stock data: {e}")
+        
+        # Fallback: fetch each ticker individually
+        stock_data_list = []
+        for ticker in stock_tickers:
+            debug_print(f"Fetching fallback data for {ticker}")
+            try:
+                df = fetch_stock_data_fallback(ticker, period)
+                stock_data_list.append(df)
+                debug_print(f"Successfully fetched fallback data for {ticker}")
+            except Exception as fallback_error:
+                debug_print(f"Fallback failed for {ticker}: {fallback_error}")
+                logger.error(f"Failed to fetch data for {ticker}: {fallback_error}")
+                raise ValueError(f"No stock data could be retrieved for {ticker}. Check stock tickers.")
+        
+        # Combine individual dataframes
+        stock_data = pd.concat([df['Close'] for df in stock_data_list], axis=1, keys=stock_tickers)
+        debug_print(f"Successfully combined fallback data: {stock_data.shape}")
     
     # Ensure data is present for all stocks
     if stock_data.empty:
