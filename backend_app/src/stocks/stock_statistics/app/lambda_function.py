@@ -567,31 +567,55 @@ def lambda_handler(event, context):
                 })
             }
         
-        # Validate each portfolio entry
-        portfolio_tuples = []
+        # Validate each portfolio entry (now expects [ticker, shares] format)
+        portfolio_entries = []
         for i, entry in enumerate(portfolio_data):
-            if not isinstance(entry, list) or len(entry) != 3:
+            # Support both [ticker, shares] and [ticker, shares, price] formats for backward compatibility
+            if not isinstance(entry, list) or len(entry) < 2 or len(entry) > 3:
                 return {
                     'statusCode': 400,
                     'headers': headers,
                     'body': json.dumps({
                         'error': f'Invalid portfolio entry at index {i}',
-                        'details': 'Each entry must be [ticker, shares, price]'
+                        'details': 'Each entry must be [ticker, shares] or [ticker, shares, price]'
                     })
                 }
             
-            ticker, shares, price = entry
+            ticker = entry[0]
+            shares = entry[1]
+            
             try:
                 shares = float(shares)
-                price = float(price)
-                portfolio_tuples.append((str(ticker).upper(), shares, price))
+                portfolio_entries.append((str(ticker).upper(), shares))
+                debug_print(f"Portfolio entry {i}: {ticker.upper()} - {shares} shares")
             except (ValueError, TypeError):
                 return {
                     'statusCode': 400,
                     'headers': headers,
                     'body': json.dumps({
                         'error': f'Invalid data types at index {i}',
-                        'details': 'Shares and price must be numbers'
+                        'details': 'Shares must be a number'
+                    })
+                }
+        
+        # Fetch current prices for all tickers
+        debug_print("Fetching current prices for all tickers")
+        portfolio_tuples = []
+        for ticker, shares in portfolio_entries:
+            try:
+                # Get current price from yfinance
+                stock = yf.Ticker(ticker)
+                current_price = stock.history(period="1d")['Close'].iloc[-1]
+                portfolio_tuples.append((ticker, shares, float(current_price)))
+                debug_print(f"Fetched current price for {ticker}: ${current_price:.2f}")
+            except Exception as price_error:
+                debug_print(f"Failed to fetch current price for {ticker}: {price_error}")
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': f'Failed to fetch current price for {ticker}',
+                        'details': str(price_error)
                     })
                 }
         

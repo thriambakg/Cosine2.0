@@ -80,6 +80,51 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 })
             }
         
+        # Validate portfolio data format and values (now expects [ticker, shares] format)
+        print("[DEBUG] Validating portfolio data format and values")
+        validated_portfolio = []
+        
+        for i, position in enumerate(portfolio_data):
+            # Support both [ticker, shares] and [ticker, shares, price] formats
+            if not isinstance(position, list) or len(position) < 2 or len(position) > 3:
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'Invalid portfolio data format',
+                        'details': f'Position {i} must be [ticker, shares] or [ticker, shares, price]. Got: {position}'
+                    })
+                }
+            
+            ticker = position[0]
+            shares = position[1]
+            
+            if not ticker or not isinstance(ticker, str):
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'Invalid ticker symbol',
+                        'details': f'Position {i}: ticker must be a non-empty string. Got: {ticker}'
+                    })
+                }
+            
+            if not isinstance(shares, (int, float)) or shares <= 0:
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'Invalid shares',
+                        'details': f'Position {i}: shares must be a positive number. Got: {shares}'
+                    })
+                }
+            
+            # Convert to new format: [ticker, shares] (price will be fetched automatically)
+            validated_portfolio.append([ticker, shares])
+            print(f"[DEBUG] Validated position {i}: {ticker} - {shares} shares (price will be fetched automatically)")
+        
+        print("[DEBUG] Portfolio data validation passed - converting to new format")
+        
         # Get portfolio analysis function name from environment
         print("[DEBUG] Getting portfolio analysis function name from environment")
         portfolio_function_name = os.environ.get('PORTFOLIO_ANALYSIS_FUNCTION_NAME')
@@ -95,7 +140,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         api_gateway_event = {
             'httpMethod': 'POST',
             'body': json.dumps({
-                'portfolio_data': portfolio_data,
+                'portfolio_data': validated_portfolio,  # Use validated portfolio in new format
                 'period': period,
                 'analysis_type': 'standalone'
             }),

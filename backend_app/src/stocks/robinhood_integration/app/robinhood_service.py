@@ -67,12 +67,13 @@ class RobinhoodService:
                     "requires_mfa": False
                 }
     
-    def get_portfolio_positions(self) -> List[Tuple[str, float, float]]:
+    def get_portfolio_positions(self) -> List[Tuple[str, float]]:
         """
         Get current portfolio positions from Robinhood
         
         Returns:
-            List[Tuple]: List of (ticker, shares, current_price) tuples
+            List[Tuple]: List of (ticker, shares) tuples
+            Note: Current prices will be fetched automatically by the Portfolio Analysis Lambda
         """
         if not self.is_authenticated:
             raise ValueError("User not authenticated. Please login first.")
@@ -88,15 +89,12 @@ class RobinhoodService:
                     stock_info = rh.get_instrument_by_url(instrument_url)
                     ticker = stock_info['symbol']
                     
-                    # Get current price
-                    current_price_data = rh.get_latest_price(ticker)
-                    current_price = float(current_price_data[0]) if current_price_data else 0.0
-                    
                     shares = float(position['quantity'])
                     
-                    portfolio_data.append((ticker, shares, current_price))
+                    # Return only ticker and shares - current price will be fetched by Portfolio Analysis Lambda
+                    portfolio_data.append((ticker, shares))
                     
-            logger.info(f"Retrieved {len(portfolio_data)} positions from Robinhood")
+            logger.info(f"Retrieved {len(portfolio_data)} positions from Robinhood (prices will be fetched automatically)")
             return portfolio_data
             
         except Exception as e:

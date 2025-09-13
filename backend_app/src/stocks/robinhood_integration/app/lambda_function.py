@@ -156,6 +156,9 @@ def handle_portfolio_analysis(body: Dict[str, Any], headers: Dict[str, str]) -> 
                 })
             }
         
+        # Convert tuples to list format expected by Portfolio Analysis Lambda
+        portfolio_data = [[ticker, shares] for ticker, shares in portfolio_positions]
+        
         # Get analysis period from request (default to 1 year)
         period = body.get('period', '1y')
         
@@ -172,7 +175,7 @@ def handle_portfolio_analysis(body: Dict[str, Any], headers: Dict[str, str]) -> 
         api_gateway_event = {
             'httpMethod': 'POST',
             'body': json.dumps({
-                'portfolio_data': portfolio_positions,
+                'portfolio_data': portfolio_data,  # Use converted list format
                 'period': period,
                 'analysis_type': 'robinhood'
             }),
@@ -205,7 +208,7 @@ def handle_portfolio_analysis(body: Dict[str, Any], headers: Dict[str, str]) -> 
             'body': json.dumps({
                 'portfolio_analysis': portfolio_analysis,
                 'account_info': account_info,
-                'positions_count': len(portfolio_positions),
+                'positions_count': len(portfolio_data),
                 'analysis_period': period
             })
         }
