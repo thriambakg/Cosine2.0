@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DashboardTab, DashboardGroup, Dashboard, TabManagementState, UnifiedTile } from '../types/dashboardTypes';
 import { robustStorage, isIncognitoMode } from '../utils/storageUtils';
-import { dashboardConfigAPI, DashboardConfig } from '../services/dashboardConfigAPI';
+import { dashboardAPI } from '../services/dashboardAPI';
 
 interface UseTabManagementOptions {
   userId: string;
@@ -75,8 +75,9 @@ export const useTabManagement = ({
     try {
       console.log('Saving tab state to database:', tabState);
       
-      // Convert TabManagementState to DashboardConfig format
-      const dashboardConfig: DashboardConfig = {
+      // Convert TabManagementState to format expected by existing dashboardAPI
+      // The existing API expects the new format with tabs/dashboards
+      const dashboardConfig = {
         tabs: tabState.tabs.map(tab => ({
           id: tab.id,
           name: tab.name,
@@ -117,7 +118,7 @@ export const useTabManagement = ({
       };
       
       // Save to database via API
-      await dashboardConfigAPI.updateDashboardConfig(userId, dashboardConfig);
+      await dashboardAPI.updateDashboard(dashboardConfig);
       console.log('Successfully saved tab state to database');
       
     } catch (error) {
@@ -144,48 +145,89 @@ export const useTabManagement = ({
 
         // Try to load from database for latest changes
         try {
-          const dbResponse = await dashboardConfigAPI.getDashboardConfig(userId);
+          const dbResponse = await dashboardAPI.getDashboard();
           const dbConfig = dbResponse.dashboard_config;
           
           // Convert DashboardConfig to TabManagementState
-          const dbState: TabManagementState = {
-            tabs: dbConfig.tabs.map(tab => ({
-              id: tab.id,
-              name: tab.name,
-              color: tab.color,
-              isPinned: tab.isPinned,
-              created_at: tab.created_at
-            })),
-            tabGroups: dbConfig.tabGroups.map(group => ({
-              id: group.id,
-              name: group.name,
-              color: group.color,
-              tabIds: group.tabIds,
-              created_at: group.created_at
-            })),
-            dashboards: dbConfig.dashboards.map(dashboard => ({
-              id: dashboard.id,
-              tabId: dashboard.tabId,
-              name: dashboard.name,
-              tiles: dashboard.tiles.map(tile => ({
-                id: tile.id,
-                type: tile.type,
-                symbol: tile.symbol,
-                timeframe: tile.timeframe,
-                displayOptions: tile.displayOptions,
-                autoRefresh: tile.autoRefresh,
-                isPinned: tile.isPinned,
-                size: tile.size,
-                position: tile.position,
-                created_at: tile.created_at
+          // Handle both old format (crypto_tiles) and new format (tabs/dashboards)
+          let dbState: TabManagementState;
+          
+          if ('tabs' in dbConfig && 'dashboards' in dbConfig) {
+            // New format with tabs and dashboards
+            dbState = {
+              tabs: dbConfig.tabs.map(tab => ({
+                id: tab.id,
+                name: tab.name,
+                color: tab.color,
+                isPinned: tab.isPinned,
+                created_at: tab.created_at
               })),
-              layout: dashboard.layout,
-              created_at: dashboard.created_at
-            })),
-            activeTabId: dbConfig.activeTabId,
-            nextTabId: dbConfig.nextTabId,
-            nextGroupId: dbConfig.nextGroupId
-          };
+              tabGroups: dbConfig.tabGroups.map(group => ({
+                id: group.id,
+                name: group.name,
+                color: group.color,
+                tabIds: group.tabIds,
+                created_at: group.created_at
+              })),
+              dashboards: dbConfig.dashboards.map(dashboard => ({
+                id: dashboard.id,
+                tabId: dashboard.tabId,
+                name: dashboard.name,
+                tiles: dashboard.tiles.map(tile => ({
+                  id: tile.id,
+                  type: tile.type,
+                  symbol: tile.symbol,
+                  timeframe: tile.timeframe,
+                  displayOptions: tile.displayOptions,
+                  autoRefresh: tile.autoRefresh,
+                  isPinned: tile.isPinned,
+                  size: tile.size,
+                  position: tile.position,
+                  created_at: tile.created_at
+                })),
+                layout: dashboard.layout,
+                created_at: dashboard.created_at
+              })),
+              activeTabId: dbConfig.activeTabId,
+              nextTabId: dbConfig.nextTabId,
+              nextGroupId: dbConfig.nextGroupId
+            };
+          } else {
+            // Old format with just crypto_tiles - convert to new format
+            const now = new Date().toISOString();
+            dbState = {
+              tabs: [{
+                id: 'tab_1',
+                name: 'My Dashboard',
+                color: '#3b82f6',
+                isPinned: false,
+                created_at: now
+              }],
+              tabGroups: [],
+              dashboards: [{
+                id: 'dashboard_1',
+                tabId: 'tab_1',
+                name: 'My Dashboard',
+                tiles: dbConfig.crypto_tiles.map(tile => ({
+                  id: tile.id,
+                  type: 'crypto',
+                  symbol: tile.symbol,
+                  timeframe: tile.timeframe,
+                  displayOptions: tile.displayOptions,
+                  autoRefresh: tile.autoRefresh,
+                  isPinned: tile.isPinned,
+                  size: tile.size,
+                  position: tile.position,
+                  created_at: tile.created_at
+                })),
+                layout: dbConfig.layout || 'grid',
+                created_at: now
+              }],
+              activeTabId: 'tab_1',
+              nextTabId: 2,
+              nextGroupId: 1
+            };
+          }
           
           // Update state with database data
           setState(dbState);

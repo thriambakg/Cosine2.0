@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 import logging
+from decimal import Decimal
 
 # Configure logging
 logger = logging.getLogger()
@@ -13,6 +14,17 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 table_name = os.environ.get('USER_PROFILES_TABLE_NAME', 'cosine-user-profiles-production')
 table = dynamodb.Table(table_name)
+
+def convert_decimals(obj):
+    """Convert Decimal objects to regular numbers for JSON serialization"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimals(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimals(item) for item in obj]
+    else:
+        return obj
 
 def lambda_handler(event, context):
     """
@@ -34,19 +46,44 @@ def lambda_handler(event, context):
         # Extract user ID from path or headers (you'll need to implement auth)
         user_id = extract_user_id(event)
         if not user_id:
-            return create_response(401, {"error": "Unauthorized - User ID required"})
+            # For now, use a default user ID for testing
+            # TODO: Implement proper authentication
+            user_id = "current-user"
+            logger.warning(f"No user ID provided, using default: {user_id}")
         
-        # Route to appropriate handler
-        if http_method == 'GET':
-            return handle_get_dashboard(user_id)
-        elif http_method == 'PUT':
-            return handle_update_dashboard(user_id, event)
-        elif http_method == 'POST':
-            return handle_add_tile(user_id, event)
-        elif http_method == 'DELETE':
-            return handle_remove_tile(user_id, event)
+        # Route to appropriate handler based on path and method
+        if path.endswith('/tiles'):
+            # Handle tile-specific operations
+            if http_method == 'POST':
+                return handle_add_tile(user_id, event)
+            elif http_method == 'DELETE':
+                # Extract tile ID from path parameters
+                path_params = event.get('pathParameters', {})
+                tile_id = path_params.get('tileId')
+                if not tile_id:
+                    return create_response(400, {"error": "Tile ID required in path"})
+                return handle_remove_tile_by_id(user_id, tile_id)
+            elif http_method == 'PUT':
+                # Extract tile ID from path parameters
+                path_params = event.get('pathParameters', {})
+                tile_id = path_params.get('tileId')
+                if not tile_id:
+                    return create_response(400, {"error": "Tile ID required in path"})
+                return handle_update_tile(user_id, tile_id, event)
+            else:
+                return create_response(405, {"error": "Method not allowed for tiles endpoint"})
         else:
-            return create_response(405, {"error": "Method not allowed"})
+            # Handle dashboard operations
+            if http_method == 'GET':
+                return handle_get_dashboard(user_id)
+            elif http_method == 'PUT':
+                return handle_update_dashboard(user_id, event)
+            elif http_method == 'POST':
+                return handle_add_tile(user_id, event)
+            elif http_method == 'DELETE':
+                return handle_remove_tile(user_id, event)
+            else:
+                return create_response(405, {"error": "Method not allowed"})
             
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
@@ -91,10 +128,15 @@ def handle_get_dashboard(user_id: str) -> Dict:
                 'created_at': datetime.utcnow().isoformat(),
                 'updated_at': datetime.utcnow().isoformat()
             })
+            # Convert Decimal objects to regular numbers for JSON serialization
+            default_dashboard = convert_decimals(default_dashboard)
             return create_response(200, {'dashboard_config': default_dashboard})
         
         user_data = response['Item']
         dashboard_config = user_data.get('dashboard_config', create_default_dashboard())
+        
+        # Convert Decimal objects to regular numbers for JSON serialization
+        dashboard_config = convert_decimals(dashboard_config)
         
         return create_response(200, {'dashboard_config': dashboard_config})
         
@@ -225,45 +267,166 @@ def handle_remove_tile(user_id: str, event: Dict) -> Dict:
         logger.error(f"Error removing tile: {str(e)}")
         return create_response(500, {"error": "Failed to remove tile"})
 
+def handle_remove_tile_by_id(user_id: str, tile_id: str) -> Dict:
+    """Remove a crypto tile from user's dashboard by tile ID"""
+    try:
+        # Get current dashboard
+        response = table.get_item(Key={'user_id': user_id})
+        if 'Item' not in response:
+            return create_response(404, {"error": "User not found"})
+        
+        user_data = response['Item']
+        dashboard_config = user_data.get('dashboard_config', create_default_dashboard())
+        
+        # Find and remove the tile from all dashboards
+        tile_removed = False
+        for dashboard in dashboard_config.get('dashboards', []):
+            original_length = len(dashboard.get('tiles', []))
+            dashboard['tiles'] = [
+                tile for tile in dashboard.get('tiles', []) 
+                if tile.get('id') != tile_id
+            ]
+            if len(dashboard.get('tiles', [])) < original_length:
+                tile_removed = True
+        
+        if not tile_removed:
+            return create_response(404, {"error": "Tile not found"})
+        
+        dashboard_config['last_updated'] = datetime.utcnow().isoformat()
+        
+        # Update the user profile
+        table.update_item(
+            Key={'user_id': user_id},
+            UpdateExpression='SET dashboard_config = :config, updated_at = :updated',
+            ExpressionAttributeValues={
+                ':config': dashboard_config,
+                ':updated': datetime.utcnow().isoformat()
+            }
+        )
+        
+        return create_response(200, {'message': 'Tile removed successfully'})
+        
+    except Exception as e:
+        logger.error(f"Error removing tile by ID: {str(e)}")
+        return create_response(500, {"error": "Failed to remove tile"})
+
+def handle_update_tile(user_id: str, tile_id: str, event: Dict) -> Dict:
+    """Update a specific tile in user's dashboard"""
+    try:
+        body = json.loads(event.get('body', '{}'))
+        
+        # Get current dashboard
+        response = table.get_item(Key={'user_id': user_id})
+        if 'Item' not in response:
+            return create_response(404, {"error": "User not found"})
+        
+        user_data = response['Item']
+        dashboard_config = user_data.get('dashboard_config', create_default_dashboard())
+        
+        # Find and update the tile
+        tile_updated = False
+        for dashboard in dashboard_config.get('dashboards', []):
+            for tile in dashboard.get('tiles', []):
+                if tile.get('id') == tile_id:
+                    # Update tile properties
+                    for key, value in body.items():
+                        if key != 'id':  # Don't allow changing the ID
+                            tile[key] = value
+                    tile_updated = True
+                    break
+        
+        if not tile_updated:
+            return create_response(404, {"error": "Tile not found"})
+        
+        dashboard_config['last_updated'] = datetime.utcnow().isoformat()
+        
+        # Update the user profile
+        table.update_item(
+            Key={'user_id': user_id},
+            UpdateExpression='SET dashboard_config = :config, updated_at = :updated',
+            ExpressionAttributeValues={
+                ':config': dashboard_config,
+                ':updated': datetime.utcnow().isoformat()
+            }
+        )
+        
+        return create_response(200, {'message': 'Tile updated successfully'})
+        
+    except Exception as e:
+        logger.error(f"Error updating tile: {str(e)}")
+        return create_response(500, {"error": "Failed to update tile"})
+
 def create_default_dashboard() -> Dict:
-    """Create a default dashboard configuration"""
+    """Create a default dashboard configuration with full tab management"""
+    now = datetime.utcnow().isoformat()
+    
     return {
-        'crypto_tiles': [
+        'tabs': [
             {
-                'id': 'tile_1',
-                'symbol': 'BTC',
-                'timeframe': '1d',
-                'displayOptions': {
-                    'showPrice': True,
-                    'show24hChange': True,
-                    'showAnnualReturn': True,
-                    'showVolatility': True,
-                    'showChart': True
-                },
-                'autoRefresh': False,
+                'id': 'tab_1',
+                'name': 'My Dashboard',
+                'color': '#3b82f6',
                 'isPinned': False,
-                'size': {'width': 350, 'height': 400},
-                'position': {'x': 0, 'y': 0},
-                'created_at': datetime.utcnow().isoformat()
+                'created_at': now
             }
         ],
-        'layout': 'grid',
-        'last_updated': datetime.utcnow().isoformat()
+        'tabGroups': [],
+        'dashboards': [
+            {
+                'id': 'dashboard_1',
+                'tabId': 'tab_1',
+                'name': 'My Dashboard',
+                'tiles': [
+                    {
+                        'id': 'tile_1',
+                        'type': 'crypto',
+                        'symbol': 'BTC',
+                        'timeframe': '1d',
+                        'displayOptions': {
+                            'showPrice': True,
+                            'show24hChange': True,
+                            'showAnnualReturn': True,
+                            'showVolatility': True,
+                            'showChart': True
+                        },
+                        'autoRefresh': False,
+                        'isPinned': False,
+                        'size': {'width': 350, 'height': 400},
+                        'position': {'x': 0, 'y': 0},
+                        'created_at': now
+                    }
+                ],
+                'layout': 'grid',
+                'created_at': now
+            }
+        ],
+        'activeTabId': 'tab_1',
+        'nextTabId': 2,
+        'nextGroupId': 1,
+        'last_updated': now
     }
 
 def validate_dashboard_config(config: Dict) -> bool:
     """Validate dashboard configuration"""
-    required_fields = ['crypto_tiles', 'layout', 'last_updated']
+    required_fields = ['tabs', 'dashboards', 'last_updated']
     
     for field in required_fields:
         if field not in config:
             return False
     
-    if not isinstance(config['crypto_tiles'], list):
+    if not isinstance(config['tabs'], list) or not isinstance(config['dashboards'], list):
         return False
     
-    for tile in config['crypto_tiles']:
-        if not validate_tile_config(tile):
+    # Validate tabs
+    for tab in config['tabs']:
+        if not isinstance(tab, dict) or 'id' not in tab or 'name' not in tab:
+            return False
+    
+    # Validate dashboards
+    for dashboard in config['dashboards']:
+        if not isinstance(dashboard, dict) or 'id' not in dashboard or 'tiles' not in dashboard:
+            return False
+        if not isinstance(dashboard['tiles'], list):
             return False
     
     return True

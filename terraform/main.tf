@@ -130,6 +130,9 @@ module "api_gateway" {
     dashboard = {
       path_part = "dashboard"
     }
+    dashboard_tiles = {
+      path_part = "dashboard/tiles"
+    }
     alerts = {
       path_part = "alerts"
     }
@@ -233,6 +236,31 @@ module "api_gateway" {
       lambda_arn              = module.user_dashboard_lambda.function_arn
       request_parameters      = {}
     }
+    # Dashboard Tiles methods
+    dashboard_tiles_post = {
+      resource_key            = "dashboard_tiles"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.function_arn
+      request_parameters      = {}
+    }
+    dashboard_tiles_delete = {
+      resource_key            = "dashboard_tiles"
+      http_method             = "DELETE"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.function_arn
+      request_parameters      = {}
+    }
+    dashboard_tiles_put = {
+      resource_key            = "dashboard_tiles"
+      http_method             = "PUT"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.function_arn
+      request_parameters      = {}
+    }
   }
 
   # Lambda permissions configuration
@@ -276,6 +304,21 @@ module "api_gateway" {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "DELETE"
       resource_path = "dashboard"
+    }
+    dashboard_tiles_post = {
+      function_arn  = module.user_dashboard_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "dashboard/tiles"
+    }
+    dashboard_tiles_delete = {
+      function_arn  = module.user_dashboard_lambda.function_arn
+      http_method   = "DELETE"
+      resource_path = "dashboard/tiles"
+    }
+    dashboard_tiles_put = {
+      function_arn  = module.user_dashboard_lambda.function_arn
+      http_method   = "PUT"
+      resource_path = "dashboard/tiles"
     }
     alerts_get = {
       function_arn  = module.stock_alerts_lambda.function_arn
