@@ -436,7 +436,14 @@ def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.05):
         # Calculate individual stock metrics
         stock_returns = returns[ticker]
         avg_annual_return = stock_returns.mean() * 252  # Annualized return
-        annual_volatility = fv.fetch_volatility(ticker, period=period)
+        
+        # Calculate volatility directly from the data we have
+        try:
+            annual_volatility = stock_returns.std() * np.sqrt(252) * 100  # Annualized volatility as percentage
+            debug_print(f"Calculated volatility for {ticker}: {annual_volatility:.2f}%")
+        except Exception as vol_error:
+            debug_print(f"Volatility calculation failed for {ticker}: {vol_error}")
+            annual_volatility = 0.0  # Default to 0 if calculation fails
         
         # Calculate portfolio weight
         stock_value = shares * current_price
