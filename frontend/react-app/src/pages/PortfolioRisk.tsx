@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -57,8 +57,54 @@ export default function PortfolioRisk() {
   const [error, setError] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState<string>('1y');
   
-  // Use the portfolio analysis hook - updated to use real API
-  const { execute: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
+  // Use the portfolio analysis hook - updated to use real API with force refresh
+  const { executeForceRefresh: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
+
+  // Load session data from localStorage on component mount
+  useEffect(() => {
+    const savedEntries = localStorage.getItem('portfolio-entries');
+    const savedResults = localStorage.getItem('portfolio-results');
+    const savedTimeframe = localStorage.getItem('portfolio-timeframe');
+    
+    if (savedEntries) {
+      try {
+        const parsedEntries = JSON.parse(savedEntries);
+        if (Array.isArray(parsedEntries) && parsedEntries.length > 0) {
+          setEntries(parsedEntries);
+        }
+      } catch (e) {
+        console.warn('Failed to parse saved portfolio entries:', e);
+      }
+    }
+    
+    if (savedResults) {
+      try {
+        const parsedResults = JSON.parse(savedResults);
+        setResults(parsedResults);
+      } catch (e) {
+        console.warn('Failed to parse saved portfolio results:', e);
+      }
+    }
+    
+    if (savedTimeframe) {
+      setTimeframe(savedTimeframe);
+    }
+  }, []);
+
+  // Save session data to localStorage whenever entries, results, or timeframe change
+  useEffect(() => {
+    localStorage.setItem('portfolio-entries', JSON.stringify(entries));
+  }, [entries]);
+
+  useEffect(() => {
+    if (results) {
+      localStorage.setItem('portfolio-results', JSON.stringify(results));
+    }
+  }, [results]);
+
+  useEffect(() => {
+    localStorage.setItem('portfolio-timeframe', timeframe);
+  }, [timeframe]);
 
   const addEntry = () => {
     setEntries([...entries, { stock: '', shares: 0 }]);
@@ -114,31 +160,61 @@ export default function PortfolioRisk() {
     return { level: 'High', color: '#ef4444' };
   };
 
+  const clearSession = () => {
+    // Clear localStorage
+    localStorage.removeItem('portfolio-entries');
+    localStorage.removeItem('portfolio-results');
+    localStorage.removeItem('portfolio-timeframe');
+    
+    // Reset state
+    setEntries([{ stock: '', shares: 0 }]);
+    setResults(null);
+    setError(null);
+    setTimeframe('1y');
+  };
+
   return (
     <Box sx={{ p: 3, maxWidth: '1400px', mx: 'auto', background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh' }}>
       {/* Header */}
-      <Box sx={{ mb: 4 }}>
-        <Typography 
-          variant="h4" 
-          sx={{ 
-            color: '#ffffff', 
-            fontWeight: 700, 
-            mb: 1,
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
+      <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <Box>
+          <Typography 
+            variant="h4" 
+            sx={{ 
+              color: '#ffffff', 
+              fontWeight: 700, 
+              mb: 1,
+              textTransform: 'uppercase',
+              letterSpacing: '1px',
+            }}
+          >
+            Portfolio Risk Analysis
+          </Typography>
+          <Typography 
+            variant="body1" 
+            sx={{ 
+              color: '#9ca3af',
+              fontSize: '1rem',
+            }}
+          >
+            Analyze your portfolio's risk metrics and optimize your investment strategy
+          </Typography>
+        </Box>
+        
+        <Button
+          variant="outlined"
+          onClick={clearSession}
+          sx={{
+            color: '#ef4444',
+            borderColor: '#ef4444',
+            '&:hover': {
+              borderColor: '#dc2626',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            },
           }}
         >
-          Portfolio Risk Analysis
-        </Typography>
-        <Typography 
-          variant="body1" 
-          sx={{ 
-            color: '#9ca3af',
-            fontSize: '1rem',
-          }}
-        >
-          Analyze your portfolio's risk metrics and optimize your investment strategy
-        </Typography>
+          Clear Session
+        </Button>
       </Box>
 
       {/* Input Section */}

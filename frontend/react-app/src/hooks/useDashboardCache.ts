@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { robustStorage, isIncognitoMode } from '../utils/storageUtils';
 
 // Dashboard cache entry interface
 interface DashboardCacheEntry<T> {
@@ -53,35 +54,32 @@ class FlexibleCacheManager {
     return timeValid && versionValid;
   }
 
-  // Get from sessionStorage
-  private getFromSessionStorage<T>(key: string): DashboardCacheEntry<T> | null {
+  // Get from robust storage
+  private getFromRobustStorage<T>(key: string): DashboardCacheEntry<T> | null {
     try {
-      const stored = sessionStorage.getItem(`${this.SESSION_STORAGE_PREFIX}${key}`);
-      if (!stored) return null;
-      
-      const entry = JSON.parse(stored) as DashboardCacheEntry<T>;
-      return entry;
+      const stored = robustStorage.get<DashboardCacheEntry<T>>(`${this.SESSION_STORAGE_PREFIX}${key}`);
+      return stored || null;
     } catch (error) {
-      console.warn('Failed to parse cache entry from sessionStorage:', error);
+      console.warn('Failed to parse cache entry from robust storage:', error);
       return null;
     }
   }
 
-  // Set to sessionStorage
-  private setToSessionStorage<T>(key: string, entry: DashboardCacheEntry<T>): void {
+  // Set to robust storage
+  private setToRobustStorage<T>(key: string, entry: DashboardCacheEntry<T>): void {
     try {
-      sessionStorage.setItem(`${this.SESSION_STORAGE_PREFIX}${key}`, JSON.stringify(entry));
+      robustStorage.set(`${this.SESSION_STORAGE_PREFIX}${key}`, entry, entry.ttl);
     } catch (error) {
-      console.warn('Failed to store cache entry to sessionStorage:', error);
+      console.warn('Failed to store cache entry to robust storage:', error);
     }
   }
 
-  // Remove from sessionStorage
-  private removeFromSessionStorage(key: string): void {
+  // Remove from robust storage
+  private removeFromRobustStorage(key: string): void {
     try {
-      sessionStorage.removeItem(`${this.SESSION_STORAGE_PREFIX}${key}`);
+      robustStorage.remove(`${this.SESSION_STORAGE_PREFIX}${key}`);
     } catch (error) {
-      console.warn('Failed to remove cache entry from sessionStorage:', error);
+      console.warn('Failed to remove cache entry from robust storage:', error);
     }
   }
 
@@ -95,16 +93,16 @@ class FlexibleCacheManager {
     let entry = this.memoryCache.get(key);
     console.log(`🧠 Memory cache ${entry ? 'hit' : 'miss'} for key: ${key}`);
     
-    // If not in memory and sessionStorage is enabled, try sessionStorage
+    // If not in memory and robust storage is enabled, try robust storage
     if (!entry && useSessionStorage) {
-      const sessionEntry = this.getFromSessionStorage<T>(key);
-      if (sessionEntry) {
-        console.log(`💾 SessionStorage hit for key: ${key}`);
+      const robustEntry = this.getFromRobustStorage<T>(key);
+      if (robustEntry) {
+        console.log(`💾 Robust storage hit for key: ${key}`);
         // Restore to memory cache
-        this.memoryCache.set(key, sessionEntry);
-        entry = sessionEntry;
+        this.memoryCache.set(key, robustEntry);
+        entry = robustEntry;
       } else {
-        console.log(`💾 SessionStorage miss for key: ${key}`);
+        console.log(`💾 Robust storage miss for key: ${key}`);
       }
     }
     

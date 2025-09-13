@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DashboardTab, DashboardGroup, Dashboard, TabManagementState, UnifiedTile } from '../types/dashboardTypes';
+import { robustStorage, isIncognitoMode } from '../utils/storageUtils';
+import { dashboardConfigAPI, DashboardConfig } from '../services/dashboardConfigAPI';
 
 interface UseTabManagementOptions {
   userId: string;
@@ -26,23 +28,29 @@ export const useTabManagement = ({
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef<TabManagementState | null>(null);
 
-  // Load from localStorage
-  const loadFromLocalStorage = useCallback((): TabManagementState | null => {
+  // Load from robust storage (handles incognito mode)
+  const loadFromStorage = useCallback((): TabManagementState | null => {
     try {
-      const saved = localStorage.getItem(`${localStorageKey}-${userId}`);
-      return saved ? JSON.parse(saved) : null;
+      const saved = robustStorage.get<TabManagementState>(`${localStorageKey}-${userId}`);
+      if (saved && isIncognitoMode()) {
+        console.warn('Running in incognito mode - data will be lost on page refresh');
+      }
+      return saved || null;
     } catch (error) {
-      console.error('Error loading tabs from localStorage:', error);
+      console.error('Error loading tabs from storage:', error);
       return null;
     }
   }, [localStorageKey, userId]);
 
-  // Save to localStorage
-  const saveToLocalStorage = useCallback((tabState: TabManagementState) => {
+  // Save to robust storage (handles incognito mode)
+  const saveToStorage = useCallback((tabState: TabManagementState) => {
     try {
-      localStorage.setItem(`${localStorageKey}-${userId}`, JSON.stringify(tabState));
+      robustStorage.set(`${localStorageKey}-${userId}`, tabState);
+      if (isIncognitoMode()) {
+        console.warn('Running in incognito mode - data will be lost on page refresh');
+      }
     } catch (error) {
-      console.error('Error saving tabs to localStorage:', error);
+      console.error('Error saving tabs to storage:', error);
     }
   }, [localStorageKey, userId]);
 
@@ -62,14 +70,60 @@ export const useTabManagement = ({
     }, debounceMs);
   }, [debounceMs]);
 
-  // Save to database (placeholder - will be implemented with API)
+  // Save to database using dashboard config API
   const saveTabStateToDatabase = async (tabState: TabManagementState) => {
     try {
-      // TODO: Implement API call to save tab state to USER_PROFILES_TABLE
       console.log('Saving tab state to database:', tabState);
-      // API call would go here
+      
+      // Convert TabManagementState to DashboardConfig format
+      const dashboardConfig: DashboardConfig = {
+        tabs: tabState.tabs.map(tab => ({
+          id: tab.id,
+          name: tab.name,
+          color: tab.color || '#3b82f6',
+          isPinned: tab.isPinned || false,
+          created_at: tab.created_at || new Date().toISOString()
+        })),
+        tabGroups: tabState.tabGroups.map(group => ({
+          id: group.id,
+          name: group.name,
+          color: group.color || '#8b5cf6',
+          tabIds: group.tabIds || [],
+          created_at: group.created_at || new Date().toISOString()
+        })),
+        dashboards: tabState.dashboards.map(dashboard => ({
+          id: dashboard.id,
+          tabId: dashboard.tabId,
+          name: dashboard.name,
+          tiles: dashboard.tiles.map(tile => ({
+            id: tile.id,
+            type: tile.type,
+            symbol: tile.symbol,
+            timeframe: tile.timeframe,
+            displayOptions: tile.displayOptions,
+            autoRefresh: tile.autoRefresh,
+            isPinned: tile.isPinned,
+            size: tile.size,
+            position: tile.position,
+            created_at: tile.created_at || new Date().toISOString()
+          })),
+          layout: dashboard.layout || 'grid',
+          created_at: dashboard.created_at || new Date().toISOString()
+        })),
+        activeTabId: tabState.activeTabId || '',
+        nextTabId: tabState.nextTabId || 1,
+        nextGroupId: tabState.nextGroupId || 1,
+        last_updated: new Date().toISOString()
+      };
+      
+      // Save to database via API
+      await dashboardConfigAPI.updateDashboardConfig(userId, dashboardConfig);
+      console.log('Successfully saved tab state to database');
+      
     } catch (error) {
       console.error('Error saving tab state to database:', error);
+      // Don't throw - we don't want to break the UI if database save fails
+      // The local storage fallback will still work
     }
   };
 
@@ -77,31 +131,88 @@ export const useTabManagement = ({
   useEffect(() => {
     const loadTabState = async () => {
       try {
-        // First try localStorage for immediate display
-        const cachedState = loadFromLocalStorage();
+        // Check storage status for debugging
+        const storageStatus = robustStorage.getStorageStatus();
+        console.log('Storage status:', storageStatus);
+
+        // First try robust storage for immediate display
+        const cachedState = loadFromStorage();
         if (cachedState) {
           setState(cachedState);
-          console.log('Loaded tab state from localStorage');
-        } else {
-          // Create default state with one dashboard
-          const defaultState = createDefaultTabState();
-          setState(defaultState);
-          saveToLocalStorage(defaultState);
+          console.log('Loaded tab state from robust storage');
         }
 
-        // TODO: Load from database for latest changes
-        // const dbState = await loadTabStateFromDatabase();
-        // if (dbState) {
-        //   setState(dbState);
-        //   saveToLocalStorage(dbState);
-        // }
+        // Try to load from database for latest changes
+        try {
+          const dbResponse = await dashboardConfigAPI.getDashboardConfig(userId);
+          const dbConfig = dbResponse.dashboard_config;
+          
+          // Convert DashboardConfig to TabManagementState
+          const dbState: TabManagementState = {
+            tabs: dbConfig.tabs.map(tab => ({
+              id: tab.id,
+              name: tab.name,
+              color: tab.color,
+              isPinned: tab.isPinned,
+              created_at: tab.created_at
+            })),
+            tabGroups: dbConfig.tabGroups.map(group => ({
+              id: group.id,
+              name: group.name,
+              color: group.color,
+              tabIds: group.tabIds,
+              created_at: group.created_at
+            })),
+            dashboards: dbConfig.dashboards.map(dashboard => ({
+              id: dashboard.id,
+              tabId: dashboard.tabId,
+              name: dashboard.name,
+              tiles: dashboard.tiles.map(tile => ({
+                id: tile.id,
+                type: tile.type,
+                symbol: tile.symbol,
+                timeframe: tile.timeframe,
+                displayOptions: tile.displayOptions,
+                autoRefresh: tile.autoRefresh,
+                isPinned: tile.isPinned,
+                size: tile.size,
+                position: tile.position,
+                created_at: tile.created_at
+              })),
+              layout: dashboard.layout,
+              created_at: dashboard.created_at
+            })),
+            activeTabId: dbConfig.activeTabId,
+            nextTabId: dbConfig.nextTabId,
+            nextGroupId: dbConfig.nextGroupId
+          };
+          
+          // Update state with database data
+          setState(dbState);
+          saveToStorage(dbState);
+          console.log('Loaded and updated tab state from database');
+          
+        } catch (dbError) {
+          console.warn('Failed to load from database, using local storage:', dbError);
+          
+          // If no cached state and database failed, create default
+          if (!cachedState) {
+            const defaultState = createDefaultTabState();
+            setState(defaultState);
+            saveToStorage(defaultState);
+            console.log('Created default tab state');
+          }
+        }
       } catch (error) {
         console.error('Error loading tab state:', error);
+        // Fallback to default state if loading fails
+        const defaultState = createDefaultTabState();
+        setState(defaultState);
       }
     };
 
     loadTabState();
-  }, [userId, loadFromLocalStorage, saveToLocalStorage]);
+  }, [userId, loadFromStorage, saveToStorage]);
 
   // Save immediately on page unload
   useEffect(() => {
@@ -158,11 +269,11 @@ export const useTabManagement = ({
   const updateState = useCallback((updates: Partial<TabManagementState>) => {
     setState(prevState => {
       const newState = { ...prevState, ...updates };
-      saveToLocalStorage(newState);
+      saveToStorage(newState);
       debouncedSaveToDatabase(newState);
       return newState;
     });
-  }, [saveToLocalStorage, debouncedSaveToDatabase]);
+  }, [saveToStorage, debouncedSaveToDatabase]);
 
   // Tab management functions
   const createTab = useCallback((options: {
