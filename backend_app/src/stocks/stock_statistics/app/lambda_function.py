@@ -603,11 +603,48 @@ def lambda_handler(event, context):
         portfolio_tuples = []
         for ticker, shares in portfolio_entries:
             try:
-                # Get current price from yfinance
+                # Get current price from yfinance with fallback options
                 stock = yf.Ticker(ticker)
-                current_price = stock.history(period="1d")['Close'].iloc[-1]
+                current_price = None
+                
+                # Try different methods to get current price
+                try:
+                    # Method 1: Try to get the most recent closing price
+                    hist_data = stock.history(period="5d")  # Get last 5 days
+                    if not hist_data.empty:
+                        current_price = hist_data['Close'].iloc[-1]
+                        debug_print(f"Fetched current price for {ticker} from history: ${current_price:.2f}")
+                    else:
+                        raise Exception("No historical data available")
+                        
+                except Exception as hist_error:
+                    debug_print(f"History method failed for {ticker}: {hist_error}")
+                    
+                    # Method 2: Try to get info data
+                    try:
+                        info = stock.info
+                        if 'currentPrice' in info and info['currentPrice']:
+                            current_price = info['currentPrice']
+                            debug_print(f"Fetched current price for {ticker} from info: ${current_price:.2f}")
+                        elif 'regularMarketPrice' in info and info['regularMarketPrice']:
+                            current_price = info['regularMarketPrice']
+                            debug_print(f"Fetched current price for {ticker} from market price: ${current_price:.2f}")
+                        elif 'previousClose' in info and info['previousClose']:
+                            current_price = info['previousClose']
+                            debug_print(f"Fetched previous close for {ticker}: ${current_price:.2f}")
+                        else:
+                            raise Exception("No price data in info")
+                            
+                    except Exception as info_error:
+                        debug_print(f"Info method failed for {ticker}: {info_error}")
+                        raise Exception(f"All price fetching methods failed: history={hist_error}, info={info_error}")
+                
+                if current_price is None or current_price <= 0:
+                    raise Exception(f"Invalid price data: {current_price}")
+                
                 portfolio_tuples.append((ticker, shares, float(current_price)))
-                debug_print(f"Fetched current price for {ticker}: ${current_price:.2f}")
+                debug_print(f"Successfully added {ticker} to portfolio with price ${current_price:.2f}")
+                
             except Exception as price_error:
                 debug_print(f"Failed to fetch current price for {ticker}: {price_error}")
                 return {
