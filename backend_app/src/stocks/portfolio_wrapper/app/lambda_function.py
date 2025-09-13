@@ -94,17 +94,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         response_payload = json.loads(response['Payload'].read())
         
         if response_payload.get('statusCode') == 200:
-            # Return the portfolio metrics directly
-            portfolio_metrics = json.loads(response_payload['body'])['portfolio_metrics']
+            # Parse the response body from the portfolio analysis lambda
+            portfolio_response = json.loads(response_payload['body'])
+            logger.info(f"Portfolio analysis response keys: {list(portfolio_response.keys())}")
             
+            # Return the complete response from the portfolio analysis lambda
             return {
                 'statusCode': 200,
                 'headers': headers,
-                'body': json.dumps({
-                    'success': True,
-                    'portfolio_metrics': portfolio_metrics,
-                    'timestamp': response_payload.get('timestamp')
-                })
+                'body': response_payload['body']  # Return the original body as-is
             }
         else:
             return {
