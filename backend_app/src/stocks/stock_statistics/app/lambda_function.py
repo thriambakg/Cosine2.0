@@ -23,6 +23,97 @@ def debug_print(message):
     """Print function that works even if CloudWatch Logs permissions are limited"""
     print(f"[DEBUG] {message}")
 
+def fetch_current_price_fallback(ticker):
+    """
+    Fallback method to fetch current price directly from Yahoo Finance API
+    when yfinance fails due to rate limiting or other issues.
+    """
+    debug_print(f"Starting fallback price fetch for {ticker}")
+    
+    try:
+        # Add random delay to avoid rate limiting
+        delay = random.uniform(0.5, 1.5)
+        debug_print(f"Adding {delay:.2f}s delay before price API call")
+        time.sleep(delay)
+        
+        # Yahoo Finance API endpoint for current price
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        debug_print(f"Fallback price API URL: {url}")
+        
+        # Get current day data
+        params = {"range": "1d", "interval": "1m"}
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        debug_print(f"Making fallback price API request for {ticker}")
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        debug_print(f"Fallback price API response status: {response.status_code}")
+        
+        if response.status_code != 200:
+            debug_print(f"Fallback price API returned non-200 status: {response.status_code}")
+            raise Exception(f"API returned status {response.status_code}")
+        
+        # Parse JSON response
+        data = response.json()
+        debug_print(f"Fallback price API JSON parsed successfully for {ticker}")
+        
+        # Validate response structure
+        if 'chart' not in data:
+            raise Exception(f"No chart data found for {ticker}")
+        
+        if not data['chart']['result']:
+            raise Exception(f"No data found for {ticker}")
+        
+        result = data['chart']['result'][0]
+        
+        # Extract price data
+        if 'indicators' not in result or 'quote' not in result['indicators']:
+            raise Exception(f"No quote data found for {ticker}")
+        
+        quote = result['indicators']['quote'][0]
+        
+        # Try to get current price from different fields
+        current_price = None
+        
+        # Try 'close' first (most recent close)
+        if 'close' in quote and quote['close']:
+            closes = [p for p in quote['close'] if p is not None]
+            if closes:
+                current_price = closes[-1]
+                debug_print(f"Got price from 'close' field: ${current_price:.2f}")
+        
+        # Try 'regularMarketPrice' if close is not available
+        if current_price is None and 'regularMarketPrice' in quote and quote['regularMarketPrice']:
+            prices = [p for p in quote['regularMarketPrice'] if p is not None]
+            if prices:
+                current_price = prices[-1]
+                debug_print(f"Got price from 'regularMarketPrice' field: ${current_price:.2f}")
+        
+        # Try 'preMarketPrice' as last resort
+        if current_price is None and 'preMarketPrice' in quote and quote['preMarketPrice']:
+            prices = [p for p in quote['preMarketPrice'] if p is not None]
+            if prices:
+                current_price = prices[-1]
+                debug_print(f"Got price from 'preMarketPrice' field: ${current_price:.2f}")
+        
+        if current_price is None or current_price <= 0:
+            raise Exception(f"No valid price data found for {ticker}")
+        
+        debug_print(f"Successfully fetched current price for {ticker}: ${current_price:.2f}")
+        return float(current_price)
+        
+    except Exception as e:
+        debug_print(f"Fallback price fetch failed for {ticker}: {e}")
+        raise
+
 def fetch_stock_data_fallback(ticker, period="1y"):
     """
     Fallback method to fetch stock data directly from Yahoo Finance API
@@ -635,9 +726,17 @@ def lambda_handler(event, context):
                         else:
                             raise Exception("No price data in info")
                             
-                    except Exception as info_error:
-                        debug_print(f"Info method failed for {ticker}: {info_error}")
-                        raise Exception(f"All price fetching methods failed: history={hist_error}, info={info_error}")
+                except Exception as info_error:
+                    debug_print(f"Info method failed for {ticker}: {info_error}")
+                    
+                    # Method 3: Try direct HTTP API fallback (same as used for historical data)
+                    try:
+                        debug_print(f"Trying direct HTTP API fallback for {ticker}")
+                        current_price = fetch_current_price_fallback(ticker)
+                        debug_print(f"Fallback method successful for {ticker}: ${current_price:.2f}")
+                    except Exception as fallback_error:
+                        debug_print(f"Fallback method failed for {ticker}: {fallback_error}")
+                        raise Exception(f"All price fetching methods failed: history={hist_error}, info={info_error}, fallback={fallback_error}")
                 
                 if current_price is None or current_price <= 0:
                     raise Exception(f"Invalid price data: {current_price}")
