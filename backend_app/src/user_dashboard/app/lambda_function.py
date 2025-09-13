@@ -52,21 +52,19 @@ def lambda_handler(event, context):
             logger.warning(f"No user ID provided, using default: {user_id}")
         
         # Route to appropriate handler based on path and method
-        if path.endswith('/tiles'):
+        if path.startswith('/tiles'):
             # Handle tile-specific operations
-            if http_method == 'POST':
+            if http_method == 'POST' and path == '/tiles':
                 return handle_add_tile(user_id, event)
-            elif http_method == 'DELETE':
-                # Extract tile ID from path parameters
-                path_params = event.get('pathParameters', {})
-                tile_id = path_params.get('tileId')
+            elif http_method == 'DELETE' and path.startswith('/tiles/'):
+                # Extract tile ID from path (e.g., /tiles/tile123 -> tile123)
+                tile_id = path.split('/')[-1]
                 if not tile_id:
                     return create_response(400, {"error": "Tile ID required in path"})
                 return handle_remove_tile_by_id(user_id, tile_id)
-            elif http_method == 'PUT':
-                # Extract tile ID from path parameters
-                path_params = event.get('pathParameters', {})
-                tile_id = path_params.get('tileId')
+            elif http_method == 'PUT' and path.startswith('/tiles/'):
+                # Extract tile ID from path (e.g., /tiles/tile123 -> tile123)
+                tile_id = path.split('/')[-1]
                 if not tile_id:
                     return create_response(400, {"error": "Tile ID required in path"})
                 return handle_update_tile(user_id, tile_id, event)

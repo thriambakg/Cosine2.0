@@ -71,7 +71,7 @@ export const dashboardAPI = {
   // Add a new crypto tile
   addTile: async (tileData: Omit<CryptoTile, 'id' | 'created_at'>): Promise<AddTileResponse> => {
     try {
-      const response = await axios.post(`${API_CONFIG.BASE_URL}/dashboard/tiles`, tileData);
+      const response = await axios.post(`${API_CONFIG.BASE_URL}/tiles`, tileData);
       return response.data;
     } catch (error) {
       console.error('Error adding tile:', error);
@@ -82,7 +82,7 @@ export const dashboardAPI = {
   // Remove a crypto tile
   removeTile: async (tileId: string): Promise<RemoveTileResponse> => {
     try {
-      const response = await axios.delete(`${API_CONFIG.BASE_URL}/dashboard/tiles/${tileId}`);
+      const response = await axios.delete(`${API_CONFIG.BASE_URL}/tiles/${tileId}`);
       return response.data;
     } catch (error) {
       console.error('Error removing tile:', error);
@@ -93,7 +93,7 @@ export const dashboardAPI = {
   // Update a specific tile
   updateTile: async (tileId: string, tileData: Partial<CryptoTile>): Promise<AddTileResponse> => {
     try {
-      const response = await axios.put(`${API_CONFIG.BASE_URL}/dashboard/tiles/${tileId}`, tileData);
+      const response = await axios.put(`${API_CONFIG.BASE_URL}/tiles/${tileId}`, tileData);
       return response.data;
     } catch (error) {
       console.error('Error updating tile:', error);
