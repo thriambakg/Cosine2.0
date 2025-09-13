@@ -24,6 +24,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         dict: HTTP response with portfolio analysis results
     """
+    print("[DEBUG] === Portfolio Wrapper Lambda Handler Started ===")
+    print(f"[DEBUG] Event keys: {list(event.keys())}")
+    print(f"[DEBUG] HTTP Method: {event.get('httpMethod', 'Unknown')}")
+    print(f"[DEBUG] Headers: {event.get('headers', {})}")
+    
     logger.info("=== Portfolio Wrapper Lambda Handler Started ===")
     logger.info(f"Event keys: {list(event.keys())}")
     logger.info(f"HTTP Method: {event.get('httpMethod', 'Unknown')}")
@@ -31,10 +36,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     try:
         # Parse request body
+        print("[DEBUG] Parsing request body")
         if isinstance(event.get('body'), str):
             body = json.loads(event['body'])
+            print("[DEBUG] Successfully parsed JSON body")
         else:
             body = event.get('body', {})
+            print("[DEBUG] Using body as-is (not JSON string)")
+        
+        print(f"[DEBUG] Request body keys: {list(body.keys())}")
         
         # CORS headers
         headers = {
@@ -46,6 +56,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Handle preflight requests
         if event.get('httpMethod') == 'OPTIONS':
+            print("[DEBUG] Handling OPTIONS preflight request")
             return {
                 'statusCode': 200,
                 'headers': headers,
@@ -53,8 +64,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         # Validate input
+        print("[DEBUG] Validating input")
         portfolio_data = body.get('portfolio_data')
         period = body.get('period', '1y')
+        print(f"[DEBUG] Portfolio data: {portfolio_data}")
+        print(f"[DEBUG] Period: {period}")
         
         if not portfolio_data:
             return {
@@ -67,11 +81,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         # Get portfolio analysis function name from environment
+        print("[DEBUG] Getting portfolio analysis function name from environment")
         portfolio_function_name = os.environ.get('PORTFOLIO_ANALYSIS_FUNCTION_NAME')
+        print(f"[DEBUG] Portfolio function name: {portfolio_function_name}")
         if not portfolio_function_name:
             raise Exception('PORTFOLIO_ANALYSIS_FUNCTION_NAME environment variable not set')
         
         # Invoke portfolio analysis lambda directly
+        print("[DEBUG] Creating boto3 lambda client")
         lambda_client = boto3.client('lambda')
         
         # Create API Gateway event format for the portfolio analysis lambda
@@ -87,6 +104,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         }
         
+        print(f"[DEBUG] Invoking portfolio analysis lambda '{portfolio_function_name}' with {len(portfolio_data)} positions")
         logger.info(f"Invoking portfolio analysis lambda '{portfolio_function_name}' with {len(portfolio_data)} positions")
         
         response = lambda_client.invoke(
@@ -94,24 +112,31 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             InvocationType='RequestResponse',
             Payload=json.dumps(api_gateway_event)
         )
+        print(f"[DEBUG] Lambda invoke response status code: {response.get('StatusCode', 'Unknown')}")
         
         # Parse response
+        print("[DEBUG] Parsing portfolio analysis lambda response")
         response_payload = json.loads(response['Payload'].read())
+        print(f"[DEBUG] Response payload keys: {list(response_payload.keys())}")
+        print(f"[DEBUG] Response status code: {response_payload.get('statusCode', 'Unknown')}")
         logger.info(f"Portfolio analysis lambda response: {json.dumps(response_payload, indent=2)}")
         
         if response_payload.get('statusCode') == 200:
+            print("[DEBUG] Portfolio analysis lambda returned 200, processing response")
             # Parse the response body from the portfolio analysis lambda
             try:
                 portfolio_response = json.loads(response_payload['body'])
                 logger.info(f"Portfolio analysis response keys: {list(portfolio_response.keys())}")
                 
                 # Return the complete response from the portfolio analysis lambda
+                print("[DEBUG] Returning successful response to frontend")
                 return {
                     'statusCode': 200,
                     'headers': headers,
                     'body': response_payload['body']  # Return the original body as-is
                 }
             except Exception as parse_error:
+                print(f"[DEBUG] Error parsing portfolio response body: {parse_error}")
                 logger.error(f"Error parsing portfolio response body: {parse_error}")
                 logger.error(f"Raw response body: {response_payload.get('body', 'No body')}")
                 return {
@@ -123,6 +148,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     })
                 }
         else:
+            print(f"[DEBUG] Portfolio analysis lambda returned non-200 status: {response_payload.get('statusCode')}")
             logger.error(f"Portfolio analysis lambda returned non-200 status: {response_payload.get('statusCode')}")
             return {
                 'statusCode': response_payload.get('statusCode', 500),
@@ -134,6 +160,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
     except json.JSONDecodeError as e:
+        print(f"[DEBUG] JSON decode error: {e}")
         logger.error(f"JSON decode error: {e}")
         return {
             'statusCode': 400,
@@ -147,10 +174,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             })
         }
     except Exception as e:
+        print(f"[DEBUG] Lambda handler error: {e}")
+        print(f"[DEBUG] Error type: {type(e).__name__}")
+        print(f"[DEBUG] Error details: {str(e)}")
+        import traceback
+        print(f"[DEBUG] Traceback: {traceback.format_exc()}")
+        
         logger.error(f"Lambda handler error: {e}")
         logger.error(f"Error type: {type(e).__name__}")
         logger.error(f"Error details: {str(e)}")
-        import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return {
             'statusCode': 500,
