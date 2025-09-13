@@ -67,8 +67,23 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         print("[DEBUG] Validating input")
         portfolio_data = body.get('portfolio_data')
         period = body.get('period', '1y')
+        analysis_type = body.get('analysis_type', 'standalone')
+        
+        # Validate period
+        valid_periods = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max']
+        if period not in valid_periods:
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': f'Invalid period: {period}',
+                    'details': f'Supported periods: {", ".join(valid_periods)}'
+                })
+            }
+        
         print(f"[DEBUG] Portfolio data: {portfolio_data}")
         print(f"[DEBUG] Period: {period}")
+        print(f"[DEBUG] Analysis type: {analysis_type}")
         
         if not portfolio_data:
             return {
@@ -142,7 +157,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'body': json.dumps({
                 'portfolio_data': validated_portfolio,  # Use validated portfolio in new format
                 'period': period,
-                'analysis_type': 'standalone'
+                'analysis_type': analysis_type
             }),
             'headers': {
                 'Content-Type': 'application/json'

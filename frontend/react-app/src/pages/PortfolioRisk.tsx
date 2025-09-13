@@ -15,6 +15,10 @@ import {
   Paper,
   Chip,
   Alert,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -51,6 +55,7 @@ export default function PortfolioRisk() {
   const [entries, setEntries] = useState<PortfolioEntry[]>([{ stock: '', shares: 0 }]);
   const [results, setResults] = useState<PortfolioResults | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [timeframe, setTimeframe] = useState<string>('1y');
   
   // Use the portfolio analysis hook - updated to use real API
   const { execute: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
@@ -86,7 +91,7 @@ export default function PortfolioRisk() {
       // Call the portfolio analysis API
       const response = await analyzePortfolio({
         portfolio_data: portfolioData,
-        period: '1y',
+        period: timeframe,
         analysis_type: 'standalone'
       });
       
@@ -148,18 +153,65 @@ export default function PortfolioRisk() {
           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
         }}
       >
-        <Typography 
-          variant="h6" 
-          sx={{ 
-            color: '#ffffff', 
-            fontWeight: 600, 
-            mb: 3,
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px',
-          }}
-        >
-          Portfolio Holdings
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              color: '#ffffff', 
+              fontWeight: 600, 
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+            }}
+          >
+            Portfolio Holdings
+          </Typography>
+          
+          <FormControl 
+            sx={{ 
+              minWidth: 120,
+              '& .MuiOutlinedInput-root': {
+                '& fieldset': {
+                  borderColor: '#374151',
+                },
+                '&:hover fieldset': {
+                  borderColor: '#3b82f6',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: '#3b82f6',
+                },
+              },
+              '& .MuiInputLabel-root': {
+                color: '#9ca3af',
+              },
+              '& .MuiSelect-select': {
+                color: '#ffffff',
+              },
+              '& .MuiSvgIcon-root': {
+                color: '#9ca3af',
+              },
+            }}
+          >
+            <InputLabel id="timeframe-label">Timeframe</InputLabel>
+            <Select
+              labelId="timeframe-label"
+              value={timeframe}
+              label="Timeframe"
+              onChange={(e) => setTimeframe(e.target.value)}
+            >
+              <MenuItem value="1d">1 Day</MenuItem>
+              <MenuItem value="5d">5 Days</MenuItem>
+              <MenuItem value="1mo">1 Month</MenuItem>
+              <MenuItem value="3mo">3 Months</MenuItem>
+              <MenuItem value="6mo">6 Months</MenuItem>
+              <MenuItem value="1y">1 Year</MenuItem>
+              <MenuItem value="2y">2 Years</MenuItem>
+              <MenuItem value="5y">5 Years</MenuItem>
+              <MenuItem value="10y">10 Years</MenuItem>
+              <MenuItem value="ytd">Year to Date</MenuItem>
+              <MenuItem value="max">Max</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
 
         {entries.map((entry, index) => (
           <Box 

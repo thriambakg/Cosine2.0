@@ -162,6 +162,18 @@ def handle_portfolio_analysis(body: Dict[str, Any], headers: Dict[str, str]) -> 
         # Get analysis period from request (default to 1 year)
         period = body.get('period', '1y')
         
+        # Validate period
+        valid_periods = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max']
+        if period not in valid_periods:
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': f'Invalid period: {period}',
+                    'details': f'Supported periods: {", ".join(valid_periods)}'
+                })
+            }
+        
         # Get portfolio analysis function name from environment
         portfolio_function_name = os.environ.get('PORTFOLIO_ANALYSIS_FUNCTION_NAME')
         if not portfolio_function_name:

@@ -451,13 +451,13 @@ def calculate_portfolio_variance(portfolio_weights, annual_volatilities, correla
     return np.sqrt(portfolio_variance)
 
 
-def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.05):
+def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.02):
     """
     Calculate portfolio risk and expected return.
     
     Args:
     portfolio_tuples (list): List of tuples with (stock_ticker, number_of_shares, current_price)
-    risk_free_rate (float): Annual risk-free rate (default 5%)
+    risk_free_rate (float): Annual risk-free rate (default 2%)
     
     Returns:
     dict: Portfolio metrics including total risk, expected return, and individual stock details
@@ -530,8 +530,8 @@ def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.05):
         
         # Calculate volatility directly from the data we have
         try:
-            annual_volatility = stock_returns.std() * np.sqrt(252) * 100  # Annualized volatility as percentage
-            debug_print(f"Calculated volatility for {ticker}: {annual_volatility:.2f}%")
+            annual_volatility = stock_returns.std() * np.sqrt(252)  # Annualized volatility as decimal
+            debug_print(f"Calculated volatility for {ticker}: {annual_volatility:.4f} ({annual_volatility*100:.2f}%)")
         except Exception as vol_error:
             debug_print(f"Volatility calculation failed for {ticker}: {vol_error}")
             annual_volatility = 0.0  # Default to 0 if calculation fails
@@ -548,8 +548,8 @@ def calculate_portfolio_metrics(portfolio_tuples, period, risk_free_rate=0.05):
             'shares': shares,
             'current_price': current_price,
             'total_value': stock_value,
-            'annual_return': avg_annual_return,
-            'annual_volatility': annual_volatility,
+            'annual_return': avg_annual_return * 100,  # Convert to percentage for display
+            'annual_volatility': annual_volatility * 100,  # Convert to percentage for display
             'weight': weight
         }
     
@@ -631,6 +631,18 @@ def lambda_handler(event, context):
         portfolio_data = body.get('portfolio_data')
         period = body.get('period', '1y')
         analysis_type = body.get('analysis_type', 'standalone')  # 'robinhood' or 'standalone'
+        
+        # Validate period
+        valid_periods = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max']
+        if period not in valid_periods:
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': f'Invalid period: {period}',
+                    'details': f'Supported periods: {", ".join(valid_periods)}'
+                })
+            }
         
         logger.info(f"Portfolio data: {portfolio_data}")
         logger.info(f"Period: {period}")
@@ -726,17 +738,17 @@ def lambda_handler(event, context):
                         else:
                             raise Exception("No price data in info")
                             
-                except Exception as info_error:
-                    debug_print(f"Info method failed for {ticker}: {info_error}")
-                    
-                    # Method 3: Try direct HTTP API fallback (same as used for historical data)
-                    try:
-                        debug_print(f"Trying direct HTTP API fallback for {ticker}")
-                        current_price = fetch_current_price_fallback(ticker)
-                        debug_print(f"Fallback method successful for {ticker}: ${current_price:.2f}")
-                    except Exception as fallback_error:
-                        debug_print(f"Fallback method failed for {ticker}: {fallback_error}")
-                        raise Exception(f"All price fetching methods failed: history={hist_error}, info={info_error}, fallback={fallback_error}")
+                    except Exception as info_error:
+                        debug_print(f"Info method failed for {ticker}: {info_error}")
+                        
+                        # Method 3: Try direct HTTP API fallback (same as used for historical data)
+                        try:
+                            debug_print(f"Trying direct HTTP API fallback for {ticker}")
+                            current_price = fetch_current_price_fallback(ticker)
+                            debug_print(f"Fallback method successful for {ticker}: ${current_price:.2f}")
+                        except Exception as fallback_error:
+                            debug_print(f"Fallback method failed for {ticker}: {fallback_error}")
+                            raise Exception(f"All price fetching methods failed: history={hist_error}, info={info_error}, fallback={fallback_error}")
                 
                 if current_price is None or current_price <= 0:
                     raise Exception(f"Invalid price data: {current_price}")
