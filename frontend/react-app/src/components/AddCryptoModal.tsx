@@ -102,6 +102,8 @@ const AddCryptoModal: React.FC<AddCryptoModalProps> = ({
       onClose={handleClose}
       maxWidth="sm"
       fullWidth
+      disableEnforceFocus={false}
+      disableAutoFocus={false}
       PaperProps={{
         sx: {
           backgroundColor: 'rgba(15, 23, 42, 0.95)',

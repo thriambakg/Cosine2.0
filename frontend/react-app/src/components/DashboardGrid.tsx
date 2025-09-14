@@ -7,6 +7,7 @@ import { UnifiedTile } from '../types/dashboardTypes';
 
 interface DashboardGridProps {
   tiles: UnifiedTile[];
+  dashboardContext?: string; // Add dashboard context for cache isolation
   onRemoveTile: (id: string) => void;
   onUpdateTile: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;
@@ -15,6 +16,7 @@ interface DashboardGridProps {
 
 const DashboardGrid: React.FC<DashboardGridProps> = ({
   tiles,
+  dashboardContext,
   onRemoveTile,
   onUpdateTile,
   onSettingsChange,
@@ -58,6 +60,7 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
             symbol={tile.symbol || 'BTC'}
             timeframe={tile.timeframe || '1d'}
             size={tile.size}
+            dashboardContext={dashboardContext}
             onRemove={onRemoveTile}
             onUpdate={onUpdateTile}
             onSettingsChange={onSettingsChange}
@@ -72,6 +75,7 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
             symbol={tile.symbol || 'AAPL'}
             timeframe={tile.timeframe || '1d'}
             size={tile.size}
+            dashboardContext={dashboardContext}
             onRemove={onRemoveTile}
             onUpdate={onUpdateTile}
             onSettingsChange={onSettingsChange}

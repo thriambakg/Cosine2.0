@@ -211,14 +211,16 @@ export const useTabManagement = ({
                 tiles: dbConfig.crypto_tiles.map(tile => ({
                   id: tile.id,
                   type: 'crypto',
+                  title: tile.symbol || 'Crypto Tile', // Add required title
                   symbol: tile.symbol,
                   timeframe: tile.timeframe,
-                  displayOptions: tile.displayOptions,
-                  autoRefresh: tile.autoRefresh,
-                  isPinned: tile.isPinned,
-                  size: tile.size,
-                  position: tile.position,
-                  created_at: tile.created_at
+                  displayOptions: tile.displayOptions || {},
+                  autoRefresh: tile.autoRefresh || false,
+                  isPinned: tile.isPinned || false,
+                  size: tile.size || { width: 350, height: 400 },
+                  position: tile.position || { x: 0, y: 0 },
+                  dashboard_id: 'dashboard_1', // Add dashboard_id for this dashboard
+                  created_at: tile.created_at || new Date().toISOString()
                 })),
                 layout: dbConfig.layout || 'grid',
                 created_at: now
@@ -334,8 +336,9 @@ export const useTabManagement = ({
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       isDefault: false,
-      isPinned: options.isPinned || false
-    };
+      isPinned: options.isPinned || false,
+      tabId: `tab-${state.nextTabId}` // Add tabId to establish the relationship
+    } as any; // Type assertion to handle missing tabId in type definition
 
     const newTab: DashboardTab = {
       id: `tab-${state.nextTabId}`,
@@ -349,6 +352,14 @@ export const useTabManagement = ({
       lastAccessed: new Date().toISOString(),
       color: options.color
     };
+
+    console.log('🆕 Creating new tab:', { 
+      newTab, 
+      newDashboard, 
+      nextTabId: state.nextTabId,
+      existingTabs: state.tabs.map(t => ({ id: t.id, name: t.name })),
+      existingDashboards: state.dashboards.map(d => ({ id: d.id, name: d.name }))
+    });
 
     // Deactivate current active tab
     const updatedTabs = state.tabs.map(tab => ({ ...tab, isActive: false }));
@@ -369,6 +380,18 @@ export const useTabManagement = ({
 
     const remainingTabs = state.tabs.filter(tab => tab.id !== tabId);
     
+    // Also remove the associated dashboard
+    const remainingDashboards = state.dashboards.filter(dashboard => 
+      (dashboard as any).tabId !== tabId
+    );
+    
+    console.log('🗑️ Closing tab:', { 
+      tabToClose, 
+      remainingTabs: remainingTabs.map(t => ({ id: t.id, name: t.name })),
+      remainingDashboards: remainingDashboards.map(d => ({ id: d.id, name: d.name })),
+      nextTabId: state.nextTabId
+    });
+    
     // If closing the active tab, activate another tab
     let newActiveTabId = state.activeTabId;
     if (tabToClose.isActive && remainingTabs.length > 0) {
@@ -386,6 +409,7 @@ export const useTabManagement = ({
 
     updateState({
       tabs: updatedTabs,
+      dashboards: remainingDashboards,
       activeTabId: newActiveTabId
     });
   }, [state, updateState]);
@@ -613,8 +637,9 @@ export const useTabManagement = ({
   // Get current active tab and dashboard
   const activeTab = state.tabs.find(tab => tab.id === state.activeTabId);
   const activeDashboard = activeTab 
-    ? state.dashboards.find(dashboard => dashboard.id === activeTab.dashboardId)
+    ? state.dashboards.find(dashboard => (dashboard as any).tabId === activeTab.id)
     : null;
+    
 
   // Update dashboard tiles
   const updateDashboardTiles = useCallback((dashboardId: string, tiles: UnifiedTile[]) => {

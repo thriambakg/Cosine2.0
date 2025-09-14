@@ -33,23 +33,34 @@ export interface DashboardGroup {
   position: number;
 }
 
+export interface GridPosition {
+  x: number; // Grid column (0-based)
+  y: number; // Grid row (0-based)
+}
+
+export interface GridSize {
+  width: number; // Number of grid columns (1, 2, 3, 4, etc.)
+  height: number; // Number of grid rows (1, 2, 3, 4, etc.)
+}
+
 export interface UnifiedTile {
   id: string;
   type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated';
   title: string;
   symbol?: string; // For crypto/stock tiles
   timeframe?: string; // For crypto/stock tiles
+  name?: string; // For portfolio tiles
+  content?: string; // For custom tiles
+  prompt?: string; // For chat_generated tiles
   displayOptions: {
-    showPrice: boolean;
-    show24hChange: boolean;
-    showAnnualReturn: boolean;
-    showVolatility: boolean;
-    showChart: boolean;
+    [key: string]: any; // Flexible display options for different tile types
   };
   autoRefresh: boolean;
   isPinned: boolean;
-  size: { width: number; height: number };
-  position?: { x: number; y: number };
+  size: { width: number; height: number }; // Legacy pixel-based size
+  position?: { x: number; y: number }; // Legacy pixel-based position
+  gridPosition?: GridPosition; // New grid-based position
+  gridSize?: GridSize; // New grid-based size
   created_at?: string;
   dashboard_id: string;
 }

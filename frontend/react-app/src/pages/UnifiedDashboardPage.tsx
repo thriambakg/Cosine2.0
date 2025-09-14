@@ -29,6 +29,7 @@ import {
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
 import DashboardGrid from '../components/DashboardGrid';
+import GridDashboard from '../components/GridDashboard';
 import AddCryptoModal from '../components/AddCryptoModal';
 import AddStockModal from '../components/AddStockModal';
 import DashboardTabBar from '../components/DashboardTabBar';
@@ -37,7 +38,7 @@ import NewGroupDialog from '../components/NewGroupDialog';
 
 // Import tab management hook and types
 import { useTabManagement } from '../hooks/useTabManagement';
-import { UnifiedTile } from '../types/dashboardTypes';
+import { UnifiedTile, GridPosition } from '../types/dashboardTypes';
 
 // Custom styled components for Wall Street chic
 const GlassCard = ({ children, sx = {}, ...props }: any) => (
@@ -163,8 +164,32 @@ const UnifiedDashboardPage: React.FC = () => {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef<UnifiedTile[] | null>(null);
 
-  // Get current tiles from active dashboard
-  const tiles = activeDashboard?.tiles || [];
+  // Get current tiles from active dashboard or localStorage
+  const [localTiles, setLocalTiles] = useState<UnifiedTile[]>([]);
+  
+  // Get current dashboard ID (either from active dashboard or default)
+  const currentDashboardId = activeDashboard?.id || 'main';
+  
+  // Get tiles for current dashboard and ensure unique IDs
+  const getTilesWithUniqueIds = (tiles: UnifiedTile[]) => {
+    const seenIds = new Set<string>();
+    return tiles.map(tile => {
+      let uniqueId = tile.id;
+      let counter = 1;
+      while (seenIds.has(uniqueId)) {
+        uniqueId = `${tile.id}_${counter}`;
+        counter++;
+      }
+      seenIds.add(uniqueId);
+      return { ...tile, id: uniqueId };
+    });
+  };
+
+  // Always prioritize active dashboard tiles over localStorage
+  const tiles = activeDashboard ? 
+    getTilesWithUniqueIds(activeDashboard.tiles || []) : 
+    getTilesWithUniqueIds(localTiles.filter(tile => tile.dashboard_id === currentDashboardId));
+
 
   // Tab management handlers
   const handleCreateTab = () => {
@@ -249,6 +274,35 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   }, []);
 
+  // Load tiles from localStorage based on dashboard state
+  useEffect(() => {
+    console.log('🔍 Dashboard state changed:', { activeDashboard, currentDashboardId, tabs: tabs?.length });
+    
+    if (activeDashboard) {
+      // When switching to an active dashboard, clear local tiles
+      console.log('✅ Active dashboard found, clearing local tiles');
+      setLocalTiles([]);
+    } else {
+      // When no active dashboard, load tiles for the current dashboard
+      console.log('⚠️ No active dashboard, loading from localStorage');
+      const cachedTiles = loadFromLocalStorage();
+      console.log('🔍 Loading tiles from localStorage:', { cachedTiles, currentDashboardId, activeDashboard });
+      if (cachedTiles && cachedTiles.length > 0) {
+        // Handle tiles without dashboard_id (legacy tiles) by assigning them to 'main'
+        const tilesWithDashboardId = cachedTiles.map(tile => ({
+          ...tile,
+          dashboard_id: tile.dashboard_id || 'main'
+        }));
+        
+        const dashboardTiles = tilesWithDashboardId.filter(tile => tile.dashboard_id === currentDashboardId);
+        console.log('🎯 Filtered tiles for current dashboard:', { dashboardTiles, currentDashboardId });
+        setLocalTiles(dashboardTiles);
+      } else {
+        console.log('❌ No tiles found in localStorage');
+      }
+    }
+  }, [activeDashboard, currentDashboardId, loadFromLocalStorage, tabs]);
+
   // Debounced save to database
   const debouncedSaveToDatabase = useCallback((updatedTiles: UnifiedTile[]) => {
     if (saveTimeoutRef.current) {
@@ -267,22 +321,54 @@ const UnifiedDashboardPage: React.FC = () => {
 
   // Helper function to update dashboard tiles
   const updateDashboardTiles = useCallback((updatedTiles: UnifiedTile[]) => {
-    if (!activeDashboard) return;
-
-    // Update the dashboard in the tab management system
-    updateTabDashboardTiles(activeDashboard.id, updatedTiles);
-
-    // Update localStorage with all tiles (including other dashboards)
-    const allTiles = loadFromLocalStorage() || [];
-    const otherDashboardTiles = allTiles.filter(tile => tile.dashboard_id !== activeDashboard.id);
-    const allUpdatedTiles = [...otherDashboardTiles, ...updatedTiles];
-    saveToLocalStorage(allUpdatedTiles);
+    console.log('updateDashboardTiles called with:', updatedTiles);
+    console.log('activeDashboard:', activeDashboard);
     
-    // Trigger debounced save to database
-    debouncedSaveToDatabase(allUpdatedTiles);
+    // If we have an active dashboard, use the tab management system
+    if (activeDashboard) {
+      console.log('Updating tiles for dashboard:', activeDashboard.id);
 
-    console.log('Updated tiles for dashboard:', activeDashboard.id, updatedTiles);
-  }, [activeDashboard, updateTabDashboardTiles, saveToLocalStorage, debouncedSaveToDatabase, loadFromLocalStorage]);
+      // Update the dashboard in the tab management system
+      updateTabDashboardTiles(activeDashboard.id, updatedTiles);
+
+      // Update localStorage with all tiles (including other dashboards)
+      const allTiles = loadFromLocalStorage() || [];
+      const otherDashboardTiles = allTiles.filter(tile => tile.dashboard_id !== activeDashboard.id);
+      const allUpdatedTiles = [...otherDashboardTiles, ...updatedTiles];
+      saveToLocalStorage(allUpdatedTiles);
+      
+      // Trigger debounced save to database
+      debouncedSaveToDatabase(allUpdatedTiles);
+
+      console.log('Successfully updated tiles for dashboard:', activeDashboard.id, updatedTiles);
+    } else {
+      // Fallback: Direct localStorage approach (original behavior)
+      console.log('No active dashboard, using direct localStorage approach');
+      
+      // Save tiles directly to localStorage with current dashboard_id
+      const tilesWithDashboardId = updatedTiles.map(tile => ({
+        ...tile,
+        dashboard_id: tile.dashboard_id || currentDashboardId
+      }));
+      
+      // Get existing tiles from localStorage
+      const existingTiles = loadFromLocalStorage() || [];
+      
+      // Filter out tiles for the current dashboard and add the new ones
+      const otherDashboardTiles = existingTiles.filter(tile => tile.dashboard_id !== currentDashboardId);
+      const allTiles = [...otherDashboardTiles, ...tilesWithDashboardId];
+      
+      saveToLocalStorage(allTiles);
+      
+      // Update local state to trigger re-render
+      setLocalTiles(allTiles);
+      
+      // Trigger debounced save to database
+      debouncedSaveToDatabase(allTiles);
+
+      console.log('Successfully saved tiles to localStorage:', allTiles);
+    }
+  }, [activeDashboard, updateTabDashboardTiles, saveToLocalStorage, debouncedSaveToDatabase, loadFromLocalStorage, currentDashboardId]);
 
   // Save immediately on page unload
   useEffect(() => {
@@ -337,12 +423,22 @@ const UnifiedDashboardPage: React.FC = () => {
 
   // Enhanced tile addition flow
   const handleAddTileClick = () => {
+    // Remove focus from the FAB button to prevent aria-hidden warning
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    
     setAddTileStep('type-selection');
     setSelectedTileType(null);
     setTileConfig({});
   };
 
   const handleTileTypeSelect = (tileType: TileTypeDefinition) => {
+    // Remove focus from any active element to prevent aria-hidden warning
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    
     // If crypto tile, use the existing AddCryptoModal
     if (tileType.id === 'crypto') {
       setCryptoModalOpen(true);
@@ -421,13 +517,18 @@ const UnifiedDashboardPage: React.FC = () => {
     const newTile: UnifiedTile = {
       id: `tile_${Date.now()}`,
       type: selectedTileType.id as any,
-      title: tileConfig.title || tileConfig.symbol || selectedTileType.name,
+      title: tileConfig.title || tileConfig.symbol || tileConfig.name || selectedTileType.name,
       symbol: tileConfig.symbol,
       timeframe: tileConfig.timeframe,
-      displayOptions: tileConfig.displayOptions,
+      name: tileConfig.name, // For portfolio tiles
+      content: tileConfig.content, // For custom tiles
+      prompt: tileConfig.prompt, // For chat_generated tiles
+      displayOptions: tileConfig.displayOptions || {},
       autoRefresh: tileConfig.autoRefresh || false,
       isPinned: false,
-      size: { width: 350, height: 400 },
+      size: { width: 350, height: 400 }, // Legacy pixel size
+      gridPosition: { x: 0, y: 0 }, // Default grid position
+      gridSize: { width: 1, height: 1 }, // Default grid size (1x1)
       dashboard_id: activeDashboard?.id || 'main',
       created_at: new Date().toISOString(),
     };
@@ -443,6 +544,10 @@ const UnifiedDashboardPage: React.FC = () => {
 
   // Handle crypto tile addition using the existing AddCryptoModal
   const handleAddCryptoTile = (cryptoData: any) => {
+    console.log('handleAddCryptoTile called with:', cryptoData);
+    console.log('activeDashboard:', activeDashboard);
+    console.log('current tiles:', tiles);
+    
     const newTile: UnifiedTile = {
       id: `tile_${Date.now()}`,
       type: 'crypto',
@@ -452,17 +557,25 @@ const UnifiedDashboardPage: React.FC = () => {
       displayOptions: cryptoData.displayOptions,
       autoRefresh: cryptoData.autoRefresh,
       isPinned: false,
-      size: { width: 350, height: 400 },
+      size: { width: 350, height: 400 }, // Legacy pixel size
+      gridPosition: { x: 0, y: 0 }, // Default grid position
+      gridSize: { width: 1, height: 1 }, // Default grid size (1x1)
       dashboard_id: activeDashboard?.id || 'main',
       created_at: new Date().toISOString(),
     };
 
+    console.log('Created new tile:', newTile);
     const updatedTiles = [...tiles, newTile];
+    console.log('Updated tiles array:', updatedTiles);
     updateDashboardTiles(updatedTiles);
   };
 
   // Handle stock tile addition using the new AddStockModal
   const handleAddStockTile = (stockData: any) => {
+    console.log('handleAddStockTile called with:', stockData);
+    console.log('activeDashboard:', activeDashboard);
+    console.log('current tiles:', tiles);
+    
     const newTile: UnifiedTile = {
       id: `tile_${Date.now()}`,
       type: 'stock',
@@ -472,12 +585,16 @@ const UnifiedDashboardPage: React.FC = () => {
       displayOptions: stockData.displayOptions,
       autoRefresh: stockData.autoRefresh,
       isPinned: false,
-      size: { width: 350, height: 400 },
+      size: { width: 350, height: 400 }, // Legacy pixel size
+      gridPosition: { x: 0, y: 0 }, // Default grid position
+      gridSize: { width: 1, height: 1 }, // Default grid size (1x1)
       dashboard_id: activeDashboard?.id || 'main',
       created_at: new Date().toISOString(),
     };
 
+    console.log('Created new tile:', newTile);
     const updatedTiles = [...tiles, newTile];
+    console.log('Updated tiles array:', updatedTiles);
     updateDashboardTiles(updatedTiles);
   };
 
@@ -505,6 +622,13 @@ const UnifiedDashboardPage: React.FC = () => {
   const handleResizeTile = (id: string, size: { width: number; height: number }) => {
     const updatedTiles = tiles.map(tile => 
       tile.id === id ? { ...tile, size } : tile
+    );
+    updateDashboardTiles(updatedTiles);
+  };
+
+  const handleMoveTile = (id: string, position: GridPosition) => {
+    const updatedTiles = tiles.map(tile => 
+      tile.id === id ? { ...tile, gridPosition: position } : tile
     );
     updateDashboardTiles(updatedTiles);
   };
@@ -596,12 +720,14 @@ const UnifiedDashboardPage: React.FC = () => {
             </Typography>
           </Box>
         ) : (
-          <DashboardGrid
+          <GridDashboard
             tiles={tiles}
+            dashboardContext={currentDashboardId}
             onRemoveTile={handleRemoveTile}
             onUpdateTile={handleUpdateTile}
             onSettingsChange={handleSettingsChange}
             onResizeTile={handleResizeTile}
+            onMoveTile={handleMoveTile}
           />
         )}
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
   Box,
   Typography,
@@ -45,10 +45,15 @@ interface CryptoTileProps {
   autoRefresh?: boolean;
   isPinned?: boolean;
   size?: { width: number; height: number };
+  dashboardContext?: string; // Add dashboard context for cache isolation
   onRemove: (id: string) => void;
   onUpdate: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;
   onResize?: (id: string, size: { width: number; height: number }) => void;
+  onDragStart?: (event: React.MouseEvent) => void;
+  onResizeStart?: (event: React.MouseEvent) => void;
+  isDragging?: boolean;
+  isResizing?: boolean;
 }
 
 const CryptoTile: React.FC<CryptoTileProps> = ({
@@ -65,10 +70,16 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   },
   autoRefresh = false,
   isPinned = false,
-     size = { width: 350, height: 400 },
+  size = { width: 350, height: 400 },
+  dashboardContext,
   onRemove,
+  onUpdate,
   onSettingsChange,
   onResize,
+  onDragStart,
+  onResizeStart,
+  isDragging = false,
+  isResizing = false,
 }) => {
   const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
   const [timeframeDialogOpen, setTimeframeDialogOpen] = useState(false);
@@ -82,8 +93,11 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   
   // Memoize the fetch function to prevent constant re-renders
   const fetchCryptoData = useCallback(async () => {
-    return await executeForceRefresh({ symbols: [symbol], timeframe });
-  }, [executeForceRefresh, symbol, timeframe]);
+    console.log(`CryptoTile ${id}: Fetching data for ${symbol} with timeframe ${timeframe}`);
+    const result = await executeForceRefresh({ symbols: [symbol], timeframe });
+    console.log(`CryptoTile ${id}: Received data:`, result);
+    return result;
+  }, [executeForceRefresh, symbol, timeframe, id]);
   
   const { data: cryptoData, loading: isLoading, error, refresh } = useTileCache(
     id,
@@ -95,8 +109,11 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
       useSessionStorage: true, // Persist across tab switches
       enabled: true,
       forceRefresh: false, // Don't force refresh on mount
+      dashboardContext, // Include dashboard context for cache isolation
     }
   );
+
+  console.log(`CryptoTile ${id}: State - loading: ${isLoading}, error: ${error}, data:`, cryptoData);
 
   // Note: Data fetching is now handled by the cache hook
   // No need to fetch on mount unless cache is empty
@@ -256,11 +273,19 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         overflow: 'hidden',
         width: size.width,
         height: size.height,
-                 resize: 'both',
-         minWidth: 300,
-         minHeight: 350,
-         maxWidth: 600,
-         maxHeight: 600,
+        resize: onDragStart ? 'none' : 'both', // Disable CSS resize when using grid system
+        minWidth: 300,
+        minHeight: 350,
+        maxWidth: 600,
+        maxHeight: 600,
+        cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
+        transition: isDragging ? 'none' : 'all 0.3s ease',
+        opacity: isDragging ? 0.8 : 1,
+        '&:hover': {
+          borderColor: '#f59e0b',
+          transform: isDragging ? 'none' : 'translateY(-2px)',
+          boxShadow: isDragging ? 'none' : '0 8px 25px rgba(245, 158, 11, 0.15)',
+        },
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -271,13 +296,14 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
           background: (crypto?.return24h ?? 0) > 0 ? '#22c55e' : '#dc2626',
         },
       }}
-             ref={tileRef}
-               onMouseUp={() => {
-          if (onResize && tileRef.current) {
-            const rect = tileRef.current.getBoundingClientRect();
-            onResize(id, { width: rect.width, height: rect.height });
-          }
-        }}
+      ref={tileRef}
+      onMouseDown={onDragStart}
+      onMouseUp={() => {
+        if (onResize && tileRef.current) {
+          const rect = tileRef.current.getBoundingClientRect();
+          onResize(id, { width: rect.width, height: rect.height });
+        }
+      }}
     >
              {/* Header with controls */}
        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -684,4 +710,48 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   );
 };
 
-export default CryptoTile;
+// Custom comparison function to ensure proper re-rendering when data changes
+const CryptoTileMemo = memo(CryptoTile, (prevProps, nextProps) => {
+  // Always re-render if key props change
+  if (prevProps.id !== nextProps.id ||
+      prevProps.symbol !== nextProps.symbol ||
+      prevProps.timeframe !== nextProps.timeframe ||
+      prevProps.dashboardContext !== nextProps.dashboardContext) {
+    return false; // Re-render
+  }
+  
+  // Check if display options changed
+  const prevDisplay = prevProps.displayOptions;
+  const nextDisplay = nextProps.displayOptions;
+  if (prevDisplay && nextDisplay) {
+    if (prevDisplay.showPrice !== nextDisplay.showPrice ||
+        prevDisplay.showPriceMarker !== nextDisplay.showPriceMarker ||
+        prevDisplay.show24hChange !== nextDisplay.show24hChange ||
+        prevDisplay.showAnnualReturn !== nextDisplay.showAnnualReturn ||
+        prevDisplay.showVolatility !== nextDisplay.showVolatility ||
+        prevDisplay.showChart !== nextDisplay.showChart) {
+      return false; // Re-render
+    }
+  }
+  
+  // Check if other important props changed
+  if (prevProps.autoRefresh !== nextProps.autoRefresh ||
+      prevProps.isPinned !== nextProps.isPinned ||
+      prevProps.isDragging !== nextProps.isDragging ||
+      prevProps.isResizing !== nextProps.isResizing) {
+    return false; // Re-render
+  }
+  
+  // If size changed significantly, re-render
+  if (prevProps.size && nextProps.size) {
+    const sizeThreshold = 10; // 10px threshold
+    if (Math.abs(prevProps.size.width - nextProps.size.width) > sizeThreshold ||
+        Math.abs(prevProps.size.height - nextProps.size.height) > sizeThreshold) {
+      return false; // Re-render
+    }
+  }
+  
+  return true; // Don't re-render
+});
+
+export default CryptoTileMemo;

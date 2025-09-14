@@ -374,26 +374,7 @@ def create_default_dashboard() -> Dict:
                 'id': 'dashboard_1',
                 'tabId': 'tab_1',
                 'name': 'My Dashboard',
-                'tiles': [
-                    {
-                        'id': 'tile_1',
-                        'type': 'crypto',
-                        'symbol': 'BTC',
-                        'timeframe': '1d',
-                        'displayOptions': {
-                            'showPrice': True,
-                            'show24hChange': True,
-                            'showAnnualReturn': True,
-                            'showVolatility': True,
-                            'showChart': True
-                        },
-                        'autoRefresh': False,
-                        'isPinned': False,
-                        'size': {'width': 350, 'height': 400},
-                        'position': {'x': 0, 'y': 0},
-                        'created_at': now
-                    }
-                ],
+                'tiles': [],  # Start with empty tiles - no default BTC tile
                 'layout': 'grid',
                 'created_at': now
             }

@@ -7,10 +7,69 @@ from datetime import datetime, timedelta
 import requests
 import time
 import random
+import hashlib
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Rate limiting configuration
+RATE_LIMIT_DELAY = 2.0  # Minimum delay between requests
+MAX_RETRIES = 3
+RETRY_DELAY = 5.0
+
+# In-memory cache for rate limiting (simple approach for Lambda)
+request_timestamps = {}
+
+def rate_limit_check(ticker):
+    """Check if we should delay requests to avoid rate limiting"""
+    current_time = time.time()
+    cache_key = f"rate_limit_{ticker}"
+    
+    if cache_key in request_timestamps:
+        last_request = request_timestamps[cache_key]
+        time_since_last = current_time - last_request
+        
+        if time_since_last < RATE_LIMIT_DELAY:
+            delay_needed = RATE_LIMIT_DELAY - time_since_last
+            logger.info(f"Rate limiting: waiting {delay_needed:.2f}s before next request for {ticker}")
+            time.sleep(delay_needed)
+    
+    request_timestamps[cache_key] = time.time()
+
+def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES):
+    """Make Yahoo Finance request with retry logic and rate limiting"""
+    for attempt in range(max_retries):
+        try:
+            # Add random delay to spread out requests
+            delay = random.uniform(0.5, 2.0)
+            time.sleep(delay)
+            
+            logger.info(f"Making Yahoo Finance request (attempt {attempt + 1}/{max_retries})")
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                return response
+            elif response.status_code == 429:
+                # Rate limited - wait longer before retry
+                wait_time = RETRY_DELAY * (2 ** attempt)  # Exponential backoff
+                logger.warning(f"Rate limited (429). Waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
+                time.sleep(wait_time)
+                continue
+            else:
+                logger.error(f"HTTP request failed with status {response.status_code}")
+                if attempt == max_retries - 1:
+                    return response
+                time.sleep(RETRY_DELAY)
+                continue
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request exception on attempt {attempt + 1}: {str(e)}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(RETRY_DELAY)
+    
+    raise Exception(f"All {max_retries} attempts failed")
 
 def lambda_handler(event, context):
     """
@@ -43,8 +102,13 @@ def lambda_handler(event, context):
         ticker = None
         period = '1y'
         
+        # Debug: Log all event keys
+        logger.info(f"Event keys: {list(event.keys()) if isinstance(event, dict) else 'Not a dict'}")
+        
         if event.get('queryStringParameters'):
             logger.info("Extracting from queryStringParameters")
+            logger.info(f"queryStringParameters: {event['queryStringParameters']}")
+            logger.info(f"queryStringParameters type: {type(event['queryStringParameters'])}")
             ticker = event['queryStringParameters'].get('ticker')
             period = event['queryStringParameters'].get('period', '1y')
             logger.info(f"From queryStringParameters - ticker: {ticker}, period: {period}")
@@ -64,6 +128,7 @@ def lambda_handler(event, context):
             logger.info(f"From direct params - ticker: {ticker}, period: {period}")
         
         logger.info(f"Final extracted values - ticker: {ticker}, period: {period}")
+        logger.info(f"Ticker validation - ticker is None: {ticker is None}, ticker is empty string: {ticker == ''}")
         
         # Validate required parameters
         if not ticker:
@@ -149,7 +214,7 @@ def lambda_handler(event, context):
 
 def fetch_stock_data(ticker, period="1y"):
     """
-    Fetch comprehensive stock data using yfinance library.
+    Fetch comprehensive stock data using yfinance library with rate limiting.
     
     Args:
         ticker (str): Stock ticker symbol
@@ -160,6 +225,9 @@ def fetch_stock_data(ticker, period="1y"):
     """
     try:
         logger.info(f"Fetching data for {ticker} with period {period}")
+        
+        # Apply rate limiting
+        rate_limit_check(ticker)
         
         # Create yfinance Ticker object
         stock = yf.Ticker(ticker)
@@ -193,12 +261,20 @@ def fetch_stock_data(ticker, period="1y"):
         
     except Exception as e:
         logger.error(f"Error fetching stock data for {ticker}: {str(e)}")
-        # Return mock data as fallback
+        # Try enhanced HTTP fallback first
+        logger.info(f"Trying enhanced HTTP fallback for {ticker}")
+        fallback_result = fetch_stock_data_fallback(ticker, period)
+        if 'error' not in fallback_result:
+            return fallback_result
+        
+        # If fallback also fails, return mock data
+        logger.warning(f"All methods failed for {ticker}, returning mock data")
         return generate_mock_stock_data(ticker, period)
 
-def fetch_stock_data_fallback(ticker, period="1y"):
+def fetch_stock_data_direct_http(ticker, period="1y"):
     """
-    Fallback method using direct HTTP calls to Yahoo Finance when yfinance library fails.
+    Direct HTTP fallback method that bypasses yfinance library completely.
+    Uses multiple Yahoo Finance endpoints to get comprehensive data.
     
     Args:
         ticker (str): Stock ticker symbol
@@ -208,10 +284,240 @@ def fetch_stock_data_fallback(ticker, period="1y"):
         dict: Stock statistics matching crypto stats format
     """
     try:
-        logger.info(f"=== Using fallback HTTP method for {ticker} ===")
+        logger.info(f"=== Using direct HTTP fallback for {ticker} ===")
+        
+        # Apply rate limiting
+        rate_limit_check(ticker)
+        
+        # Get current price and basic data
+        current_data = fetch_current_price_direct(ticker)
+        if 'error' in current_data:
+            logger.error(f"Failed to get current price: {current_data['error']}")
+            return current_data
+        
+        # Get historical data for chart
+        chart_data = fetch_historical_data_direct(ticker, period)
+        
+        # Get additional statistics
+        stats_data = fetch_additional_stats_direct(ticker)
+        
+        # Combine all data into crypto stats format
+        result = {
+            'current_price': current_data.get('current_price', 0),
+            'price_change_24h': current_data.get('price_change_24h', 0),
+            'week_return': stats_data.get('week_return', 0),
+            'annual_return': stats_data.get('annual_return', 0),
+            'volatility': stats_data.get('volatility', 0),
+            'chart_data': chart_data,
+            'data_source': 'Yahoo Finance Direct HTTP',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        logger.info(f"Direct HTTP fallback successful for {ticker}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Direct HTTP fallback failed for {ticker}: {str(e)}")
+        return {"error": f"Direct HTTP fallback failed: {str(e)}"}
+
+def fetch_current_price_direct(ticker):
+    """Fetch current price using direct HTTP call to Yahoo Finance"""
+    try:
+        # Use the v8 chart endpoint for current price
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+        }
+        
+        logger.info(f"Fetching current price for {ticker}")
+        response = make_yahoo_request_with_retry(url, headers)
+        
+        if response.status_code != 200:
+            return {"error": f"HTTP request failed: {response.status_code}"}
+        
+        data = response.json()
+        
+        if 'chart' not in data or not data['chart']['result']:
+            return {"error": f"No data found for {ticker}"}
+        
+        result = data['chart']['result'][0]
+        meta = result.get('meta', {})
+        
+        current_price = meta.get('regularMarketPrice', 0)
+        previous_close = meta.get('previousClose', 0)
+        price_change_24h = current_price - previous_close if current_price and previous_close else 0
+        
+        return {
+            'current_price': current_price,
+            'price_change_24h': price_change_24h,
+            'previous_close': previous_close
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching current price for {ticker}: {str(e)}")
+        return {"error": f"Failed to fetch current price: {str(e)}"}
+
+def fetch_historical_data_direct(ticker, period="1y"):
+    """Fetch historical data for chart using direct HTTP call"""
+    try:
+        # Map period to Yahoo Finance parameters
+        period_map = {
+            '1d': {'range': '1d', 'interval': '1m'},
+            '7d': {'range': '7d', 'interval': '1h'},
+            '30d': {'range': '1mo', 'interval': '1d'},
+            '1y': {'range': '1y', 'interval': '1d'}
+        }
+        
+        period_config = period_map.get(period, period_map['1y'])
+        
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+        params = {
+            'range': period_config['range'],
+            'interval': period_config['interval'],
+            'includePrePost': 'true'
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+        }
+        
+        logger.info(f"Fetching historical data for {ticker} with period {period}")
+        
+        # Add delay between requests
+        time.sleep(random.uniform(1.0, 2.0))
+        
+        response = requests.get(url, params=params, headers=headers, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"Historical data request failed: {response.status_code}")
+            return []
+        
+        data = response.json()
+        
+        if 'chart' not in data or not data['chart']['result']:
+            logger.error("No historical data in response")
+            return []
+        
+        result = data['chart']['result'][0]
+        timestamps = result.get('timestamp', [])
+        quotes = result.get('indicators', {}).get('quote', [{}])[0]
+        closes = quotes.get('close', [])
+        
+        # Format data for chart
+        chart_data = []
+        for i, timestamp in enumerate(timestamps):
+            if i < len(closes) and closes[i] is not None:
+                chart_data.append({
+                    'time': timestamp,
+                    'close': closes[i]
+                })
+        
+        logger.info(f"Retrieved {len(chart_data)} data points for {ticker}")
+        return chart_data
+        
+    except Exception as e:
+        logger.error(f"Error fetching historical data for {ticker}: {str(e)}")
+        return []
+
+def fetch_additional_stats_direct(ticker):
+    """Fetch additional statistics using direct HTTP calls"""
+    try:
+        # Use the v10 finance endpoint for additional stats
+        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}"
+        params = {
+            'modules': 'financialData,defaultKeyStatistics,price'
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+        }
+        
+        logger.info(f"Fetching additional stats for {ticker}")
+        
+        # Add delay between requests
+        time.sleep(random.uniform(1.0, 2.0))
+        
+        response = requests.get(url, params=params, headers=headers, timeout=30)
+        
+        if response.status_code != 200:
+            logger.warning(f"Additional stats request failed: {response.status_code}")
+            return {'week_return': 0, 'annual_return': 0, 'volatility': 0}
+        
+        data = response.json()
+        
+        if 'quoteSummary' not in data or not data['quoteSummary']['result']:
+            logger.warning("No additional stats in response")
+            return {'week_return': 0, 'annual_return': 0, 'volatility': 0}
+        
+        result = data['quoteSummary']['result'][0]
+        
+        # Extract statistics
+        financial_data = result.get('financialData', {})
+        key_stats = result.get('defaultKeyStatistics', {})
+        
+        # Calculate returns (simplified)
+        current_price = financial_data.get('currentPrice', {}).get('raw', 0)
+        week_return = 0
+        annual_return = 0
+        
+        if current_price:
+            # Use 52-week high/low for annual return estimation
+            week_52_high = key_stats.get('fiftyTwoWeekHigh', {}).get('raw', current_price)
+            week_52_low = key_stats.get('fiftyTwoWeekLow', {}).get('raw', current_price)
+            
+            if week_52_low > 0:
+                annual_return = ((current_price - week_52_low) / week_52_low) * 100
+        
+        # Estimate volatility (simplified)
+        volatility = key_stats.get('beta', {}).get('raw', 1.0) * 20  # Rough estimation
+        
+        return {
+            'week_return': week_return,
+            'annual_return': annual_return,
+            'volatility': volatility
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching additional stats for {ticker}: {str(e)}")
+        return {'week_return': 0, 'annual_return': 0, 'volatility': 0}
+
+def fetch_stock_data_fallback(ticker, period="1y"):
+    """
+    Enhanced fallback method using direct HTTP calls to Yahoo Finance when yfinance library fails.
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        period (str): Time period for historical data
+        
+    Returns:
+        dict: Stock statistics matching crypto stats format
+    """
+    try:
+        logger.info(f"=== Using enhanced HTTP fallback for {ticker} ===")
+        
+        # Try the new direct HTTP method first
+        result = fetch_stock_data_direct_http(ticker, period)
+        if 'error' not in result:
+            return result
+        
+        # If that fails, try the original fallback method
+        logger.info(f"Direct HTTP method failed, trying original fallback for {ticker}")
         
         # Add random delay to avoid rate limiting
-        delay = random.uniform(0.5, 2.0)
+        delay = random.uniform(1.0, 3.0)
         logger.info(f"Adding {delay:.2f}s delay to avoid rate limiting")
         time.sleep(delay)
         
@@ -1124,3 +1430,92 @@ def generate_mock_analytics():
             'payout_ratio': 25.0
         }
     }
+
+def generate_mock_stock_data(ticker, period="1y"):
+    """Generate mock stock data in crypto stats format."""
+    base_price = 100 + (hash(ticker) % 500)
+    
+    # Generate mock chart data
+    chart_data = []
+    for i in range(30):
+        price = base_price + (i * 0.5) + ((hash(ticker + str(i)) % 10) - 5)
+        chart_data.append({
+            'time': int((datetime.now() - timedelta(days=30-i)).timestamp()),
+            'close': round(price, 2)
+        })
+    
+    return {
+        'current_price': base_price,
+        'price_change_24h': round((hash(ticker) % 20) - 10, 2),
+        'week_return': round((hash(ticker) % 40) - 20, 2),
+        'annual_return': round((hash(ticker) % 100) - 50, 2),
+        'volatility': round((hash(ticker) % 50) / 100, 4),
+        'chart_data': chart_data,
+        'data_source': 'Mock Data',
+        'timestamp': datetime.now().isoformat()
+    }
+
+def fetch_stock_stats(ticker, period="1y"):
+    """
+    Main function to fetch stock statistics in crypto stats format for tile compatibility.
+    This function tries multiple methods in order of preference.
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        period (str): Time period for historical data
+        
+    Returns:
+        dict: Stock statistics matching crypto stats format
+    """
+    try:
+        logger.info(f"=== Fetching stock stats for {ticker} with period {period} ===")
+        
+        # Method 1: Try yfinance library with rate limiting
+        try:
+            logger.info(f"Method 1: Trying yfinance library for {ticker}")
+            stock_data = fetch_stock_data(ticker, period)
+            
+            # Convert comprehensive data to crypto stats format
+            if 'error' not in stock_data:
+                result = {
+                    'current_price': stock_data.get('quote', {}).get('current_price', 0),
+                    'price_change_24h': stock_data.get('quote', {}).get('price_change_24h', 0),
+                    'week_return': stock_data.get('analytics', {}).get('week_return', 0),
+                    'annual_return': stock_data.get('analytics', {}).get('annual_return', 0),
+                    'volatility': stock_data.get('technical', {}).get('volatility_percent', 0) / 100,
+                    'chart_data': stock_data.get('historical', {}).get('prices', []),
+                    'data_source': stock_data.get('data_source', 'Yahoo Finance'),
+                    'timestamp': stock_data.get('timestamp', datetime.now().isoformat())
+                }
+                logger.info(f"Method 1 successful for {ticker}")
+                return result
+        except Exception as e:
+            logger.warning(f"Method 1 failed for {ticker}: {str(e)}")
+        
+        # Method 2: Try direct HTTP fallback
+        try:
+            logger.info(f"Method 2: Trying direct HTTP fallback for {ticker}")
+            result = fetch_stock_data_direct_http(ticker, period)
+            if 'error' not in result:
+                logger.info(f"Method 2 successful for {ticker}")
+                return result
+        except Exception as e:
+            logger.warning(f"Method 2 failed for {ticker}: {str(e)}")
+        
+        # Method 3: Try enhanced HTTP fallback
+        try:
+            logger.info(f"Method 3: Trying enhanced HTTP fallback for {ticker}")
+            result = fetch_stock_data_fallback(ticker, period)
+            if 'error' not in result:
+                logger.info(f"Method 3 successful for {ticker}")
+                return result
+        except Exception as e:
+            logger.warning(f"Method 3 failed for {ticker}: {str(e)}")
+        
+        # Method 4: Return mock data as last resort
+        logger.warning(f"All methods failed for {ticker}, returning mock data")
+        return generate_mock_stock_data(ticker, period)
+        
+    except Exception as e:
+        logger.error(f"fetch_stock_stats failed completely for {ticker}: {str(e)}")
+        return generate_mock_stock_data(ticker, period)

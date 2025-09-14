@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { robustStorage, isIncognitoMode } from '../utils/storageUtils';
+import { robustStorage } from '../utils/storageUtils';
 
 // Dashboard cache entry interface
 interface DashboardCacheEntry<T> {
@@ -32,9 +32,7 @@ class FlexibleCacheManager {
 
   // Generate tile cache key
   generateTileKey(tileId: string, type: string, ...params: (string | number)[]): string {
-    const key = this.generateKey('tile', tileId, type, ...params);
-    console.log(`🔑 Generated tile cache key: ${key} for tileId: ${tileId}, type: ${type}, params:`, params);
-    return key;
+    return this.generateKey('tile', tileId, type, ...params);
   }
 
   // Generate dashboard cache key
@@ -87,46 +85,28 @@ class FlexibleCacheManager {
   get<T>(key: string, config: CacheConfig = {}): T | null {
     const { version = this.CACHE_VERSION, useSessionStorage = true } = config;
     
-    console.log(`🔍 Cache get: ${key}, version: ${version}, useSessionStorage: ${useSessionStorage}`);
-    
     // Try memory cache first
     let entry = this.memoryCache.get(key);
-    console.log(`🧠 Memory cache ${entry ? 'hit' : 'miss'} for key: ${key}`);
     
     // If not in memory and robust storage is enabled, try robust storage
     if (!entry && useSessionStorage) {
       const robustEntry = this.getFromRobustStorage<T>(key);
       if (robustEntry) {
-        console.log(`💾 Robust storage hit for key: ${key}`);
         // Restore to memory cache
         this.memoryCache.set(key, robustEntry);
         entry = robustEntry;
-      } else {
-        console.log(`💾 Robust storage miss for key: ${key}`);
       }
     }
     
     if (!entry || !this.isCacheValid(entry, version)) {
-      if (entry) {
-        const age = Date.now() - entry.timestamp;
-        const timeValid = age < entry.ttl;
-        const versionValid = !version || entry.version === version;
-        console.log(`❌ Cache invalid for key: ${key}`);
-        console.log(`   Age: ${Math.round(age / 1000)}s, TTL: ${Math.round(entry.ttl / 1000)}s, Time valid: ${timeValid}`);
-        console.log(`   Version: ${entry.version}, Expected: ${version}, Version valid: ${versionValid}`);
-      } else {
-        console.log(`❌ Cache invalid for key: ${key} - no entry found`);
-      }
       this.delete(key);
       return null;
     }
     
-    console.log(`✅ Cache valid for key: ${key}`);
-    
     // Update last accessed time
     entry.lastAccessed = Date.now();
     if (useSessionStorage) {
-      this.setToSessionStorage(key, entry);
+      this.setToRobustStorage(key, entry);
     }
     
     return entry.data;
@@ -151,16 +131,16 @@ class FlexibleCacheManager {
     // Store in memory
     this.memoryCache.set(key, entry);
     
-    // Store in sessionStorage if enabled
+    // Store in robust storage if enabled
     if (useSessionStorage) {
-      this.setToSessionStorage(key, entry);
+      this.setToRobustStorage(key, entry);
     }
   }
 
-  // Delete from both memory and sessionStorage
+  // Delete from both memory and robust storage
   delete(key: string): boolean {
     const memoryDeleted = this.memoryCache.delete(key);
-    this.removeFromSessionStorage(key);
+    this.removeFromRobustStorage(key);
     return memoryDeleted;
   }
 
@@ -338,15 +318,11 @@ export function useFlexibleCache<T>(
 
     // Check cache first (unless bypassing)
     if (!bypassCache && !forceRefresh) {
-      console.log(`🔍 Checking cache for key: ${cacheKey}`);
       const cachedData = flexibleCache.get<T>(cacheKey, { version, useSessionStorage });
       if (cachedData) {
-        console.log(`✅ Cache hit for key: ${cacheKey}`);
         setData(cachedData);
         setError(null);
         return cachedData;
-      } else {
-        console.log(`❌ Cache miss for key: ${cacheKey}`);
       }
     }
 
@@ -354,11 +330,9 @@ export function useFlexibleCache<T>(
     setError(null);
 
     try {
-      console.log(`🌐 Making API call for key: ${cacheKey}`);
       const result = await fetchFunctionRef.current();
       
       // Cache the result
-      console.log(`💾 Caching result for key: ${cacheKey}`);
       flexibleCache.set(cacheKey, result, { ttl, useSessionStorage, version });
       
       setData(result);
@@ -413,11 +387,20 @@ export function useTileCache<T>(
   options: CacheConfig & {
     enabled?: boolean;
     forceRefresh?: boolean;
+    dashboardContext?: string; // Add dashboard context for cache isolation
   } = {}
 ) {
-  const cacheKey = flexibleCache.generateTileKey(tileId, type, ...params);
+  // Include dashboard context in cache key if provided
+  const cacheParams = options.dashboardContext 
+    ? [options.dashboardContext, ...params]
+    : params;
   
-  return useFlexibleCache(cacheKey, fetchFunction, options);
+  const cacheKey = flexibleCache.generateTileKey(tileId, type, ...cacheParams);
+  
+  // Remove dashboardContext from options before passing to useFlexibleCache
+  const { dashboardContext, ...cacheOptions } = options;
+  
+  return useFlexibleCache(cacheKey, fetchFunction, cacheOptions);
 }
 
 // Dashboard state cache hook

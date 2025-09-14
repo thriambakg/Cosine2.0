@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import {
   Box,
   Typography,
@@ -30,6 +30,8 @@ interface PlaceholderTileProps {
     title: string;
     size: { width: number; height: number };
     position?: { x: number; y: number };
+    gridPosition?: { x: number; y: number };
+    gridSize?: { width: number; height: number };
   };
   tileType?: {
     id: string;
@@ -44,12 +46,22 @@ interface PlaceholderTileProps {
   onUpdate: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;
   onResize: (id: string, size: { width: number; height: number }) => void;
+  onDragStart?: (event: React.MouseEvent) => void;
+  onResizeStart?: (event: React.MouseEvent) => void;
+  isDragging?: boolean;
+  isResizing?: boolean;
+  dashboardContext?: string;
 }
 
 const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
   tile,
   tileType,
-  onRemove
+  onRemove,
+  onDragStart,
+  onResizeStart,
+  isDragging = false,
+  isResizing = false,
+  dashboardContext
 }) => {
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
@@ -86,24 +98,41 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
     return tileType?.color || '#f59e0b';
   };
 
+  // Calculate grid position and size
+  const gridPosition = tile.gridPosition || { x: 0, y: 0 };
+  const gridSize = tile.gridSize || { width: 1, height: 1 };
+
   return (
     <Card
       sx={{
-        width: tile.size.width,
-        height: tile.size.height,
+        // Grid positioning
+        gridColumn: `${gridPosition.x + 1} / ${gridPosition.x + gridSize.width + 1}`,
+        gridRow: `${gridPosition.y + 1} / ${gridPosition.y + gridSize.height + 1}`,
+        
+        // Fallback for legacy positioning
+        ...(tile.position && !tile.gridPosition && {
+          position: 'absolute',
+          left: tile.position.x,
+          top: tile.position.y,
+          width: tile.size.width,
+          height: tile.size.height,
+        }),
+        
         backgroundColor: 'rgba(15, 23, 42, 0.95)',
         border: '2px solid #374151',
         borderRadius: '8px',
-        position: 'relative',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        cursor: 'grab',
+        cursor: isDragging ? 'grabbing' : 'grab',
+        opacity: isDragging ? 0.7 : 1,
+        transition: 'opacity 0.2s ease',
         '&:hover': {
           borderColor: getTileColor(),
           boxShadow: `0 8px 32px ${getTileColor()}20`
         }
       }}
+      onMouseDown={onDragStart}
     >
       {/* Header */}
       <Box
@@ -245,9 +274,65 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
             opacity: 1
           }
         }}
+        onMouseDown={onResizeStart}
       />
     </Card>
   );
 };
 
-export default PlaceholderTile;
+// Custom comparison function to ensure proper re-rendering when data changes
+const PlaceholderTileMemo = memo(PlaceholderTile, (prevProps, nextProps) => {
+  // Always re-render if key props change
+  if (prevProps.tile.id !== nextProps.tile.id ||
+      prevProps.tile.type !== nextProps.tile.type ||
+      prevProps.tile.title !== nextProps.tile.title ||
+      prevProps.dashboardContext !== nextProps.dashboardContext) {
+    return false; // Re-render
+  }
+  
+  // Check if grid position changed
+  const prevGridPos = prevProps.tile.gridPosition;
+  const nextGridPos = nextProps.tile.gridPosition;
+  if (prevGridPos && nextGridPos) {
+    if (prevGridPos.x !== nextGridPos.x || prevGridPos.y !== nextGridPos.y) {
+      return false; // Re-render
+    }
+  }
+  
+  // Check if grid size changed
+  const prevGridSize = prevProps.tile.gridSize;
+  const nextGridSize = nextProps.tile.gridSize;
+  if (prevGridSize && nextGridSize) {
+    if (prevGridSize.width !== nextGridSize.width || prevGridSize.height !== nextGridSize.height) {
+      return false; // Re-render
+    }
+  }
+  
+  // Check if legacy size changed significantly
+  const prevSize = prevProps.tile.size;
+  const nextSize = nextProps.tile.size;
+  if (prevSize && nextSize) {
+    const sizeThreshold = 10; // 10px threshold
+    if (Math.abs(prevSize.width - nextSize.width) > sizeThreshold ||
+        Math.abs(prevSize.height - nextSize.height) > sizeThreshold) {
+      return false; // Re-render
+    }
+  }
+  
+  // Check if tile type changed
+  if (prevProps.tileType?.id !== nextProps.tileType?.id ||
+      prevProps.tileType?.name !== nextProps.tileType?.name ||
+      prevProps.tileType?.color !== nextProps.tileType?.color) {
+    return false; // Re-render
+  }
+  
+  // Check if drag/resize state changed
+  if (prevProps.isDragging !== nextProps.isDragging ||
+      prevProps.isResizing !== nextProps.isResizing) {
+    return false; // Re-render
+  }
+  
+  return true; // Don't re-render
+});
+
+export default PlaceholderTileMemo;
