@@ -9,6 +9,7 @@ export interface Dashboard {
   updated_at: string;
   isDefault: boolean;
   isPinned?: boolean;
+  tabId?: string; // Associated tab ID
 }
 
 export interface DashboardTab {
@@ -22,6 +23,7 @@ export interface DashboardTab {
   isDirty?: boolean; // Has unsaved changes
   lastAccessed?: string;
   color?: string; // Tab color for visual distinction
+  created_at?: string; // Creation timestamp
 }
 
 export interface DashboardGroup {
@@ -29,8 +31,10 @@ export interface DashboardGroup {
   name: string;
   color: string;
   tabs: string[]; // Tab IDs
+  tabIds?: string[]; // Alternative property name for compatibility
   collapsed: boolean;
   position: number;
+  created_at?: string; // Creation timestamp
 }
 
 export interface GridPosition {
@@ -81,6 +85,7 @@ export interface TabManagementState {
   dashboards: Dashboard[];
   nextTabId: number;
   nextGroupId: number;
+  created_at?: string; // Creation timestamp
 }
 
 export interface TabContextMenuAction {

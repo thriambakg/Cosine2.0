@@ -28,7 +28,6 @@ import {
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
-import DashboardGrid from '../components/DashboardGrid';
 import GridDashboard from '../components/GridDashboard';
 import { getDefaultTileSize } from '../utils/tileConfig';
 import { safeLoadDashboard, needsMigration, getDashboardVersion } from '../utils/dashboardMigration';
@@ -782,8 +781,8 @@ const UnifiedDashboardPage: React.FC = () => {
       autoRefresh: cryptoData.autoRefresh,
       isPinned: false,
       size: { width: 350, height: 400 }, // Legacy pixel size
-      gridPosition: findNextAvailablePosition(getDefaultTileSize(selectedTileType.id as any)), // Smart placement
-      gridSize: getDefaultTileSize(selectedTileType.id as any), // Tile-specific default size
+      gridPosition: findNextAvailablePosition(getDefaultTileSize('crypto')), // Smart placement
+      gridSize: getDefaultTileSize('crypto'), // Tile-specific default size
       dashboard_id: activeDashboard?.id || 'main',
       created_at: new Date().toISOString(),
     };
@@ -810,8 +809,8 @@ const UnifiedDashboardPage: React.FC = () => {
       autoRefresh: stockData.autoRefresh,
       isPinned: false,
       size: { width: 350, height: 400 }, // Legacy pixel size
-      gridPosition: findNextAvailablePosition(getDefaultTileSize(selectedTileType.id as any)), // Smart placement
-      gridSize: getDefaultTileSize(selectedTileType.id as any), // Tile-specific default size
+      gridPosition: findNextAvailablePosition(getDefaultTileSize('stock')), // Smart placement
+      gridSize: getDefaultTileSize('stock'), // Tile-specific default size
       dashboard_id: activeDashboard?.id || 'main',
       created_at: new Date().toISOString(),
     };

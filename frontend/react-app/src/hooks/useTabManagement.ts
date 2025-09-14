@@ -155,42 +155,60 @@ export const useTabManagement = ({
           if ('tabs' in dbConfig && 'dashboards' in dbConfig) {
             // New format with tabs and dashboards
             dbState = {
-              tabs: dbConfig.tabs.map(tab => ({
+              tabs: (dbConfig.tabs as any[]).map((tab: any) => ({
                 id: tab.id,
                 name: tab.name,
+                dashboardId: tab.dashboardId || '',
+                isActive: tab.isActive || false,
+                groupId: tab.groupId,
+                position: tab.position || 0,
                 color: tab.color,
                 isPinned: tab.isPinned,
                 created_at: tab.created_at
               })),
-              tabGroups: dbConfig.tabGroups.map(group => ({
+              tabGroups: (dbConfig.tabGroups as any[]).map((group: any) => ({
                 id: group.id,
                 name: group.name,
                 color: group.color,
-                tabIds: group.tabIds,
+                tabs: group.tabs || group.tabIds || [],
+                tabIds: group.tabIds || group.tabs || [],
+                collapsed: group.collapsed || false,
+                position: group.position || 0,
                 created_at: group.created_at
               })),
-              dashboards: dbConfig.dashboards.map(dashboard => ({
+              dashboards: (dbConfig.dashboards as any[]).map((dashboard: any) => ({
                 id: dashboard.id,
                 tabId: dashboard.tabId,
                 name: dashboard.name,
-                tiles: dashboard.tiles.map(tile => ({
+                tiles: (dashboard.tiles as any[]).map((tile: any) => ({
                   id: tile.id,
                   type: tile.type,
+                  title: tile.title || tile.symbol || 'Untitled',
                   symbol: tile.symbol,
                   timeframe: tile.timeframe,
-                  displayOptions: tile.displayOptions,
-                  autoRefresh: tile.autoRefresh,
-                  isPinned: tile.isPinned,
-                  size: tile.size,
+                  name: tile.name,
+                  content: tile.content,
+                  prompt: tile.prompt,
+                  displayOptions: tile.displayOptions || {},
+                  autoRefresh: tile.autoRefresh || false,
+                  isPinned: tile.isPinned || false,
+                  size: tile.size || { width: 350, height: 400 },
                   position: tile.position,
-                  created_at: tile.created_at
+                  gridPosition: tile.gridPosition,
+                  gridSize: tile.gridSize,
+                  dashboard_id: tile.dashboard_id || dashboard.id,
+                  created_at: tile.created_at || new Date().toISOString()
                 })),
-                layout: dashboard.layout,
-                created_at: dashboard.created_at
+                layout: dashboard.layout as 'grid' | 'list' | 'custom',
+                created_at: dashboard.created_at || new Date().toISOString(),
+                updated_at: dashboard.updated_at || new Date().toISOString(),
+                isDefault: dashboard.isDefault || false,
+                isPinned: dashboard.isPinned
               })),
-              activeTabId: dbConfig.activeTabId,
-              nextTabId: dbConfig.nextTabId,
-              nextGroupId: dbConfig.nextGroupId
+              activeTabId: (dbConfig as any).activeTabId || null,
+              nextTabId: (dbConfig as any).nextTabId || 1,
+              nextGroupId: (dbConfig as any).nextGroupId || 1,
+              created_at: (dbConfig as any).created_at || new Date().toISOString()
             };
           } else {
             // Old format with just crypto_tiles - convert to new format
@@ -350,7 +368,8 @@ export const useTabManagement = ({
       isPinned: options.isPinned || false,
       isDirty: false,
       lastAccessed: new Date().toISOString(),
-      color: options.color
+      color: options.color,
+      created_at: new Date().toISOString()
     };
 
     console.log('🆕 Creating new tab:', { 

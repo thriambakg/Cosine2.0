@@ -61,8 +61,8 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
   onDragStart,
   onResizeStart,
   isDragging = false,
-  isResizing = false,
-  dashboardContext
+  isResizing: _isResizing = false,
+  dashboardContext: _dashboardContext
 }) => {
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);

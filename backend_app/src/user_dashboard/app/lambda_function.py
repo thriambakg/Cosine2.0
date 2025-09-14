@@ -524,7 +524,7 @@ def create_default_dashboard() -> Dict:
         'last_updated': now
     }
 
-def validate_dashboard_config(config: Dict) -> bool:
+def validate_dashboard_config_legacy(config: Dict) -> bool:
     """Validate dashboard configuration"""
     required_fields = ['tabs', 'dashboards', 'last_updated']
     

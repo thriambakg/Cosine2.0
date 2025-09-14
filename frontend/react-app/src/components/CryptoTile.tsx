@@ -73,13 +73,13 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   size = { width: 350, height: 400 },
   dashboardContext,
   onRemove,
-  onUpdate,
+  onUpdate: _onUpdate,
   onSettingsChange,
   onResize,
   onDragStart,
-  onResizeStart,
+  onResizeStart: _onResizeStart,
   isDragging = false,
-  isResizing = false,
+  isResizing: _isResizing = false,
 }) => {
   const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
   const [timeframeDialogOpen, setTimeframeDialogOpen] = useState(false);

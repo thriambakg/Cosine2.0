@@ -43,7 +43,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   onUpdateTile,
   onSettingsChange,
   onResizeTile,
-  onMoveTile,
+  onMoveTile: _onMoveTile,
 }) => {
   const [dragState, setDragState] = useState<DragState>({
     isDragging: false,
@@ -101,7 +101,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
       // Find available position by scanning the grid
       const occupiedCells = new Set<string>();
-      propsMap.forEach((props, tileId) => {
+      propsMap.forEach((props, _tileId) => {
         for (let x = props.position.x; x < props.position.x + props.size.width; x++) {
           for (let y = props.position.y; y < props.position.y + props.size.height; y++) {
             occupiedCells.add(`${x},${y}`);

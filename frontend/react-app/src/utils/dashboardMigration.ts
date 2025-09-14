@@ -1,7 +1,7 @@
 // Dashboard Migration and Compatibility Utilities
 // Ensures backward compatibility and safe migrations for production deployments
 
-import { UnifiedTile, Dashboard } from '../types/dashboardTypes';
+import { Dashboard } from '../types/dashboardTypes';
 import { getDefaultTileSize, getTileConfig } from './tileConfig';
 
 // Version tracking for dashboard configurations
@@ -116,7 +116,7 @@ export function migrateDashboard(dashboard: any): MigratedDashboard {
   console.log(`🔄 Migrating dashboard from ${currentVersion} to ${CURRENT_DASHBOARD_VERSION}`);
   
   let migratedDashboard = dashboard;
-  const migrationHistory = dashboard._version?.migrationHistory || [currentVersion];
+  const _migrationHistory = dashboard._version?.migrationHistory || [currentVersion];
   
   // Apply migrations in sequence
   const versionChain = ['1.0.0', '1.1.0', '2.0.0'];

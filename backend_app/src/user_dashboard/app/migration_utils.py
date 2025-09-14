@@ -345,6 +345,28 @@ def attempt_dashboard_repair(dashboard_data: Dict[str, Any]) -> Dict[str, Any]:
     
     return repaired_data
 
+def get_tile_constraints(tile_type: str) -> Dict[str, int]:
+    """Get size constraints for a specific tile type"""
+    constraints = {
+        'stock': {'minWidth': 3, 'maxWidth': 6, 'minHeight': 3, 'maxHeight': 8},
+        'crypto': {'minWidth': 3, 'maxWidth': 6, 'minHeight': 3, 'maxHeight': 8},
+        'portfolio': {'minWidth': 4, 'maxWidth': 8, 'minHeight': 4, 'maxHeight': 10},
+        'custom': {'minWidth': 2, 'maxWidth': 12, 'minHeight': 2, 'maxHeight': 12},
+        'chat_generated': {'minWidth': 3, 'maxWidth': 8, 'minHeight': 3, 'maxHeight': 12}
+    }
+    return constraints.get(tile_type, constraints['custom'])
+
+def get_default_tile_size(tile_type: str) -> Dict[str, int]:
+    """Get default size for a specific tile type"""
+    defaults = {
+        'stock': {'width': 4, 'height': 4},
+        'crypto': {'width': 4, 'height': 4},
+        'portfolio': {'width': 6, 'height': 6},
+        'custom': {'width': 4, 'height': 4},
+        'chat_generated': {'width': 4, 'height': 6}
+    }
+    return defaults.get(tile_type, defaults['custom'])
+
 def create_fallback_dashboard() -> Dict[str, Any]:
     """Create fallback dashboard if all else fails"""
     logger.info("Creating fallback dashboard")
