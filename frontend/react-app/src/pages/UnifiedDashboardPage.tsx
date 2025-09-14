@@ -32,6 +32,7 @@ import GridDashboard from '../components/GridDashboard';
 import { getDefaultTileSize } from '../utils/tileConfig';
 // import { safeLoadDashboard } from '../utils/dashboardMigration';
 import AddCryptoModal from '../components/AddCryptoModal';
+import { dashboardAPI } from '../services/api';
 import AddStockModal from '../components/AddStockModal';
 import DashboardTabBar from '../components/DashboardTabBar';
 import NewTabDialog from '../components/NewTabDialog';
@@ -302,6 +303,19 @@ const UnifiedDashboardPage: React.FC = () => {
   };
   
   const tiles = getTilesWithUniqueIds(getCurrentDashboardTiles());
+  
+  // Debug: Log tiles being rendered
+  console.log('🎯 TILES BEING RENDERED DEBUG START');
+  console.log('Number of tiles:', tiles.length);
+  tiles.forEach(tile => {
+    console.log(`Rendering tile ${tile.id}:`, {
+      gridPosition: tile.gridPosition,
+      gridSize: tile.gridSize,
+      position: tile.position,
+      size: tile.size
+    });
+  });
+  console.log('🎯 TILES BEING RENDERED DEBUG END');
 
 
   // Tab management handlers
@@ -548,8 +562,8 @@ const UnifiedDashboardPage: React.FC = () => {
       const allUpdatedTiles = [...otherDashboardTiles, ...updatedTiles];
       saveToLocalStorage(allUpdatedTiles);
       
-      // Trigger debounced save to database
-      debouncedSaveToDatabase(allUpdatedTiles);
+      // Trigger debounced save to database (only current dashboard tiles)
+      debouncedSaveToDatabase(updatedTiles);
 
       // Set override tiles for immediate visual feedback
       setOverrideTiles(updatedTiles);
@@ -586,8 +600,8 @@ const UnifiedDashboardPage: React.FC = () => {
       // Update local state to trigger re-render
       setLocalTiles(allTiles);
       
-      // Trigger debounced save to database
-      debouncedSaveToDatabase(allTiles);
+      // Trigger debounced save to database (only current dashboard tiles)
+      debouncedSaveToDatabase(tilesWithDashboardId);
 
       console.log('Successfully saved tiles to localStorage:', allTiles);
     }
@@ -637,10 +651,26 @@ const UnifiedDashboardPage: React.FC = () => {
     try {
       saveToLocalStorage(updatedTiles);
       
-      // TODO: Replace with actual API call to save user dashboard
-      console.log('Saving dashboard configuration to database:', updatedTiles);
+      // Create dashboard config for the current dashboard
+      const dashboardConfig = {
+        id: activeDashboard?.id || 'main',
+        name: activeDashboard?.name || 'Dashboard',
+        tiles: updatedTiles,
+        layout: 'grid' as const,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        isDefault: false
+      };
+      
+      console.log('💾 Saving dashboard configuration to backend:', dashboardConfig);
+      
+      // Save to backend via API
+      await dashboardAPI.updateDashboard(dashboardConfig as any);
+      console.log('✅ Dashboard configuration saved to backend successfully');
+      
     } catch (error) {
-      console.error('Error saving dashboard:', error);
+      console.error('❌ Error saving dashboard to backend:', error);
+      // Continue to work with localStorage even if backend fails
     }
   };
 
@@ -829,9 +859,14 @@ const UnifiedDashboardPage: React.FC = () => {
   };
 
   const handleUpdateTile = (id: string, data: any) => {
+    console.log('🔄 handleUpdateTile called:', { id, data });
+    console.log('Current tiles before update:', tiles.map(t => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
+    
     const updatedTiles = tiles.map(tile => 
       tile.id === id ? { ...tile, ...data } : tile
     );
+    
+    console.log('Updated tiles after merge:', updatedTiles.map(t => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
     safeUpdateDashboardTiles(updatedTiles);
   };
 

@@ -445,13 +445,13 @@ export interface TilePositionUpdate {
 
 export const dashboardAPI = {
   getDashboard: async (userId: string = 'current-user'): Promise<{ dashboard_config: DashboardConfig }> => {
-    return apiRequest<{ dashboard_config: DashboardConfig }>(`/user-dashboard?userId=${userId}`, {
+    return apiRequest<{ dashboard_config: DashboardConfig }>(`/dashboard?userId=${userId}`, {
       method: 'GET',
     });
   },
 
   updateDashboard: async (dashboardConfig: DashboardConfig): Promise<{ message: string }> => {
-    return apiRequest<{ message: string }>('/user-dashboard', {
+    return apiRequest<{ message: string }>('/dashboard', {
       method: 'PUT',
       body: JSON.stringify({ dashboard_config: dashboardConfig }),
     });

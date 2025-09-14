@@ -238,29 +238,27 @@ def validate_tile(tile: Dict[str, Any], dashboard_index: int, tile_index: int) -
         if field not in tile:
             errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} missing required '{field}' field")
     
-    # Validate grid properties
-    if 'gridPosition' not in tile:
-        errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} missing 'gridPosition'")
-    elif not isinstance(tile['gridPosition'], dict) or 'x' not in tile['gridPosition'] or 'y' not in tile['gridPosition']:
-        errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} has invalid 'gridPosition'")
+    # Validate grid properties (make them optional to avoid triggering repair)
+    if 'gridPosition' in tile:
+        if not isinstance(tile['gridPosition'], dict) or 'x' not in tile['gridPosition'] or 'y' not in tile['gridPosition']:
+            errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} has invalid 'gridPosition'")
     
-    if 'gridSize' not in tile:
-        errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} missing 'gridSize'")
-    elif not isinstance(tile['gridSize'], dict) or 'width' not in tile['gridSize'] or 'height' not in tile['gridSize']:
-        errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} has invalid 'gridSize'")
-    else:
-        # Validate size constraints
-        tile_type = tile.get('type', 'custom')
-        constraints = get_tile_constraints(tile_type)
-        
-        width = tile['gridSize'].get('width', 0)
-        height = tile['gridSize'].get('height', 0)
-        
-        if width < constraints['minWidth'] or width > constraints['maxWidth']:
-            errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} width {width} outside valid range [{constraints['minWidth']}, {constraints['maxWidth']}]")
-        
-        if height < constraints['minHeight'] or height > constraints['maxHeight']:
-            errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} height {height} outside valid range [{constraints['minHeight']}, {constraints['maxHeight']}]")
+    if 'gridSize' in tile:
+        if not isinstance(tile['gridSize'], dict) or 'width' not in tile['gridSize'] or 'height' not in tile['gridSize']:
+            errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} has invalid 'gridSize'")
+        else:
+            # Validate size constraints
+            tile_type = tile.get('type', 'custom')
+            constraints = get_tile_constraints(tile_type)
+            
+            width = tile['gridSize'].get('width', 0)
+            height = tile['gridSize'].get('height', 0)
+            
+            if width < constraints['minWidth'] or width > constraints['maxWidth']:
+                errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} width {width} outside valid range [{constraints['minWidth']}, {constraints['maxWidth']}]")
+            
+            if height < constraints['minHeight'] or height > constraints['maxHeight']:
+                errors.append(f"Dashboard {dashboard_index}, Tile {tile_index} height {height} outside valid range [{constraints['minHeight']}, {constraints['maxHeight']}]")
     
     return errors
 
@@ -322,14 +320,26 @@ def attempt_dashboard_repair(dashboard_data: Dict[str, Any]) -> Dict[str, Any]:
             tile['id'] = tile.get('id', f"tile_{datetime.utcnow().timestamp()}_{hash(str(tile))}")
             tile['type'] = tile_type
             tile['title'] = tile.get('title', 'Repaired Tile')
-            tile['gridPosition'] = {
-                'x': max(0, tile.get('gridPosition', {}).get('x', 0)),
-                'y': max(0, tile.get('gridPosition', {}).get('y', 0))
-            }
-            tile['gridSize'] = {
-                'width': max(constraints['minWidth'], min(constraints['maxWidth'], tile.get('gridSize', {}).get('width', default_size['width']))),
-                'height': max(constraints['minHeight'], min(constraints['maxHeight'], tile.get('gridSize', {}).get('height', default_size['height'])))
-            }
+            
+            # Only set gridPosition if it's missing or invalid - preserve existing values
+            if 'gridPosition' not in tile or not isinstance(tile.get('gridPosition'), dict):
+                tile['gridPosition'] = {'x': 0, 'y': 0}
+            else:
+                # Ensure valid values but preserve existing position
+                tile['gridPosition'] = {
+                    'x': max(0, tile['gridPosition'].get('x', 0)),
+                    'y': max(0, tile['gridPosition'].get('y', 0))
+                }
+            
+            # Only set gridSize if it's missing or invalid - preserve existing values
+            if 'gridSize' not in tile or not isinstance(tile.get('gridSize'), dict):
+                tile['gridSize'] = default_size
+            else:
+                # Ensure valid values but preserve existing size within constraints
+                tile['gridSize'] = {
+                    'width': max(constraints['minWidth'], min(constraints['maxWidth'], tile['gridSize'].get('width', default_size['width']))),
+                    'height': max(constraints['minHeight'], min(constraints['maxHeight'], tile['gridSize'].get('height', default_size['height'])))
+                }
             tile['dashboard_id'] = tile.get('dashboard_id', dashboard.get('id', 'main'))
             tile['displayOptions'] = tile.get('displayOptions', {})
             tile['autoRefresh'] = tile.get('autoRefresh', False)

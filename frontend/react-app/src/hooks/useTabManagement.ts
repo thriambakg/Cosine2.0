@@ -99,13 +99,20 @@ export const useTabManagement = ({
           tiles: dashboard.tiles.map(tile => ({
             id: tile.id,
             type: tile.type,
+            title: tile.title,
             symbol: tile.symbol,
             timeframe: tile.timeframe,
+            name: tile.name,
+            content: tile.content,
+            prompt: tile.prompt,
             displayOptions: tile.displayOptions,
             autoRefresh: tile.autoRefresh,
             isPinned: tile.isPinned,
             size: tile.size,
             position: tile.position,
+            gridPosition: tile.gridPosition,
+            gridSize: tile.gridSize,
+            dashboard_id: tile.dashboard_id,
             created_at: tile.created_at || new Date().toISOString()
           })),
           layout: dashboard.layout || 'grid',
@@ -123,6 +130,13 @@ export const useTabManagement = ({
       
     } catch (error) {
       console.error('Error saving tab state to database:', error);
+      
+      // Check if it's a CORS error specifically
+      if (error instanceof Error && error.message && error.message.includes('CORS')) {
+        console.warn('🚨 CORS error when saving to database - changes will only be saved locally');
+        console.warn('💡 Tile positions and sizes are saved locally but won\'t persist across devices until CORS is fixed');
+      }
+      
       // Don't throw - we don't want to break the UI if database save fails
       // The local storage fallback will still work
     }
@@ -147,6 +161,11 @@ export const useTabManagement = ({
         try {
           const dbResponse = await dashboardAPI.getDashboard();
           const dbConfig = dbResponse.dashboard_config;
+          
+          // Debug: Log raw database response
+          console.log('🔍 RAW DATABASE RESPONSE DEBUG START');
+          console.log('Raw dbConfig:', dbConfig);
+          console.log('🔍 RAW DATABASE RESPONSE DEBUG END');
           
           // Convert DashboardConfig to TabManagementState
           // Handle both old format (crypto_tiles) and new format (tabs/dashboards)
@@ -241,6 +260,8 @@ export const useTabManagement = ({
                   isPinned: tile.isPinned || false,
                   size: tile.size || { width: 350, height: 400 },
                   position: tile.position || { x: 0, y: 0 },
+                  gridPosition: tile.gridPosition || { x: 0, y: 0 },
+                  gridSize: tile.gridSize || { width: 4, height: 4 },
                   dashboard_id: 'dashboard_1', // Add dashboard_id for this dashboard
                   created_at: tile.created_at || new Date().toISOString()
                 })),
@@ -255,20 +276,48 @@ export const useTabManagement = ({
             };
           }
           
+          // Debug: Log which dashboard is being selected
+          console.log('🔍 DASHBOARD SELECTION DEBUG START');
+          console.log('Active tab ID from DB:', dbConfig.activeTabId);
+          console.log('Total dashboards loaded:', dbState.dashboards.length);
+          console.log('Total tabs loaded:', dbState.tabs.length);
+          console.log('🔍 DASHBOARD SELECTION DEBUG END');
+          
           // Update state with database data
           setState(dbState);
           saveToStorage(dbState);
           console.log('Loaded and updated tab state from database');
           
+          // Debug: Log tile positions and sizes
+          console.log('🔍 TILE POSITIONS DEBUG START');
+          dbState.dashboards.forEach(dashboard => {
+            console.log(`Dashboard ${dashboard.id} tiles:`, dashboard.tiles.length);
+            dashboard.tiles.forEach(tile => {
+              console.log(`Tile ${tile.id}:`, {
+                gridPosition: tile.gridPosition,
+                gridSize: tile.gridSize,
+                position: tile.position,
+                size: tile.size
+              });
+            });
+          });
+          console.log('🔍 TILE POSITIONS DEBUG END');
+          
         } catch (dbError) {
           console.warn('Failed to load from database, using local storage:', dbError);
+          
+          // Check if it's a CORS error specifically
+          if (dbError instanceof Error && dbError.message && dbError.message.includes('CORS')) {
+            console.warn('🚨 CORS error detected - this may prevent dashboard loading for new users');
+            console.warn('💡 Consider deploying Lambda function with CORS fixes or check API Gateway configuration');
+          }
           
           // If no cached state and database failed, create default
           if (!cachedState) {
             const defaultState = createDefaultTabState();
             setState(defaultState);
             saveToStorage(defaultState);
-            console.log('Created default tab state');
+            console.log('Created default tab state due to database error');
           }
         }
       } catch (error) {
