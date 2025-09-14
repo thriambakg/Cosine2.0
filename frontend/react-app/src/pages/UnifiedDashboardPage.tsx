@@ -30,7 +30,7 @@ import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
 import GridDashboard from '../components/GridDashboard';
 import { getDefaultTileSize } from '../utils/tileConfig';
-import { safeLoadDashboard } from '../utils/dashboardMigration';
+// import { safeLoadDashboard } from '../utils/dashboardMigration';
 import AddCryptoModal from '../components/AddCryptoModal';
 import AddStockModal from '../components/AddStockModal';
 import DashboardTabBar from '../components/DashboardTabBar';

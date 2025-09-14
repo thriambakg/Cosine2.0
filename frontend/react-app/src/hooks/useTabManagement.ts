@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DashboardTab, DashboardGroup, Dashboard, TabManagementState, UnifiedTile } from '../types/dashboardTypes';
 import { robustStorage, isIncognitoMode } from '../utils/storageUtils';
-import { dashboardAPI, DashboardConfig } from '../services/api';
+import { dashboardAPI } from '../services/api';
 
 interface UseTabManagementOptions {
   userId: string;
@@ -118,7 +118,7 @@ export const useTabManagement = ({
       };
       
       // Save to database via API
-      await dashboardAPI.updateDashboard(dashboardConfig);
+      await dashboardAPI.updateDashboard(dashboardConfig as any);
       console.log('Successfully saved tab state to database');
       
     } catch (error) {
@@ -230,7 +230,7 @@ export const useTabManagement = ({
                 id: 'dashboard_1',
                 tabId: 'tab_1',
                 name: 'My Dashboard',
-                tiles: dbConfig.crypto_tiles.map(tile => ({
+                tiles: (dbConfig as any).crypto_tiles.map((tile: any) => ({
                   id: tile.id,
                   type: 'crypto',
                   title: tile.symbol || 'Crypto Tile', // Add required title
@@ -244,8 +244,10 @@ export const useTabManagement = ({
                   dashboard_id: 'dashboard_1', // Add dashboard_id for this dashboard
                   created_at: tile.created_at || new Date().toISOString()
                 })),
-                layout: (dbConfig.layout || 'grid') as 'grid' | 'list' | 'custom',
-                created_at: now
+                layout: ((dbConfig as any).layout || 'grid') as 'grid' | 'list' | 'custom',
+                created_at: now,
+                updated_at: now,
+                isDefault: true
               }],
               activeTabId: 'tab_1',
               nextTabId: 2,
