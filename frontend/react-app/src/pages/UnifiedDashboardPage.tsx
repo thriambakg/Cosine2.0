@@ -30,6 +30,8 @@ import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
 import DashboardGrid from '../components/DashboardGrid';
 import GridDashboard from '../components/GridDashboard';
+import { getDefaultTileSize } from '../utils/tileConfig';
+import { safeLoadDashboard, needsMigration, getDashboardVersion } from '../utils/dashboardMigration';
 import AddCryptoModal from '../components/AddCryptoModal';
 import AddStockModal from '../components/AddStockModal';
 import DashboardTabBar from '../components/DashboardTabBar';
@@ -167,8 +169,94 @@ const UnifiedDashboardPage: React.FC = () => {
   // Get current tiles from active dashboard or localStorage
   const [localTiles, setLocalTiles] = useState<UnifiedTile[]>([]);
   
+  // Local state to override activeDashboard tiles for immediate updates during drag/resize
+  const [overrideTiles, setOverrideTiles] = useState<UnifiedTile[]>([]);
+  
+  // Ref to track override tiles timeout
+  const overrideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Production safety: Track state corruption attempts
+  const stateCorruptionRef = useRef<number>(0);
+  const MAX_CORRUPTION_ATTEMPTS = 3;
+  
   // Get current dashboard ID (either from active dashboard or default)
   const currentDashboardId = activeDashboard?.id || 'main';
+
+  // Function to find the next available position for a new tile
+  const findNextAvailablePosition = (tileSize: { width: number; height: number } = { width: 4, height: 4 }) => {
+    const GRID_COLUMNS = 12; // Match the GridDashboard constant
+    const MAX_ROWS = 50; // Match the GridDashboard constant for flexibility
+    
+    // Get all existing tiles for the current dashboard
+    const existingTiles = activeDashboard?.tiles || [];
+    
+    // If no existing tiles, place at the top-left
+    if (existingTiles.length === 0) {
+      console.log(`📍 No existing tiles, placing at top-left:`, { x: 0, y: 0 });
+      return { x: 0, y: 0 };
+    }
+    
+    // Create a set of occupied positions
+    const occupiedPositions = new Set<string>();
+    existingTiles.forEach(tile => {
+      const pos = tile.gridPosition || { x: 0, y: 0 };
+      const size = tile.gridSize || getDefaultTileSize(tile.type);
+      
+      // Mark all cells occupied by this tile
+      for (let x = pos.x; x < pos.x + size.width; x++) {
+        for (let y = pos.y; y < pos.y + size.height; y++) {
+          occupiedPositions.add(`${x},${y}`);
+        }
+      }
+    });
+    
+    // Smart placement: Try to place tiles in a visually pleasing way
+    // 1. First try to place in the next available column on the first row
+    // 2. Then try to place in the next available row
+    // 3. Finally, scan row by row
+    
+    // Strategy 1: Find the rightmost position on the first row
+    for (let x = 0; x <= GRID_COLUMNS - tileSize.width; x++) {
+      let canPlace = true;
+      for (let dx = 0; dx < tileSize.width; dx++) {
+        if (occupiedPositions.has(`${x + dx},0`)) {
+          canPlace = false;
+          break;
+        }
+      }
+      if (canPlace) {
+        console.log(`📍 Placing new tile on first row:`, { x, y: 0, tileSize });
+        return { x, y: 0 };
+      }
+    }
+    
+    // Strategy 2: Find the first available position row by row
+    for (let y = 0; y < MAX_ROWS; y++) {
+      for (let x = 0; x <= GRID_COLUMNS - tileSize.width; x++) {
+        let canPlace = true;
+        
+        // Check if this position is available
+        for (let dx = 0; dx < tileSize.width; dx++) {
+          for (let dy = 0; dy < tileSize.height; dy++) {
+            if (occupiedPositions.has(`${x + dx},${y + dy}`)) {
+              canPlace = false;
+              break;
+            }
+          }
+          if (!canPlace) break;
+        }
+        
+        if (canPlace) {
+          console.log(`📍 Found available position for new tile:`, { x, y, tileSize });
+          return { x, y };
+        }
+      }
+    }
+    
+    // Fallback to position 0,0 if no position found
+    console.log(`⚠️ No available position found, using fallback position`);
+    return { x: 0, y: 0 };
+  };
   
   // Get tiles for current dashboard and ensure unique IDs
   const getTilesWithUniqueIds = (tiles: UnifiedTile[]) => {
@@ -185,10 +273,36 @@ const UnifiedDashboardPage: React.FC = () => {
     });
   };
 
-  // Always prioritize active dashboard tiles over localStorage
-  const tiles = activeDashboard ? 
-    getTilesWithUniqueIds(activeDashboard.tiles || []) : 
-    getTilesWithUniqueIds(localTiles.filter(tile => tile.dashboard_id === currentDashboardId));
+  // Get current tiles with proper state priority: overrideTiles > localTiles > activeDashboard.tiles
+  const getCurrentDashboardTiles = () => {
+    if (activeDashboard) {
+      const dashboardOverrideTiles = overrideTiles.filter(tile => tile.dashboard_id === activeDashboard.id);
+      const dashboardLocalTiles = localTiles.filter(tile => tile.dashboard_id === activeDashboard.id);
+      const dashboardActiveTiles = activeDashboard.tiles || [];
+      
+      console.log('🔍 getCurrentDashboardTiles:', {
+        activeDashboardId: activeDashboard.id,
+        dashboardOverrideTiles: dashboardOverrideTiles.length,
+        dashboardLocalTiles: dashboardLocalTiles.length,
+        dashboardActiveTiles: dashboardActiveTiles.length,
+        usingOverrideTiles: dashboardOverrideTiles.length > 0,
+        usingLocalTiles: dashboardOverrideTiles.length === 0 && dashboardLocalTiles.length > 0,
+      });
+      
+      // Priority: overrideTiles > localTiles > activeDashboard.tiles
+      if (dashboardOverrideTiles.length > 0) {
+        return dashboardOverrideTiles;
+      } else if (dashboardLocalTiles.length > 0) {
+        return dashboardLocalTiles;
+      } else {
+        return dashboardActiveTiles;
+      }
+    } else {
+      return localTiles.filter(tile => tile.dashboard_id === currentDashboardId);
+    }
+  };
+  
+  const tiles = getTilesWithUniqueIds(getCurrentDashboardTiles());
 
 
   // Tab management handlers
@@ -263,13 +377,51 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   }, []);
 
-  // Load from localStorage
+  // Load from localStorage with migration support
   const loadFromLocalStorage = useCallback((): UnifiedTile[] | null => {
     try {
       const saved = localStorage.getItem('unified-dashboard-tiles');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      
+      const data = JSON.parse(saved);
+      
+      // Check if this is an old format that needs migration
+      if (Array.isArray(data)) {
+        // Old format: array of tiles
+        console.log('🔄 Detected old localStorage format, migrating...');
+        const migratedTiles = data.map((tile: any) => {
+          const tileConfig = getDefaultTileSize(tile.type || 'custom');
+          return {
+            ...tile,
+            gridPosition: tile.gridPosition || { x: 0, y: 0 },
+            gridSize: tile.gridSize || tileConfig,
+            dashboard_id: tile.dashboard_id || 'main',
+            displayOptions: tile.displayOptions || {},
+            autoRefresh: tile.autoRefresh || false,
+            isPinned: tile.isPinned || false,
+          };
+        });
+        
+        // Save migrated format
+        localStorage.setItem('unified-dashboard-tiles', JSON.stringify(migratedTiles));
+        console.log('✅ Migration completed');
+        
+        return migratedTiles;
+      }
+      
+      return data;
     } catch (error) {
       console.error('Error loading from localStorage:', error);
+      
+      // Try to recover from corrupted data
+      try {
+        console.log('🔄 Attempting to recover from corrupted localStorage...');
+        localStorage.removeItem('unified-dashboard-tiles');
+        console.log('✅ Cleared corrupted data');
+      } catch (cleanupError) {
+        console.error('Failed to clear corrupted data:', cleanupError);
+      }
+      
       return null;
     }
   }, []);
@@ -279,9 +431,10 @@ const UnifiedDashboardPage: React.FC = () => {
     console.log('🔍 Dashboard state changed:', { activeDashboard, currentDashboardId, tabs: tabs?.length });
     
     if (activeDashboard) {
-      // When switching to an active dashboard, clear local tiles
-      console.log('✅ Active dashboard found, clearing local tiles');
+      // When switching to an active dashboard, clear local tiles and override tiles
+      console.log('✅ Active dashboard found, clearing local tiles and override tiles');
       setLocalTiles([]);
+      setOverrideTiles([]);
     } else {
       // When no active dashboard, load tiles for the current dashboard
       console.log('⚠️ No active dashboard, loading from localStorage');
@@ -303,6 +456,15 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   }, [activeDashboard, currentDashboardId, loadFromLocalStorage, tabs]);
 
+  // Cleanup override timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (overrideTimeoutRef.current) {
+        clearTimeout(overrideTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Debounced save to database
   const debouncedSaveToDatabase = useCallback((updatedTiles: UnifiedTile[]) => {
     if (saveTimeoutRef.current) {
@@ -318,6 +480,56 @@ const UnifiedDashboardPage: React.FC = () => {
       }
     }, 2000);
   }, []);
+
+  // Production-safe dashboard update with corruption protection
+  const safeUpdateDashboardTiles = useCallback((updatedTiles: UnifiedTile[]) => {
+    try {
+      // Validate tiles before updating
+      const validTiles = updatedTiles.filter(tile => {
+        if (!tile.id || !tile.type) {
+          console.warn('⚠️ Skipping invalid tile:', tile);
+          return false;
+        }
+        return true;
+      });
+
+      if (validTiles.length !== updatedTiles.length) {
+        console.warn(`⚠️ Filtered out ${updatedTiles.length - validTiles.length} invalid tiles`);
+      }
+
+      // Check for state corruption
+      if (stateCorruptionRef.current >= MAX_CORRUPTION_ATTEMPTS) {
+        console.error('🚨 Maximum corruption attempts reached, using fallback mode');
+        return updateDashboardTilesFallback(validTiles);
+      }
+
+      return updateDashboardTiles(validTiles);
+    } catch (error) {
+      console.error('❌ Error in safe dashboard update:', error);
+      stateCorruptionRef.current++;
+      return updateDashboardTilesFallback(updatedTiles);
+    }
+  }, [activeDashboard, updateTabDashboardTiles, saveToLocalStorage, debouncedSaveToDatabase, loadFromLocalStorage, currentDashboardId]);
+
+  // Fallback update function for corrupted states
+  const updateDashboardTilesFallback = useCallback((updatedTiles: UnifiedTile[]) => {
+    console.log('🆘 Using fallback dashboard update');
+    
+    try {
+      // Simple localStorage-only approach
+      const tilesWithDashboardId = updatedTiles.map(tile => ({
+        ...tile,
+        dashboard_id: tile.dashboard_id || currentDashboardId
+      }));
+      
+      saveToLocalStorage(tilesWithDashboardId);
+      setLocalTiles(tilesWithDashboardId);
+      
+      console.log('✅ Fallback update successful');
+    } catch (error) {
+      console.error('❌ Fallback update failed:', error);
+    }
+  }, [saveToLocalStorage, currentDashboardId]);
 
   // Helper function to update dashboard tiles
   const updateDashboardTiles = useCallback((updatedTiles: UnifiedTile[]) => {
@@ -339,6 +551,18 @@ const UnifiedDashboardPage: React.FC = () => {
       
       // Trigger debounced save to database
       debouncedSaveToDatabase(allUpdatedTiles);
+
+      // Set override tiles for immediate visual feedback
+      setOverrideTiles(updatedTiles);
+      
+      // Clear override tiles after a delay to allow activeDashboard state to update
+      if (overrideTimeoutRef.current) {
+        clearTimeout(overrideTimeoutRef.current);
+      }
+      overrideTimeoutRef.current = setTimeout(() => {
+        console.log('🔄 Clearing override tiles after state update');
+        setOverrideTiles([]);
+      }, 1000); // 1 second delay
 
       console.log('Successfully updated tiles for dashboard:', activeDashboard.id, updatedTiles);
     } else {
@@ -527,8 +751,8 @@ const UnifiedDashboardPage: React.FC = () => {
       autoRefresh: tileConfig.autoRefresh || false,
       isPinned: false,
       size: { width: 350, height: 400 }, // Legacy pixel size
-      gridPosition: { x: 0, y: 0 }, // Default grid position
-      gridSize: { width: 1, height: 1 }, // Default grid size (1x1)
+      gridPosition: findNextAvailablePosition(getDefaultTileSize(selectedTileType.id as any)), // Smart placement
+      gridSize: getDefaultTileSize(selectedTileType.id as any), // Tile-specific default size
       dashboard_id: activeDashboard?.id || 'main',
       created_at: new Date().toISOString(),
     };
@@ -558,8 +782,8 @@ const UnifiedDashboardPage: React.FC = () => {
       autoRefresh: cryptoData.autoRefresh,
       isPinned: false,
       size: { width: 350, height: 400 }, // Legacy pixel size
-      gridPosition: { x: 0, y: 0 }, // Default grid position
-      gridSize: { width: 1, height: 1 }, // Default grid size (1x1)
+      gridPosition: findNextAvailablePosition(getDefaultTileSize(selectedTileType.id as any)), // Smart placement
+      gridSize: getDefaultTileSize(selectedTileType.id as any), // Tile-specific default size
       dashboard_id: activeDashboard?.id || 'main',
       created_at: new Date().toISOString(),
     };
@@ -586,8 +810,8 @@ const UnifiedDashboardPage: React.FC = () => {
       autoRefresh: stockData.autoRefresh,
       isPinned: false,
       size: { width: 350, height: 400 }, // Legacy pixel size
-      gridPosition: { x: 0, y: 0 }, // Default grid position
-      gridSize: { width: 1, height: 1 }, // Default grid size (1x1)
+      gridPosition: findNextAvailablePosition(getDefaultTileSize(selectedTileType.id as any)), // Smart placement
+      gridSize: getDefaultTileSize(selectedTileType.id as any), // Tile-specific default size
       dashboard_id: activeDashboard?.id || 'main',
       created_at: new Date().toISOString(),
     };
@@ -602,35 +826,35 @@ const UnifiedDashboardPage: React.FC = () => {
 
   const handleRemoveTile = (id: string) => {
     const updatedTiles = tiles.filter(tile => tile.id !== id);
-    updateDashboardTiles(updatedTiles);
+    safeUpdateDashboardTiles(updatedTiles);
   };
 
   const handleUpdateTile = (id: string, data: any) => {
     const updatedTiles = tiles.map(tile => 
       tile.id === id ? { ...tile, ...data } : tile
     );
-    updateDashboardTiles(updatedTiles);
+    safeUpdateDashboardTiles(updatedTiles);
   };
 
   const handleSettingsChange = (id: string, settings: any) => {
     const updatedTiles = tiles.map(tile => 
       tile.id === id ? { ...tile, ...settings } : tile
     );
-    updateDashboardTiles(updatedTiles);
+    safeUpdateDashboardTiles(updatedTiles);
   };
 
   const handleResizeTile = (id: string, size: { width: number; height: number }) => {
     const updatedTiles = tiles.map(tile => 
       tile.id === id ? { ...tile, size } : tile
     );
-    updateDashboardTiles(updatedTiles);
+    safeUpdateDashboardTiles(updatedTiles);
   };
 
   const handleMoveTile = (id: string, position: GridPosition) => {
     const updatedTiles = tiles.map(tile => 
       tile.id === id ? { ...tile, gridPosition: position } : tile
     );
-    updateDashboardTiles(updatedTiles);
+    safeUpdateDashboardTiles(updatedTiles);
   };
 
 

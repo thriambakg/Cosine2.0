@@ -43,6 +43,15 @@ export interface GridSize {
   height: number; // Number of grid rows (1, 2, 3, 4, etc.)
 }
 
+export interface TileSizeConstraints {
+  minWidth: number; // Minimum grid columns
+  maxWidth: number; // Maximum grid columns
+  minHeight: number; // Minimum grid rows
+  maxHeight: number; // Maximum grid rows
+  defaultWidth: number; // Default grid columns
+  defaultHeight: number; // Default grid rows
+}
+
 export interface UnifiedTile {
   id: string;
   type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated';

@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 import logging
 from decimal import Decimal
+from migration_utils import safe_load_dashboard, migrate_dashboard_data, validate_dashboard_config
 
 # Configure logging
 logger = logging.getLogger()
@@ -67,7 +68,12 @@ def lambda_handler(event, context):
                 tile_id = path.split('/')[-1]
                 if not tile_id:
                     return create_response(400, {"error": "Tile ID required in path"})
-                return handle_update_tile(user_id, tile_id, event)
+                
+                # Check if this is a position update request
+                if path.endswith('/position'):
+                    return handle_update_tile_position(user_id, tile_id, event)
+                else:
+                    return handle_update_tile(user_id, tile_id, event)
             else:
                 return create_response(405, {"error": "Method not allowed for tiles endpoint"})
         else:
@@ -131,10 +137,29 @@ def handle_get_dashboard(user_id: str) -> Dict:
             return create_response(200, {'dashboard_config': default_dashboard})
         
         user_data = response['Item']
-        dashboard_config = user_data.get('dashboard_config', create_default_dashboard())
+        raw_dashboard_config = user_data.get('dashboard_config', create_default_dashboard())
+        
+        # Safely load dashboard with migration and validation
+        dashboard_config = safe_load_dashboard(raw_dashboard_config)
         
         # Convert Decimal objects to regular numbers for JSON serialization
         dashboard_config = convert_decimals(dashboard_config)
+        
+        # Check if migration occurred and save if needed
+        if raw_dashboard_config != dashboard_config:
+            logger.info("Dashboard was migrated, saving updated version")
+            try:
+                table.update_item(
+                    Key={'user_id': user_id},
+                    UpdateExpression='SET dashboard_config = :config, updated_at = :updated',
+                    ExpressionAttributeValues={
+                        ':config': dashboard_config,
+                        ':updated': datetime.utcnow().isoformat()
+                    }
+                )
+                logger.info("Migrated dashboard saved successfully")
+            except Exception as save_error:
+                logger.warning(f"Failed to save migrated dashboard: {str(save_error)}")
         
         return create_response(200, {'dashboard_config': dashboard_config})
         
@@ -151,9 +176,14 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
         if not dashboard_config:
             return create_response(400, {"error": "Dashboard configuration required"})
         
-        # Validate dashboard configuration
-        if not validate_dashboard_config(dashboard_config):
-            return create_response(400, {"error": "Invalid dashboard configuration"})
+        # Safely load and validate dashboard configuration
+        dashboard_config = safe_load_dashboard(dashboard_config)
+        
+        # Additional validation
+        validation = validate_dashboard_config(dashboard_config)
+        if not validation['valid']:
+            logger.warning(f"Dashboard validation failed: {validation['errors']}")
+            return create_response(400, {"error": f"Invalid dashboard configuration: {', '.join(validation['errors'])}"})
         
         # Update the user profile
         table.update_item(
@@ -192,16 +222,43 @@ def handle_add_tile(user_id: str, event: Dict) -> Dict:
         user_data = response['Item']
         dashboard_config = user_data.get('dashboard_config', create_default_dashboard())
         
-        # Add new tile
+        # Find the dashboard to add the tile to (default to first dashboard)
+        target_dashboard = None
+        dashboard_id = body.get('dashboard_id')
+        
+        if dashboard_id:
+            # Find specific dashboard
+            for dashboard in dashboard_config.get('dashboards', []):
+                if dashboard['id'] == dashboard_id:
+                    target_dashboard = dashboard
+                    break
+        
+        if not target_dashboard:
+            # Use first dashboard if no specific dashboard found
+            target_dashboard = dashboard_config.get('dashboards', [{}])[0]
+        
+        # Add new tile with grid properties
         new_tile = {
-            'id': f"tile_{len(dashboard_config['crypto_tiles']) + 1}",
+            'id': f"tile_{int(datetime.utcnow().timestamp() * 1000)}",
+            'type': tile_config.get('type', 'crypto'),
             'symbol': tile_config['symbol'],
             'timeframe': tile_config['timeframe'],
-            'position': tile_config.get('position', {'x': 0, 'y': 0}),
+            'title': tile_config.get('title', tile_config['symbol']),
+            'displayOptions': tile_config.get('displayOptions', {}),
+            'autoRefresh': tile_config.get('autoRefresh', False),
+            'isPinned': tile_config.get('isPinned', False),
+            'size': tile_config.get('size', {'width': 350, 'height': 400}),  # Legacy pixel size
+            'gridPosition': tile_config.get('gridPosition', {'x': 0, 'y': 0}),  # Grid position
+            'gridSize': tile_config.get('gridSize', {'width': 1, 'height': 1}),  # Grid size
+            'dashboard_id': target_dashboard.get('id', 'main'),
             'created_at': datetime.utcnow().isoformat()
         }
         
-        dashboard_config['crypto_tiles'].append(new_tile)
+        # Ensure the dashboard has a tiles array
+        if 'tiles' not in target_dashboard:
+            target_dashboard['tiles'] = []
+        
+        target_dashboard['tiles'].append(new_tile)
         dashboard_config['last_updated'] = datetime.utcnow().isoformat()
         
         # Update the user profile
@@ -354,6 +411,88 @@ def handle_update_tile(user_id: str, tile_id: str, event: Dict) -> Dict:
         logger.error(f"Error updating tile: {str(e)}")
         return create_response(500, {"error": "Failed to update tile"})
 
+def handle_update_tile_position(user_id: str, tile_id: str, event: Dict) -> Dict:
+    """Update a specific tile's position and size in user's dashboard"""
+    try:
+        body = json.loads(event.get('body', '{}'))
+        grid_position = body.get('gridPosition')
+        grid_size = body.get('gridSize')
+        
+        if not grid_position and not grid_size:
+            return create_response(400, {"error": "gridPosition or gridSize required"})
+        
+        # Validate grid position if provided
+        if grid_position:
+            if not isinstance(grid_position, dict) or 'x' not in grid_position or 'y' not in grid_position:
+                return create_response(400, {"error": "Invalid gridPosition format"})
+            if not isinstance(grid_position['x'], (int, float)) or not isinstance(grid_position['y'], (int, float)):
+                return create_response(400, {"error": "gridPosition x and y must be numbers"})
+            if grid_position['x'] < 0 or grid_position['y'] < 0:
+                return create_response(400, {"error": "gridPosition x and y must be non-negative"})
+        
+        # Validate grid size if provided
+        if grid_size:
+            if not isinstance(grid_size, dict) or 'width' not in grid_size or 'height' not in grid_size:
+                return create_response(400, {"error": "Invalid gridSize format"})
+            if not isinstance(grid_size['width'], (int, float)) or not isinstance(grid_size['height'], (int, float)):
+                return create_response(400, {"error": "gridSize width and height must be numbers"})
+            if grid_size['width'] < 1 or grid_size['height'] < 1:
+                return create_response(400, {"error": "gridSize width and height must be at least 1"})
+        
+        # Get current dashboard
+        response = table.get_item(Key={'user_id': user_id})
+        if 'Item' not in response:
+            return create_response(404, {"error": "User not found"})
+        
+        user_data = response['Item']
+        dashboard_config = user_data.get('dashboard_config', create_default_dashboard())
+        
+        # Find and update the tile
+        tile_updated = False
+        for dashboard in dashboard_config.get('dashboards', []):
+            for tile in dashboard.get('tiles', []):
+                if tile.get('id') == tile_id:
+                    # Update grid position and size
+                    if grid_position:
+                        tile['gridPosition'] = grid_position
+                        # Also update legacy position for backward compatibility
+                        tile['position'] = {
+                            'x': grid_position['x'] * 60,  # GRID_CELL_SIZE + GRID_GAP
+                            'y': grid_position['y'] * 60
+                        }
+                    
+                    if grid_size:
+                        tile['gridSize'] = grid_size
+                        # Also update legacy size for backward compatibility
+                        tile['size'] = {
+                            'width': grid_size['width'] * 60,  # GRID_CELL_SIZE + GRID_GAP
+                            'height': grid_size['height'] * 60
+                        }
+                    
+                    tile_updated = True
+                    break
+        
+        if not tile_updated:
+            return create_response(404, {"error": "Tile not found"})
+        
+        dashboard_config['last_updated'] = datetime.utcnow().isoformat()
+        
+        # Update the user profile
+        table.update_item(
+            Key={'user_id': user_id},
+            UpdateExpression='SET dashboard_config = :config, updated_at = :updated',
+            ExpressionAttributeValues={
+                ':config': dashboard_config,
+                ':updated': datetime.utcnow().isoformat()
+            }
+        )
+        
+        return create_response(200, {'message': 'Tile position/size updated successfully'})
+        
+    except Exception as e:
+        logger.error(f"Error updating tile position/size: {str(e)}")
+        return create_response(500, {"error": "Failed to update tile position/size"})
+
 def create_default_dashboard() -> Dict:
     """Create a default dashboard configuration with full tab management"""
     now = datetime.utcnow().isoformat()
@@ -427,6 +566,26 @@ def validate_tile_config(tile: Dict) -> bool:
     valid_timeframes = ['1d', '7d', '30d', '1y']
     if tile['timeframe'] not in valid_timeframes:
         return False
+    
+    # Validate grid position if provided
+    if 'gridPosition' in tile:
+        grid_pos = tile['gridPosition']
+        if not isinstance(grid_pos, dict) or 'x' not in grid_pos or 'y' not in grid_pos:
+            return False
+        if not isinstance(grid_pos['x'], (int, float)) or not isinstance(grid_pos['y'], (int, float)):
+            return False
+        if grid_pos['x'] < 0 or grid_pos['y'] < 0:
+            return False
+    
+    # Validate grid size if provided
+    if 'gridSize' in tile:
+        grid_size = tile['gridSize']
+        if not isinstance(grid_size, dict) or 'width' not in grid_size or 'height' not in grid_size:
+            return False
+        if not isinstance(grid_size['width'], (int, float)) or not isinstance(grid_size['height'], (int, float)):
+            return False
+        if grid_size['width'] < 1 or grid_size['height'] < 1:
+            return False
     
     return True
 

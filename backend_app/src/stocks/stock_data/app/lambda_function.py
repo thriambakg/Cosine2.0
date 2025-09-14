@@ -175,6 +175,10 @@ def lambda_handler(event, context):
         
         logger.info(f"=== LAMBDA HANDLER SUCCESS ===")
         logger.info(f"Returning successful response for {ticker}")
+        logger.info(f"Response data structure: {list(stock_stats.keys()) if isinstance(stock_stats, dict) else 'Not a dict'}")
+        logger.info(f"Current price: {stock_stats.get('current_price', 'Not found')}")
+        logger.info(f"Price change 24h: {stock_stats.get('price_change_24h', 'Not found')}")
+        logger.info(f"Chart data points: {len(stock_stats.get('chart_data', []))}")
         
         return {
             'statusCode': 200,
@@ -1261,6 +1265,37 @@ def calculate_advanced_analytics(stock, ticker, historical_data):
         dividend_rate = info.get('dividendRate', 0)
         payout_ratio = info.get('payoutRatio', 0)
         
+        # Calculate returns from historical data
+        week_return = 0
+        annual_return = 0
+        
+        if historical_data and len(historical_data) > 0:
+            try:
+                # Get current price and prices from different time periods
+                current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
+                
+                # Calculate week return (7 days ago)
+                if len(historical_data) >= 7:
+                    week_ago_price = historical_data[-7].get('close', current_price)
+                    if week_ago_price > 0:
+                        week_return = ((current_price - week_ago_price) / week_ago_price) * 100
+                
+                # Calculate annual return (1 year ago or earliest available)
+                if len(historical_data) >= 252:  # ~1 year of trading days
+                    year_ago_price = historical_data[-252].get('close', current_price)
+                elif len(historical_data) > 0:
+                    year_ago_price = historical_data[0].get('close', current_price)
+                else:
+                    year_ago_price = current_price
+                
+                if year_ago_price > 0:
+                    annual_return = ((current_price - year_ago_price) / year_ago_price) * 100
+                    
+                logger.info(f"Calculated returns for {ticker}: week_return={week_return:.2f}%, annual_return={annual_return:.2f}%")
+                
+            except Exception as calc_error:
+                logger.error(f"Error calculating returns: {str(calc_error)}")
+        
         return {
             'valuation': {
                 'pe_ratio': round(pe_ratio, 2) if pe_ratio else None,
@@ -1285,7 +1320,9 @@ def calculate_advanced_analytics(stock, ticker, historical_data):
             },
             'returns': {
                 'roe': round(roe * 100, 2) if roe else None,
-                'roa': round(roa * 100, 2) if roa else None
+                'roa': round(roa * 100, 2) if roa else None,
+                'week_return': round(week_return, 2),
+                'annual_return': round(annual_return, 2)
             },
             'dividend': {
                 'dividend_yield': round(dividend_yield * 100, 2) if dividend_yield else None,
@@ -1477,17 +1514,32 @@ def fetch_stock_stats(ticker, period="1y"):
             
             # Convert comprehensive data to crypto stats format
             if 'error' not in stock_data:
+                # Get chart data from historical data
+                historical_data = stock_data.get('historical', [])
+                chart_data = []
+                
+                # Transform historical data to chart format
+                if isinstance(historical_data, list):
+                    for point in historical_data:
+                        chart_data.append({
+                            'time': point.get('timestamp', 0),
+                            'close': point.get('close', 0)
+                        })
+                
                 result = {
                     'current_price': stock_data.get('quote', {}).get('current_price', 0),
-                    'price_change_24h': stock_data.get('quote', {}).get('price_change_24h', 0),
-                    'week_return': stock_data.get('analytics', {}).get('week_return', 0),
-                    'annual_return': stock_data.get('analytics', {}).get('annual_return', 0),
+                    'price_change_24h': stock_data.get('quote', {}).get('change', 0),  # Use 'change' instead of 'price_change_24h'
+                    'week_return': stock_data.get('analytics', {}).get('returns', {}).get('week_return', 0),
+                    'annual_return': stock_data.get('analytics', {}).get('returns', {}).get('annual_return', 0),
                     'volatility': stock_data.get('technical', {}).get('volatility_percent', 0) / 100,
-                    'chart_data': stock_data.get('historical', {}).get('prices', []),
+                    'chart_data': chart_data,
                     'data_source': stock_data.get('data_source', 'Yahoo Finance'),
                     'timestamp': stock_data.get('timestamp', datetime.now().isoformat())
                 }
                 logger.info(f"Method 1 successful for {ticker}")
+                logger.info(f"Result structure: {list(result.keys())}")
+                logger.info(f"Current price in result: {result.get('current_price')}")
+                logger.info(f"Chart data points: {len(result.get('chart_data', []))}")
                 return result
         except Exception as e:
             logger.warning(f"Method 1 failed for {ticker}: {str(e)}")

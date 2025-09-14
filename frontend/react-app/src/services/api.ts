@@ -395,6 +395,99 @@ export const handleAPIError = (error: any, endpoint: string): never => {
 };
 
 // Export all APIs as a single object for easy importing
+// ============================================================================
+// DASHBOARD API
+// ============================================================================
+
+export interface DashboardTile {
+  id: string;
+  type: 'crypto' | 'stock' | 'custom' | 'placeholder';
+  symbol?: string;
+  timeframe?: string;
+  title: string;
+  displayOptions?: any;
+  autoRefresh?: boolean;
+  isPinned?: boolean;
+  size: { width: number; height: number };
+  gridPosition: { x: number; y: number };
+  gridSize: { width: number; height: number };
+  dashboard_id: string;
+  created_at: string;
+}
+
+export interface DashboardConfig {
+  tabs: Array<{
+    id: string;
+    name: string;
+    color: string;
+    isPinned: boolean;
+    created_at: string;
+  }>;
+  tabGroups: any[];
+  dashboards: Array<{
+    id: string;
+    tabId: string;
+    name: string;
+    tiles: DashboardTile[];
+    layout: string;
+    created_at: string;
+  }>;
+  activeTabId: string;
+  nextTabId: number;
+  nextGroupId: number;
+  last_updated: string;
+}
+
+export interface TilePositionUpdate {
+  gridPosition?: { x: number; y: number };
+  gridSize?: { width: number; height: number };
+}
+
+export const dashboardAPI = {
+  getDashboard: async (userId: string = 'current-user'): Promise<{ dashboard_config: DashboardConfig }> => {
+    return apiRequest<{ dashboard_config: DashboardConfig }>(`/user-dashboard?userId=${userId}`, {
+      method: 'GET',
+    });
+  },
+
+  updateDashboard: async (dashboardConfig: DashboardConfig): Promise<{ message: string }> => {
+    return apiRequest<{ message: string }>('/user-dashboard', {
+      method: 'PUT',
+      body: JSON.stringify({ dashboard_config: dashboardConfig }),
+    });
+  },
+
+  addTile: async (tile: Partial<DashboardTile>, dashboardId?: string): Promise<{ tile: DashboardTile; message: string }> => {
+    return apiRequest<{ tile: DashboardTile; message: string }>('/tiles', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        tile,
+        dashboard_id: dashboardId 
+      }),
+    });
+  },
+
+  updateTile: async (tileId: string, updates: Partial<DashboardTile>): Promise<{ message: string }> => {
+    return apiRequest<{ message: string }>(`/tiles/${tileId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  },
+
+  updateTilePosition: async (tileId: string, positionUpdate: TilePositionUpdate): Promise<{ message: string }> => {
+    return apiRequest<{ message: string }>(`/tiles/${tileId}/position`, {
+      method: 'PUT',
+      body: JSON.stringify(positionUpdate),
+    });
+  },
+
+  removeTile: async (tileId: string): Promise<{ message: string }> => {
+    return apiRequest<{ message: string }>(`/tiles/${tileId}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
 export const api = {
   stockVolatility: stockVolatilityAPI,
   stockData: stockDataAPI,
@@ -404,6 +497,7 @@ export const api = {
   stockAlerts: stockAlertsAPI,
   chat: chatAPI,
   health: apiHealthAPI,
+  dashboard: dashboardAPI,
 };
 
 export default api;

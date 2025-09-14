@@ -4,6 +4,7 @@ import CryptoTile from './CryptoTile';
 import StockTile from './StockTile';
 import PlaceholderTile from './PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../types/dashboardTypes';
+import { getTileConfig, validateTileSize } from '../utils/tileConfig';
 
 interface GridDashboardProps {
   tiles: UnifiedTile[];
@@ -33,6 +34,7 @@ interface ResizeState {
 const GRID_COLUMNS = 12; // Total grid columns
 const GRID_CELL_SIZE = 80; // Size of each grid cell in pixels
 const GRID_GAP = 16; // Gap between grid cells
+const MAX_GRID_ROWS = 50; // Maximum grid rows (increased for flexibility)
 
 const GridDashboard: React.FC<GridDashboardProps> = ({
   tiles,
@@ -77,13 +79,24 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const tilesWithoutGridProps = tiles.filter(tile => !tile.gridPosition || !tile.gridSize);
     
     tilesWithoutGridProps.forEach(tile => {
-      // Convert legacy pixel size to grid size
-      let gridSize: GridSize = { width: 1, height: 1 };
+      // Get tile-specific configuration
+      const tileConfig = getTileConfig(tile.type);
+      const defaultSize = tileConfig.sizeConstraints;
+      
+      // Convert legacy pixel size to grid size, or use tile-specific defaults
+      let gridSize: GridSize = { 
+        width: defaultSize.defaultWidth, 
+        height: defaultSize.defaultHeight 
+      };
+      
       if (tile.size) {
-        gridSize = {
+        const pixelBasedSize = {
           width: Math.max(1, Math.round(tile.size.width / (GRID_CELL_SIZE + GRID_GAP))),
           height: Math.max(1, Math.round(tile.size.height / (GRID_CELL_SIZE + GRID_GAP))),
         };
+        
+        // Validate against tile-specific constraints
+        gridSize = validateTileSize(tile.type, pixelBasedSize);
       }
 
       // Find available position by scanning the grid
@@ -98,7 +111,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
       // Find first available position
       let foundPosition = false;
-      for (let y = 0; y < 20 && !foundPosition; y++) { // Max 20 rows
+      for (let y = 0; y < MAX_GRID_ROWS && !foundPosition; y++) {
         for (let x = 0; x < GRID_COLUMNS - gridSize.width + 1 && !foundPosition; x++) {
           let canPlace = true;
           for (let dx = 0; dx < gridSize.width; dx++) {
@@ -127,15 +140,21 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
   // Get default grid position and size for a tile
   const getDefaultGridProps = useCallback((tile: UnifiedTile): { position: GridPosition; size: GridSize } => {
-    return tileGridProps.get(tile.id) || { position: { x: 0, y: 0 }, size: { width: 1, height: 1 } };
+    const tileConfig = getTileConfig(tile.type);
+    const defaultSize = tileConfig.sizeConstraints;
+    
+    return tileGridProps.get(tile.id) || { 
+      position: { x: 0, y: 0 }, 
+      size: { width: defaultSize.defaultWidth, height: defaultSize.defaultHeight } 
+    };
   }, [tileGridProps]);
 
   // Check if a grid area is available
   const isAreaAvailable = useCallback((position: GridPosition, size: GridSize, excludeTileId?: string): boolean => {
-    // Check bounds
+    // Check bounds - allow flexible sizing within reasonable limits
     if (position.x < 0 || position.y < 0 || 
         position.x + size.width > GRID_COLUMNS || 
-        position.y + size.height > 20) {
+        position.y + size.height > MAX_GRID_ROWS) {
       return false;
     }
 
@@ -145,11 +164,11 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       
       const { position: tilePos, size: tileSize } = getDefaultGridProps(tile);
       
-      // Check if rectangles overlap
-      if (!(position.x >= tilePos.x + tileSize.width ||
-            position.x + size.width <= tilePos.x ||
-            position.y >= tilePos.y + tileSize.height ||
-            position.y + size.height <= tilePos.y)) {
+      // Check if rectangles overlap (improved logic)
+      const overlapX = position.x < tilePos.x + tileSize.width && position.x + size.width > tilePos.x;
+      const overlapY = position.y < tilePos.y + tileSize.height && position.y + size.height > tilePos.y;
+      
+      if (overlapX && overlapY) {
         return false;
       }
     }
@@ -160,10 +179,15 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   // Handle drag start
   const handleDragStart = useCallback((tileId: string, event: React.MouseEvent) => {
     event.preventDefault();
+    console.log('🖱️ Drag start for tile:', tileId);
     const tile = tiles.find(t => t.id === tileId);
-    if (!tile) return;
+    if (!tile) {
+      console.log('❌ Tile not found:', tileId);
+      return;
+    }
 
     const { position } = getDefaultGridProps(tile);
+    console.log('📍 Starting drag from position:', position);
     
     setDragState({
       isDragging: true,
@@ -193,24 +217,47 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         y: Math.max(0, gridY),
       };
 
-      setDragState(prev => ({
-        ...prev,
-        currentPosition: constrainedPos,
-      }));
+      // Only update if position actually changed
+      if (dragState.currentPosition?.x !== constrainedPos.x || dragState.currentPosition?.y !== constrainedPos.y) {
+        console.log('🔄 Updating drag position to:', constrainedPos);
+        setDragState(prev => ({
+          ...prev,
+          currentPosition: constrainedPos,
+        }));
+      }
     }
   }, [dragState, tiles, getDefaultGridProps]);
 
   // Handle drag end
   const handleDragEnd = useCallback(() => {
+    console.log('🏁 Drag end:', dragState);
     if (!dragState.isDragging || !dragState.dragTileId || !dragState.currentPosition) return;
 
     const tile = tiles.find(t => t.id === dragState.dragTileId);
     if (tile) {
       const { size } = getDefaultGridProps(tile);
       
+      console.log('🔍 Checking if position is available:', {
+        position: dragState.currentPosition,
+        size,
+        tileId: dragState.dragTileId
+      });
+      
       // Check if the new position is available
       if (isAreaAvailable(dragState.currentPosition, size, dragState.dragTileId)) {
-        onMoveTile(dragState.dragTileId, dragState.currentPosition);
+        console.log('✅ Position available, updating tile');
+        // Update the tile's grid position
+        onUpdateTile(dragState.dragTileId, {
+          gridPosition: dragState.currentPosition,
+          // Also update legacy position for backward compatibility
+          position: {
+            x: dragState.currentPosition.x * (GRID_CELL_SIZE + GRID_GAP),
+            y: dragState.currentPosition.y * (GRID_CELL_SIZE + GRID_GAP),
+          }
+        });
+        console.log('✅ Tile moved successfully to:', dragState.currentPosition);
+      } else {
+        console.log('❌ Position not available, reverting');
       }
     }
 
@@ -220,17 +267,22 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       dragStart: { x: 0, y: 0 },
       currentPosition: null,
     });
-  }, [dragState, tiles, getDefaultGridProps, isAreaAvailable, onMoveTile]);
+  }, [dragState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile]);
 
   // Handle resize start
   const handleResizeStart = useCallback((tileId: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    console.log('🔧 Resize start for tile:', tileId);
     
     const tile = tiles.find(t => t.id === tileId);
-    if (!tile) return;
+    if (!tile) {
+      console.log('❌ Tile not found for resize:', tileId);
+      return;
+    }
 
     const { size } = getDefaultGridProps(tile);
+    console.log('📏 Starting resize with size:', size);
     
     setResizeState({
       isResizing: true,
@@ -252,10 +304,19 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const gridDeltaX = Math.round(deltaX / (GRID_CELL_SIZE + GRID_GAP));
     const gridDeltaY = Math.round(deltaY / (GRID_CELL_SIZE + GRID_GAP));
 
+    // Get tile-specific size constraints
+    const currentTile = tiles.find(tile => tile.id === resizeState.resizeTileId);
+    if (!currentTile) return;
+    
+    const tileConfig = getTileConfig(currentTile.type);
+    const constraints = tileConfig.sizeConstraints;
+    
     const newSize = {
-      width: Math.max(1, Math.min(4, (resizeState.currentSize?.width || 1) + gridDeltaX)),
-      height: Math.max(1, Math.min(4, (resizeState.currentSize?.height || 1) + gridDeltaY)),
+      width: Math.max(constraints.minWidth, Math.min(constraints.maxWidth, (resizeState.currentSize?.width || constraints.defaultWidth) + gridDeltaX)),
+      height: Math.max(constraints.minHeight, Math.min(constraints.maxHeight, (resizeState.currentSize?.height || constraints.defaultHeight) + gridDeltaY)),
     };
+
+    console.log('📏 Resize move:', { deltaX, deltaY, gridDeltaX, gridDeltaY, newSize });
 
     setResizeState(prev => ({
       ...prev,
@@ -265,14 +326,22 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
   // Handle resize end
   const handleResizeEnd = useCallback(() => {
+    console.log('🏁 Resize end:', resizeState);
     if (!resizeState.isResizing || !resizeState.resizeTileId || !resizeState.previewSize) return;
 
     const tile = tiles.find(t => t.id === resizeState.resizeTileId);
     if (tile) {
       const { position } = getDefaultGridProps(tile);
       
+      console.log('🔍 Checking if resize fits:', {
+        position,
+        newSize: resizeState.previewSize,
+        tileId: resizeState.resizeTileId
+      });
+      
       // Check if the new size fits
       if (isAreaAvailable(position, resizeState.previewSize, resizeState.resizeTileId)) {
+        console.log('✅ Resize fits, updating tile');
         // Update the tile with new grid size
         onUpdateTile(resizeState.resizeTileId, {
           gridSize: resizeState.previewSize,
@@ -284,6 +353,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           height: resizeState.previewSize.height * GRID_CELL_SIZE + (resizeState.previewSize.height - 1) * GRID_GAP,
         };
         onResizeTile(resizeState.resizeTileId, pixelSize);
+        console.log('✅ Tile resized successfully to:', resizeState.previewSize);
+      } else {
+        console.log('❌ Resize would cause overlap, reverting');
       }
     }
 
@@ -323,9 +395,13 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   const renderTile = (tile: UnifiedTile) => {
     const { position, size } = getDefaultGridProps(tile);
 
-    // Check if this tile is being dragged - if so, render at original position with reduced opacity
+    // Check if this tile is being dragged
     const isDragging = dragState.dragTileId === tile.id;
-    const displayPosition = position; // Always use original position for the actual tile
+    
+    // Use drag preview position if dragging, otherwise use original position
+    const displayPosition = isDragging && dragState.currentPosition 
+      ? dragState.currentPosition 
+      : position;
 
     // Check if this tile is being resized
     const isResizing = resizeState.resizeTileId === tile.id;
@@ -390,13 +466,16 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             backgroundColor: '#3b82f6',
             borderRadius: '50%',
             cursor: 'nw-resize',
-            opacity: isResizing ? 1 : 0,
+            opacity: isResizing ? 1 : 0.6, // Make it more visible
             transition: 'opacity 0.2s ease',
             '&:hover': {
               opacity: 1,
             },
           }}
-          onMouseDown={(e) => handleResizeStart(tile.id, e)}
+          onMouseDown={(e) => {
+            console.log('🖱️ Resize handle clicked for tile:', tile.id);
+            handleResizeStart(tile.id, e);
+          }}
         />
       </Box>
     );

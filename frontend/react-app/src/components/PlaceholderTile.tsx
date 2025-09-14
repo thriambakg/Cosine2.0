@@ -11,6 +11,7 @@ import {
   ListItemIcon,
   ListItemText
 } from '@mui/material';
+import { getDefaultTileSize } from '../utils/tileConfig';
 import {
   MoreVert as MoreVertIcon,
   Settings as SettingsIcon,
@@ -100,7 +101,7 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
 
   // Calculate grid position and size
   const gridPosition = tile.gridPosition || { x: 0, y: 0 };
-  const gridSize = tile.gridSize || { width: 1, height: 1 };
+  const gridSize = tile.gridSize || getDefaultTileSize(tile.type);
 
   return (
     <Card
