@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DashboardTab, DashboardGroup, Dashboard, TabManagementState, UnifiedTile } from '../types/dashboardTypes';
 import { robustStorage, isIncognitoMode } from '../utils/storageUtils';
-import { dashboardAPI } from '../services/dashboardAPI';
+import { dashboardAPI, DashboardConfig } from '../services/api';
 
 interface UseTabManagementOptions {
   userId: string;
@@ -217,6 +217,10 @@ export const useTabManagement = ({
               tabs: [{
                 id: 'tab_1',
                 name: 'My Dashboard',
+                dashboardId: 'dashboard_1',
+                isActive: true,
+                groupId: undefined,
+                position: 0,
                 color: '#3b82f6',
                 isPinned: false,
                 created_at: now
@@ -240,7 +244,7 @@ export const useTabManagement = ({
                   dashboard_id: 'dashboard_1', // Add dashboard_id for this dashboard
                   created_at: tile.created_at || new Date().toISOString()
                 })),
-                layout: dbConfig.layout || 'grid',
+                layout: (dbConfig.layout || 'grid') as 'grid' | 'list' | 'custom',
                 created_at: now
               }],
               activeTabId: 'tab_1',

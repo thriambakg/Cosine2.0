@@ -116,7 +116,7 @@ export function migrateDashboard(dashboard: any): MigratedDashboard {
   console.log(`🔄 Migrating dashboard from ${currentVersion} to ${CURRENT_DASHBOARD_VERSION}`);
   
   let migratedDashboard = dashboard;
-  const _migrationHistory = dashboard._version?.migrationHistory || [currentVersion];
+  const migrationHistory = dashboard._version?.migrationHistory || [currentVersion];
   
   // Apply migrations in sequence
   const versionChain = ['1.0.0', '1.1.0', '2.0.0'];
@@ -134,6 +134,13 @@ export function migrateDashboard(dashboard: any): MigratedDashboard {
       }
     }
   }
+
+  // Update version with migration history
+  migratedDashboard._version = {
+    version: CURRENT_DASHBOARD_VERSION,
+    lastUpdated: new Date().toISOString(),
+    migrationHistory: [...migrationHistory, CURRENT_DASHBOARD_VERSION]
+  };
 
   return migratedDashboard;
 }

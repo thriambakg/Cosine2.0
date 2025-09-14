@@ -44,6 +44,10 @@ def lambda_handler(event, context):
         
         logger.info(f"Processing {http_method} request for path: {path}")
         
+        # Handle CORS preflight requests
+        if http_method == 'OPTIONS':
+            return create_response(200, {'message': 'CORS preflight'})
+        
         # Extract user ID from path or headers (you'll need to implement auth)
         user_id = extract_user_id(event)
         if not user_id:
@@ -596,8 +600,9 @@ def create_response(status_code: int, body: Dict) -> Dict:
         'headers': {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-User-ID',
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+            'Access-Control-Max-Age': '86400'
         },
         'body': json.dumps(body)
     }
