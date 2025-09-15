@@ -230,8 +230,12 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
   const handleGroupDrop = (event: React.DragEvent, targetGroupId: string) => {
     event.preventDefault();
     
-    if (draggedGroup && draggedGroup.id !== targetGroupId) {
-      // Find the target position (index) for the dragged group
+    if (draggedTab) {
+      // Handle tab being dropped into a group
+      console.log(`🔄 Adding tab ${draggedTab.id} to group ${targetGroupId}`);
+      onTabGroup(draggedTab.id, targetGroupId);
+    } else if (draggedGroup && draggedGroup.id !== targetGroupId) {
+      // Handle group being dropped onto another group (reordering)
       const targetGroupIndex = tabGroups.findIndex(group => group.id === targetGroupId);
       
       if (targetGroupIndex !== -1) {
@@ -239,7 +243,9 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
       }
     }
     
+    setDraggedTab(null);
     setDraggedGroup(null);
+    setDragOverTab(null);
     setDragOverGroup(null);
   };
 
@@ -372,13 +378,15 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
               minWidth: '200px',
               maxWidth: '300px',
               height: '40px',
-              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              backgroundColor: dragOverGroup === group.id && draggedTab ? 
+                'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.1)',
               border: '1px solid rgba(59, 130, 246, 0.3)',
               borderRadius: '4px',
               color: group.color,
               fontWeight: 600,
               opacity: draggedGroup?.id === group.id ? 0.5 : 1,
-              borderLeft: dragOverGroup === group.id ? '3px solid #3b82f6' : 'none',
+              borderLeft: dragOverGroup === group.id ? 
+                (draggedTab ? '3px solid #10b981' : '3px solid #3b82f6') : 'none',
               cursor: 'grab',
               px: 2,
               '&:hover': {
@@ -446,13 +454,15 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
             onDragEnd={handleDragEnd}
             onContextMenu={(e) => handleGroupContextMenu(e, group)}
             sx={{
-              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              backgroundColor: dragOverGroup === group.id && draggedTab ? 
+                'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.1)',
               border: '1px solid rgba(59, 130, 246, 0.3)',
               borderRadius: '4px',
               color: group.color,
               fontWeight: 600,
               opacity: draggedGroup?.id === group.id ? 0.5 : 1,
-              borderLeft: dragOverGroup === group.id ? '3px solid #3b82f6' : 'none',
+              borderLeft: dragOverGroup === group.id ? 
+                (draggedTab ? '3px solid #10b981' : '3px solid #3b82f6') : 'none',
               cursor: 'grab',
               '&:hover': {
                 backgroundColor: 'rgba(59, 130, 246, 0.2)'

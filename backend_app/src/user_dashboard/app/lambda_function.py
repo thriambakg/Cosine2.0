@@ -208,8 +208,15 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
         if not dashboard_config:
             return create_response(400, {"error": "Dashboard configuration required"})
         
+        # Log the received dashboard config for debugging
+        logger.info(f"Received dashboard config for user {user_id}")
+        logger.info(f"TabGroups in received config: {[{'id': g.get('id'), 'name': g.get('name'), 'tabs': g.get('tabs', []), 'tabIds': g.get('tabIds', [])} for g in dashboard_config.get('tabGroups', [])]}")
+        
         # Clean up any old data structure
         dashboard_config = cleanup_old_data_structure(dashboard_config)
+        
+        # Log the cleaned config
+        logger.info(f"TabGroups after cleanup: {[{'id': g.get('id'), 'name': g.get('name'), 'tabs': g.get('tabs', []), 'tabIds': g.get('tabIds', [])} for g in dashboard_config.get('tabGroups', [])]}")
         
         # Validate dashboard configuration has required fields
         if not validate_dashboard_structure(dashboard_config):
@@ -648,6 +655,20 @@ def cleanup_old_data_structure(config: Dict) -> Dict:
     # Ensure required fields exist
     if 'tabGroups' not in cleaned_config:
         cleaned_config['tabGroups'] = []
+    
+    # Ensure each tab group has proper structure
+    for group in cleaned_config.get('tabGroups', []):
+        # Ensure tabs array exists (for group membership)
+        if 'tabs' not in group:
+            # Initialize from tabIds if it exists, otherwise empty array
+            group['tabs'] = group.get('tabIds', [])
+            logger.info(f"Initialized tabs array for group {group.get('id', 'unknown')}: {group['tabs']}")
+        # Ensure tabIds array exists for backward compatibility
+        if 'tabIds' not in group:
+            group['tabIds'] = group.get('tabs', [])
+            logger.info(f"Initialized tabIds array for group {group.get('id', 'unknown')}: {group['tabIds']}")
+        
+        logger.info(f"Group {group.get('id', 'unknown')} final state: tabs={group.get('tabs', [])}, tabIds={group.get('tabIds', [])}")
     
     # Ensure order arrays exist and are properly initialized
     if 'tabOrder' not in cleaned_config:

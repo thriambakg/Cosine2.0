@@ -90,7 +90,8 @@ export const useTabManagement = ({
           id: group.id,
           name: group.name,
           color: group.color || '#8b5cf6',
-          tabIds: group.tabIds || [],
+          tabs: group.tabs || group.tabIds || [],
+          tabIds: group.tabIds || group.tabs || [],
           created_at: group.created_at || new Date().toISOString()
         })),
         dashboards: (tabState.dashboards || []).map(dashboard => ({
@@ -120,6 +121,8 @@ export const useTabManagement = ({
           created_at: dashboard.created_at || new Date().toISOString()
         })),
         activeTabId: tabState.activeTabId || '',
+        tabOrder: tabState.tabs.map(tab => tab.id),
+        groupOrder: tabState.tabGroups.map(group => group.id),
         nextTabId: tabState.nextTabId || 1,
         nextGroupId: tabState.nextGroupId || 1,
         last_updated: new Date().toISOString()
@@ -343,6 +346,7 @@ export const useTabManagement = ({
     });
   }, [saveToStorage, debouncedSaveToDatabase]);
 
+
   // Tab management functions
   const createTab = useCallback(async (options: {
     name: string;
@@ -489,28 +493,25 @@ export const useTabManagement = ({
   const addTabToGroup = useCallback((tabId: string, groupId: string) => {
     const updatedGroups = state.tabGroups.map(group =>
       group.id === groupId 
-        ? { ...group, tabs: [...group.tabs, tabId] }
+        ? { ...group, tabs: [...(group.tabs || group.tabIds || []), tabId] }
         : group
     );
 
     updateState({
       tabGroups: updatedGroups
     });
-  }, [state, updateState]);
+  }, [state.tabGroups, updateState]);
 
   const removeTabFromGroup = useCallback((tabId: string) => {
-    const updatedTabs = state.tabs;
-
     const updatedGroups = state.tabGroups.map(group => ({
       ...group,
-      tabs: group.tabs.filter(id => id !== tabId)
+      tabs: (group.tabs || group.tabIds || []).filter(id => id !== tabId)
     }));
 
     updateState({
-      tabs: updatedTabs,
       tabGroups: updatedGroups
     });
-  }, [state, updateState]);
+  }, [state.tabGroups, updateState]);
 
   const toggleGroupCollapse = useCallback((groupId: string) => {
     const updatedGroups = state.tabGroups.map(group =>
@@ -570,35 +571,16 @@ export const useTabManagement = ({
       const [movedTab] = updatedTabs.splice(tabIndex, 1);
       updatedTabs.splice(newPosition, 0, movedTab);
       
+      // Update state - this will trigger automatic debounced save
       updateState({ tabs: updatedTabs });
       
-      // Get the new order after reordering
-      const newTabOrder = [...updatedTabs];
-      const draggedTabIndex = newTabOrder.findIndex(tab => tab.id === tabId);
-      if (draggedTabIndex !== -1) {
-        // Remove the dragged tab from its current position
-        const draggedTab = newTabOrder.splice(draggedTabIndex, 1)[0];
-        // Insert it at the new position
-        newTabOrder.splice(newPosition, 0, draggedTab);
-      }
-      
-      // Extract the new order of tab IDs
-      const tabIds = newTabOrder.map(tab => tab.id);
-      console.log('🔄 Reordering tabs in backend:', tabIds);
-      
-      if (userId) {
-        dashboardAPI.reorderTabs(tabIds, userId)
-          .then(() => console.log('✅ Tab order updated in backend'))
-          .catch(error => console.error('❌ Failed to reorder tabs in backend:', error));
-      } else {
-        console.warn('⚠️ User not authenticated - skipping tab reorder in backend');
-      }
+      console.log('🔄 Tab reordered locally, will be saved automatically via debounced save');
       
     } catch (error) {
       console.error('❌ Failed to reorder tabs in frontend:', error);
       alert('Failed to reorder tabs. Please try again.');
     }
-  }, [state, updateState, userId]);
+  }, [state.tabs, updateState]);
 
   const reorderGroup = useCallback(async (groupId: string, newPosition: number) => {
     try {
@@ -611,39 +593,16 @@ export const useTabManagement = ({
       const [movedGroup] = updatedGroups.splice(groupIndex, 1);
       updatedGroups.splice(newPosition, 0, movedGroup);
       
+      // Update state - this will trigger automatic debounced save
       updateState({ tabGroups: updatedGroups });
       
-      // Get the new order after reordering
-      const newGroupOrder = [...updatedGroups];
-      const draggedGroupIndex = newGroupOrder.findIndex(group => group.id === groupId);
-      if (draggedGroupIndex !== -1) {
-        // Remove the dragged group from its current position
-        const draggedGroup = newGroupOrder.splice(draggedGroupIndex, 1)[0];
-        // Insert it at the new position
-        newGroupOrder.splice(newPosition, 0, draggedGroup);
-      }
-      
-      // Extract the new order of group IDs
-      const groupIds = newGroupOrder.map(group => group.id);
-      console.log('🔄 Reordering groups in backend:', {
-        groupIds,
-        newGroupOrder: newGroupOrder.map(g => ({ id: g.id, name: g.name })),
-        userId
-      });
-      
-      if (userId) {
-        dashboardAPI.reorderGroups(groupIds, userId)
-          .then(() => console.log('✅ Group order updated in backend'))
-          .catch(error => console.error('❌ Failed to reorder groups in backend:', error));
-      } else {
-        console.warn('⚠️ User not authenticated - skipping group reorder in backend');
-      }
+      console.log('🔄 Group reordered locally, will be saved automatically via debounced save');
       
     } catch (error) {
       console.error('❌ Failed to reorder groups in frontend:', error);
       alert('Failed to reorder groups. Please try again.');
     }
-  }, [state, updateState, userId]);
+  }, [state.tabGroups, updateState]);
 
   // Get current active tab and dashboard
   const activeTab = state.tabs.find(tab => tab.id === state.activeTabId);
@@ -681,11 +640,13 @@ export const useTabManagement = ({
 
     // Group tabs by their group membership
     state.tabGroups.forEach(group => {
-      groupedTabs[group.id] = state.tabs.filter(tab => group.tabs.includes(tab.id));
+      // Handle both 'tabs' (array of tab IDs) and 'tabIds' for backward compatibility
+      const groupTabIds = group.tabs || group.tabIds || [];
+      groupedTabs[group.id] = state.tabs.filter(tab => groupTabIds.includes(tab.id));
     });
     
     // Find ungrouped tabs
-    const groupedTabIds = new Set(state.tabGroups.flatMap(group => group.tabs));
+    const groupedTabIds = new Set(state.tabGroups.flatMap(group => group.tabs || group.tabIds || []));
     state.tabs.forEach(tab => {
       if (!groupedTabIds.has(tab.id)) {
         ungroupedTabs.push(tab);
@@ -693,7 +654,7 @@ export const useTabManagement = ({
     });
 
     return { groupedTabs, ungroupedTabs };
-  }, [state.tabs]);
+  }, [state.tabs, state.tabGroups]);
 
   // Reload data from database
   const reloadFromDatabase = useCallback(async () => {
