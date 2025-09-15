@@ -331,6 +331,11 @@ module "api_gateway" {
       http_method   = "PUT"
       resource_path = "reorder"
     }
+    dashboard_reorder_options = {
+      function_arn  = module.user_dashboard_lambda.function_arn
+      http_method   = "OPTIONS"
+      resource_path = "reorder"
+    }
     tiles_post = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "POST"
