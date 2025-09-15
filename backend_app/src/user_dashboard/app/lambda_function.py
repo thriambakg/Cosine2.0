@@ -160,10 +160,29 @@ def handle_get_dashboard(user_id: str) -> Dict:
             return create_response(200, {'dashboard_config': default_dashboard})
         
         user_data = response['Item']
-        dashboard_config = user_data.get('dashboard_config', create_default_dashboard_clean())
+        raw_dashboard_config = user_data.get('dashboard_config', create_default_dashboard_clean())
+        
+        # Clean up any old data structure (remove dashboards field if present)
+        dashboard_config = cleanup_old_data_structure(raw_dashboard_config)
         
         # Convert Decimal objects to regular numbers for JSON serialization
         dashboard_config = convert_decimals(dashboard_config)
+        
+        # Save cleaned data if it was modified
+        if raw_dashboard_config != dashboard_config:
+            logger.info("Cleaning up old data structure and saving to database")
+            try:
+                table.update_item(
+                    Key={'user_id': user_id},
+                    UpdateExpression='SET dashboard_config = :config, updated_at = :updated',
+                    ExpressionAttributeValues={
+                        ':config': convert_floats_to_decimals(dashboard_config),
+                        ':updated': datetime.utcnow().isoformat()
+                    }
+                )
+                logger.info("Cleaned data structure saved successfully")
+            except Exception as save_error:
+                logger.warning(f"Failed to save cleaned data structure: {str(save_error)}")
         
         return create_response(200, {'dashboard_config': dashboard_config})
         
@@ -179,6 +198,9 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
         
         if not dashboard_config:
             return create_response(400, {"error": "Dashboard configuration required"})
+        
+        # Clean up any old data structure
+        dashboard_config = cleanup_old_data_structure(dashboard_config)
         
         # Validate dashboard configuration has required fields
         if not validate_dashboard_structure(dashboard_config):
@@ -201,13 +223,13 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
         return create_response(500, {"error": "Failed to update dashboard"})
 
 def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
-    """Create new dashboard component (tab, group, or dashboard)"""
+    """Create new dashboard component (tab or group)"""
     try:
         body = json.loads(event.get('body', '{}'))
-        component_type = body.get('type')  # 'tab', 'group', or 'dashboard'
+        component_type = body.get('type')  # 'tab' or 'group'
         
         if not component_type:
-            return create_response(400, {"error": "Component type required (tab, group, or dashboard)"})
+            return create_response(400, {"error": "Component type required (tab or group)"})
         
         # Get current dashboard
         dashboard_config = get_user_dashboard(user_id)
@@ -222,6 +244,8 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
                 'name': body.get('name', 'New Tab'),
                 'color': body.get('color', '#3b82f6'),
                 'isPinned': body.get('isPinned', False),
+                'tiles': [],
+                'layout': body.get('layout', 'grid'),
                 'created_at': now,
                 'updated_at': now
             }
@@ -249,48 +273,19 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
             save_user_dashboard(user_id, dashboard_config)
             
             return create_response(200, {'group': new_group, 'message': 'Group created successfully'})
-            
-        elif component_type == 'dashboard':
-            tab_id = body.get('tabId')
-            if not tab_id:
-                return create_response(400, {"error": "tabId required for dashboard creation"})
-            
-            # Verify tab exists
-            tab_exists = any(tab['id'] == tab_id for tab in dashboard_config.get('tabs', []))
-            if not tab_exists:
-                return create_response(400, {"error": "Invalid tabId"})
-            
-            new_dashboard = {
-                'id': str(uuid.uuid4()),
-                'tabId': tab_id,
-                'name': body.get('name', 'New Dashboard'),
-                'tiles': [],
-                'layout': body.get('layout', 'grid'),
-                'created_at': now,
-                'updated_at': now,
-                'isDefault': body.get('isDefault', False),
-                'isPinned': body.get('isPinned', False)
-            }
-            
-            dashboard_config['dashboards'].append(new_dashboard)
-            dashboard_config['last_updated'] = now
-            
-            save_user_dashboard(user_id, dashboard_config)
-            
-            return create_response(200, {'dashboard': new_dashboard, 'message': 'Dashboard created successfully'})
         
         else:
-            return create_response(400, {"error": "Invalid component type. Must be 'tab', 'group', or 'dashboard'"})
+            return create_response(400, {"error": "Invalid component type. Must be 'tab' or 'group'"})
             
     except Exception as e:
         logger.error(f"Error creating dashboard component: {str(e)}")
         return create_response(500, {"error": "Failed to create dashboard component"})
 
 def handle_delete_dashboard_component(user_id: str, event: Dict) -> Dict:
-    """Delete dashboard component (tab, group, or dashboard) with cascading deletes"""
+    """Delete dashboard component (tab or group) with cascading deletes"""
     try:
         body = json.loads(event.get('body', '{}'))
-        component_type = body.get('type')  # 'tab', 'group', or 'dashboard'
+        component_type = body.get('type')  # 'tab' or 'group'
         component_id = body.get('id')
         
         if not component_type or not component_id:
@@ -302,16 +297,8 @@ def handle_delete_dashboard_component(user_id: str, event: Dict) -> Dict:
             return create_response(404, {"error": "User not found"})
         
         if component_type == 'tab':
-            # Cascading delete: Remove all dashboards and tiles associated with this tab
+            # Remove the tab (tiles are included in the tab)
             dashboard_config['tabs'] = [tab for tab in dashboard_config.get('tabs', []) if tab['id'] != component_id]
-            
-            # Remove all dashboards for this tab
-            original_dashboard_count = len(dashboard_config.get('dashboards', []))
-            dashboard_config['dashboards'] = [
-                dashboard for dashboard in dashboard_config.get('dashboards', []) 
-                if dashboard.get('tabId') != component_id
-            ]
-            removed_dashboards = original_dashboard_count - len(dashboard_config['dashboards'])
             
             # Remove tab from any groups
             for group in dashboard_config.get('tabGroups', []):
@@ -326,13 +313,10 @@ def handle_delete_dashboard_component(user_id: str, event: Dict) -> Dict:
             dashboard_config['last_updated'] = datetime.utcnow().isoformat()
             save_user_dashboard(user_id, dashboard_config)
             
-            return create_response(200, {
-                'message': f'Tab and {removed_dashboards} associated dashboards deleted successfully'
-            })
+            return create_response(200, {'message': 'Tab and all its tiles deleted successfully'})
             
         elif component_type == 'group':
             # Remove the group
-            original_group_count = len(dashboard_config.get('tabGroups', []))
             dashboard_config['tabGroups'] = [
                 group for group in dashboard_config.get('tabGroups', []) 
                 if group['id'] != component_id
@@ -342,49 +326,36 @@ def handle_delete_dashboard_component(user_id: str, event: Dict) -> Dict:
             save_user_dashboard(user_id, dashboard_config)
             
             return create_response(200, {'message': 'Group deleted successfully'})
-            
-        elif component_type == 'dashboard':
-            # Remove the dashboard and all its tiles
-            original_dashboard_count = len(dashboard_config.get('dashboards', []))
-            dashboard_config['dashboards'] = [
-                dashboard for dashboard in dashboard_config.get('dashboards', []) 
-                if dashboard['id'] != component_id
-            ]
-            
-            dashboard_config['last_updated'] = datetime.utcnow().isoformat()
-            save_user_dashboard(user_id, dashboard_config)
-            
-            return create_response(200, {'message': 'Dashboard and all its tiles deleted successfully'})
         
         else:
-            return create_response(400, {"error": "Invalid component type. Must be 'tab', 'group', or 'dashboard'"})
+            return create_response(400, {"error": "Invalid component type. Must be 'tab' or 'group'"})
             
     except Exception as e:
         logger.error(f"Error deleting dashboard component: {str(e)}")
         return create_response(500, {"error": "Failed to delete dashboard component"})
 
 def handle_get_tiles(user_id: str, event: Dict) -> Dict:
-    """Get tiles for a specific dashboard"""
+    """Get tiles for a specific tab"""
     try:
         query_params = event.get('queryStringParameters', {}) or {}
-        dashboard_id = query_params.get('dashboardId')
+        tab_id = query_params.get('tabId')
         
         dashboard_config = get_user_dashboard(user_id)
         if not dashboard_config:
             return create_response(404, {"error": "User not found"})
         
-        if dashboard_id:
-            # Get tiles for specific dashboard
-            dashboard = next((d for d in dashboard_config.get('dashboards', []) if d['id'] == dashboard_id), None)
-            if not dashboard:
-                return create_response(404, {"error": "Dashboard not found"})
+        if tab_id:
+            # Get tiles for specific tab
+            tab = next((t for t in dashboard_config.get('tabs', []) if t['id'] == tab_id), None)
+            if not tab:
+                return create_response(404, {"error": "Tab not found"})
             
-            tiles = dashboard.get('tiles', [])
+            tiles = tab.get('tiles', [])
         else:
-            # Get all tiles across all dashboards
+            # Get all tiles across all tabs
             tiles = []
-            for dashboard in dashboard_config.get('dashboards', []):
-                tiles.extend(dashboard.get('tiles', []))
+            for tab in dashboard_config.get('tabs', []):
+                tiles.extend(tab.get('tiles', []))
         
         return create_response(200, {'tiles': tiles})
         
@@ -393,11 +364,11 @@ def handle_get_tiles(user_id: str, event: Dict) -> Dict:
         return create_response(500, {"error": "Failed to retrieve tiles"})
 
 def handle_add_tile(user_id: str, event: Dict) -> Dict:
-    """Add a new tile to a dashboard"""
+    """Add a new tile to a tab"""
     try:
         body = json.loads(event.get('body', '{}'))
         tile_config = body.get('tile')
-        dashboard_id = body.get('dashboardId')
+        tab_id = body.get('tabId')
         
         if not tile_config:
             return create_response(400, {"error": "Tile configuration required"})
@@ -411,17 +382,22 @@ def handle_add_tile(user_id: str, event: Dict) -> Dict:
         if not dashboard_config:
             return create_response(404, {"error": "User not found"})
         
-        # Find the target dashboard
-        target_dashboard = None
-        if dashboard_id:
-            target_dashboard = next((d for d in dashboard_config.get('dashboards', []) if d['id'] == dashboard_id), None)
+        # Find the target tab
+        target_tab = None
+        if tab_id:
+            target_tab = next((t for t in dashboard_config.get('tabs', []) if t['id'] == tab_id), None)
         else:
-            # Use first dashboard if no specific dashboard found
-            dashboards = dashboard_config.get('dashboards', [])
-            target_dashboard = dashboards[0] if dashboards else None
+            # Use active tab if no specific tab found
+            active_tab_id = dashboard_config.get('activeTabId')
+            if active_tab_id:
+                target_tab = next((t for t in dashboard_config.get('tabs', []) if t['id'] == active_tab_id), None)
+            else:
+                # Use first tab if no active tab
+                tabs = dashboard_config.get('tabs', [])
+                target_tab = tabs[0] if tabs else None
         
-        if not target_dashboard:
-            return create_response(400, {"error": "No dashboard found to add tile to"})
+        if not target_tab:
+            return create_response(400, {"error": "No tab found to add tile to"})
         
         # Create new tile with clean structure
         now = datetime.utcnow().isoformat()
@@ -436,17 +412,17 @@ def handle_add_tile(user_id: str, event: Dict) -> Dict:
             'isPinned': tile_config.get('isPinned', False),
             'gridPosition': tile_config.get('gridPosition', {'x': 0, 'y': 0}),
             'gridSize': tile_config.get('gridSize', {'width': 1, 'height': 1}),
-            'dashboard_id': target_dashboard['id'],
+            'tab_id': target_tab['id'],
             'created_at': now,
             'updated_at': now
         }
         
-        # Add tile to dashboard
-        if 'tiles' not in target_dashboard:
-            target_dashboard['tiles'] = []
+        # Add tile to tab
+        if 'tiles' not in target_tab:
+            target_tab['tiles'] = []
         
-        target_dashboard['tiles'].append(new_tile)
-        target_dashboard['updated_at'] = now
+        target_tab['tiles'].append(new_tile)
+        target_tab['updated_at'] = now
         dashboard_config['last_updated'] = now
         
         # Save updated dashboard
@@ -472,15 +448,15 @@ def handle_update_tile(user_id: str, tile_id: str, event: Dict) -> Dict:
         if not dashboard_config:
             return create_response(404, {"error": "User not found"})
         
-        # Find the tile across all dashboards
+        # Find the tile across all tabs
         target_tile = None
-        target_dashboard = None
+        target_tab = None
         
-        for dashboard in dashboard_config.get('dashboards', []):
-            for tile in dashboard.get('tiles', []):
+        for tab in dashboard_config.get('tabs', []):
+            for tile in tab.get('tiles', []):
                 if tile['id'] == tile_id:
                     target_tile = tile
-                    target_dashboard = dashboard
+                    target_tab = tab
                     break
             if target_tile:
                 break
@@ -496,7 +472,7 @@ def handle_update_tile(user_id: str, tile_id: str, event: Dict) -> Dict:
             target_tile[key] = value
         
         target_tile['updated_at'] = now
-        target_dashboard['updated_at'] = now
+        target_tab['updated_at'] = now
         dashboard_config['last_updated'] = now
         
         # Save updated dashboard
@@ -509,7 +485,7 @@ def handle_update_tile(user_id: str, tile_id: str, event: Dict) -> Dict:
         return create_response(500, {"error": "Failed to update tile"})
 
 def handle_remove_tile(user_id: str, tile_id: str) -> Dict:
-    """Remove a tile from dashboard"""
+    """Remove a tile from tab"""
     try:
         # Get current dashboard
         dashboard_config = get_user_dashboard(user_id)
@@ -518,12 +494,12 @@ def handle_remove_tile(user_id: str, tile_id: str) -> Dict:
         
         # Find and remove the tile
         tile_found = False
-        for dashboard in dashboard_config.get('dashboards', []):
-            original_tile_count = len(dashboard.get('tiles', []))
-            dashboard['tiles'] = [tile for tile in dashboard.get('tiles', []) if tile['id'] != tile_id]
-            if len(dashboard['tiles']) < original_tile_count:
+        for tab in dashboard_config.get('tabs', []):
+            original_tile_count = len(tab.get('tiles', []))
+            tab['tiles'] = [tile for tile in tab.get('tiles', []) if tile['id'] != tile_id]
+            if len(tab['tiles']) < original_tile_count:
                 tile_found = True
-                dashboard['updated_at'] = datetime.utcnow().isoformat()
+                tab['updated_at'] = datetime.utcnow().isoformat()
                 break
         
         if not tile_found:
@@ -543,6 +519,28 @@ def handle_remove_tile(user_id: str, tile_id: str) -> Dict:
 
 # Helper functions
 
+def cleanup_old_data_structure(config: Dict) -> Dict:
+    """Clean up old data structure by removing dashboards field and ensuring tabs have tiles"""
+    cleaned_config = config.copy()
+    
+    # Remove old dashboards field if it exists
+    if 'dashboards' in cleaned_config:
+        logger.info("Removing old dashboards field from data structure")
+        del cleaned_config['dashboards']
+    
+    # Ensure all tabs have tiles array
+    for tab in cleaned_config.get('tabs', []):
+        if 'tiles' not in tab:
+            tab['tiles'] = []
+        if 'layout' not in tab:
+            tab['layout'] = 'grid'
+    
+    # Ensure required fields exist
+    if 'tabGroups' not in cleaned_config:
+        cleaned_config['tabGroups'] = []
+    
+    return cleaned_config
+
 def get_user_dashboard(user_id: str) -> Optional[Dict]:
     """Get user's dashboard configuration from database"""
     try:
@@ -551,7 +549,10 @@ def get_user_dashboard(user_id: str) -> Optional[Dict]:
             return None
         
         user_data = response['Item']
-        dashboard_config = user_data.get('dashboard_config', create_default_dashboard_clean())
+        raw_dashboard_config = user_data.get('dashboard_config', create_default_dashboard_clean())
+        
+        # Clean up any old data structure
+        dashboard_config = cleanup_old_data_structure(raw_dashboard_config)
         
         return dashboard_config
         
@@ -577,10 +578,9 @@ def save_user_dashboard(user_id: str, dashboard_config: Dict) -> bool:
         return False
 
 def create_default_dashboard_clean() -> Dict:
-    """Create a default dashboard configuration with clean data structure"""
+    """Create a default dashboard configuration with simplified Tab = Dashboard structure"""
     now = datetime.utcnow().isoformat()
     tab_id = str(uuid.uuid4())
-    dashboard_id = str(uuid.uuid4())
     
     return {
         'tabs': [
@@ -589,39 +589,28 @@ def create_default_dashboard_clean() -> Dict:
                 'name': 'My Dashboard',
                 'color': '#3b82f6',
                 'isPinned': False,
+                'tiles': [],
+                'layout': 'grid',
                 'created_at': now,
                 'updated_at': now
             }
         ],
         'tabGroups': [],
-        'dashboards': [
-            {
-                'id': dashboard_id,
-                'tabId': tab_id,
-                'name': 'My Dashboard',
-                'tiles': [],
-                'layout': 'grid',
-                'created_at': now,
-                'updated_at': now,
-                'isDefault': True,
-                'isPinned': False
-            }
-        ],
         'activeTabId': tab_id,
         'last_updated': now
     }
 
 def validate_dashboard_structure(config: Dict) -> bool:
     """Validate dashboard configuration structure"""
-    required_fields = ['tabs', 'dashboards', 'activeTabId']
+    required_fields = ['tabs', 'activeTabId']
     
     for field in required_fields:
         if field not in config:
             logger.error(f"Missing required field: {field}")
             return False
     
-    if not isinstance(config['tabs'], list) or not isinstance(config['dashboards'], list):
-        logger.error("tabs and dashboards must be arrays")
+    if not isinstance(config['tabs'], list):
+        logger.error("tabs must be an array")
         return False
     
     # Validate tabs
@@ -629,14 +618,8 @@ def validate_dashboard_structure(config: Dict) -> bool:
         if not isinstance(tab, dict) or 'id' not in tab or 'name' not in tab:
             logger.error("Invalid tab structure")
             return False
-    
-    # Validate dashboards
-    for dashboard in config['dashboards']:
-        if not isinstance(dashboard, dict) or 'id' not in dashboard or 'tiles' not in dashboard:
-            logger.error("Invalid dashboard structure")
-            return False
-        if not isinstance(dashboard['tiles'], list):
-            logger.error("Dashboard tiles must be an array")
+        if 'tiles' not in tab or not isinstance(tab['tiles'], list):
+            logger.error("Tab must have tiles array")
             return False
     
     return True
