@@ -431,6 +431,10 @@ export interface DashboardConfig {
     created_at: string;
   }>;
   tabGroups: any[];
+  activeTabId: string;
+  last_updated: string;
+  tabOrder?: string[];
+  groupOrder?: string[];
   dashboards: Array<{
     id: string;
     tabId: string;
@@ -439,10 +443,8 @@ export interface DashboardConfig {
     layout: string;
     created_at: string;
   }>;
-  activeTabId: string;
   nextTabId: number;
   nextGroupId: number;
-  last_updated: string;
 }
 
 export interface TilePositionUpdate {
@@ -509,6 +511,7 @@ export const dashboardAPI = {
     return apiRequest<{ message: string; order: string[] }>(`/dashboard?userId=${userId}`, {
       method: 'PUT',
       headers: {
+        
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -518,12 +521,13 @@ export const dashboardAPI = {
     });
   },
 
-  addTile: async (tile: Partial<DashboardTile>, dashboardId?: string): Promise<{ tile: DashboardTile; message: string }> => {
-    return apiRequest<{ tile: DashboardTile; message: string }>('/tiles', {
+  addTile: async (tile: Partial<DashboardTile>, tabId?: string, userId?: string): Promise<{ tile: DashboardTile; message: string }> => {
+    return apiRequest<{ tile: DashboardTile; message: string }>(`/dashboard?userId=${userId}`, {
       method: 'POST',
       body: JSON.stringify({ 
+        type: 'add_tile',
         tile,
-        dashboard_id: dashboardId 
+        tabId 
       }),
     });
   },

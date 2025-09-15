@@ -199,6 +199,10 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
         if body.get('type') in ['reorder_tabs', 'reorder_groups']:
             return handle_reorder_components(user_id, body)
         
+        # Check if this is an add tile request
+        if body.get('type') == 'add_tile':
+            return handle_add_tile(user_id, event)
+        
         dashboard_config = body.get('dashboard_config')
         
         if not dashboard_config:
@@ -228,15 +232,19 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
         return create_response(500, {"error": "Failed to update dashboard"})
 
 def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
-    """Create new dashboard component (tab or group)"""
+    """Create new dashboard component (tab, group, or add tile)"""
     try:
         body = json.loads(event.get('body', '{}'))
-        component_type = body.get('type')  # 'tab' or 'group'
+        component_type = body.get('type')  # 'tab', 'group', or 'add_tile'
         
         logger.info(f"Creating dashboard component: type={component_type}, user_id={user_id}")
         
         if not component_type:
-            return create_response(400, {"error": "Component type required (tab or group)"})
+            return create_response(400, {"error": "Component type required (tab, group, or add_tile)"})
+        
+        # Handle add_tile requests
+        if component_type == 'add_tile':
+            return handle_add_tile(user_id, event)
         
         # Get current dashboard
         dashboard_config = get_user_dashboard(user_id)

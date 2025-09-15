@@ -25,6 +25,8 @@ export interface DashboardConfig {
   tabGroups: DashboardGroup[];
   activeTabId: string;
   last_updated: string;
+  tabOrder?: string[];
+  groupOrder?: string[];
   // Legacy fields for backward compatibility (deprecated)
   crypto_tiles?: CryptoTile[];
   layout?: string;

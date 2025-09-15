@@ -154,8 +154,13 @@ const UnifiedDashboardPage: React.FC = () => {
     reorderTab,
     reorderGroup,
     updateDashboardTiles: updateTabDashboardTiles,
-    getTabsByGroup
+    updateTabTiles,
+    getTabsByGroup,
+    reloadFromDatabase
   } = tabManagement;
+
+  // Derive activeTab from activeTabId
+  const activeTab = tabs.find(tab => tab.id === activeTabId);
 
   // Handle hot reload scenario where user might be temporarily undefined
   useEffect(() => {
@@ -809,85 +814,130 @@ const UnifiedDashboardPage: React.FC = () => {
   };
 
   // Handle crypto tile addition using the existing AddCryptoModal
-  const handleAddCryptoTile = (cryptoData: any) => {
+  const handleAddCryptoTile = async (cryptoData: any) => {
     console.log('handleAddCryptoTile called with:', cryptoData);
-    console.log('activeDashboard:', activeDashboard);
-    console.log('current tiles:', tiles);
+    console.log('activeTab:', activeTab);
     
-    const newTile: UnifiedTile = {
-      id: `tile_${Date.now()}`,
-      type: 'crypto',
-      title: cryptoData.symbol,
+    if (!activeTab) {
+      console.warn('No active tab found, cannot add tile');
+      return;
+    }
+    
+    if (!user?.id) {
+      console.warn('No user ID found, cannot add tile');
+      return;
+    }
+    
+    const newTile = {
+      type: 'crypto' as const,
       symbol: cryptoData.symbol,
       timeframe: cryptoData.timeframe,
+      title: cryptoData.symbol,
       displayOptions: cryptoData.displayOptions,
       autoRefresh: cryptoData.autoRefresh,
       isPinned: false,
-      size: { width: 350, height: 400 }, // Legacy pixel size
-      gridPosition: findNextAvailablePosition(getDefaultTileSize('crypto')), // Smart placement
-      gridSize: getDefaultTileSize('crypto'), // Tile-specific default size
-      dashboard_id: activeDashboard?.id || 'main',
-      created_at: new Date().toISOString(),
+      gridPosition: findNextAvailablePosition(getDefaultTileSize('crypto')),
+      gridSize: getDefaultTileSize('crypto'),
     };
 
-    console.log('Created new tile:', newTile);
-    const updatedTiles = [...tiles, newTile];
-    console.log('Updated tiles array:', updatedTiles);
-    updateDashboardTiles(updatedTiles);
+    try {
+      console.log('Creating tile via API:', newTile);
+      console.log('Tab ID:', activeTab.id);
+      console.log('User ID:', user.id);
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      console.log('Tile created successfully:', response);
+      
+      // Reload data from database to get the updated tiles
+      await reloadFromDatabase();
+      console.log('✅ Data reloaded from database after tile creation');
+      
+    } catch (error: any) {
+      console.error('Failed to create tile:', error);
+      console.error('Error details:', error.response?.data);
+      console.error('Request config:', error.config);
+      // TODO: Show error message to user
+    }
   };
 
   // Handle stock tile addition using the new AddStockModal
-  const handleAddStockTile = (stockData: any) => {
+  const handleAddStockTile = async (stockData: any) => {
     console.log('handleAddStockTile called with:', stockData);
-    console.log('activeDashboard:', activeDashboard);
-    console.log('current tiles:', tiles);
+    console.log('activeTab:', activeTab);
     
-    const newTile: UnifiedTile = {
-      id: `tile_${Date.now()}`,
-      type: 'stock',
-      title: stockData.symbol,
+    if (!activeTab) {
+      console.warn('No active tab found, cannot add tile');
+      return;
+    }
+    
+    if (!user?.id) {
+      console.warn('No user ID found, cannot add tile');
+      return;
+    }
+    
+    const newTile = {
+      type: 'stock' as const,
       symbol: stockData.symbol,
       timeframe: stockData.timeframe,
+      title: stockData.symbol,
       displayOptions: stockData.displayOptions,
       autoRefresh: stockData.autoRefresh,
       isPinned: false,
-      size: { width: 350, height: 400 }, // Legacy pixel size
-      gridPosition: findNextAvailablePosition(getDefaultTileSize('stock')), // Smart placement
-      gridSize: getDefaultTileSize('stock'), // Tile-specific default size
-      dashboard_id: activeDashboard?.id || 'main',
-      created_at: new Date().toISOString(),
+      gridPosition: findNextAvailablePosition(getDefaultTileSize('stock')),
+      gridSize: getDefaultTileSize('stock'),
     };
 
-    console.log('Created new tile:', newTile);
-    const updatedTiles = [...tiles, newTile];
-    console.log('Updated tiles array:', updatedTiles);
-    updateDashboardTiles(updatedTiles);
+    try {
+      console.log('Creating tile via API:', newTile);
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      console.log('Tile created successfully:', response);
+      
+      // Reload data from database to get the updated tiles
+      await reloadFromDatabase();
+      console.log('✅ Data reloaded from database after tile creation');
+      
+    } catch (error) {
+      console.error('Failed to create tile:', error);
+      // TODO: Show error message to user
+    }
   };
 
   const getExistingSymbols = () => tiles.map(tile => tile.symbol).filter((symbol): symbol is string => Boolean(symbol));
 
   const handleRemoveTile = (id: string) => {
-    const updatedTiles = tiles.filter(tile => tile.id !== id);
-    safeUpdateDashboardTiles(updatedTiles);
+    if (activeTab) {
+      const updatedTiles = (activeTab.tiles || []).filter((tile: any) => tile.id !== id);
+      updateTabTiles(activeTab.id, updatedTiles);
+    } else {
+      console.warn('No active tab found, cannot remove tile');
+    }
   };
 
   const handleUpdateTile = (id: string, data: any) => {
     console.log('🔄 handleUpdateTile called:', { id, data });
-    console.log('Current tiles before update:', tiles.map(t => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
     
-    const updatedTiles = tiles.map(tile => 
-      tile.id === id ? { ...tile, ...data } : tile
-    );
-    
-    console.log('Updated tiles after merge:', updatedTiles.map(t => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
-    safeUpdateDashboardTiles(updatedTiles);
+    if (activeTab) {
+      console.log('Current tiles before update:', (activeTab.tiles || []).map((t: any) => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
+      
+      const updatedTiles = (activeTab.tiles || []).map((tile: any) => 
+        tile.id === id ? { ...tile, ...data } : tile
+      );
+      
+      console.log('Updated tiles after merge:', updatedTiles.map((t: any) => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
+      updateTabTiles(activeTab.id, updatedTiles);
+    } else {
+      console.warn('No active tab found, cannot update tile');
+    }
   };
 
   const handleSettingsChange = (id: string, settings: any) => {
-    const updatedTiles = tiles.map(tile => 
-      tile.id === id ? { ...tile, ...settings } : tile
-    );
-    safeUpdateDashboardTiles(updatedTiles);
+    if (activeTab) {
+      const updatedTiles = (activeTab.tiles || []).map((tile: any) => 
+        tile.id === id ? { ...tile, ...settings } : tile
+      );
+      updateTabTiles(activeTab.id, updatedTiles);
+    } else {
+      console.warn('No active tab found, cannot update tile settings');
+    }
   };
 
   const handleResizeTile = (id: string, size: { width: number; height: number }) => {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DashboardTab, TabManagementState, UnifiedTile } from '../types/dashboardTypes';
 import { robustStorage, isIncognitoMode } from '../utils/storageUtils';
-import { dashboardAPI } from '../services/api';
+import { dashboardAPI, DashboardConfig } from '../services/api';
 
 interface UseTabManagementOptions {
   userId?: string;
@@ -648,7 +648,7 @@ export const useTabManagement = ({
     : null;
     
 
-  // Update dashboard tiles
+  // Update dashboard tiles (legacy function - deprecated)
   const updateDashboardTiles = useCallback((dashboardId: string, tiles: UnifiedTile[]) => {
     const updatedDashboards = (state.dashboards || []).map(dashboard =>
       dashboard.id === dashboardId 
@@ -658,6 +658,17 @@ export const useTabManagement = ({
 
     updateState({ dashboards: updatedDashboards });
   }, [state.dashboards, updateState]);
+
+  // Update tiles for a specific tab
+  const updateTabTiles = useCallback((tabId: string, tiles: UnifiedTile[]) => {
+    const updatedTabs = state.tabs.map(tab =>
+      tab.id === tabId 
+        ? { ...tab, tiles, updated_at: new Date().toISOString() }
+        : tab
+    );
+
+    updateState({ tabs: updatedTabs });
+  }, [state.tabs, updateState]);
 
   // Get tabs by group
   const getTabsByGroup = useCallback(() => {
@@ -679,6 +690,76 @@ export const useTabManagement = ({
 
     return { groupedTabs, ungroupedTabs };
   }, [state.tabs]);
+
+  // Reload data from database
+  const reloadFromDatabase = useCallback(async () => {
+    if (!userId) {
+      console.warn('No userId provided, cannot reload from database');
+      return;
+    }
+
+    try {
+      console.log('🔄 Reloading data from database...');
+      const dbResponse = await dashboardAPI.getDashboard(userId);
+      const dbConfig: DashboardConfig = dbResponse.dashboard_config;
+      
+      // Convert DashboardConfig to TabManagementState
+      let dbState: TabManagementState;
+      
+      if ('tabs' in dbConfig) {
+        // New simplified format: tabs contain tiles directly
+        dbState = {
+          tabs: (dbConfig.tabs as any[]).map((tab: any) => ({
+            id: tab.id,
+            name: tab.name,
+            color: tab.color || '#3b82f6',
+            isPinned: tab.isPinned || false,
+            tiles: tab.tiles || [],
+            layout: tab.layout || 'grid',
+            created_at: tab.created_at || new Date().toISOString(),
+            updated_at: tab.updated_at || new Date().toISOString()
+          })),
+          tabGroups: (dbConfig.tabGroups || []).map((group: any) => ({
+            id: group.id,
+            name: group.name,
+            color: group.color || '#8b5cf6',
+            tabs: group.tabs || [],
+            collapsed: group.collapsed || false,
+            position: group.position || 0,
+            created_at: group.created_at || new Date().toISOString()
+          })),
+          activeTabId: dbConfig.activeTabId || null,
+          last_updated: dbConfig.last_updated || new Date().toISOString(),
+          dashboards: [], // Legacy field - not used in new structure
+          nextTabId: 1, // Will be calculated from existing tabs
+          nextGroupId: 1 // Will be calculated from existing groups
+        };
+
+        // Sort tabs and groups according to their order arrays
+        if (dbConfig.tabOrder && Array.isArray(dbConfig.tabOrder)) {
+          dbState.tabs.sort((a, b) => {
+            const aIndex = dbConfig.tabOrder!.indexOf(a.id);
+            const bIndex = dbConfig.tabOrder!.indexOf(b.id);
+            return aIndex - bIndex;
+          });
+        }
+
+        if (dbConfig.groupOrder && Array.isArray(dbConfig.groupOrder)) {
+          dbState.tabGroups.sort((a, b) => {
+            const aIndex = dbConfig.groupOrder!.indexOf(a.id);
+            const bIndex = dbConfig.groupOrder!.indexOf(b.id);
+            return aIndex - bIndex;
+          });
+        }
+
+        setState(dbState);
+        saveToStorage(dbState);
+        console.log('✅ Successfully reloaded data from database');
+      }
+    } catch (error) {
+      console.error('Failed to reload from database:', error);
+    }
+  }, [userId]);
 
   return {
     // State
@@ -703,9 +784,11 @@ export const useTabManagement = ({
     reorderTab,
     reorderGroup,
     updateDashboardTiles,
+    updateTabTiles,
     
     // Utilities
     getTabsByGroup,
-    updateState
+    updateState,
+    reloadFromDatabase
   };
 };
