@@ -62,13 +62,6 @@ const defaultNavigationItems: NavigationItem[] = [
     category: 'analysis'
   },
   {
-    id: 'crypto-stats',
-    label: 'Crypto Stats',
-    path: '/crypto-stats',
-    icon: 'CurrencyBitcoinIcon',
-    category: 'analysis'
-  },
-  {
     id: 'option-pricing',
     label: 'Option Pricing',
     path: '/option-pricing',

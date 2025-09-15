@@ -30,6 +30,9 @@ def migrate_dashboard_data(dashboard_config: Dict[str, Any]) -> Dict[str, Any]:
         # Apply migrations based on current version
         migrated_config = dashboard_config.copy()
         
+        # First check if this is the old format and migrate it
+        migrated_config = migrate_from_old_format(migrated_config)
+        
         if current_version == "1.0.0":
             migrated_config = migrate_from_v1_0_0(migrated_config)
         
@@ -58,6 +61,72 @@ def migrate_dashboard_data(dashboard_config: Dict[str, Any]) -> Dict[str, Any]:
                 'migrationError': str(e)
             }
         }
+
+def migrate_from_old_format(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Migrate from old crypto_tiles format to new dashboards format"""
+    logger.info("Applying migration from old crypto_tiles format to new dashboards format")
+    
+    migrated_config = config.copy()
+    
+    # Check if this is the old format with crypto_tiles
+    if 'crypto_tiles' in migrated_config and 'dashboards' not in migrated_config:
+        logger.info("Converting old crypto_tiles format to new dashboards format")
+        
+        # Create a default dashboard
+        default_dashboard = {
+            'id': 'dashboard_1',
+            'tabId': 'tab_1',
+            'name': 'My Dashboard',
+            'layout': migrated_config.get('layout', 'grid'),
+            'tiles': [],
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat(),
+            'isDefault': True,
+            'isPinned': False
+        }
+        
+        # Convert crypto_tiles to the new format
+        crypto_tiles = migrated_config.get('crypto_tiles', [])
+        for tile in crypto_tiles:
+            new_tile = {
+                'id': tile.get('id', f"tile_{datetime.utcnow().timestamp()}"),
+                'type': 'crypto',
+                'title': tile.get('symbol', 'Untitled'),
+                'symbol': tile.get('symbol'),
+                'timeframe': tile.get('timeframe', '1d'),
+                'displayOptions': tile.get('displayOptions', {}),
+                'autoRefresh': tile.get('autoRefresh', False),
+                'isPinned': tile.get('isPinned', False),
+                'size': tile.get('size', {'width': 350, 'height': 400}),
+                'position': tile.get('position', {'x': 0, 'y': 0}),
+                'gridPosition': {'x': 0, 'y': 0},  # Default grid position
+                'gridSize': get_default_tile_size('crypto'),
+                'dashboard_id': 'dashboard_1',
+                'created_at': tile.get('created_at', datetime.utcnow().isoformat())
+            }
+            default_dashboard['tiles'].append(new_tile)
+        
+        # Replace crypto_tiles with dashboards
+        migrated_config['dashboards'] = [default_dashboard]
+        migrated_config['tabs'] = [{
+            'id': 'tab_1',
+            'name': 'My Dashboard',
+            'color': '#3b82f6',
+            'isPinned': False,
+            'created_at': datetime.utcnow().isoformat()
+        }]
+        migrated_config['tabGroups'] = []
+        migrated_config['activeTabId'] = 'tab_1'
+        migrated_config['nextTabId'] = 2
+        migrated_config['nextGroupId'] = 1
+        
+        # Remove old fields
+        if 'crypto_tiles' in migrated_config:
+            del migrated_config['crypto_tiles']
+        
+        logger.info(f"Converted {len(crypto_tiles)} crypto tiles to new dashboard format")
+    
+    return migrated_config
 
 def migrate_from_v1_0_0(config: Dict[str, Any]) -> Dict[str, Any]:
     """Migrate from version 1.0.0 to 1.1.0"""

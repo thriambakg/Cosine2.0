@@ -159,7 +159,7 @@ export const useTabManagement = ({
 
         // Try to load from database for latest changes
         try {
-          const dbResponse = await dashboardAPI.getDashboard();
+          const dbResponse = await dashboardAPI.getDashboard(userId);
           const dbConfig = dbResponse.dashboard_config;
           
           // Debug: Log raw database response

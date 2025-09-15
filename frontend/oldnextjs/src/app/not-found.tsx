@@ -15,7 +15,6 @@ export default function NotFound() {
       '/',
       '/login',
       '/chat',
-      '/crypto-stats',
       '/heatmap',
       '/option-pricing',
       '/portfolio-risk',

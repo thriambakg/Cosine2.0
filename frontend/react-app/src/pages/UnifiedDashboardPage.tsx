@@ -17,6 +17,7 @@ import {
   Chip,
   IconButton
 } from '@mui/material';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   Add as AddIcon, 
   Close as CloseIcon,
@@ -126,6 +127,7 @@ const tileTypes: TileTypeDefinition[] = [
 ];
 
 const UnifiedDashboardPage: React.FC = () => {
+  const { user } = useAuth();
   const [configValid, setConfigValid] = useState<boolean>(false);
   const [configErrors, setConfigErrors] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -149,7 +151,14 @@ const UnifiedDashboardPage: React.FC = () => {
     reorderGroup,
     updateDashboardTiles: updateTabDashboardTiles,
     getTabsByGroup
-  } = useTabManagement({ userId: 'current-user' }); // TODO: Get actual user ID
+  } = useTabManagement({ userId: user?.id || 'current-user' });
+
+  // Handle hot reload scenario where user might be temporarily undefined
+  useEffect(() => {
+    if (!user && typeof window !== 'undefined') {
+      console.warn('🚨 No user found during dashboard load - this might be due to hot reload');
+    }
+  }, [user]);
 
   // Multi-step tile addition state
   const [addTileStep, setAddTileStep] = useState<'closed' | 'type-selection' | 'configuration'>('closed');

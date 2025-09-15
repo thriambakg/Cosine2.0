@@ -21,7 +21,6 @@ const pageConfig = {
   '/portfolio-risk': { title: 'Portfolio Risk', breadcrumbs: [{ label: 'Dashboard', path: '/' }, { label: 'Portfolio', path: '#' }, { label: 'Risk Analysis', path: '/portfolio-risk' }] },
   '/stock-volatility': { title: 'Stock Volatility', breadcrumbs: [{ label: 'Dashboard', path: '/' }, { label: 'Analysis', path: '#' }, { label: 'Stock Volatility', path: '/stock-volatility' }] },
   '/stock-alerts': { title: 'Stock Alerts', breadcrumbs: [{ label: 'Dashboard', path: '/' }, { label: 'Analysis', path: '#' }, { label: 'Stock Alerts', path: '/stock-alerts' }] },
-  '/crypto-stats': { title: 'Crypto Stats', breadcrumbs: [{ label: 'Dashboard', path: '/' }, { label: 'Analysis', path: '#' }, { label: 'Crypto Stats', path: '/crypto-stats' }] },
   '/option-pricing': { title: 'Option Pricing', breadcrumbs: [{ label: 'Dashboard', path: '/' }, { label: 'Analysis', path: '#' }, { label: 'Option Pricing', path: '/option-pricing' }] },
   '/heatmap': { title: 'Market Heatmap', breadcrumbs: [{ label: 'Dashboard', path: '/' }, { label: 'Analysis', path: '#' }, { label: 'Heatmap', path: '/heatmap' }] },
 };

@@ -13,7 +13,6 @@ import Robinhood from './pages/Robinhood';
 import PortfolioRisk from './pages/PortfolioRisk';
 import StockVolatilityPage from './pages/StockVolatilityPage';
 import StockAlertsPage from './pages/StockAlertsPage';
-import CryptoStatsPage from './pages/CryptoStatsPage';
 import UnifiedDashboardPage from './pages/UnifiedDashboardPage';
 import OptionPricingPage from './pages/OptionPricingPage';
 import HeatmapPage from './pages/HeatmapPage';
@@ -99,13 +98,6 @@ function AppContent() {
         </ProtectedRoute>
       } />
       
-      <Route path="/crypto-stats" element={
-        <ProtectedRoute>
-          <AppLayout>
-            <CryptoStatsPage />
-          </AppLayout>
-        </ProtectedRoute>
-      } />
       
       <Route path="/option-pricing" element={
         <ProtectedRoute>
