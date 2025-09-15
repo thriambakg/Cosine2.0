@@ -248,15 +248,15 @@ module "api_gateway" {
       lambda_arn              = module.user_dashboard_lambda.function_arn
       request_parameters      = {}
     }
-    # Dashboard Reorder OPTIONS method for CORS
-    dashboard_reorder_options = {
-      resource_key            = "reorder"
-      http_method             = "OPTIONS"
-      integration_type        = "AWS_PROXY"
-      integration_http_method = "POST"
-      lambda_arn              = module.user_dashboard_lambda.function_arn
-      request_parameters      = {}
-    }
+    # Dashboard Reorder OPTIONS method for CORS - method already exists in API Gateway
+    # dashboard_reorder_options = {
+    #   resource_key            = "reorder"
+    #   http_method             = "OPTIONS"
+    #   integration_type        = "AWS_PROXY"
+    #   integration_http_method = "POST"
+    #   lambda_arn              = module.user_dashboard_lambda.function_arn
+    #   request_parameters      = {}
+    # }
     # Dashboard Tiles methods
     tiles_post = {
       resource_key            = "tiles"
@@ -331,11 +331,7 @@ module "api_gateway" {
       http_method   = "PUT"
       resource_path = "reorder"
     }
-    dashboard_reorder_options = {
-      function_arn  = module.user_dashboard_lambda.function_arn
-      http_method   = "OPTIONS"
-      resource_path = "reorder"
-    }
+
     tiles_post = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "POST"
