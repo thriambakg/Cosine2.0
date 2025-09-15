@@ -671,9 +671,9 @@ const UnifiedDashboardPage: React.FC = () => {
       
       console.log('💾 Saving dashboard configuration to backend:', dashboardConfig);
       
-      // Save to backend via API
-      await dashboardAPI.updateDashboard(dashboardConfig as any);
-      console.log('✅ Dashboard configuration saved to backend successfully');
+      // DISABLED: Don't save to database to avoid overwriting manually created tabs
+      // await dashboardAPI.updateDashboard(dashboardConfig as any);
+      console.log('Dashboard configuration changes saved locally (database saving disabled to prevent overwriting)');
       
     } catch (error) {
       console.error('❌ Error saving dashboard to backend:', error);

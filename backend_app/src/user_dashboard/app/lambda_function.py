@@ -75,6 +75,8 @@ def lambda_handler(event, context):
         # Route to appropriate handler based on path and method
         if path.startswith('/tiles'):
             return handle_tiles_operations(user_id, http_method, path, event)
+        elif path.startswith('/dashboard/reorder'):
+            return handle_reorder_components(user_id, event)
         else:
             return handle_dashboard_operations(user_id, http_method, path, event)
             
@@ -251,6 +253,12 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
             }
             
             dashboard_config['tabs'].append(new_tab)
+            
+            # Add new tab to the end of tabOrder
+            if 'tabOrder' not in dashboard_config:
+                dashboard_config['tabOrder'] = []
+            dashboard_config['tabOrder'].append(new_tab['id'])
+            
             dashboard_config['last_updated'] = now
             
             save_user_dashboard(user_id, dashboard_config)
@@ -268,6 +276,12 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
             }
             
             dashboard_config['tabGroups'].append(new_group)
+            
+            # Add new group to the end of groupOrder
+            if 'groupOrder' not in dashboard_config:
+                dashboard_config['groupOrder'] = []
+            dashboard_config['groupOrder'].append(new_group['id'])
+            
             dashboard_config['last_updated'] = now
             
             save_user_dashboard(user_id, dashboard_config)
@@ -280,6 +294,56 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
     except Exception as e:
         logger.error(f"Error creating dashboard component: {str(e)}")
         return create_response(500, {"error": "Failed to create dashboard component"})
+
+def handle_reorder_components(user_id: str, event: Dict) -> Dict:
+    """Reorder tabs or groups"""
+    try:
+        body = json.loads(event.get('body', '{}'))
+        component_type = body.get('type')  # 'tab' or 'group'
+        new_order = body.get('order', [])  # Array of IDs in new order
+        
+        if not component_type or not new_order:
+            return create_response(400, {"error": "Component type and order array required"})
+        
+        if component_type not in ['tab', 'group']:
+            return create_response(400, {"error": "Component type must be 'tab' or 'group'"})
+        
+        # Get current dashboard
+        dashboard_config = get_user_dashboard(user_id)
+        if not dashboard_config:
+            return create_response(404, {"error": "User not found"})
+        
+        # Validate that all IDs in new_order exist
+        if component_type == 'tab':
+            existing_ids = {tab['id'] for tab in dashboard_config.get('tabs', [])}
+            order_key = 'tabOrder'
+        else:  # group
+            existing_ids = {group['id'] for group in dashboard_config.get('tabGroups', [])}
+            order_key = 'groupOrder'
+        
+        # Check if all IDs in new_order exist
+        if not all(tab_id in existing_ids for tab_id in new_order):
+            return create_response(400, {"error": f"Some {component_type} IDs in order array do not exist"})
+        
+        # Check if all existing IDs are in new_order
+        if set(new_order) != existing_ids:
+            return create_response(400, {"error": f"Order array must contain all existing {component_type} IDs"})
+        
+        # Update the order
+        dashboard_config[order_key] = new_order
+        dashboard_config['last_updated'] = datetime.utcnow().isoformat()
+        
+        # Save to database
+        save_user_dashboard(user_id, dashboard_config)
+        
+        return create_response(200, {
+            'message': f'{component_type.capitalize()} order updated successfully',
+            'order': new_order
+        })
+        
+    except Exception as e:
+        logger.error(f"Error reordering components: {str(e)}")
+        return create_response(500, {"error": "Failed to reorder components"})
 
 def handle_delete_dashboard_component(user_id: str, event: Dict) -> Dict:
     """Delete dashboard component (tab or group) with cascading deletes"""
@@ -310,6 +374,10 @@ def handle_delete_dashboard_component(user_id: str, event: Dict) -> Dict:
                 remaining_tabs = dashboard_config.get('tabs', [])
                 dashboard_config['activeTabId'] = remaining_tabs[0]['id'] if remaining_tabs else None
             
+            # Remove tab ID from tabOrder
+            if 'tabOrder' in dashboard_config:
+                dashboard_config['tabOrder'] = [tid for tid in dashboard_config['tabOrder'] if tid != component_id]
+            
             dashboard_config['last_updated'] = datetime.utcnow().isoformat()
             save_user_dashboard(user_id, dashboard_config)
             
@@ -321,6 +389,10 @@ def handle_delete_dashboard_component(user_id: str, event: Dict) -> Dict:
                 group for group in dashboard_config.get('tabGroups', []) 
                 if group['id'] != component_id
             ]
+            
+            # Remove group ID from groupOrder
+            if 'groupOrder' in dashboard_config:
+                dashboard_config['groupOrder'] = [gid for gid in dashboard_config['groupOrder'] if gid != component_id]
             
             dashboard_config['last_updated'] = datetime.utcnow().isoformat()
             save_user_dashboard(user_id, dashboard_config)
@@ -539,6 +611,30 @@ def cleanup_old_data_structure(config: Dict) -> Dict:
     if 'tabGroups' not in cleaned_config:
         cleaned_config['tabGroups'] = []
     
+    # Ensure order arrays exist and are properly initialized
+    if 'tabOrder' not in cleaned_config:
+        # Initialize tabOrder from existing tabs
+        cleaned_config['tabOrder'] = [tab['id'] for tab in cleaned_config.get('tabs', [])]
+        logger.info("Initialized tabOrder from existing tabs")
+    
+    if 'groupOrder' not in cleaned_config:
+        cleaned_config['groupOrder'] = []
+        logger.info("Initialized groupOrder as empty array")
+    
+    # Ensure tabOrder contains all tab IDs and no extras
+    existing_tab_ids = {tab['id'] for tab in cleaned_config.get('tabs', [])}
+    current_tab_order = cleaned_config.get('tabOrder', [])
+    
+    # Remove any tab IDs from tabOrder that don't exist in tabs
+    cleaned_tab_order = [tab_id for tab_id in current_tab_order if tab_id in existing_tab_ids]
+    
+    # Add any new tab IDs that aren't in tabOrder
+    for tab_id in existing_tab_ids:
+        if tab_id not in cleaned_tab_order:
+            cleaned_tab_order.append(tab_id)
+    
+    cleaned_config['tabOrder'] = cleaned_tab_order
+    
     return cleaned_config
 
 def get_user_dashboard(user_id: str) -> Optional[Dict]:
@@ -596,13 +692,15 @@ def create_default_dashboard_clean() -> Dict:
             }
         ],
         'tabGroups': [],
+        'tabOrder': [tab_id],  # Ordered array of tab IDs
+        'groupOrder': [],      # Ordered array of group IDs
         'activeTabId': tab_id,
         'last_updated': now
     }
 
 def validate_dashboard_structure(config: Dict) -> bool:
     """Validate dashboard configuration structure"""
-    required_fields = ['tabs', 'activeTabId']
+    required_fields = ['tabs', 'activeTabId', 'tabOrder', 'groupOrder']
     
     for field in required_fields:
         if field not in config:
@@ -611,6 +709,14 @@ def validate_dashboard_structure(config: Dict) -> bool:
     
     if not isinstance(config['tabs'], list):
         logger.error("tabs must be an array")
+        return False
+    
+    if not isinstance(config['tabOrder'], list):
+        logger.error("tabOrder must be an array")
+        return False
+    
+    if not isinstance(config['groupOrder'], list):
+        logger.error("groupOrder must be an array")
         return False
     
     # Validate tabs

@@ -124,9 +124,9 @@ export const useTabManagement = ({
         last_updated: new Date().toISOString()
       };
       
-      // Save to database via API
-      await dashboardAPI.updateDashboard(dashboardConfig as any);
-      console.log('Successfully saved tab state to database');
+      // DISABLED: Don't save to database to avoid overwriting manually created tabs
+      // await dashboardAPI.updateDashboard(dashboardConfig as any);
+      console.log('Tab state changes saved locally (database saving disabled to prevent overwriting)');
       
     } catch (error) {
       console.error('Error saving tab state to database:', error);

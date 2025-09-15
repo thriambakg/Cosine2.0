@@ -3,6 +3,7 @@
 
 import { API_CONFIG, logApiConfig } from '../config/api';
 import axios from 'axios';
+import { DashboardTab } from '../types/dashboardTypes';
 
 const API_BASE_URL = API_CONFIG.BASE_URL;
 
@@ -27,9 +28,12 @@ export const apiRequest = async <T>(
   console.log(`🌐 Making API request to: ${url}`);
   
   try {
+    // Merge custom headers with default headers
+    const headers = { ...getHeaders(), ...options.headers } as any;
+    
     console.log(`📡 Request config:`, {
       method: options.method || 'GET',
-      headers: getHeaders(),
+      headers: headers,
     });
 
     console.log('url', url);
@@ -37,11 +41,11 @@ export const apiRequest = async <T>(
     // Use appropriate axios method based on HTTP method
     let response;
     if (options.method === 'POST') {
-      response = await axios.post(url, options.body, { headers: getHeaders() });
+      response = await axios.post(url, options.body, { headers });
     } else if (options.method === 'DELETE') {
-      response = await axios.delete(url, { headers: getHeaders() });
+      response = await axios.delete(url, { headers });
     } else {
-      response = await axios.get(url, { headers: getHeaders() });
+      response = await axios.get(url, { headers });
     }
     
     console.log(`📥 Response status: ${response.status} ${response.statusText}`);
@@ -454,6 +458,37 @@ export const dashboardAPI = {
     return apiRequest<{ message: string }>('/dashboard', {
       method: 'PUT',
       body: JSON.stringify({ dashboard_config: dashboardConfig }),
+    });
+  },
+
+  createTab: async (tabData: { name: string; color?: string }): Promise<{ tab: DashboardTab; message: string }> => {
+    return apiRequest<{ tab: DashboardTab; message: string }>('/dashboard', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'tab',
+        name: tabData.name,
+        color: tabData.color || '#3b82f6'
+      }),
+    });
+  },
+
+  reorderTabs: async (tabIds: string[]): Promise<{ message: string; order: string[] }> => {
+    return apiRequest<{ message: string; order: string[] }>('/dashboard/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({
+        type: 'tab',
+        order: tabIds
+      }),
+    });
+  },
+
+  reorderGroups: async (groupIds: string[]): Promise<{ message: string; order: string[] }> => {
+    return apiRequest<{ message: string; order: string[] }>('/dashboard/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({
+        type: 'group',
+        order: groupIds
+      }),
     });
   },
 
