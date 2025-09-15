@@ -124,7 +124,7 @@ export const useTabManagement = ({
         last_updated: new Date().toISOString()
       };
       
-      await dashboardAPI.updateDashboard(dashboardConfig as any);
+      await dashboardAPI.updateDashboard(dashboardConfig as any, userId);
       console.log('Successfully saved tab state to database');
       
     } catch (error) {

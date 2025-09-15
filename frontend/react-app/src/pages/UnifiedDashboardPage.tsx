@@ -678,7 +678,7 @@ const UnifiedDashboardPage: React.FC = () => {
       
       console.log('💾 Saving dashboard configuration to backend:', dashboardConfig);
       
-      await dashboardAPI.updateDashboard(dashboardConfig as any);
+      await dashboardAPI.updateDashboard(dashboardConfig as any, user?.id || '');
       console.log('Successfully saved dashboard configuration to backend');
       
     } catch (error) {

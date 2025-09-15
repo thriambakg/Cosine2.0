@@ -457,8 +457,8 @@ export const dashboardAPI = {
     });
   },
 
-  updateDashboard: async (dashboardConfig: DashboardConfig): Promise<{ message: string }> => {
-    return apiRequest<{ message: string }>('/dashboard', {
+  updateDashboard: async (dashboardConfig: DashboardConfig, userId: string): Promise<{ message: string }> => {
+    return apiRequest<{ message: string }>(`/dashboard?userId=${userId}`, {
       method: 'PUT',
       body: JSON.stringify({ dashboard_config: dashboardConfig }),
     });
@@ -495,6 +495,9 @@ export const dashboardAPI = {
   reorderTabs: async (tabIds: string[], userId: string): Promise<{ message: string; order: string[] }> => {
     return apiRequest<{ message: string; order: string[] }>(`/reorder?userId=${userId}`, {
       method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({
         type: 'tab',
         order: tabIds
@@ -505,6 +508,9 @@ export const dashboardAPI = {
   reorderGroups: async (groupIds: string[], userId: string): Promise<{ message: string; order: string[] }> => {
     return apiRequest<{ message: string; order: string[] }>(`/reorder?userId=${userId}`, {
       method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({
         type: 'group',
         order: groupIds
