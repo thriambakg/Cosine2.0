@@ -212,12 +212,12 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
     if (draggedTab && draggedTab.id !== targetTabId) {
       const targetTab = tabs.find(tab => tab.id === targetTabId);
       if (targetTab) {
-        // Only allow reordering within the same category (both ungrouped or both in same group)
-        const draggedTabGroup = draggedTab.groupId;
-        const targetTabGroup = targetTab.groupId;
+        // Allow reordering between any tabs
+        const draggedTabIndex = tabs.findIndex(tab => tab.id === draggedTab.id);
+        const targetTabIndex = tabs.findIndex(tab => tab.id === targetTabId);
         
-        if (draggedTabGroup === targetTabGroup) {
-          onTabReorder(draggedTab.id, targetTab.position);
+        if (draggedTabIndex !== -1 && targetTabIndex !== -1) {
+          onTabReorder(draggedTab.id, targetTabIndex);
         }
       }
     }
@@ -664,9 +664,9 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
               <ListItemText>Add to Group</ListItemText>
             </MenuItem>
 
-            {contextMenu.tab!.groupId && (
+            {false && (
               <MenuItem onClick={() => {
-                onTabUngroup(contextMenu.tab!.id);
+                onTabUngroup(contextMenu?.tab?.id || '');
                 handleCloseContextMenu();
               }}>
                 <ListItemIcon>
@@ -739,7 +739,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
                 </ListItemIcon>
                 <ListItemText>
                   {group.name}
-                  {groupSubmenu.tab!.groupId === group.id && (
+                  {false && (
                     <Typography variant="caption" sx={{ color: '#9ca3af', ml: 1 }}>
                       (Current)
                     </Typography>

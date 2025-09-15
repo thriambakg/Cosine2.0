@@ -127,7 +127,7 @@ const tileTypes: TileTypeDefinition[] = [
 ];
 
 const UnifiedDashboardPage: React.FC = () => {
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user } = useAuth();
   const [configValid, setConfigValid] = useState<boolean>(false);
   const [configErrors, setConfigErrors] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);

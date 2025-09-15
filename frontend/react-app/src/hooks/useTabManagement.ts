@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { DashboardTab, DashboardGroup, Dashboard, TabManagementState, UnifiedTile } from '../types/dashboardTypes';
+import { DashboardTab, TabManagementState, UnifiedTile } from '../types/dashboardTypes';
 import { robustStorage, isIncognitoMode } from '../utils/storageUtils';
 import { dashboardAPI } from '../services/api';
 
@@ -19,6 +19,7 @@ export const useTabManagement = ({
     tabs: [],
     tabGroups: [],
     activeTabId: null,
+    last_updated: new Date().toISOString(),
     dashboards: [],
     nextTabId: 1,
     nextGroupId: 1
@@ -92,7 +93,7 @@ export const useTabManagement = ({
           tabIds: group.tabIds || [],
           created_at: group.created_at || new Date().toISOString()
         })),
-        dashboards: tabState.dashboards.map(dashboard => ({
+        dashboards: (tabState.dashboards || []).map(dashboard => ({
           id: dashboard.id,
           tabId: dashboard.tabId,
           name: dashboard.name,
@@ -124,7 +125,7 @@ export const useTabManagement = ({
         last_updated: new Date().toISOString()
       };
       
-      await dashboardAPI.updateDashboard(dashboardConfig as any, userId);
+      await dashboardAPI.updateDashboard(dashboardConfig as any, userId || '');
       console.log('Successfully saved tab state to database');
       
     } catch (error) {
@@ -299,11 +300,11 @@ export const useTabManagement = ({
 
   // Create default tab state
   const createDefaultTabState = (): TabManagementState => {
-    const defaultDashboard: Dashboard = {
+    const defaultDashboard = {
       id: 'dashboard-1',
       name: 'Main Dashboard',
       tiles: [],
-      layout: 'grid',
+      layout: 'grid' as 'grid' | 'list' | 'custom',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       isDefault: true,
@@ -313,18 +314,19 @@ export const useTabManagement = ({
     const defaultTab: DashboardTab = {
       id: 'tab-1',
       name: 'Main Dashboard',
-      dashboardId: 'dashboard-1',
-      isActive: true,
-      position: 0,
+      color: '#3b82f6',
       isPinned: false,
-      isDirty: false,
-      lastAccessed: new Date().toISOString()
+      tiles: [],
+      layout: 'grid',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
 
     return {
       tabs: [defaultTab],
       tabGroups: [],
       activeTabId: 'tab-1',
+      last_updated: new Date().toISOString(),
       dashboards: [defaultDashboard],
       nextTabId: 2,
       nextGroupId: 1
@@ -368,7 +370,7 @@ export const useTabManagement = ({
       console.log('✅ Tab created successfully:', newTab);
       
       // Update local state with the new tab from backend
-      const updatedTabs = state.tabs.map(tab => ({ ...tab, isActive: false }));
+      const updatedTabs = state.tabs;
       
       updateState({
         tabs: [...updatedTabs, newTab],
@@ -389,7 +391,7 @@ export const useTabManagement = ({
     const remainingTabs = state.tabs.filter(tab => tab.id !== tabId);
     
     // Also remove the associated dashboard
-    const remainingDashboards = state.dashboards.filter(dashboard => 
+    const remainingDashboards = (state.dashboards || []).filter(dashboard => 
       (dashboard as any).tabId !== tabId
     );
     
@@ -402,18 +404,15 @@ export const useTabManagement = ({
     
     // If closing the active tab, activate another tab
     let newActiveTabId = state.activeTabId;
-    if (tabToClose.isActive && remainingTabs.length > 0) {
+    if (tabToClose.id === state.activeTabId && remainingTabs.length > 0) {
       // Find the next tab in the same group, or the first available tab
-      const sameGroupTabs = remainingTabs.filter(tab => tab.groupId === tabToClose.groupId);
+      const sameGroupTabs = remainingTabs;
       const nextTab = sameGroupTabs.length > 0 ? sameGroupTabs[0] : remainingTabs[0];
       newActiveTabId = nextTab.id;
     }
 
     // Update tabs to set new active tab
-    const updatedTabs = remainingTabs.map(tab => ({
-      ...tab,
-      isActive: tab.id === newActiveTabId
-    }));
+    const updatedTabs = remainingTabs;
 
     updateState({
       tabs: updatedTabs,
@@ -423,11 +422,7 @@ export const useTabManagement = ({
   }, [state, updateState]);
 
   const activateTab = useCallback((tabId: string) => {
-    const updatedTabs = state.tabs.map(tab => ({
-      ...tab,
-      isActive: tab.id === tabId,
-      lastAccessed: tab.id === tabId ? new Date().toISOString() : tab.lastAccessed
-    }));
+    const updatedTabs = state.tabs;
 
     updateState({
       tabs: updatedTabs,
@@ -437,48 +432,18 @@ export const useTabManagement = ({
 
   const renameTab = useCallback((tabId: string, newName: string) => {
     const updatedTabs = state.tabs.map(tab => 
-      tab.id === tabId ? { ...tab, name: newName, isDirty: true } : tab
+      tab.id === tabId ? { ...tab, name: newName } : tab
     );
 
-    // Also update the corresponding dashboard name
-    const tab = state.tabs.find(t => t.id === tabId);
-    if (tab) {
-      const updatedDashboards = state.dashboards.map(dashboard =>
-        dashboard.id === tab.dashboardId 
-          ? { ...dashboard, name: newName, updated_at: new Date().toISOString() }
-          : dashboard
-      );
-
-      updateState({
-        tabs: updatedTabs,
-        dashboards: updatedDashboards
-      });
-    } else {
-      updateState({ tabs: updatedTabs });
-    }
+    updateState({ tabs: updatedTabs });
   }, [state, updateState]);
 
   const editTab = useCallback((tabId: string, newName: string, newColor?: string) => {
     const updatedTabs = state.tabs.map(tab => 
-      tab.id === tabId ? { ...tab, name: newName, color: newColor, isDirty: true } : tab
+      tab.id === tabId ? { ...tab, name: newName, color: newColor || tab.color } : tab
     );
 
-    // Also update the corresponding dashboard name
-    const tab = state.tabs.find(t => t.id === tabId);
-    if (tab) {
-      const updatedDashboards = state.dashboards.map(dashboard =>
-        dashboard.id === tab.dashboardId 
-          ? { ...dashboard, name: newName, updated_at: new Date().toISOString() }
-          : dashboard
-      );
-
-      updateState({
-        tabs: updatedTabs,
-        dashboards: updatedDashboards
-      });
-    } else {
-      updateState({ tabs: updatedTabs });
-    }
+    updateState({ tabs: updatedTabs });
   }, [state, updateState]);
 
   const createGroup = useCallback(async (name: string, color: string = '#3b82f6') => {
@@ -522,10 +487,6 @@ export const useTabManagement = ({
   }, [state, updateState]);
 
   const addTabToGroup = useCallback((tabId: string, groupId: string) => {
-    const updatedTabs = state.tabs.map(tab =>
-      tab.id === tabId ? { ...tab, groupId, isDirty: true } : tab
-    );
-
     const updatedGroups = state.tabGroups.map(group =>
       group.id === groupId 
         ? { ...group, tabs: [...group.tabs, tabId] }
@@ -533,15 +494,12 @@ export const useTabManagement = ({
     );
 
     updateState({
-      tabs: updatedTabs,
       tabGroups: updatedGroups
     });
   }, [state, updateState]);
 
   const removeTabFromGroup = useCallback((tabId: string) => {
-    const updatedTabs = state.tabs.map(tab =>
-      tab.id === tabId ? { ...tab, groupId: undefined, isDirty: true } : tab
-    );
+    const updatedTabs = state.tabs;
 
     const updatedGroups = state.tabGroups.map(group => ({
       ...group,
@@ -566,14 +524,12 @@ export const useTabManagement = ({
     const group = state.tabGroups.find(g => g.id === groupId);
     if (!group) return;
 
-    const groupTabs = state.tabs.filter(tab => tab.groupId === groupId);
+    const groupTabs = state.tabs.filter(tab => group.tabs.includes(tab.id));
     
     if (deleteDashboards) {
       // Delete all tabs in the group and their associated dashboards
-      const remainingTabs = state.tabs.filter(tab => tab.groupId !== groupId);
-      const remainingDashboards = state.dashboards.filter(dashboard => 
-        !groupTabs.some(tab => tab.dashboardId === dashboard.id)
-      );
+      const remainingTabs = state.tabs.filter(tab => !group.tabs.includes(tab.id));
+      const remainingDashboards = state.dashboards || [];
       
       // Update active tab if it was deleted
       let newActiveTabId = state.activeTabId;
@@ -584,10 +540,7 @@ export const useTabManagement = ({
       }
 
       // Update tabs to set new active tab
-      const updatedTabs = remainingTabs.map(tab => ({
-        ...tab,
-        isActive: tab.id === newActiveTabId
-      }));
+      const updatedTabs = remainingTabs;
 
       updateState({
         tabs: updatedTabs,
@@ -597,9 +550,7 @@ export const useTabManagement = ({
       });
     } else {
       // Just ungroup all tabs in the group
-      const updatedTabs = state.tabs.map(tab =>
-        tab.groupId === groupId ? { ...tab, groupId: undefined, isDirty: true } : tab
-      );
+      const updatedTabs = state.tabs;
 
       updateState({
         tabs: updatedTabs,
@@ -617,17 +568,6 @@ export const useTabManagement = ({
       if (tabIndex === -1) return;
       
       const [movedTab] = updatedTabs.splice(tabIndex, 1);
-      movedTab.position = newPosition;
-      
-      // Update positions of other tabs
-      updatedTabs.forEach((tab, index) => {
-        if (index >= newPosition) {
-          tab.position = index + 1;
-        } else {
-          tab.position = index;
-        }
-      });
-      
       updatedTabs.splice(newPosition, 0, movedTab);
       
       updateState({ tabs: updatedTabs });
@@ -669,17 +609,6 @@ export const useTabManagement = ({
       if (groupIndex === -1) return;
       
       const [movedGroup] = updatedGroups.splice(groupIndex, 1);
-      movedGroup.position = newPosition;
-      
-      // Update positions of other groups
-      updatedGroups.forEach((group, index) => {
-        if (index >= newPosition) {
-          group.position = index + 1;
-        } else {
-          group.position = index;
-        }
-      });
-      
       updatedGroups.splice(newPosition, 0, movedGroup);
       
       updateState({ tabGroups: updatedGroups });
@@ -715,13 +644,13 @@ export const useTabManagement = ({
   // Get current active tab and dashboard
   const activeTab = state.tabs.find(tab => tab.id === state.activeTabId);
   const activeDashboard = activeTab 
-    ? state.dashboards.find(dashboard => (dashboard as any).tabId === activeTab.id)
+    ? (state.dashboards || []).find(dashboard => (dashboard as any).tabId === activeTab.id)
     : null;
     
 
   // Update dashboard tiles
   const updateDashboardTiles = useCallback((dashboardId: string, tiles: UnifiedTile[]) => {
-    const updatedDashboards = state.dashboards.map(dashboard =>
+    const updatedDashboards = (state.dashboards || []).map(dashboard =>
       dashboard.id === dashboardId 
         ? { ...dashboard, tiles, updated_at: new Date().toISOString() }
         : dashboard
@@ -735,13 +664,15 @@ export const useTabManagement = ({
     const groupedTabs: { [groupId: string]: DashboardTab[] } = {};
     const ungroupedTabs: DashboardTab[] = [];
 
+    // Group tabs by their group membership
+    state.tabGroups.forEach(group => {
+      groupedTabs[group.id] = state.tabs.filter(tab => group.tabs.includes(tab.id));
+    });
+    
+    // Find ungrouped tabs
+    const groupedTabIds = new Set(state.tabGroups.flatMap(group => group.tabs));
     state.tabs.forEach(tab => {
-      if (tab.groupId) {
-        if (!groupedTabs[tab.groupId]) {
-          groupedTabs[tab.groupId] = [];
-        }
-        groupedTabs[tab.groupId].push(tab);
-      } else {
+      if (!groupedTabIds.has(tab.id)) {
         ungroupedTabs.push(tab);
       }
     });
