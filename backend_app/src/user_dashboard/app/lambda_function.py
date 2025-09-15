@@ -327,14 +327,20 @@ def handle_reorder_components(user_id: str, event: Dict) -> Dict:
     """Reorder tabs or groups"""
     try:
         body = json.loads(event.get('body', '{}'))
-        component_type = body.get('type')  # 'tab' or 'group'
+        component_type = body.get('type')  # 'reorder_tabs', 'reorder_groups', 'tab', or 'group'
         new_order = body.get('order', [])  # Array of IDs in new order
         
         if not component_type or not new_order:
             return create_response(400, {"error": "Component type and order array required"})
         
+        # Normalize component type
+        if component_type == 'reorder_tabs':
+            component_type = 'tab'
+        elif component_type == 'reorder_groups':
+            component_type = 'group'
+        
         if component_type not in ['tab', 'group']:
-            return create_response(400, {"error": "Component type must be 'tab' or 'group'"})
+            return create_response(400, {"error": "Component type must be 'reorder_tabs', 'reorder_groups', 'tab', or 'group'"})
         
         # Get current dashboard
         dashboard_config = get_user_dashboard(user_id)
