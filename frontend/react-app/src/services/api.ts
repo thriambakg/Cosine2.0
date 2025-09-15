@@ -493,26 +493,26 @@ export const dashboardAPI = {
   },
 
   reorderTabs: async (tabIds: string[], userId: string): Promise<{ message: string; order: string[] }> => {
-    return apiRequest<{ message: string; order: string[] }>(`/reorder?userId=${userId}`, {
+    return apiRequest<{ message: string; order: string[] }>(`/dashboard?userId=${userId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        type: 'tab',
+        type: 'reorder_tabs',
         order: tabIds
       }),
     });
   },
 
   reorderGroups: async (groupIds: string[], userId: string): Promise<{ message: string; order: string[] }> => {
-    return apiRequest<{ message: string; order: string[] }>(`/reorder?userId=${userId}`, {
+    return apiRequest<{ message: string; order: string[] }>(`/dashboard?userId=${userId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        type: 'group',
+        type: 'reorder_groups',
         order: groupIds
       }),
     });

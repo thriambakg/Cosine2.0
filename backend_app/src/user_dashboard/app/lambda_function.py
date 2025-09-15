@@ -194,6 +194,11 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
     """Update user's entire dashboard configuration"""
     try:
         body = json.loads(event.get('body', '{}'))
+        
+        # Check if this is a reorder request
+        if body.get('type') in ['reorder_tabs', 'reorder_groups']:
+            return handle_reorder_components(user_id, body)
+        
         dashboard_config = body.get('dashboard_config')
         
         if not dashboard_config:
@@ -228,6 +233,8 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
         body = json.loads(event.get('body', '{}'))
         component_type = body.get('type')  # 'tab' or 'group'
         
+        logger.info(f"Creating dashboard component: type={component_type}, user_id={user_id}")
+        
         if not component_type:
             return create_response(400, {"error": "Component type required (tab or group)"})
         
@@ -235,6 +242,8 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
         dashboard_config = get_user_dashboard(user_id)
         if not dashboard_config:
             return create_response(404, {"error": "User not found"})
+        
+        logger.info(f"Retrieved dashboard config: keys={list(dashboard_config.keys())}")
         
         now = datetime.utcnow().isoformat()
         
@@ -249,6 +258,11 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
                 'created_at': now,
                 'updated_at': now
             }
+            
+            # Ensure tabs array exists
+            if 'tabs' not in dashboard_config:
+                logger.warning("Missing 'tabs' key in dashboard config, initializing")
+                dashboard_config['tabs'] = []
             
             dashboard_config['tabs'].append(new_tab)
             
@@ -273,6 +287,11 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
                 'updated_at': now
             }
             
+            # Ensure tabGroups array exists
+            if 'tabGroups' not in dashboard_config:
+                logger.warning("Missing 'tabGroups' key in dashboard config, initializing")
+                dashboard_config['tabGroups'] = []
+            
             dashboard_config['tabGroups'].append(new_group)
             
             # Add new group to the end of groupOrder
@@ -291,6 +310,9 @@ def handle_create_dashboard_component(user_id: str, event: Dict) -> Dict:
             
     except Exception as e:
         logger.error(f"Error creating dashboard component: {str(e)}")
+        logger.error(f"Component type: {component_type}, User ID: {user_id}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return create_response(500, {"error": "Failed to create dashboard component"})
 
 def handle_reorder_components(user_id: str, event: Dict) -> Dict:
@@ -597,6 +619,11 @@ def cleanup_old_data_structure(config: Dict) -> Dict:
     if 'dashboards' in cleaned_config:
         logger.info("Removing old dashboards field from data structure")
         del cleaned_config['dashboards']
+    
+    # Ensure tabs key exists
+    if 'tabs' not in cleaned_config:
+        logger.warning("Missing 'tabs' key in dashboard config, initializing with empty array")
+        cleaned_config['tabs'] = []
     
     # Ensure all tabs have tiles array
     for tab in cleaned_config.get('tabs', []):
