@@ -562,8 +562,7 @@ const UnifiedDashboardPage: React.FC = () => {
       const allUpdatedTiles = [...otherDashboardTiles, ...updatedTiles];
       saveToLocalStorage(allUpdatedTiles);
       
-      // Trigger debounced save to database (only current dashboard tiles)
-      debouncedSaveToDatabase(updatedTiles);
+      // Note: Database save is handled by useTabManagement when updateTabDashboardTiles is called above
 
       // Set override tiles for immediate visual feedback
       setOverrideTiles(updatedTiles);
@@ -600,8 +599,7 @@ const UnifiedDashboardPage: React.FC = () => {
       // Update local state to trigger re-render
       setLocalTiles(allTiles);
       
-      // Trigger debounced save to database (only current dashboard tiles)
-      debouncedSaveToDatabase(tilesWithDashboardId);
+      // Note: Database save is handled by useTabManagement
 
       console.log('Successfully saved tiles to localStorage:', allTiles);
     }
