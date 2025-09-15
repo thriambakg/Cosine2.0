@@ -1,5 +1,18 @@
 // Dashboard and Tab Management Types
 
+// Simplified structure: Tab = Dashboard
+export interface DashboardTab {
+  id: string;
+  name: string;
+  color: string;
+  isPinned: boolean;
+  tiles: UnifiedTile[];
+  layout: 'grid' | 'list' | 'custom';
+  created_at: string;
+  updated_at: string;
+}
+
+// Legacy interface for backward compatibility (deprecated)
 export interface Dashboard {
   id: string;
   name: string;
@@ -10,20 +23,6 @@ export interface Dashboard {
   isDefault: boolean;
   isPinned?: boolean;
   tabId?: string; // Associated tab ID
-}
-
-export interface DashboardTab {
-  id: string;
-  name: string;
-  dashboardId: string;
-  isActive: boolean;
-  groupId?: string; // For tab grouping
-  position: number;
-  isPinned: boolean;
-  isDirty?: boolean; // Has unsaved changes
-  lastAccessed?: string;
-  color?: string; // Tab color for visual distinction
-  created_at?: string; // Creation timestamp
 }
 
 export interface DashboardGroup {
@@ -82,10 +81,12 @@ export interface TabManagementState {
   tabs: DashboardTab[];
   tabGroups: DashboardGroup[];
   activeTabId: string | null;
-  dashboards: Dashboard[];
-  nextTabId: number;
-  nextGroupId: number;
-  created_at?: string; // Creation timestamp
+  last_updated: string;
+  // Legacy fields for backward compatibility (deprecated)
+  dashboards?: Dashboard[];
+  nextTabId?: number;
+  nextGroupId?: number;
+  created_at?: string;
 }
 
 export interface TabContextMenuAction {

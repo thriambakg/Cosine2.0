@@ -168,22 +168,21 @@ export const useTabManagement = ({
           console.log('🔍 RAW DATABASE RESPONSE DEBUG END');
           
           // Convert DashboardConfig to TabManagementState
-          // Handle both old format (crypto_tiles) and new format (tabs/dashboards)
+          // Use new simplified structure: Tab = Dashboard
           let dbState: TabManagementState;
           
-          if ('tabs' in dbConfig && 'dashboards' in dbConfig) {
-            // New format with tabs and dashboards
+          if ('tabs' in dbConfig) {
+            // New simplified format: tabs contain tiles directly
             dbState = {
               tabs: (dbConfig.tabs as any[]).map((tab: any) => ({
                 id: tab.id,
                 name: tab.name,
-                dashboardId: tab.dashboardId || '',
-                isActive: tab.isActive || false,
-                groupId: tab.groupId,
-                position: tab.position || 0,
                 color: tab.color,
-                isPinned: tab.isPinned,
-                created_at: tab.created_at
+                isPinned: tab.isPinned || false,
+                tiles: tab.tiles || [],
+                layout: tab.layout || 'grid',
+                created_at: tab.created_at,
+                updated_at: tab.updated_at
               })),
               tabGroups: (dbConfig.tabGroups as any[]).map((group: any) => ({
                 id: group.id,
@@ -195,93 +194,36 @@ export const useTabManagement = ({
                 position: group.position || 0,
                 created_at: group.created_at
               })),
-              dashboards: (dbConfig.dashboards as any[]).map((dashboard: any) => ({
-                id: dashboard.id,
-                tabId: dashboard.tabId,
-                name: dashboard.name,
-                tiles: (dashboard.tiles as any[]).map((tile: any) => ({
-                  id: tile.id,
-                  type: tile.type,
-                  title: tile.title || tile.symbol || 'Untitled',
-                  symbol: tile.symbol,
-                  timeframe: tile.timeframe,
-                  name: tile.name,
-                  content: tile.content,
-                  prompt: tile.prompt,
-                  displayOptions: tile.displayOptions || {},
-                  autoRefresh: tile.autoRefresh || false,
-                  isPinned: tile.isPinned || false,
-                  size: tile.size || { width: 350, height: 400 },
-                  position: tile.position,
-                  gridPosition: tile.gridPosition,
-                  gridSize: tile.gridSize,
-                  dashboard_id: tile.dashboard_id || dashboard.id,
-                  created_at: tile.created_at || new Date().toISOString()
-                })),
-                layout: dashboard.layout as 'grid' | 'list' | 'custom',
-                created_at: dashboard.created_at || new Date().toISOString(),
-                updated_at: dashboard.updated_at || new Date().toISOString(),
-                isDefault: dashboard.isDefault || false,
-                isPinned: dashboard.isPinned
-              })),
-              activeTabId: (dbConfig as any).activeTabId || null,
-              nextTabId: (dbConfig as any).nextTabId || 1,
-              nextGroupId: (dbConfig as any).nextGroupId || 1,
-              created_at: (dbConfig as any).created_at || new Date().toISOString()
+              dashboards: [], // No separate dashboards in new structure
+              activeTabId: dbConfig.activeTabId || null,
+              last_updated: dbConfig.last_updated || new Date().toISOString()
             };
           } else {
-            // Old format with just crypto_tiles - convert to new format
+            // Fallback: create default structure if no tabs found
             const now = new Date().toISOString();
             dbState = {
               tabs: [{
-                id: 'tab_1',
+                id: 'default-tab-1',
                 name: 'My Dashboard',
-                dashboardId: 'dashboard_1',
-                isActive: true,
-                groupId: undefined,
-                position: 0,
                 color: '#3b82f6',
                 isPinned: false,
-                created_at: now
+                tiles: [],
+                layout: 'grid',
+                created_at: now,
+                updated_at: now
               }],
               tabGroups: [],
-              dashboards: [{
-                id: 'dashboard_1',
-                tabId: 'tab_1',
-                name: 'My Dashboard',
-                tiles: (dbConfig as any).crypto_tiles.map((tile: any) => ({
-                  id: tile.id,
-                  type: 'crypto',
-                  title: tile.symbol || 'Crypto Tile', // Add required title
-                  symbol: tile.symbol,
-                  timeframe: tile.timeframe,
-                  displayOptions: tile.displayOptions || {},
-                  autoRefresh: tile.autoRefresh || false,
-                  isPinned: tile.isPinned || false,
-                  size: tile.size || { width: 350, height: 400 },
-                  position: tile.position || { x: 0, y: 0 },
-                  gridPosition: tile.gridPosition || { x: 0, y: 0 },
-                  gridSize: tile.gridSize || { width: 4, height: 4 },
-                  dashboard_id: 'dashboard_1', // Add dashboard_id for this dashboard
-                  created_at: tile.created_at || new Date().toISOString()
-                })),
-                layout: ((dbConfig as any).layout || 'grid') as 'grid' | 'list' | 'custom',
-                created_at: now,
-                updated_at: now,
-                isDefault: true
-              }],
-              activeTabId: 'tab_1',
-              nextTabId: 2,
-              nextGroupId: 1
+              dashboards: [], // No separate dashboards in new structure
+              activeTabId: 'default-tab-1',
+              last_updated: now
             };
           }
           
-          // Debug: Log which dashboard is being selected
-          console.log('🔍 DASHBOARD SELECTION DEBUG START');
+          // Debug: Log which tab is being selected
+          console.log('🔍 TAB SELECTION DEBUG START');
           console.log('Active tab ID from DB:', dbConfig.activeTabId);
-          console.log('Total dashboards loaded:', dbState.dashboards.length);
           console.log('Total tabs loaded:', dbState.tabs.length);
-          console.log('🔍 DASHBOARD SELECTION DEBUG END');
+          console.log('🔍 TAB SELECTION DEBUG END');
           
           // Update state with database data
           setState(dbState);
@@ -290,9 +232,9 @@ export const useTabManagement = ({
           
           // Debug: Log tile positions and sizes
           console.log('🔍 TILE POSITIONS DEBUG START');
-          dbState.dashboards.forEach(dashboard => {
-            console.log(`Dashboard ${dashboard.id} tiles:`, dashboard.tiles.length);
-            dashboard.tiles.forEach(tile => {
+          dbState.tabs.forEach(tab => {
+            console.log(`Tab ${tab.id} tiles:`, tab.tiles.length);
+            tab.tiles.forEach(tile => {
               console.log(`Tile ${tile.id}:`, {
                 gridPosition: tile.gridPosition,
                 gridSize: tile.gridSize,
