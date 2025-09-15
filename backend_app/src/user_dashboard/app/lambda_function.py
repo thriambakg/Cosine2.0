@@ -67,10 +67,8 @@ def lambda_handler(event, context):
         # Extract user ID from path or headers
         user_id = extract_user_id(event)
         if not user_id:
-            # For now, use a default user ID for testing
-            # TODO: Implement proper authentication
-            user_id = "current-user"
-            logger.warning(f"No user ID provided, using default: {user_id}")
+            logger.error("No user ID provided in request")
+            return create_response(400, {'error': 'User ID is required'})
         
         # Route to appropriate handler based on path and method
         if path.startswith('/tiles'):

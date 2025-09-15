@@ -4,7 +4,7 @@ import { robustStorage, isIncognitoMode } from '../utils/storageUtils';
 import { dashboardAPI } from '../services/api';
 
 interface UseTabManagementOptions {
-  userId: string;
+  userId?: string;
   localStorageKey?: string;
   debounceMs?: number;
 }
@@ -124,9 +124,8 @@ export const useTabManagement = ({
         last_updated: new Date().toISOString()
       };
       
-      // DISABLED: Don't save to database to avoid overwriting manually created tabs
-      // await dashboardAPI.updateDashboard(dashboardConfig as any);
-      console.log('Tab state changes saved locally (database saving disabled to prevent overwriting)');
+      await dashboardAPI.updateDashboard(dashboardConfig as any);
+      console.log('Successfully saved tab state to database');
       
     } catch (error) {
       console.error('Error saving tab state to database:', error);
@@ -157,9 +156,10 @@ export const useTabManagement = ({
           console.log('Loaded tab state from robust storage');
         }
 
-        // Try to load from database for latest changes
-        try {
-          const dbResponse = await dashboardAPI.getDashboard(userId);
+        // Try to load from database for latest changes (only if userId is available)
+        if (userId) {
+          try {
+            const dbResponse = await dashboardAPI.getDashboard(userId);
           const dbConfig = dbResponse.dashboard_config;
           
           // Debug: Log raw database response
@@ -196,7 +196,9 @@ export const useTabManagement = ({
               })),
               dashboards: [], // No separate dashboards in new structure
               activeTabId: dbConfig.activeTabId || null,
-              last_updated: dbConfig.last_updated || new Date().toISOString()
+              last_updated: dbConfig.last_updated || new Date().toISOString(),
+              nextTabId: 1, // Not used with UUID-based IDs from backend
+              nextGroupId: 1 // Not used with UUID-based IDs from backend
             };
           } else {
             // Fallback: create default structure if no tabs found
@@ -215,7 +217,9 @@ export const useTabManagement = ({
               tabGroups: [],
               dashboards: [], // No separate dashboards in new structure
               activeTabId: 'default-tab-1',
-              last_updated: now
+              last_updated: now,
+              nextTabId: 2,
+              nextGroupId: 1
             };
           }
           
@@ -261,6 +265,9 @@ export const useTabManagement = ({
             saveToStorage(defaultState);
             console.log('Created default tab state due to database error');
           }
+        }
+        } else {
+          console.log('No userId provided, skipping database load');
         }
       } catch (error) {
         console.error('Error loading tab state:', error);
@@ -335,7 +342,7 @@ export const useTabManagement = ({
   }, [saveToStorage, debouncedSaveToDatabase]);
 
   // Tab management functions
-  const createTab = useCallback((options: {
+  const createTab = useCallback(async (options: {
     name: string;
     dashboardId?: string;
     groupId?: string;
@@ -343,52 +350,37 @@ export const useTabManagement = ({
     isPinned?: boolean;
     color?: string;
   }) => {
-    const newDashboard: Dashboard = {
-      id: `dashboard-${state.nextTabId}`,
-      name: options.name,
-      tiles: [],
-      layout: 'grid',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      isDefault: false,
-      isPinned: options.isPinned || false,
-      tabId: `tab-${state.nextTabId}` // Add tabId to establish the relationship
-    } as any; // Type assertion to handle missing tabId in type definition
-
-    const newTab: DashboardTab = {
-      id: `tab-${state.nextTabId}`,
-      name: options.name,
-      dashboardId: newDashboard.id,
-      isActive: true,
-      groupId: options.groupId,
-      position: options.position || state.tabs.length,
-      isPinned: options.isPinned || false,
-      isDirty: false,
-      lastAccessed: new Date().toISOString(),
-      color: options.color,
-      created_at: new Date().toISOString()
-    };
-
-    console.log('🆕 Creating new tab:', { 
-      newTab, 
-      newDashboard, 
-      nextTabId: state.nextTabId,
-      existingTabs: state.tabs.map(t => ({ id: t.id, name: t.name })),
-      existingDashboards: state.dashboards.map(d => ({ id: d.id, name: d.name }))
-    });
-
-    // Deactivate current active tab
-    const updatedTabs = state.tabs.map(tab => ({ ...tab, isActive: false }));
+    if (!userId) {
+      console.warn('⚠️ User not authenticated - skipping tab creation');
+      return Promise.reject(new Error('User not authenticated - cannot create tab'));
+    }
     
-    updateState({
-      tabs: [...updatedTabs, newTab],
-      dashboards: [...state.dashboards, newDashboard],
-      activeTabId: newTab.id,
-      nextTabId: state.nextTabId + 1
-    });
+    try {
+      console.log('🆕 Creating new tab via API:', options);
+      
+      // Make API call to create tab - backend will generate UUID
+      const response = await dashboardAPI.createTab({
+        name: options.name,
+        color: options.color
+      }, userId);
+      
+      const newTab = response.tab;
+      console.log('✅ Tab created successfully:', newTab);
+      
+      // Update local state with the new tab from backend
+      const updatedTabs = state.tabs.map(tab => ({ ...tab, isActive: false }));
+      
+      updateState({
+        tabs: [...updatedTabs, newTab],
+        activeTabId: newTab.id
+      });
 
-    return newTab;
-  }, [state, updateState]);
+      return newTab;
+    } catch (error) {
+      console.error('❌ Failed to create tab:', error);
+      throw error;
+    }
+  }, [state, updateState, userId]);
 
   const closeTab = useCallback((tabId: string) => {
     const tabToClose = state.tabs.find(tab => tab.id === tabId);
@@ -489,23 +481,35 @@ export const useTabManagement = ({
     }
   }, [state, updateState]);
 
-  const createGroup = useCallback((name: string, color: string = '#3b82f6') => {
-    const newGroup: DashboardGroup = {
-      id: `group-${state.nextGroupId}`,
-      name,
-      color,
-      tabs: [],
-      collapsed: false,
-      position: state.tabGroups.length
-    };
+  const createGroup = useCallback(async (name: string, color: string = '#3b82f6') => {
+    if (!userId) {
+      console.warn('⚠️ User not authenticated - skipping group creation');
+      return Promise.reject(new Error('User not authenticated - cannot create group'));
+    }
+    
+    try {
+      console.log('🆕 Creating new group via API:', { name, color });
+      
+      // Make API call to create group - backend will generate UUID
+      const response = await dashboardAPI.createGroup({
+        name,
+        color
+      }, userId);
+      
+      const newGroup = response.group;
+      console.log('✅ Group created successfully:', newGroup);
+      
+      // Update local state with the new group from backend
+      updateState({
+        tabGroups: [...state.tabGroups, newGroup]
+      });
 
-    updateState({
-      tabGroups: [...state.tabGroups, newGroup],
-      nextGroupId: state.nextGroupId + 1
-    });
-
-    return newGroup;
-  }, [state, updateState]);
+      return newGroup;
+    } catch (error) {
+      console.error('❌ Failed to create group:', error);
+      throw error;
+    }
+  }, [state, updateState, userId]);
 
   const editGroup = useCallback((groupId: string, newName: string, newColor: string) => {
     const updatedGroups = state.tabGroups.map(group => 
@@ -604,51 +608,109 @@ export const useTabManagement = ({
     }
   }, [state, updateState]);
 
-  const reorderTab = useCallback((tabId: string, newPosition: number) => {
-    const updatedTabs = [...state.tabs];
-    const tabIndex = updatedTabs.findIndex(tab => tab.id === tabId);
-    
-    if (tabIndex === -1) return;
-    
-    const [movedTab] = updatedTabs.splice(tabIndex, 1);
-    movedTab.position = newPosition;
-    
-    // Update positions of other tabs
-    updatedTabs.forEach((tab, index) => {
-      if (index >= newPosition) {
-        tab.position = index + 1;
-      } else {
-        tab.position = index;
+  const reorderTab = useCallback(async (tabId: string, newPosition: number) => {
+    try {
+      // First update local state for immediate UI feedback
+      const updatedTabs = [...state.tabs];
+      const tabIndex = updatedTabs.findIndex(tab => tab.id === tabId);
+      
+      if (tabIndex === -1) return;
+      
+      const [movedTab] = updatedTabs.splice(tabIndex, 1);
+      movedTab.position = newPosition;
+      
+      // Update positions of other tabs
+      updatedTabs.forEach((tab, index) => {
+        if (index >= newPosition) {
+          tab.position = index + 1;
+        } else {
+          tab.position = index;
+        }
+      });
+      
+      updatedTabs.splice(newPosition, 0, movedTab);
+      
+      updateState({ tabs: updatedTabs });
+      
+      // Get the new order after reordering
+      const newTabOrder = [...updatedTabs];
+      const draggedTabIndex = newTabOrder.findIndex(tab => tab.id === tabId);
+      if (draggedTabIndex !== -1) {
+        // Remove the dragged tab from its current position
+        const draggedTab = newTabOrder.splice(draggedTabIndex, 1)[0];
+        // Insert it at the new position
+        newTabOrder.splice(newPosition, 0, draggedTab);
       }
-    });
-    
-    updatedTabs.splice(newPosition, 0, movedTab);
-    
-    updateState({ tabs: updatedTabs });
-  }, [state, updateState]);
+      
+      // Extract the new order of tab IDs
+      const tabIds = newTabOrder.map(tab => tab.id);
+      console.log('🔄 Reordering tabs in backend:', tabIds);
+      
+      if (userId) {
+        dashboardAPI.reorderTabs(tabIds, userId)
+          .then(() => console.log('✅ Tab order updated in backend'))
+          .catch(error => console.error('❌ Failed to reorder tabs in backend:', error));
+      } else {
+        console.warn('⚠️ User not authenticated - skipping tab reorder in backend');
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to reorder tabs in frontend:', error);
+      alert('Failed to reorder tabs. Please try again.');
+    }
+  }, [state, updateState, userId]);
 
-  const reorderGroup = useCallback((groupId: string, newPosition: number) => {
-    const updatedGroups = [...state.tabGroups];
-    const groupIndex = updatedGroups.findIndex(group => group.id === groupId);
-    
-    if (groupIndex === -1) return;
-    
-    const [movedGroup] = updatedGroups.splice(groupIndex, 1);
-    movedGroup.position = newPosition;
-    
-    // Update positions of other groups
-    updatedGroups.forEach((group, index) => {
-      if (index >= newPosition) {
-        group.position = index + 1;
-      } else {
-        group.position = index;
+  const reorderGroup = useCallback(async (groupId: string, newPosition: number) => {
+    try {
+      // First update local state for immediate UI feedback
+      const updatedGroups = [...state.tabGroups];
+      const groupIndex = updatedGroups.findIndex(group => group.id === groupId);
+      
+      if (groupIndex === -1) return;
+      
+      const [movedGroup] = updatedGroups.splice(groupIndex, 1);
+      movedGroup.position = newPosition;
+      
+      // Update positions of other groups
+      updatedGroups.forEach((group, index) => {
+        if (index >= newPosition) {
+          group.position = index + 1;
+        } else {
+          group.position = index;
+        }
+      });
+      
+      updatedGroups.splice(newPosition, 0, movedGroup);
+      
+      updateState({ tabGroups: updatedGroups });
+      
+      // Get the new order after reordering
+      const newGroupOrder = [...updatedGroups];
+      const draggedGroupIndex = newGroupOrder.findIndex(group => group.id === groupId);
+      if (draggedGroupIndex !== -1) {
+        // Remove the dragged group from its current position
+        const draggedGroup = newGroupOrder.splice(draggedGroupIndex, 1)[0];
+        // Insert it at the new position
+        newGroupOrder.splice(newPosition, 0, draggedGroup);
       }
-    });
-    
-    updatedGroups.splice(newPosition, 0, movedGroup);
-    
-    updateState({ tabGroups: updatedGroups });
-  }, [state, updateState]);
+      
+      // Extract the new order of group IDs
+      const groupIds = newGroupOrder.map(group => group.id);
+      console.log('🔄 Reordering groups in backend:', groupIds);
+      
+      if (userId) {
+        dashboardAPI.reorderGroups(groupIds, userId)
+          .then(() => console.log('✅ Group order updated in backend'))
+          .catch(error => console.error('❌ Failed to reorder groups in backend:', error));
+      } else {
+        console.warn('⚠️ User not authenticated - skipping group reorder in backend');
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to reorder groups in frontend:', error);
+      alert('Failed to reorder groups. Please try again.');
+    }
+  }, [state, updateState, userId]);
 
   // Get current active tab and dashboard
   const activeTab = state.tabs.find(tab => tab.id === state.activeTabId);

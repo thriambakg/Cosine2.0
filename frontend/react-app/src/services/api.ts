@@ -3,7 +3,7 @@
 
 import { API_CONFIG, logApiConfig } from '../config/api';
 import axios from 'axios';
-import { DashboardTab } from '../types/dashboardTypes';
+import { DashboardTab, DashboardGroup } from '../types/dashboardTypes';
 
 const API_BASE_URL = API_CONFIG.BASE_URL;
 
@@ -14,14 +14,15 @@ console.log('🚀 API Service initialized with:', {
 });
 
 // Common headers for all API requests
-const getHeaders = () => ({
-  'Content-Type': 'application/json'
+const getHeaders = (userId?: string) => ({
+  'Content-Type': 'application/json',
+  ...(userId && { 'X-User-ID': userId })
 });
 
 // Generic API request function
 export const apiRequest = async <T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit & { userId?: string } = {}
 ): Promise<T> => {
   const url = `${API_BASE_URL}${endpoint}`;
   
@@ -29,7 +30,7 @@ export const apiRequest = async <T>(
   
   try {
     // Merge custom headers with default headers
-    const headers = { ...getHeaders(), ...options.headers } as any;
+    const headers = { ...getHeaders(options.userId), ...options.headers } as any;
     
     console.log(`📡 Request config:`, {
       method: options.method || 'GET',
@@ -42,6 +43,8 @@ export const apiRequest = async <T>(
     let response;
     if (options.method === 'POST') {
       response = await axios.post(url, options.body, { headers });
+    } else if (options.method === 'PUT') {
+      response = await axios.put(url, options.body, { headers });
     } else if (options.method === 'DELETE') {
       response = await axios.delete(url, { headers });
     } else {
@@ -448,7 +451,7 @@ export interface TilePositionUpdate {
 }
 
 export const dashboardAPI = {
-  getDashboard: async (userId: string = 'current-user'): Promise<{ dashboard_config: DashboardConfig }> => {
+  getDashboard: async (userId: string): Promise<{ dashboard_config: DashboardConfig }> => {
     return apiRequest<{ dashboard_config: DashboardConfig }>(`/dashboard?userId=${userId}`, {
       method: 'GET',
     });
@@ -461,19 +464,36 @@ export const dashboardAPI = {
     });
   },
 
-  createTab: async (tabData: { name: string; color?: string }): Promise<{ tab: DashboardTab; message: string }> => {
-    return apiRequest<{ tab: DashboardTab; message: string }>('/dashboard', {
+  createTab: async (tabData: { name: string; color?: string }, userId: string): Promise<{ tab: DashboardTab; message: string }> => {
+    const body: any = {
+      type: 'tab',
+      name: tabData.name
+    };
+    
+    // Only include color if it's provided
+    if (tabData.color) {
+      body.color = tabData.color;
+    }
+    
+    return apiRequest<{ tab: DashboardTab; message: string }>(`/dashboard?userId=${userId}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  createGroup: async (groupData: { name: string; color?: string }, userId: string): Promise<{ group: DashboardGroup; message: string }> => {
+    return apiRequest<{ group: DashboardGroup; message: string }>(`/dashboard?userId=${userId}`, {
       method: 'POST',
       body: JSON.stringify({
-        type: 'tab',
-        name: tabData.name,
-        color: tabData.color || '#3b82f6'
+        type: 'group',
+        name: groupData.name,
+        color: groupData.color || '#3b82f6'
       }),
     });
   },
 
-  reorderTabs: async (tabIds: string[]): Promise<{ message: string; order: string[] }> => {
-    return apiRequest<{ message: string; order: string[] }>('/reorder', {
+  reorderTabs: async (tabIds: string[], userId: string): Promise<{ message: string; order: string[] }> => {
+    return apiRequest<{ message: string; order: string[] }>(`/reorder?userId=${userId}`, {
       method: 'PUT',
       body: JSON.stringify({
         type: 'tab',
@@ -482,8 +502,8 @@ export const dashboardAPI = {
     });
   },
 
-  reorderGroups: async (groupIds: string[]): Promise<{ message: string; order: string[] }> => {
-    return apiRequest<{ message: string; order: string[] }>('/reorder', {
+  reorderGroups: async (groupIds: string[], userId: string): Promise<{ message: string; order: string[] }> => {
+    return apiRequest<{ message: string; order: string[] }>(`/reorder?userId=${userId}`, {
       method: 'PUT',
       body: JSON.stringify({
         type: 'group',

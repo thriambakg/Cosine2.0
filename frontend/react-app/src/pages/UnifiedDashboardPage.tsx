@@ -127,12 +127,16 @@ const tileTypes: TileTypeDefinition[] = [
 ];
 
 const UnifiedDashboardPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const [configValid, setConfigValid] = useState<boolean>(false);
   const [configErrors, setConfigErrors] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Tab management
+  // Tab management - only initialize when user is authenticated
+  const tabManagement = useTabManagement({ 
+    userId: user?.id || undefined 
+  });
+  
   const {
     tabs,
     tabGroups,
@@ -151,12 +155,15 @@ const UnifiedDashboardPage: React.FC = () => {
     reorderGroup,
     updateDashboardTiles: updateTabDashboardTiles,
     getTabsByGroup
-  } = useTabManagement({ userId: user?.id || 'current-user' });
+  } = tabManagement;
 
   // Handle hot reload scenario where user might be temporarily undefined
   useEffect(() => {
     if (!user && typeof window !== 'undefined') {
       console.warn('🚨 No user found during dashboard load - this might be due to hot reload');
+      // Refresh the page to properly reinitialize authentication
+      console.log('🔄 Refreshing page to reinitialize authentication...');
+      window.location.reload();
     }
   }, [user]);
 
@@ -671,9 +678,8 @@ const UnifiedDashboardPage: React.FC = () => {
       
       console.log('💾 Saving dashboard configuration to backend:', dashboardConfig);
       
-      // DISABLED: Don't save to database to avoid overwriting manually created tabs
-      // await dashboardAPI.updateDashboard(dashboardConfig as any);
-      console.log('Dashboard configuration changes saved locally (database saving disabled to prevent overwriting)');
+      await dashboardAPI.updateDashboard(dashboardConfig as any);
+      console.log('Successfully saved dashboard configuration to backend');
       
     } catch (error) {
       console.error('❌ Error saving dashboard to backend:', error);
