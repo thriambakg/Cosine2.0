@@ -625,7 +625,11 @@ export const useTabManagement = ({
       
       // Extract the new order of group IDs
       const groupIds = newGroupOrder.map(group => group.id);
-      console.log('🔄 Reordering groups in backend:', groupIds);
+      console.log('🔄 Reordering groups in backend:', {
+        groupIds,
+        newGroupOrder: newGroupOrder.map(g => ({ id: g.id, name: g.name })),
+        userId
+      });
       
       if (userId) {
         dashboardAPI.reorderGroups(groupIds, userId)

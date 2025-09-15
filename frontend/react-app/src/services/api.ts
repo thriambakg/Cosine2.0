@@ -508,16 +508,36 @@ export const dashboardAPI = {
   },
 
   reorderGroups: async (groupIds: string[], userId: string): Promise<{ message: string; order: string[] }> => {
+    const requestBody = {
+      type: 'reorder_groups',
+      order: groupIds
+    };
+    
+    console.log('🔄 Reordering groups API call:', {
+      userId,
+      groupIds,
+      requestBody,
+      url: `/dashboard?userId=${userId}`
+    });
+    
     return apiRequest<{ message: string; order: string[] }>(`/dashboard?userId=${userId}`, {
       method: 'PUT',
       headers: {
-        
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        type: 'reorder_groups',
-        order: groupIds
-      }),
+      body: JSON.stringify(requestBody),
+    }).catch(error => {
+      console.error('🚨 reorderGroups API Error Details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        request: {
+          url: error.config?.url,
+          method: error.config?.method,
+          data: error.config?.data
+        }
+      });
+      throw error;
     });
   },
 

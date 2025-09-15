@@ -359,9 +359,8 @@ def handle_reorder_components(user_id: str, event: Dict) -> Dict:
         if not all(tab_id in existing_ids for tab_id in new_order):
             return create_response(400, {"error": f"Some {component_type} IDs in order array do not exist"})
         
-        # Check if all existing IDs are in new_order
-        if set(new_order) != existing_ids:
-            return create_response(400, {"error": f"Order array must contain all existing {component_type} IDs"})
+        # Allow partial reordering - check if all IDs in new_order are valid
+        # (Don't require all existing IDs to be in new_order)
         
         # Update the order
         dashboard_config[order_key] = new_order

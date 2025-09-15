@@ -21,7 +21,8 @@ import {
   PushPin as PinIcon,
   PushPinOutlined as UnpinIcon,
   Folder as FolderIcon,
-  FolderOpen as FolderOpenIcon
+  FolderOpen as FolderOpenIcon,
+  DragIndicator as DragIcon
 } from '@mui/icons-material';
 import { DashboardTab, DashboardGroup } from '../types/dashboardTypes';
 import EditTabDialog from './EditTabDialog';
@@ -230,9 +231,11 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
     event.preventDefault();
     
     if (draggedGroup && draggedGroup.id !== targetGroupId) {
-      const targetGroup = tabGroups.find(group => group.id === targetGroupId);
-      if (targetGroup) {
-        onGroupReorder(draggedGroup.id, targetGroup.position);
+      // Find the target position (index) for the dragged group
+      const targetGroupIndex = tabGroups.findIndex(group => group.id === targetGroupId);
+      
+      if (targetGroupIndex !== -1) {
+        onGroupReorder(draggedGroup.id, targetGroupIndex);
       }
     }
     
@@ -433,7 +436,10 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
             onChange={(e) => handleGroupTabSelect(e.target.value)}
             displayEmpty
             draggable
-            onDragStart={(e) => handleGroupDragStart(e, group)}
+            onDragStart={(e) => {
+              e.stopPropagation();
+              handleGroupDragStart(e, group);
+            }}
             onDragOver={(e) => handleGroupDragOver(e, group.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleGroupDrop(e, group.id)}
@@ -458,15 +464,44 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 py: 0.5,
-                px: 1
+                px: 1,
+                cursor: 'grab',
+                '&:active': {
+                  cursor: 'grabbing'
+                }
               },
               '& .MuiOutlinedInput-notchedOutline': {
                 border: 'none'
               },
               '& .MuiSvgIcon-root': {
-                color: group.color
+                color: group.color,
+                cursor: 'grab',
+                '&:active': {
+                  cursor: 'grabbing'
+                }
               }
             }}
+            IconComponent={() => (
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <DragIcon 
+                  sx={{ 
+                    color: group.color, 
+                    fontSize: 16, 
+                    mr: 0.5,
+                    cursor: 'grab',
+                    '&:active': { cursor: 'grabbing' }
+                  }} 
+                />
+                <Box sx={{ 
+                  width: 0, 
+                  height: 0, 
+                  borderLeft: '4px solid transparent',
+                  borderRight: '4px solid transparent',
+                  borderTop: `4px solid ${group.color}`,
+                  ml: 0.5
+                }} />
+              </Box>
+            )}
             MenuProps={{
               PaperProps: {
                 sx: {
