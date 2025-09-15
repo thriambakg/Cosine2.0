@@ -473,7 +473,7 @@ export const dashboardAPI = {
   },
 
   reorderTabs: async (tabIds: string[]): Promise<{ message: string; order: string[] }> => {
-    return apiRequest<{ message: string; order: string[] }>('/dashboard/reorder', {
+    return apiRequest<{ message: string; order: string[] }>('/reorder', {
       method: 'PUT',
       body: JSON.stringify({
         type: 'tab',
@@ -483,7 +483,7 @@ export const dashboardAPI = {
   },
 
   reorderGroups: async (groupIds: string[]): Promise<{ message: string; order: string[] }> => {
-    return apiRequest<{ message: string; order: string[] }>('/dashboard/reorder', {
+    return apiRequest<{ message: string; order: string[] }>('/reorder', {
       method: 'PUT',
       body: JSON.stringify({
         type: 'group',

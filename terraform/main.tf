@@ -130,8 +130,8 @@ module "api_gateway" {
     dashboard = {
       path_part = "dashboard"
     }
-    dashboard_reorder = {
-      path_part = "dashboard/reorder"
+    reorder = {
+      path_part = "reorder"
     }
     tiles = {
       path_part = "tiles"
@@ -241,7 +241,7 @@ module "api_gateway" {
     }
     # Dashboard Reorder method
     dashboard_reorder_put = {
-      resource_key            = "dashboard_reorder"
+      resource_key            = "reorder"
       http_method             = "PUT"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -320,7 +320,7 @@ module "api_gateway" {
     dashboard_reorder_put = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
-      resource_path = "dashboard/reorder"
+      resource_path = "reorder"
     }
     tiles_post = {
       function_arn  = module.user_dashboard_lambda.function_arn

@@ -75,7 +75,7 @@ def lambda_handler(event, context):
         # Route to appropriate handler based on path and method
         if path.startswith('/tiles'):
             return handle_tiles_operations(user_id, http_method, path, event)
-        elif path.startswith('/dashboard/reorder'):
+        elif path.startswith('/reorder'):
             return handle_reorder_components(user_id, event)
         else:
             return handle_dashboard_operations(user_id, http_method, path, event)
