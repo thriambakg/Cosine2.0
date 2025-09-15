@@ -118,11 +118,12 @@ def migrate_from_v1_1_0(config: Dict[str, Any]) -> Dict[str, Any]:
             # Validate grid size constraints
             tile_type = tile.get('type', 'custom')
             constraints = get_tile_constraints(tile_type)
+            default_size = get_default_tile_size(tile_type)
             
             if 'gridSize' in tile:
                 tile['gridSize'] = {
-                    'width': max(constraints['minWidth'], min(constraints['maxWidth'], tile['gridSize'].get('width', constraints['defaultWidth']))),
-                    'height': max(constraints['minHeight'], min(constraints['maxHeight'], tile['gridSize'].get('height', constraints['defaultHeight'])))
+                    'width': max(constraints['minWidth'], min(constraints['maxWidth'], tile['gridSize'].get('width', default_size['width']))),
+                    'height': max(constraints['minHeight'], min(constraints['maxHeight'], tile['gridSize'].get('height', default_size['height'])))
                 }
             
             # Ensure grid position is valid

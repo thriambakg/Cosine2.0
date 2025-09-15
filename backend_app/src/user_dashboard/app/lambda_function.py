@@ -27,6 +27,17 @@ def convert_decimals(obj):
     else:
         return obj
 
+def convert_floats_to_decimals(obj):
+    """Convert float objects to Decimal for DynamoDB storage"""
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    elif isinstance(obj, dict):
+        return {key: convert_floats_to_decimals(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_floats_to_decimals(item) for item in obj]
+    else:
+        return obj
+
 def lambda_handler(event, context):
     """
     Lambda handler for user dashboard operations
@@ -157,7 +168,7 @@ def handle_get_dashboard(user_id: str) -> Dict:
                     Key={'user_id': user_id},
                     UpdateExpression='SET dashboard_config = :config, updated_at = :updated',
                     ExpressionAttributeValues={
-                        ':config': dashboard_config,
+                        ':config': convert_floats_to_decimals(dashboard_config),
                         ':updated': datetime.utcnow().isoformat()
                     }
                 )
@@ -194,7 +205,7 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
             Key={'user_id': user_id},
             UpdateExpression='SET dashboard_config = :config, updated_at = :updated',
             ExpressionAttributeValues={
-                ':config': dashboard_config,
+                ':config': convert_floats_to_decimals(dashboard_config),
                 ':updated': datetime.utcnow().isoformat()
             }
         )
