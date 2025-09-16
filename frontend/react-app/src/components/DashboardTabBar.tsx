@@ -536,10 +536,15 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
     // Show dropdown when collapsed
     return (
       <Box key={group.id} sx={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
-        {/* Group dropdown */}
+        {/* Group dropdown - only render if group has tabs */}
+        {groupTabs && groupTabs.length > 0 && (
         <FormControl size="small" sx={{ minWidth: 200 }}>
           <Select
             value={(() => {
+              // Safety check: if no tabs in group, return empty string
+              if (!groupTabs || groupTabs.length === 0) {
+                return '';
+              }
               // Only use the active tab ID if it exists in the current group's tabs
               const validTabIds = groupTabs.map(tab => tab.id);
               return activeTabInGroup && validTabIds.includes(activeTabInGroup.id) ? activeTabInGroup.id : '';
@@ -807,6 +812,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
             })}
           </Select>
         </FormControl>
+        )}
       </Box>
     );
   };

@@ -50,7 +50,7 @@ interface UploadedFile {
 }
 
 interface WebSocketMessage {
-  type: 'connection_established' | 'message_received' | 'ai_response' | 'error';
+  type: 'connection_established' | 'message_received' | 'ai_response' | 'error' | 'connection_establish';
   message_id?: string;
   session_id?: string;
   content?: string;
@@ -207,14 +207,7 @@ const DropZone = ({ isDragging, children, ...props }: any) => (
 export default function ChatPage() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      text: '🚀 Welcome to Enhanced Cosine AI!\n\nI\'m your advanced financial assistant with enhanced capabilities:\n\n💬 Chat Features:\n• Natural language financial analysis\n• Stock analysis and market insights\n• Portfolio optimization guidance\n\n📁 File Upload Support:\n• CSV files for portfolio analysis\n• Text files for document analysis\n• Images for chart interpretation\n\n🎯 Try asking:\n• "Analyze Apple stock"\n• "Help me understand portfolio risk"\n• Upload a CSV with your holdings!\n\nYou can also select different AI models for specialized analysis.',
-      sender: 'bot',
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -245,9 +238,26 @@ export default function ChatPage() {
       return;
     }
 
+    // Prevent multiple connections
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.CONNECTING) {
+      console.log('🔄 WebSocket connection already in progress, skipping');
+      return;
+    }
+
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      console.log('✅ WebSocket already connected, skipping');
+      return;
+    }
+
     try {
       setConnectionStatus('connecting');
       setConnectionError(null);
+
+      // Close existing connection if any
+      if (websocketRef.current) {
+        websocketRef.current.close();
+        websocketRef.current = null;
+      }
 
       // Create WebSocket URL with user ID as query parameter
       const wsUrl = `${ENV_CONFIG.websocketUrl}?userId=${user.id}`;
@@ -261,20 +271,18 @@ export default function ChatPage() {
         setConnectionStatus('connected');
         reconnectAttemptsRef.current = 0;
         
-        // Send a first message to establish the connection and get welcome message
-        const firstMessage = {
-          type: 'chat',
-          message: 'Hello',
-          is_first_message: true,
-          model: 'claude-3-sonnet',
-          files: []
+        // Send a connection establishment message (not a chat message)
+        const connectionMessage = {
+          type: 'connection_establish',
+          userId: user.id,
+          timestamp: new Date().toISOString()
         };
         
         try {
-          ws.send(JSON.stringify(firstMessage));
-          console.log('📤 Sent first message to establish connection');
+          ws.send(JSON.stringify(connectionMessage));
+          console.log('📤 Sent connection establishment message');
         } catch (error) {
-          console.error('Error sending first message:', error);
+          console.error('Error sending connection message:', error);
         }
       };
 
@@ -373,7 +381,7 @@ export default function ChatPage() {
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, [user?.id, ENV_CONFIG.websocketUrl, connectWebSocket]);
+  }, [user?.id, ENV_CONFIG.websocketUrl]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

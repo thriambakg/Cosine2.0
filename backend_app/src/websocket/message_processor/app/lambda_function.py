@@ -128,6 +128,28 @@ def process_message(connection_id, user_id, session_id, message_data):
         files = message_data.get('files', [])
         message_id = f"msg_{int(datetime.now().timestamp() * 1000)}"
         
+        logger.info(f"Processing message type: {message_type} for connection {connection_id}")
+        
+        # Handle connection establishment message
+        if message_type == 'connection_establish':
+            logger.info(f"Processing connection establishment message for connection {connection_id}")
+            # Send connection established message
+            connection_message = {
+                'type': 'connection_established',
+                'session_id': session_id,
+                'message': 'Connected to Cosine AI Chat',
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            if not send_message_to_client(connection_id, connection_message):
+                logger.warning(f"Failed to send connection message to connection {connection_id}")
+            
+            logger.info(f"Connection establishment completed for connection {connection_id}")
+            return {
+                'statusCode': 200,
+                'body': json.dumps({'message': 'Connection established'})
+            }
+        
         # Check if this is the first message (welcome message)
         is_first_message = message_data.get('is_first_message', False)
         
