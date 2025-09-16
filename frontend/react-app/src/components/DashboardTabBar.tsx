@@ -228,7 +228,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
       if (targetTabIndex !== -1) {
         const previewPos = {
           index: shouldDropBefore ? targetTabIndex : targetTabIndex + 1,
-          type: shouldDropBefore ? 'before' : 'after'
+          type: (shouldDropBefore ? 'before' : 'after') as 'before' | 'after'
         };
         console.log('🎯 Tab drag over:', { 
           draggedTab: draggedTab.id, 
@@ -545,7 +545,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
             })()}
             onChange={(e) => handleGroupTabSelect(e.target.value)}
             displayEmpty
-            renderValue={(value) => (
+            renderValue={() => (
               <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                 {/* Color indicator - solid line */}
                 <Box
@@ -652,8 +652,8 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
                   color: '#ffffff',
                   maxHeight: 300
                 },
-                onDragOver: (e) => e.preventDefault(), // Allow drag over
-                onDrop: (e) => e.preventDefault() // Prevent default drop behavior
+                onDragOver: (e: React.DragEvent) => e.preventDefault(), // Allow drag over
+                onDrop: (e: React.DragEvent) => e.preventDefault() // Prevent default drop behavior
               }
             }}
           >
