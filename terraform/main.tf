@@ -248,15 +248,6 @@ module "api_gateway" {
       lambda_arn              = module.user_dashboard_lambda.function_arn
       request_parameters      = {}
     }
-    # Dashboard Reorder OPTIONS method for CORS - method already exists in API Gateway
-    # dashboard_reorder_options = {
-    #   resource_key            = "reorder"
-    #   http_method             = "OPTIONS"
-    #   integration_type        = "AWS_PROXY"
-    #   integration_http_method = "POST"
-    #   lambda_arn              = module.user_dashboard_lambda.function_arn
-    #   request_parameters      = {}
-    # }
     # Dashboard Tiles methods
     tiles_post = {
       resource_key            = "tiles"
@@ -776,6 +767,27 @@ resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
           "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
           "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
         ]
+      }
+    ]
+  })
+}
+
+# ECR image access policy for chat agent container
+resource "aws_iam_role_policy" "chat_agent_ecr_policy" {
+  name = "${var.project_name}-chat-agent-ecr-policy-${var.environment}"
+  role = aws_iam_role.chat_agent_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability"
+        ]
+        Resource = "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/*"
       }
     ]
   })

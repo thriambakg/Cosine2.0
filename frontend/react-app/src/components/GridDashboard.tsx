@@ -7,6 +7,7 @@ import PlaceholderTile from './PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../utils/tileConfig';
 import TileDataParser from '../utils/TileDataParser';
+import { stockDataAPI, cryptoStatsAPI } from '../services/api';
 
 interface GridDashboardProps {
   tiles: UnifiedTile[];
@@ -443,11 +444,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   }, []);
 
   // Perform analysis on selected tiles
-  const handlePerformAnalysis = useCallback(() => {
+  const handlePerformAnalysis = useCallback(async () => {
     const selectedTilesArray = Array.from(selectionState.selectedTiles);
     console.log('🔍 Analysis Debug - Selected tiles array:', selectedTilesArray);
-    console.log('🔍 Analysis Debug - Selection state:', selectionState.selectedTiles);
-    console.log('🔍 Analysis Debug - Available tiles:', tiles.map(t => ({ id: t.id, type: t.type })));
     
     if (selectedTilesArray.length === 0) {
       console.log('No tiles selected for analysis');
@@ -458,20 +457,100 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
     console.log('🔍 Analysis Debug - Selected tiles data:', selectedTilesData);
     
-    // Extract data using TileDataParser (configuration-based extraction)
-    const extractedData: Record<string, any> = {};
-    selectedTilesData.forEach(tile => {
-      extractedData[tile.id] = TileDataParser.extractTileConfigData(tile);
-    });
+    // Fetch live data for each selected tile
+    const analysisData: Record<string, any> = {};
     
-    // Format for AI consumption
-    const formattedData = TileDataParser.formatForAI(extractedData);
-    
-    // Log the data structure (for now, until AI agent is ready)
-    console.log('=== TILE ANALYSIS DATA ===');
-    console.log(`Selected ${selectedTilesArray.length} tiles for analysis:`);
-    console.log('Formatted data structure:', formattedData);
-    console.log('Raw extracted data:', extractedData);
+    try {
+      for (const tile of selectedTilesData) {
+        console.log(`📊 Fetching live data for ${tile.type} tile: ${tile.symbol || tile.id}`);
+        
+        if (tile.type === 'stock' && tile.symbol) {
+          try {
+            const stockData = await stockDataAPI.getStockData({
+              ticker: tile.symbol,
+              period: tile.timeframe === '1d' ? '1y' : '1y' // Map timeframe to API period
+            });
+            
+            analysisData[tile.id] = {
+              ...TileDataParser.extractTileConfigData(tile),
+              liveData: {
+                currentPrice: stockData.current_price,
+                priceChange24h: stockData.price_change_24h,
+                weekReturn: stockData.week_return,
+                annualReturn: stockData.annual_return,
+                volatility: stockData.volatility,
+                chartData: stockData.chart_data,
+                lastUpdated: new Date().toISOString()
+              }
+            };
+            
+            console.log(`✅ Stock data fetched for ${tile.symbol}:`, stockData);
+          } catch (error) {
+            console.error(`❌ Failed to fetch stock data for ${tile.symbol}:`, error);
+            analysisData[tile.id] = {
+              ...TileDataParser.extractTileConfigData(tile),
+              liveData: { error: `Failed to fetch data: ${error}` }
+            };
+          }
+        } else if (tile.type === 'crypto' && tile.symbol) {
+          try {
+            const cryptoData = await cryptoStatsAPI.getStats({
+              symbols: [tile.symbol],
+              timeframe: tile.timeframe as '1d' | '7d' | '30d' | '1y'
+            });
+            
+            const cryptoStats = cryptoData.data.find(c => c.symbol === tile.symbol);
+            if (cryptoStats) {
+              analysisData[tile.id] = {
+                ...TileDataParser.extractTileConfigData(tile),
+                liveData: {
+                  currentPrice: cryptoStats.currentPrice,
+                  return24h: cryptoStats.return24h,
+                  annualReturn: cryptoStats.annualReturn,
+                  annualizedVolatility: cryptoStats.annualizedVolatility,
+                  chartData: cryptoStats.chartData,
+                  lastUpdated: new Date().toISOString()
+                }
+              };
+              
+              console.log(`✅ Crypto data fetched for ${tile.symbol}:`, cryptoStats);
+            } else {
+              analysisData[tile.id] = {
+                ...TileDataParser.extractTileConfigData(tile),
+                liveData: { error: `No data found for ${tile.symbol}` }
+              };
+            }
+          } catch (error) {
+            console.error(`❌ Failed to fetch crypto data for ${tile.symbol}:`, error);
+            analysisData[tile.id] = {
+              ...TileDataParser.extractTileConfigData(tile),
+              liveData: { error: `Failed to fetch data: ${error}` }
+            };
+          }
+        } else {
+          // For placeholder tiles or tiles without symbols, just use config data
+          analysisData[tile.id] = {
+            ...TileDataParser.extractTileConfigData(tile),
+            liveData: { note: 'No live data available for this tile type' }
+          };
+        }
+      }
+      
+      // Format for AI consumption
+      const formattedData = TileDataParser.formatForAI(analysisData);
+      
+      // Log the comprehensive data structure
+      console.log('=== COMPREHENSIVE TILE ANALYSIS DATA ===');
+      console.log(`Selected ${selectedTilesArray.length} tiles for analysis:`);
+      console.log('Formatted data structure with live data:', formattedData);
+      console.log('Raw analysis data:', analysisData);
+      
+      // TODO: Pass formattedData to AI agent for analysis
+      console.log('🚀 Ready to send to AI agent:', formattedData);
+      
+    } catch (error) {
+      console.error('❌ Error during tile analysis:', error);
+    }
     
     // Close context menu
     handleContextMenuClose();
