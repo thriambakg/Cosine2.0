@@ -216,6 +216,7 @@ export default function ChatPage() {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
+  const [connectionEstablished, setConnectionEstablished] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -271,18 +272,25 @@ export default function ChatPage() {
         setConnectionStatus('connected');
         reconnectAttemptsRef.current = 0;
         
-        // Send a connection establishment message (not a chat message)
-        const connectionMessage = {
-          type: 'connection_establish',
-          userId: user.id,
-          timestamp: new Date().toISOString()
-        };
-        
-        try {
-          ws.send(JSON.stringify(connectionMessage));
-          console.log('📤 Sent connection establishment message');
-        } catch (error) {
-          console.error('Error sending connection message:', error);
+        // Send a connection establishment message (not a chat message) only if not already established
+        if (!connectionEstablished) {
+          const connectionMessage = {
+            type: 'connection_establish',
+            userId: user.id,
+            timestamp: new Date().toISOString()
+          };
+          
+          try {
+            const messageString = JSON.stringify(connectionMessage);
+            console.log('📤 Sending connection establishment message:', messageString);
+            ws.send(messageString);
+            console.log('📤 Sent connection establishment message successfully');
+            setConnectionEstablished(true);
+          } catch (error) {
+            console.error('Error sending connection message:', error);
+          }
+        } else {
+          console.log('📤 Connection already established, skipping message');
         }
       };
 
@@ -299,6 +307,7 @@ export default function ChatPage() {
       ws.onclose = (event) => {
         console.log('❌ WebSocket disconnected:', event.code, event.reason);
         setConnectionStatus('disconnected');
+        setConnectionEstablished(false); // Reset connection established flag
         
         // Attempt to reconnect if not a normal closure
         if (event.code !== 1000 && reconnectAttemptsRef.current < maxReconnectAttempts) {

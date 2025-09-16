@@ -129,6 +129,7 @@ def process_message(connection_id, user_id, session_id, message_data):
         message_id = f"msg_{int(datetime.now().timestamp() * 1000)}"
         
         logger.info(f"Processing message type: {message_type} for connection {connection_id}")
+        logger.info(f"Full message data: {message_data}")
         
         # Handle connection establishment message
         if message_type == 'connection_establish':
@@ -144,7 +145,7 @@ def process_message(connection_id, user_id, session_id, message_data):
             if not send_message_to_client(connection_id, connection_message):
                 logger.warning(f"Failed to send connection message to connection {connection_id}")
             
-            logger.info(f"Connection establishment completed for connection {connection_id}")
+            logger.info(f"Connection establishment completed for connection {connection_id} - RETURNING EARLY")
             return {
                 'statusCode': 200,
                 'body': json.dumps({'message': 'Connection established'})
