@@ -110,6 +110,62 @@ const MessageBubble = ({ isUser, children, status, ...props }: any) => (
   </Box>
 );
 
+// Typing animation component
+const TypingText = ({ 
+  text, 
+  speed = 30, 
+  onComplete
+}: { 
+  text: string; 
+  speed?: number; 
+  onComplete?: () => void;
+}) => {
+  const [displayedText, setDisplayedText] = useState('');
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    if (currentIndex < text.length) {
+      const timer = setTimeout(() => {
+        setDisplayedText(prev => prev + text[currentIndex]);
+        setCurrentIndex(prev => prev + 1);
+      }, speed);
+
+      return () => clearTimeout(timer);
+    } else if (onComplete && currentIndex === text.length) {
+      onComplete();
+    }
+  }, [currentIndex, text, speed, onComplete]);
+
+  // Reset when text changes
+  useEffect(() => {
+    setDisplayedText('');
+    setCurrentIndex(0);
+  }, [text]);
+
+  return (
+    <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+      {displayedText}
+      {currentIndex < text.length && (
+        <Box
+          component="span"
+          sx={{
+            display: 'inline-block',
+            width: '2px',
+            height: '1.2em',
+            backgroundColor: 'currentColor',
+            marginLeft: '2px',
+            animation: 'blink 1s infinite',
+            '@keyframes blink': {
+              '0%, 50%': { opacity: 1 },
+              '51%, 100%': { opacity: 0 },
+            },
+          }}
+        />
+      )}
+    </Typography>
+  );
+};
+
 const FilePreview = ({ children, ...props }: any) => (
   <Box
     sx={{
@@ -166,6 +222,7 @@ export default function ChatPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -286,6 +343,8 @@ export default function ChatPage() {
           timestamp: new Date(data.timestamp || Date.now()),
         };
         setMessages(prev => [...prev, aiMessage]);
+        // Add to typing messages to trigger typing animation
+        setTypingMessages(prev => new Set([...prev, aiMessage.id]));
         setIsLoadingChat(false);
         break;
 
@@ -566,9 +625,23 @@ export default function ChatPage() {
               </Avatar>
               <Box sx={{ flex: 1 }}>
                 <MessageBubble isUser={message.sender === 'user'} status={message.status}>
-                  <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                    {message.text}
-                  </Typography>
+                  {message.sender === 'bot' && typingMessages.has(message.id) ? (
+                    <TypingText 
+                      text={message.text} 
+                      speed={20}
+                      onComplete={() => {
+                        setTypingMessages(prev => {
+                          const newSet = new Set(prev);
+                          newSet.delete(message.id);
+                          return newSet;
+                        });
+                      }}
+                    />
+                  ) : (
+                    <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+                      {message.text}
+                    </Typography>
+                  )}
                   {message.files && message.files.length > 0 && (
                     <Stack spacing={1} mt={1}>
                       {message.files.map((file) => (
