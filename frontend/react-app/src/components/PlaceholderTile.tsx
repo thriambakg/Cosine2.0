@@ -9,7 +9,8 @@ import {
   Menu,
   MenuItem,
   ListItemIcon,
-  ListItemText
+  ListItemText,
+  Checkbox
 } from '@mui/material';
 import { getDefaultTileSize } from '../utils/tileConfig';
 import {
@@ -156,7 +157,7 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
           {onSelectionChange && (
             <Checkbox
               checked={isSelected}
-              onClick={(e) => {
+              onClick={(e: React.MouseEvent) => {
                 const now = Date.now();
                 if (now - lastClickTimeRef.current < 200) {
                   // Prevent double clicks within 200ms
@@ -175,10 +176,10 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
                 '&:hover': { backgroundColor: `${getTileColor()}20` }
               }}
               size="small"
-              onMouseDown={(e) => {
+              onMouseDown={(e: React.MouseEvent) => {
                 e.stopPropagation();
               }}
-              onMouseUp={(e) => {
+              onMouseUp={(e: React.MouseEvent) => {
                 e.stopPropagation();
               }}
             />

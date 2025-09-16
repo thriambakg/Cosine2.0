@@ -64,7 +64,7 @@ export class TileDataParser {
   /**
    * Extract data from a single tile
    */
-  static extractTileData(tile: any, tileComponent?: React.ComponentType<any>): ExtractedTileData {
+  static extractTileData(tile: any): ExtractedTileData {
     const baseData: ExtractedTileData = {
       uuid: tile.id,
       type: tile.type as ExtractedTileData['type'],
