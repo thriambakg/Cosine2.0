@@ -475,6 +475,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         
         # Handle session management
         session_context = None
+        is_new_session = False
         if session_id and user_id:
             # Get existing session context
             logger.info(f"🔍 DEBUG: Retrieving session context for session {session_id}")
@@ -486,11 +487,13 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 page_context = event_body.get('context', {})
                 session_id = session_manager.create_session(user_id, page_context)
                 session_context = session_manager.get_session_context(session_id, user_id)
+                is_new_session = True
         else:
             # Fallback to default session for backward compatibility
             logger.info("🔍 DEBUG: No session_id or user_id provided, using default session")
             session_id = 'default'
             user_id = 'default'
+            is_new_session = True
         
         # Get session-aware agent
         if session_context:
@@ -500,6 +503,23 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             # Fallback to base agent
             logger.info("🔍 DEBUG: Using base financial agent as fallback")
             agent, _, FinancialTools = get_financial_agent()
+        
+        # Check if this is a new session and send welcome message
+        if is_new_session and (not user_message or user_message.strip() == '' or user_message.lower() in ['hi', 'hello', 'start', 'begin']):
+            logger.info("🔍 DEBUG: New session detected, sending welcome message")
+            welcome_message = "Hello! I'm Cosine, your AI financial analyst. I can help you with stock analysis, portfolio optimization, market research, and investment insights using real-time data. What would you like to analyze today?"
+            
+            response_body = {
+                'response': welcome_message,
+                'session_id': session_id,
+                'user_id': user_id,
+                'timestamp': int(time.time())
+            }
+            
+            return {
+                'statusCode': 200,
+                'body': response_body
+            }
         
         # Process message with session-aware agent
         logger.info(f"🔍 DEBUG: About to process message with session-aware agent")

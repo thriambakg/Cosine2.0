@@ -777,7 +777,7 @@ resource "aws_lambda_function" "chat_agent" {
   function_name = "${var.project_name}-chat-agent-${var.environment}"
   description   = "Lambda function for chat agent with financial analysis capabilities - Container-based deployment"
   role          = aws_iam_role.chat_agent_execution_role.arn
-  timeout       = 60
+  timeout       = 300
   memory_size   = 1024 # Memory for chat agent processing
 
   # Container-based deployment
@@ -857,7 +857,7 @@ module "websocket_message_lambda" {
   description   = "Lambda function for WebSocket message processing"
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.11"
-  timeout       = 30
+  timeout       = 120
   memory_size   = 512
 
   # Source directory
