@@ -772,27 +772,6 @@ resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
   })
 }
 
-# ECR image access policy for chat agent container
-resource "aws_iam_role_policy" "chat_agent_ecr_policy" {
-  name = "${var.project_name}-chat-agent-ecr-policy-${var.environment}"
-  role = aws_iam_role.chat_agent_execution_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:BatchGetImage",
-          "ecr:BatchCheckLayerAvailability"
-        ]
-        Resource = "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/*"
-      }
-    ]
-  })
-}
-
 # Chat Agent Lambda Function (Container-based)
 resource "aws_lambda_function" "chat_agent" {
   function_name = "${var.project_name}-chat-agent-${var.environment}"
