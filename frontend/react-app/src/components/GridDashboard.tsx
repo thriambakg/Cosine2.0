@@ -1,10 +1,12 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
+import { Analytics as AnalyticsIcon } from '@mui/icons-material';
 import CryptoTile from './CryptoTile';
 import StockTile from './StockTile';
 import PlaceholderTile from './PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../utils/tileConfig';
+import TileDataParser from '../utils/TileDataParser';
 
 interface GridDashboardProps {
   tiles: UnifiedTile[];
@@ -31,6 +33,12 @@ interface ResizeState {
   previewSize: GridSize | null;
 }
 
+interface SelectionState {
+  selectedTiles: Set<string>;
+  contextMenuAnchor: HTMLElement | null;
+  contextMenuPosition: { x: number; y: number } | null;
+}
+
 const GRID_COLUMNS = 12; // Total grid columns
 const GRID_CELL_SIZE = 80; // Size of each grid cell in pixels
 const GRID_GAP = 16; // Gap between grid cells
@@ -52,6 +60,12 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     currentPosition: null,
   });
 
+  const [selectionState, setSelectionState] = useState<SelectionState>({
+    selectedTiles: new Set(),
+    contextMenuAnchor: null,
+    contextMenuPosition: null,
+  });
+
   const [resizeState, setResizeState] = useState<ResizeState>({
     isResizing: false,
     resizeTileId: null,
@@ -61,6 +75,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   });
 
   const containerRef = useRef<HTMLDivElement>(null);
+
 
   // Memoize grid props for all tiles to prevent unnecessary recalculations
   const tileGridProps = useMemo(() => {
@@ -391,6 +406,77 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     }
   }, [resizeState.isResizing, handleResizeMove, handleResizeEnd]);
 
+
+  // Tile selection handlers
+  const handleTileSelection = useCallback((tileId: string, selected: boolean) => {
+    setSelectionState(prev => {
+      const newSelectedTiles = new Set(prev.selectedTiles);
+      if (selected) {
+        newSelectedTiles.add(tileId);
+      } else {
+        newSelectedTiles.delete(tileId);
+      }
+      
+      return {
+        ...prev,
+        selectedTiles: newSelectedTiles
+      };
+    });
+  }, []); // Remove the dependency array - use the functional update pattern
+
+  // Grid context menu handlers
+  const handleGridContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    setSelectionState(prev => ({
+      ...prev,
+      contextMenuAnchor: event.currentTarget as HTMLElement,
+      contextMenuPosition: { x: event.clientX, y: event.clientY }
+    }));
+  }, []);
+
+  const handleContextMenuClose = useCallback(() => {
+    setSelectionState(prev => ({
+      ...prev,
+      contextMenuAnchor: null,
+      contextMenuPosition: null
+    }));
+  }, []);
+
+  // Perform analysis on selected tiles
+  const handlePerformAnalysis = useCallback(() => {
+    const selectedTilesArray = Array.from(selectionState.selectedTiles);
+    console.log('🔍 Analysis Debug - Selected tiles array:', selectedTilesArray);
+    console.log('🔍 Analysis Debug - Selection state:', selectionState.selectedTiles);
+    console.log('🔍 Analysis Debug - Available tiles:', tiles.map(t => ({ id: t.id, type: t.type })));
+    
+    if (selectedTilesArray.length === 0) {
+      console.log('No tiles selected for analysis');
+      return;
+    }
+
+    // Get selected tiles data
+    const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
+    console.log('🔍 Analysis Debug - Selected tiles data:', selectedTilesData);
+    
+    // Extract data using TileDataParser (configuration-based extraction)
+    const extractedData: Record<string, any> = {};
+    selectedTilesData.forEach(tile => {
+      extractedData[tile.id] = TileDataParser.extractTileConfigData(tile);
+    });
+    
+    // Format for AI consumption
+    const formattedData = TileDataParser.formatForAI(extractedData);
+    
+    // Log the data structure (for now, until AI agent is ready)
+    console.log('=== TILE ANALYSIS DATA ===');
+    console.log(`Selected ${selectedTilesArray.length} tiles for analysis:`);
+    console.log('Formatted data structure:', formattedData);
+    console.log('Raw extracted data:', extractedData);
+    
+    // Close context menu
+    handleContextMenuClose();
+  }, [selectionState.selectedTiles, tiles, handleContextMenuClose]);
+
   // Render tile with grid positioning
   const renderTile = (tile: UnifiedTile) => {
     const { position, size } = getDefaultGridProps(tile);
@@ -409,6 +495,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ? resizeState.previewSize
       : size;
 
+    const isTileSelected = selectionState.selectedTiles.has(tile.id);
+    
+    
     const tileProps = {
       id: tile.id,
       symbol: tile.symbol || 'BTC',
@@ -426,7 +515,10 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       onResizeStart: (e: React.MouseEvent) => handleResizeStart(tile.id, e),
       isDragging,
       isResizing,
+      isSelected: isTileSelected,
+      onSelectionChange: handleTileSelection,
     };
+
 
     return (
       <Box
@@ -452,6 +544,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             onUpdate={onUpdateTile}
             onSettingsChange={onSettingsChange}
             onResize={onResizeTile}
+            isSelected={tileProps.isSelected}
+            onSelectionChange={handleTileSelection}
           />
         )}
         
@@ -549,21 +643,23 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   }
 
   return (
-    <Box
-      ref={containerRef}
-      sx={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${GRID_COLUMNS}, ${GRID_CELL_SIZE}px)`,
-        gridAutoRows: `${GRID_CELL_SIZE}px`,
-        gap: `${GRID_GAP}px`,
-        minHeight: '600px',
-        background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%)',
-        border: '1px solid #374151',
-        borderRadius: '8px',
-        overflow: 'hidden',
-        padding: '16px',
-      }}
-    >
+    <>
+      <Box
+        ref={containerRef}
+        onContextMenu={handleGridContextMenu}
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${GRID_COLUMNS}, ${GRID_CELL_SIZE}px)`,
+          gridAutoRows: `${GRID_CELL_SIZE}px`,
+          gap: `${GRID_GAP}px`,
+          minHeight: '600px',
+          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%)',
+          border: '1px solid #374151',
+          borderRadius: '8px',
+          overflow: 'hidden',
+          padding: '16px',
+        }}
+      >
       {/* Grid background */}
       <Box
         sx={{
@@ -590,7 +686,37 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       
       {/* Resize preview */}
       {renderResizePreview()}
-    </Box>
+      </Box>
+
+      {/* Grid Context Menu */}
+      <Menu
+        anchorEl={selectionState.contextMenuAnchor}
+        open={Boolean(selectionState.contextMenuAnchor)}
+        onClose={handleContextMenuClose}
+        anchorReference="anchorPosition"
+        anchorPosition={selectionState.contextMenuPosition ? {
+          top: selectionState.contextMenuPosition.y,
+          left: selectionState.contextMenuPosition.x
+        } : undefined}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+            color: 'white',
+            minWidth: 200,
+          },
+        }}
+      >
+        <MenuItem onClick={handlePerformAnalysis} disabled={selectionState.selectedTiles.size === 0}>
+          <ListItemIcon>
+            <AnalyticsIcon sx={{ color: '#10b981' }} />
+          </ListItemIcon>
+          <ListItemText>
+            Perform Analysis ({selectionState.selectedTiles.size} selected)
+          </ListItemText>
+        </MenuItem>
+      </Menu>
+    </>
   );
 };
 

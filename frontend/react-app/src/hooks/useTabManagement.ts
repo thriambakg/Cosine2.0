@@ -397,42 +397,70 @@ export const useTabManagement = ({
     }
   }, [state, updateState, userId]);
 
-  const closeTab = useCallback((tabId: string) => {
+  const closeTab = useCallback(async (tabId: string) => {
     const tabToClose = state.tabs.find(tab => tab.id === tabId);
-    if (!tabToClose) return;
-
-    const remainingTabs = state.tabs.filter(tab => tab.id !== tabId);
-    
-    // Also remove the associated dashboard
-    const remainingDashboards = (state.dashboards || []).filter(dashboard => 
-      (dashboard as any).tabId !== tabId
-    );
-    
-    console.log('🗑️ Closing tab:', { 
-      tabToClose, 
-      remainingTabs: remainingTabs.map(t => ({ id: t.id, name: t.name })),
-      remainingDashboards: remainingDashboards.map(d => ({ id: d.id, name: d.name })),
-      nextTabId: state.nextTabId
-    });
-    
-    // If closing the active tab, activate another tab
-    let newActiveTabId = state.activeTabId;
-    if (tabToClose.id === state.activeTabId && remainingTabs.length > 0) {
-      // Find the next tab in the same group, or the first available tab
-      const sameGroupTabs = remainingTabs;
-      const nextTab = sameGroupTabs.length > 0 ? sameGroupTabs[0] : remainingTabs[0];
-      newActiveTabId = nextTab.id;
+    if (!tabToClose) {
+      console.log('❌ Tab not found for closing:', tabId);
+      return;
     }
 
-    // Update tabs to set new active tab
-    const updatedTabs = remainingTabs;
+    if (!userId) {
+      console.error('❌ User ID required for tab deletion');
+      return;
+    }
 
-    updateState({
-      tabs: updatedTabs,
-      dashboards: remainingDashboards,
-      activeTabId: newActiveTabId
+    console.log('🗑️ Closing tab:', { 
+      tabToClose: { id: tabToClose.id, name: tabToClose.name },
+      userId 
     });
-  }, [state, updateState]);
+
+    try {
+      // Call backend API to delete the tab
+      await dashboardAPI.deleteTab(tabId, userId);
+      console.log('✅ Tab successfully deleted from backend');
+
+      // Update local state after successful backend deletion
+      const remainingTabs = state.tabs.filter(tab => tab.id !== tabId);
+      
+      // Also remove the associated dashboard
+      const remainingDashboards = (state.dashboards || []).filter(dashboard => 
+        (dashboard as any).tabId !== tabId
+      );
+      
+      // Remove the tab from any groups it belongs to
+      const updatedGroups = state.tabGroups.map(group => ({
+        ...group,
+        tabs: (group.tabs || group.tabIds || []).filter(id => id !== tabId),
+        tabIds: (group.tabIds || group.tabs || []).filter(id => id !== tabId)
+      }));
+      
+      // If closing the active tab, activate another tab
+      let newActiveTabId = state.activeTabId;
+      if (tabToClose.id === state.activeTabId && remainingTabs.length > 0) {
+        // Find the next tab in the same group, or the first available tab
+        const sameGroupTabs = remainingTabs;
+        const nextTab = sameGroupTabs.length > 0 ? sameGroupTabs[0] : remainingTabs[0];
+        newActiveTabId = nextTab.id;
+      }
+
+      // Update tabs to set new active tab
+      const updatedTabs = remainingTabs;
+
+      updateState({
+        tabs: updatedTabs,
+        dashboards: remainingDashboards,
+        tabGroups: updatedGroups,
+        activeTabId: newActiveTabId
+      });
+
+      console.log('✅ Tab successfully removed from local state');
+
+    } catch (error) {
+      console.error('❌ Failed to delete tab from backend:', error);
+      // Don't update local state if backend deletion failed
+      throw error;
+    }
+  }, [state, updateState, userId]);
 
   const activateTab = useCallback((tabId: string) => {
     const updatedTabs = state.tabs;
@@ -530,31 +558,58 @@ export const useTabManagement = ({
     updateState({ tabGroups: updatedGroups });
   }, [state, updateState]);
 
-  const dissolveGroup = useCallback((groupId: string, deleteDashboards: boolean) => {
+  const dissolveGroup = useCallback(async (groupId: string, deleteDashboards: boolean) => {
     const group = state.tabGroups.find(g => g.id === groupId);
     if (!group) return;
+
+    if (!userId) {
+      console.error('❌ User ID required for group operations');
+      return;
+    }
 
     const groupTabs = state.tabs.filter(tab => (group.tabs || group.tabIds || []).includes(tab.id));
     
     if (deleteDashboards) {
-      // Delete all tabs in the group and their associated dashboards
-      const remainingTabs = state.tabs.filter(tab => !(group.tabs || group.tabIds || []).includes(tab.id));
+      console.log('🗑️ Deleting group and all tabs:', { groupId, groupName: group.name, tabCount: groupTabs.length });
       
-      // Update active tab if it was deleted
-      let newActiveTabId = state.activeTabId;
-      if (groupTabs.some(tab => tab.id === state.activeTabId) && remainingTabs.length > 0) {
-        newActiveTabId = remainingTabs[0].id;
-      } else if (groupTabs.some(tab => tab.id === state.activeTabId)) {
-        newActiveTabId = null;
-      }
+      try {
+        // Delete each tab in the group from backend
+        for (const tab of groupTabs) {
+          await dashboardAPI.deleteTab(tab.id, userId);
+          console.log(`✅ Deleted tab: ${tab.name} (${tab.id})`);
+        }
 
-      updateState({
-        tabs: remainingTabs,
-        tabGroups: state.tabGroups.filter(g => g.id !== groupId),
-        activeTabId: newActiveTabId
-      });
+        // Delete the group from backend
+        await dashboardAPI.deleteGroup(groupId, userId);
+        console.log(`✅ Deleted group: ${group.name} (${groupId})`);
+
+        // Update local state after successful backend deletion
+        const remainingTabs = state.tabs.filter(tab => !(group.tabs || group.tabIds || []).includes(tab.id));
+        
+        // Update active tab if it was deleted
+        let newActiveTabId = state.activeTabId;
+        if (groupTabs.some(tab => tab.id === state.activeTabId) && remainingTabs.length > 0) {
+          newActiveTabId = remainingTabs[0].id;
+        } else if (groupTabs.some(tab => tab.id === state.activeTabId)) {
+          newActiveTabId = null;
+        }
+
+        updateState({
+          tabs: remainingTabs,
+          tabGroups: state.tabGroups.filter(g => g.id !== groupId),
+          activeTabId: newActiveTabId
+        });
+
+        console.log('✅ Group and all tabs successfully deleted from backend and local state');
+
+      } catch (error) {
+        console.error('❌ Failed to delete group and tabs from backend:', error);
+        throw error;
+      }
     } else {
-      // Ungroup all tabs but keep the group (empty group)
+      // Ungroup all tabs but keep the group (empty group) - no backend call needed
+      console.log('🔄 Ungrouping all tabs from group:', { groupId, groupName: group.name });
+      
       const updatedGroups = state.tabGroups.map(g => 
         g.id === groupId 
           ? { ...g, tabs: [], tabIds: [] }
@@ -565,7 +620,7 @@ export const useTabManagement = ({
         tabGroups: updatedGroups
       });
     }
-  }, [state.tabs, state.tabGroups, state.activeTabId, updateState]);
+  }, [state.tabs, state.tabGroups, state.activeTabId, updateState, userId]);
 
   // Move tab between groups
   const moveTabToGroup = useCallback((tabId: string, targetGroupId: string) => {

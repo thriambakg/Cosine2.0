@@ -55,6 +55,8 @@ interface StockTileProps {
   onResizeStart?: (event: React.MouseEvent) => void;
   isDragging?: boolean;
   isResizing?: boolean;
+  isSelected?: boolean;
+  onSelectionChange?: (id: string, selected: boolean) => void;
 }
 
 const StockTile: React.FC<StockTileProps> = ({
@@ -81,8 +83,12 @@ const StockTile: React.FC<StockTileProps> = ({
   onResizeStart: _onResizeStart,
   isDragging = false,
   isResizing: _isResizing = false,
+  isSelected = false,
+  onSelectionChange,
 }) => {
   const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
+  const lastClickTimeRef = useRef<number>(0);
+  
   const [timeframeDialogOpen, setTimeframeDialogOpen] = useState(false);
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [localTimeframe, setLocalTimeframe] = useState(timeframe);
@@ -320,6 +326,36 @@ const StockTile: React.FC<StockTileProps> = ({
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {/* Selection checkbox */}
+          {onSelectionChange && (
+            <Checkbox
+              checked={isSelected}
+              onClick={(e) => {
+                const now = Date.now();
+                if (now - lastClickTimeRef.current < 200) {
+                  // Prevent double clicks within 200ms
+                  return;
+                }
+                lastClickTimeRef.current = now;
+                
+                e.stopPropagation();
+                onSelectionChange(id, !isSelected);
+              }}
+              sx={{ 
+                color: '#9ca3af',
+                '&.Mui-checked': { color: '#10b981' },
+                p: 0.5,
+                '&:hover': { backgroundColor: 'rgba(16, 185, 129, 0.1)' }
+              }}
+              size="small"
+              onMouseDown={(e) => {
+                e.stopPropagation();
+              }}
+              onMouseUp={(e) => {
+                e.stopPropagation();
+              }}
+            />
+          )}
           {/* Stock Market Symbol */}
           <TrendingUpIcon 
             sx={{ 
@@ -746,7 +782,8 @@ const StockTileMemo = memo(StockTile, (prevProps, nextProps) => {
   if (prevProps.autoRefresh !== nextProps.autoRefresh ||
       prevProps.isPinned !== nextProps.isPinned ||
       prevProps.isDragging !== nextProps.isDragging ||
-      prevProps.isResizing !== nextProps.isResizing) {
+      prevProps.isResizing !== nextProps.isResizing ||
+      prevProps.isSelected !== nextProps.isSelected) {
     return false; // Re-render
   }
   

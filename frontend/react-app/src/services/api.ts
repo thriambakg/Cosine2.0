@@ -35,6 +35,7 @@ export const apiRequest = async <T>(
     console.log(`📡 Request config:`, {
       method: options.method || 'GET',
       headers: headers,
+      body: options.body,
     });
 
     console.log('url', url);
@@ -46,7 +47,10 @@ export const apiRequest = async <T>(
     } else if (options.method === 'PUT') {
       response = await axios.put(url, options.body, { headers });
     } else if (options.method === 'DELETE') {
-      response = await axios.delete(url, { headers });
+      response = await axios.delete(url, { 
+        headers,
+        data: options.body  // DELETE requests need data in the config object
+      });
     } else {
       response = await axios.get(url, { headers });
     }
@@ -569,6 +573,30 @@ export const dashboardAPI = {
   removeTile: async (tileId: string): Promise<{ message: string }> => {
     return apiRequest<{ message: string }>(`/tiles/${tileId}`, {
       method: 'DELETE',
+    });
+  },
+
+  deleteTab: async (tabId: string, userId: string): Promise<{ message: string }> => {
+    const requestBody = {
+      type: 'tab',
+      id: tabId
+    };
+    console.log('🗑️ API - Deleting tab:', { tabId, userId, requestBody });
+    return apiRequest<{ message: string }>(`/dashboard?userId=${userId}`, {
+      method: 'DELETE',
+      body: JSON.stringify(requestBody),
+    });
+  },
+
+  deleteGroup: async (groupId: string, userId: string): Promise<{ message: string }> => {
+    const requestBody = {
+      type: 'group',
+      id: groupId
+    };
+    console.log('🗑️ API - Deleting group:', { groupId, userId, requestBody });
+    return apiRequest<{ message: string }>(`/dashboard?userId=${userId}`, {
+      method: 'DELETE',
+      body: JSON.stringify(requestBody),
     });
   },
 };

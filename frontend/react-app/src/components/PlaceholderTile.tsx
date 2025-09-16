@@ -52,6 +52,8 @@ interface PlaceholderTileProps {
   isDragging?: boolean;
   isResizing?: boolean;
   dashboardContext?: string;
+  isSelected?: boolean;
+  onSelectionChange?: (id: string, selected: boolean) => void;
 }
 
 const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
@@ -62,9 +64,12 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
   onResizeStart,
   isDragging = false,
   isResizing: _isResizing = false,
-  dashboardContext: _dashboardContext
+  dashboardContext: _dashboardContext,
+  isSelected = false,
+  onSelectionChange,
 }) => {
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const lastClickTimeRef = React.useRef<number>(0);
   const open = Boolean(anchorEl);
 
   const handleMenuClick = (event: React.MouseEvent<HTMLElement>) => {
@@ -147,6 +152,37 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          {/* Selection checkbox */}
+          {onSelectionChange && (
+            <Checkbox
+              checked={isSelected}
+              onClick={(e) => {
+                const now = Date.now();
+                if (now - lastClickTimeRef.current < 200) {
+                  // Prevent double clicks within 200ms
+                  return;
+                }
+                lastClickTimeRef.current = now;
+                
+                e.stopPropagation();
+                onSelectionChange(tile.id, !isSelected);
+              }}
+              sx={{ 
+                color: '#9ca3af',
+                '&.Mui-checked': { color: getTileColor() },
+                p: 0.5,
+                mr: 1,
+                '&:hover': { backgroundColor: `${getTileColor()}20` }
+              }}
+              size="small"
+              onMouseDown={(e) => {
+                e.stopPropagation();
+              }}
+              onMouseUp={(e) => {
+                e.stopPropagation();
+              }}
+            />
+          )}
           {getTileIcon()}
           <Box sx={{ ml: 2 }}>
             <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>

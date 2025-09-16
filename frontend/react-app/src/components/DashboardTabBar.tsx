@@ -437,6 +437,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
           size="small"
           onClick={(e) => {
             e.stopPropagation();
+            console.log('🗑️ DashboardTabBar - Close button clicked for tab:', { id: tab.id, name: tab.name });
             onTabClose(tab.id);
           }}
           sx={{
@@ -785,6 +786,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
                       size="small"
                       onClick={(e) => {
                         e.stopPropagation();
+                        console.log('🗑️ DashboardTabBar - Close button clicked for dropdown tab:', { id: tab.id, name: tab.name });
                         onTabClose(tab.id);
                       }}
                       sx={{
@@ -1009,7 +1011,10 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
             <Divider sx={{ borderColor: '#374151' }} />
 
             <MenuItem 
-              onClick={() => onTabClose(contextMenu.tab!.id)}
+              onClick={() => {
+                console.log('🗑️ DashboardTabBar - Close from context menu for tab:', { id: contextMenu.tab!.id, name: contextMenu.tab!.name });
+                onTabClose(contextMenu.tab!.id);
+              }}
               sx={{ color: '#ef4444' }}
             >
               <ListItemIcon>
