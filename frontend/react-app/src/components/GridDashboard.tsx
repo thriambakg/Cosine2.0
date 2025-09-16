@@ -410,7 +410,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       : size;
 
     const tileProps = {
-      key: tile.id,
       id: tile.id,
       symbol: tile.symbol || 'BTC',
       timeframe: tile.timeframe || '1d',
@@ -442,11 +441,12 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         }}
       >
         {tile.type === 'crypto' ? (
-          <CryptoTile {...tileProps} />
+          <CryptoTile key={tile.id} {...tileProps} />
         ) : tile.type === 'stock' ? (
-          <StockTile {...tileProps} />
+          <StockTile key={tile.id} {...tileProps} />
         ) : (
           <PlaceholderTile
+            key={tile.id}
             tile={tile}
             onRemove={onRemoveTile}
             onUpdate={onUpdateTile}

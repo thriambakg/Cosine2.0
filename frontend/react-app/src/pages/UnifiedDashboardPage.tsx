@@ -151,9 +151,10 @@ const UnifiedDashboardPage: React.FC = () => {
     addTabToGroup,
     removeTabFromGroup,
     dissolveGroup,
+    moveTabToGroup,
     reorderTab,
     reorderGroup,
-    updateDashboardTiles: updateTabDashboardTiles,
+    // updateDashboardTiles: updateTabDashboardTiles, // Removed - using tab-based system
     updateTabTiles,
     getTabsByGroup,
     reloadFromDatabase
@@ -187,18 +188,9 @@ const UnifiedDashboardPage: React.FC = () => {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef<UnifiedTile[] | null>(null);
 
-  // Get current tiles from active dashboard or localStorage
-  const [localTiles, setLocalTiles] = useState<UnifiedTile[]>([]);
+  // Removed old tile state variables - now using tab-based system via useTabManagement
   
-  // Local state to override activeDashboard tiles for immediate updates during drag/resize
-  const [overrideTiles, setOverrideTiles] = useState<UnifiedTile[]>([]);
-  
-  // Ref to track override tiles timeout
-  const overrideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Production safety: Track state corruption attempts
-  const stateCorruptionRef = useRef<number>(0);
-  const MAX_CORRUPTION_ATTEMPTS = 3;
+  // Removed old state corruption tracking - no longer needed with tab-based system
   
   // Get current dashboard ID (either from active dashboard or default)
   const currentDashboardId = activeDashboard?.id || 'main';
@@ -208,74 +200,100 @@ const UnifiedDashboardPage: React.FC = () => {
     const GRID_COLUMNS = 12; // Match the GridDashboard constant
     const MAX_ROWS = 50; // Match the GridDashboard constant for flexibility
     
-    // Get all existing tiles for the current dashboard
-    const existingTiles = activeDashboard?.tiles || [];
+    // Get all existing tiles for the current tab (not dashboard)
+    const existingTiles = activeTab?.tiles || [];
     
-    // If no existing tiles, place at the top-left
+    // If no existing tiles, place at the top-left (origin)
     if (existingTiles.length === 0) {
-      console.log(`📍 No existing tiles, placing at top-left:`, { x: 0, y: 0 });
+      console.log(`📍 No existing tiles, placing at origin:`, { x: 0, y: 0 });
       return { x: 0, y: 0 };
     }
     
-    // Create a set of occupied positions
-    const occupiedPositions = new Set<string>();
+    // Create a 2D grid to track occupied positions
+    // This is more efficient than a Set for large grids
+    const grid = Array(MAX_ROWS).fill(null).map(() => Array(GRID_COLUMNS).fill(false));
+    
+    // Mark occupied positions
     existingTiles.forEach(tile => {
       const pos = tile.gridPosition || { x: 0, y: 0 };
       const size = tile.gridSize || getDefaultTileSize(tile.type);
       
       // Mark all cells occupied by this tile
-      for (let x = pos.x; x < pos.x + size.width; x++) {
-        for (let y = pos.y; y < pos.y + size.height; y++) {
-          occupiedPositions.add(`${x},${y}`);
+      for (let x = pos.x; x < pos.x + size.width && x < GRID_COLUMNS; x++) {
+        for (let y = pos.y; y < pos.y + size.height && y < MAX_ROWS; y++) {
+          grid[y][x] = true;
         }
       }
     });
     
-    // Smart placement: Try to place tiles in a visually pleasing way
-    // 1. First try to place in the next available column on the first row
-    // 2. Then try to place in the next available row
-    // 3. Finally, scan row by row
+    // Intelligent placement algorithm: Find the nearest available space to origin (0,0)
+    // Use a spiral search pattern starting from origin
+    const directions = [
+      { dx: 1, dy: 0 },  // Right
+      { dx: 0, dy: 1 },  // Down
+      { dx: -1, dy: 0 }, // Left
+      { dx: 0, dy: -1 }  // Up
+    ];
     
-    // Strategy 1: Find the rightmost position on the first row
-    for (let x = 0; x <= GRID_COLUMNS - tileSize.width; x++) {
-      let canPlace = true;
-      for (let dx = 0; dx < tileSize.width; dx++) {
-        if (occupiedPositions.has(`${x + dx},0`)) {
-          canPlace = false;
-          break;
+    // Check if a position is available for the given tile size
+    const isPositionAvailable = (x: number, y: number, width: number, height: number): boolean => {
+      if (x < 0 || y < 0 || x + width > GRID_COLUMNS || y + height > MAX_ROWS) {
+        return false;
+      }
+      
+      for (let dx = 0; dx < width; dx++) {
+        for (let dy = 0; dy < height; dy++) {
+          if (grid[y + dy][x + dx]) {
+            return false;
+          }
         }
       }
-      if (canPlace) {
-        console.log(`📍 Placing new tile on first row:`, { x, y: 0, tileSize });
-        return { x, y: 0 };
+      return true;
+    };
+    
+    // Spiral search from origin - this finds the nearest available space
+    let x = 0, y = 0;
+    let step = 1;
+    let directionIndex = 0;
+    let stepsInDirection = 0;
+    
+    while (x < GRID_COLUMNS && y < MAX_ROWS) {
+      // Check current position
+      if (isPositionAvailable(x, y, tileSize.width, tileSize.height)) {
+        console.log(`📍 Found nearest available position:`, { x, y, tileSize, distance: Math.abs(x) + Math.abs(y) });
+        return { x, y };
+      }
+      
+      // Move in current direction
+      const direction = directions[directionIndex];
+      x += direction.dx;
+      y += direction.dy;
+      stepsInDirection++;
+      
+      // Change direction when we've taken enough steps
+      if (stepsInDirection === step) {
+        stepsInDirection = 0;
+        directionIndex = (directionIndex + 1) % 4;
+        
+        // Increase step size every 2 direction changes (completes a square)
+        if (directionIndex === 0 || directionIndex === 2) {
+          step++;
+        }
       }
     }
     
-    // Strategy 2: Find the first available position row by row
+    // Fallback: Linear search if spiral fails (shouldn't happen with reasonable grid size)
     for (let y = 0; y < MAX_ROWS; y++) {
       for (let x = 0; x <= GRID_COLUMNS - tileSize.width; x++) {
-        let canPlace = true;
-        
-        // Check if this position is available
-        for (let dx = 0; dx < tileSize.width; dx++) {
-          for (let dy = 0; dy < tileSize.height; dy++) {
-            if (occupiedPositions.has(`${x + dx},${y + dy}`)) {
-              canPlace = false;
-              break;
-            }
-          }
-          if (!canPlace) break;
-        }
-        
-        if (canPlace) {
-          console.log(`📍 Found available position for new tile:`, { x, y, tileSize });
+        if (isPositionAvailable(x, y, tileSize.width, tileSize.height)) {
+          console.log(`📍 Fallback position found:`, { x, y, tileSize });
           return { x, y };
         }
       }
     }
     
-    // Fallback to position 0,0 if no position found
-    console.log(`⚠️ No available position found, using fallback position`);
+    // Ultimate fallback: place at origin
+    console.log(`📍 No space found, placing at origin:`, { x: 0, y: 0 });
     return { x: 0, y: 0 };
   };
   
@@ -294,32 +312,20 @@ const UnifiedDashboardPage: React.FC = () => {
     });
   };
 
-  // Get current tiles with proper state priority: overrideTiles > localTiles > activeDashboard.tiles
+  // Get current tiles from the active tab
   const getCurrentDashboardTiles = () => {
-    if (activeDashboard) {
-      const dashboardOverrideTiles = overrideTiles.filter(tile => tile.dashboard_id === activeDashboard.id);
-      const dashboardLocalTiles = localTiles.filter(tile => tile.dashboard_id === activeDashboard.id);
-      const dashboardActiveTiles = activeDashboard.tiles || [];
-      
-      console.log('🔍 getCurrentDashboardTiles:', {
-        activeDashboardId: activeDashboard.id,
-        dashboardOverrideTiles: dashboardOverrideTiles.length,
-        dashboardLocalTiles: dashboardLocalTiles.length,
-        dashboardActiveTiles: dashboardActiveTiles.length,
-        usingOverrideTiles: dashboardOverrideTiles.length > 0,
-        usingLocalTiles: dashboardOverrideTiles.length === 0 && dashboardLocalTiles.length > 0,
+    if (activeTab) {
+      console.log('🔍 getCurrentDashboardTiles (tab-based):', {
+        activeTabId: activeTab.id,
+        activeTabName: activeTab.name,
+        activeTabTiles: (activeTab.tiles || []).length,
+        activeTabTilesData: activeTab.tiles || []
       });
       
-      // Priority: overrideTiles > localTiles > activeDashboard.tiles
-      if (dashboardOverrideTiles.length > 0) {
-        return dashboardOverrideTiles;
-      } else if (dashboardLocalTiles.length > 0) {
-        return dashboardLocalTiles;
-      } else {
-        return dashboardActiveTiles;
-      }
+      return activeTab.tiles || [];
     } else {
-      return localTiles.filter(tile => tile.dashboard_id === currentDashboardId);
+      console.log('🔍 getCurrentDashboardTiles: No active tab found');
+      return [];
     }
   };
   
@@ -460,171 +466,17 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   }, []);
 
-  // Load tiles from localStorage based on dashboard state
-  useEffect(() => {
-    console.log('🔍 Dashboard state changed:', { activeDashboard, currentDashboardId, tabs: tabs?.length });
-    
-    if (activeDashboard) {
-      // When switching to an active dashboard, clear local tiles and override tiles
-      console.log('✅ Active dashboard found, clearing local tiles and override tiles');
-      setLocalTiles([]);
-      setOverrideTiles([]);
-    } else {
-      // When no active dashboard, load tiles for the current dashboard
-      console.log('⚠️ No active dashboard, loading from localStorage');
-      const cachedTiles = loadFromLocalStorage();
-      console.log('🔍 Loading tiles from localStorage:', { cachedTiles, currentDashboardId, activeDashboard });
-      if (cachedTiles && cachedTiles.length > 0) {
-        // Handle tiles without dashboard_id (legacy tiles) by assigning them to 'main'
-        const tilesWithDashboardId = cachedTiles.map(tile => ({
-          ...tile,
-          dashboard_id: tile.dashboard_id || 'main'
-        }));
-        
-        const dashboardTiles = tilesWithDashboardId.filter(tile => tile.dashboard_id === currentDashboardId);
-        console.log('🎯 Filtered tiles for current dashboard:', { dashboardTiles, currentDashboardId });
-        setLocalTiles(dashboardTiles);
-      } else {
-        console.log('❌ No tiles found in localStorage');
-      }
-    }
-  }, [activeDashboard, currentDashboardId, loadFromLocalStorage, tabs]);
+  // Removed old tile loading useEffect - now using tab-based system via useTabManagement
 
-  // Cleanup override timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (overrideTimeoutRef.current) {
-        clearTimeout(overrideTimeoutRef.current);
-      }
-    };
-  }, []);
+  // Removed old override timeout cleanup - no longer needed with tab-based system
 
-  // Debounced save to database
-  const debouncedSaveToDatabase = useCallback((updatedTiles: UnifiedTile[]) => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
+  // Removed debounced save - now using tab-based system via useTabManagement
 
-    pendingSaveRef.current = updatedTiles;
+  // Removed safeUpdateDashboardTiles - now using tab-based system via useTabManagement
 
-    saveTimeoutRef.current = setTimeout(() => {
-      if (pendingSaveRef.current) {
-        saveUserDashboard(pendingSaveRef.current);
-        pendingSaveRef.current = null;
-      }
-    }, 2000);
-  }, []);
+  // Removed updateDashboardTilesFallback - now using tab-based system via useTabManagement
 
-  // Production-safe dashboard update with corruption protection
-  const safeUpdateDashboardTiles = useCallback((updatedTiles: UnifiedTile[]) => {
-    try {
-      // Validate tiles before updating
-      const validTiles = updatedTiles.filter(tile => {
-        if (!tile.id || !tile.type) {
-          console.warn('⚠️ Skipping invalid tile:', tile);
-          return false;
-        }
-        return true;
-      });
-
-      if (validTiles.length !== updatedTiles.length) {
-        console.warn(`⚠️ Filtered out ${updatedTiles.length - validTiles.length} invalid tiles`);
-      }
-
-      // Check for state corruption
-      if (stateCorruptionRef.current >= MAX_CORRUPTION_ATTEMPTS) {
-        console.error('🚨 Maximum corruption attempts reached, using fallback mode');
-        return updateDashboardTilesFallback(validTiles);
-      }
-
-      return updateDashboardTiles(validTiles);
-    } catch (error) {
-      console.error('❌ Error in safe dashboard update:', error);
-      stateCorruptionRef.current++;
-      return updateDashboardTilesFallback(updatedTiles);
-    }
-  }, [activeDashboard, updateTabDashboardTiles, saveToLocalStorage, debouncedSaveToDatabase, loadFromLocalStorage, currentDashboardId]);
-
-  // Fallback update function for corrupted states
-  const updateDashboardTilesFallback = useCallback((updatedTiles: UnifiedTile[]) => {
-    console.log('🆘 Using fallback dashboard update');
-    
-    try {
-      // Simple localStorage-only approach
-      const tilesWithDashboardId = updatedTiles.map(tile => ({
-        ...tile,
-        dashboard_id: tile.dashboard_id || currentDashboardId
-      }));
-      
-      saveToLocalStorage(tilesWithDashboardId);
-      setLocalTiles(tilesWithDashboardId);
-      
-      console.log('✅ Fallback update successful');
-    } catch (error) {
-      console.error('❌ Fallback update failed:', error);
-    }
-  }, [saveToLocalStorage, currentDashboardId]);
-
-  // Helper function to update dashboard tiles
-  const updateDashboardTiles = useCallback((updatedTiles: UnifiedTile[]) => {
-    console.log('updateDashboardTiles called with:', updatedTiles);
-    console.log('activeDashboard:', activeDashboard);
-    
-    // If we have an active dashboard, use the tab management system
-    if (activeDashboard) {
-      console.log('Updating tiles for dashboard:', activeDashboard.id);
-
-      // Update the dashboard in the tab management system
-      updateTabDashboardTiles(activeDashboard.id, updatedTiles);
-
-      // Update localStorage with all tiles (including other dashboards)
-      const allTiles = loadFromLocalStorage() || [];
-      const otherDashboardTiles = allTiles.filter(tile => tile.dashboard_id !== activeDashboard.id);
-      const allUpdatedTiles = [...otherDashboardTiles, ...updatedTiles];
-      saveToLocalStorage(allUpdatedTiles);
-      
-      // Note: Database save is handled by useTabManagement when updateTabDashboardTiles is called above
-
-      // Set override tiles for immediate visual feedback
-      setOverrideTiles(updatedTiles);
-      
-      // Clear override tiles after a delay to allow activeDashboard state to update
-      if (overrideTimeoutRef.current) {
-        clearTimeout(overrideTimeoutRef.current);
-      }
-      overrideTimeoutRef.current = setTimeout(() => {
-        console.log('🔄 Clearing override tiles after state update');
-        setOverrideTiles([]);
-      }, 1000); // 1 second delay
-
-      console.log('Successfully updated tiles for dashboard:', activeDashboard.id, updatedTiles);
-    } else {
-      // Fallback: Direct localStorage approach (original behavior)
-      console.log('No active dashboard, using direct localStorage approach');
-      
-      // Save tiles directly to localStorage with current dashboard_id
-      const tilesWithDashboardId = updatedTiles.map(tile => ({
-        ...tile,
-        dashboard_id: tile.dashboard_id || currentDashboardId
-      }));
-      
-      // Get existing tiles from localStorage
-      const existingTiles = loadFromLocalStorage() || [];
-      
-      // Filter out tiles for the current dashboard and add the new ones
-      const otherDashboardTiles = existingTiles.filter(tile => tile.dashboard_id !== currentDashboardId);
-      const allTiles = [...otherDashboardTiles, ...tilesWithDashboardId];
-      
-      saveToLocalStorage(allTiles);
-      
-      // Update local state to trigger re-render
-      setLocalTiles(allTiles);
-      
-      // Note: Database save is handled by useTabManagement
-
-      console.log('Successfully saved tiles to localStorage:', allTiles);
-    }
-  }, [activeDashboard, updateTabDashboardTiles, saveToLocalStorage, debouncedSaveToDatabase, loadFromLocalStorage, currentDashboardId]);
+  // Removed updateDashboardTiles - now using tab-based system via useTabManagement
 
   // Save immediately on page unload
   useEffect(() => {
@@ -782,35 +634,41 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   };
 
-  const handleTileConfigSubmit = () => {
-    if (!selectedTileType) return;
+  const handleTileConfigSubmit = async () => {
+    if (!selectedTileType || !activeTab) return;
 
-    const newTile: UnifiedTile = {
-      id: `tile_${Date.now()}`,
-      type: selectedTileType.id as any,
-      title: tileConfig.title || tileConfig.symbol || tileConfig.name || selectedTileType.name,
-      symbol: tileConfig.symbol,
-      timeframe: tileConfig.timeframe,
-      name: tileConfig.name, // For portfolio tiles
-      content: tileConfig.content, // For custom tiles
-      prompt: tileConfig.prompt, // For chat_generated tiles
-      displayOptions: tileConfig.displayOptions || {},
-      autoRefresh: tileConfig.autoRefresh || false,
-      isPinned: false,
-      size: { width: 350, height: 400 }, // Legacy pixel size
-      gridPosition: findNextAvailablePosition(getDefaultTileSize(selectedTileType.id as any)), // Smart placement
-      gridSize: getDefaultTileSize(selectedTileType.id as any), // Tile-specific default size
-      dashboard_id: activeDashboard?.id || 'main',
-      created_at: new Date().toISOString(),
-    };
+    try {
+      // Create tile data for the API
+      const tileData = {
+        type: selectedTileType.id as "crypto" | "custom" | "stock" | "placeholder",
+        title: tileConfig.title || tileConfig.symbol || tileConfig.name || selectedTileType.name,
+        symbol: tileConfig.symbol,
+        timeframe: tileConfig.timeframe,
+        name: tileConfig.name, // For portfolio tiles
+        content: tileConfig.content, // For custom tiles
+        prompt: tileConfig.prompt, // For chat_generated tiles
+        displayOptions: tileConfig.displayOptions || {},
+        autoRefresh: tileConfig.autoRefresh || false,
+        gridPosition: findNextAvailablePosition(getDefaultTileSize(selectedTileType.id as any)),
+        gridSize: getDefaultTileSize(selectedTileType.id as any)
+      };
 
-    const updatedTiles = [...tiles, newTile];
-    updateDashboardTiles(updatedTiles);
+      // Call the backend API to create the tile
+      await dashboardAPI.addTile(tileData, activeTab.id, user?.id);
+      
+      // Add a small delay to ensure the database has been updated
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Reload from database to get the updated state
+      await reloadFromDatabase();
 
-    // Reset state
-    setAddTileStep('closed');
-    setSelectedTileType(null);
-    setTileConfig({});
+      // Reset state
+      setAddTileStep('closed');
+      setSelectedTileType(null);
+      setTileConfig({});
+    } catch (error) {
+      console.error('Failed to create tile:', error);
+    }
   };
 
   // Handle crypto tile addition using the existing AddCryptoModal
@@ -846,6 +704,9 @@ const UnifiedDashboardPage: React.FC = () => {
       console.log('User ID:', user.id);
       const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
       console.log('Tile created successfully:', response);
+      
+      // Add a small delay to ensure the database has been updated
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       // Reload data from database to get the updated tiles
       await reloadFromDatabase();
@@ -941,17 +802,21 @@ const UnifiedDashboardPage: React.FC = () => {
   };
 
   const handleResizeTile = (id: string, size: { width: number; height: number }) => {
-    const updatedTiles = tiles.map(tile => 
+    if (!activeTab) return;
+    
+    const updatedTiles = (activeTab.tiles || []).map(tile => 
       tile.id === id ? { ...tile, size } : tile
     );
-    safeUpdateDashboardTiles(updatedTiles);
+    updateTabTiles(activeTab.id, updatedTiles);
   };
 
   const handleMoveTile = (id: string, position: GridPosition) => {
-    const updatedTiles = tiles.map(tile => 
+    if (!activeTab) return;
+    
+    const updatedTiles = (activeTab.tiles || []).map(tile => 
       tile.id === id ? { ...tile, gridPosition: position } : tile
     );
-    safeUpdateDashboardTiles(updatedTiles);
+    updateTabTiles(activeTab.id, updatedTiles);
   };
 
 
@@ -968,6 +833,7 @@ const UnifiedDashboardPage: React.FC = () => {
         onTabEdit={editTab}
         onTabGroup={addTabToGroup}
         onTabUngroup={removeTabFromGroup}
+        onTabMoveToGroup={moveTabToGroup}
         onTabPin={handleTabPin}
         onTabUnpin={handleTabUnpin}
         onGroupCreate={handleCreateGroup}

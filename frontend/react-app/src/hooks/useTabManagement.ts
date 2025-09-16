@@ -84,7 +84,10 @@ export const useTabManagement = ({
           name: tab.name,
           color: tab.color || '#3b82f6',
           isPinned: tab.isPinned || false,
-          created_at: tab.created_at || new Date().toISOString()
+          tiles: tab.tiles || [],
+          layout: tab.layout || 'grid',
+          created_at: tab.created_at || new Date().toISOString(),
+          updated_at: tab.updated_at || new Date().toISOString()
         })),
         tabGroups: tabState.tabGroups.map(group => ({
           id: group.id,
@@ -169,6 +172,7 @@ export const useTabManagement = ({
           // Debug: Log raw database response
           console.log('🔍 RAW DATABASE RESPONSE DEBUG START');
           console.log('Raw dbConfig:', dbConfig);
+          console.log('TabGroups in dbConfig:', dbConfig.tabGroups);
           console.log('🔍 RAW DATABASE RESPONSE DEBUG END');
           
           // Convert DashboardConfig to TabManagementState
@@ -204,6 +208,11 @@ export const useTabManagement = ({
               nextTabId: 1, // Not used with UUID-based IDs from backend
               nextGroupId: 1 // Not used with UUID-based IDs from backend
             };
+            
+            // Debug: Log processed state
+            console.log('🔍 PROCESSED STATE DEBUG START');
+            console.log('Processed tabGroups:', dbState.tabGroups);
+            console.log('🔍 PROCESSED STATE DEBUG END');
           } else {
             // Fallback: create default structure if no tabs found
             const now = new Date().toISOString();
@@ -525,12 +534,11 @@ export const useTabManagement = ({
     const group = state.tabGroups.find(g => g.id === groupId);
     if (!group) return;
 
-    const groupTabs = state.tabs.filter(tab => group.tabs.includes(tab.id));
+    const groupTabs = state.tabs.filter(tab => (group.tabs || group.tabIds || []).includes(tab.id));
     
     if (deleteDashboards) {
       // Delete all tabs in the group and their associated dashboards
-      const remainingTabs = state.tabs.filter(tab => !group.tabs.includes(tab.id));
-      const remainingDashboards = state.dashboards || [];
+      const remainingTabs = state.tabs.filter(tab => !(group.tabs || group.tabIds || []).includes(tab.id));
       
       // Update active tab if it was deleted
       let newActiveTabId = state.activeTabId;
@@ -540,25 +548,49 @@ export const useTabManagement = ({
         newActiveTabId = null;
       }
 
-      // Update tabs to set new active tab
-      const updatedTabs = remainingTabs;
-
       updateState({
-        tabs: updatedTabs,
-        dashboards: remainingDashboards,
+        tabs: remainingTabs,
         tabGroups: state.tabGroups.filter(g => g.id !== groupId),
         activeTabId: newActiveTabId
       });
     } else {
-      // Just ungroup all tabs in the group
-      const updatedTabs = state.tabs;
+      // Ungroup all tabs but keep the group (empty group)
+      const updatedGroups = state.tabGroups.map(g => 
+        g.id === groupId 
+          ? { ...g, tabs: [], tabIds: [] }
+          : g
+      );
 
       updateState({
-        tabs: updatedTabs,
-        tabGroups: state.tabGroups.filter(g => g.id !== groupId)
+        tabGroups: updatedGroups
       });
     }
-  }, [state, updateState]);
+  }, [state.tabs, state.tabGroups, state.activeTabId, updateState]);
+
+  // Move tab between groups
+  const moveTabToGroup = useCallback((tabId: string, targetGroupId: string) => {
+    // Remove tab from all groups first
+    const updatedGroups = state.tabGroups.map(group => ({
+      ...group,
+      tabs: (group.tabs || group.tabIds || []).filter(id => id !== tabId),
+      tabIds: (group.tabIds || group.tabs || []).filter(id => id !== tabId)
+    }));
+
+    // Add tab to target group
+    const finalGroups = updatedGroups.map(group =>
+      group.id === targetGroupId
+        ? { 
+            ...group, 
+            tabs: [...(group.tabs || []), tabId],
+            tabIds: [...(group.tabIds || []), tabId]
+          }
+        : group
+    );
+
+    updateState({
+      tabGroups: finalGroups
+    });
+  }, [state.tabGroups, updateState]);
 
   const reorderTab = useCallback(async (tabId: string, newPosition: number) => {
     try {
@@ -688,7 +720,8 @@ export const useTabManagement = ({
             id: group.id,
             name: group.name,
             color: group.color || '#8b5cf6',
-            tabs: group.tabs || [],
+            tabs: group.tabs || group.tabIds || [],
+            tabIds: group.tabIds || group.tabs || [],
             collapsed: group.collapsed || false,
             position: group.position || 0,
             created_at: group.created_at || new Date().toISOString()
@@ -746,6 +779,7 @@ export const useTabManagement = ({
     removeTabFromGroup,
     toggleGroupCollapse,
     dissolveGroup,
+    moveTabToGroup,
     reorderTab,
     reorderGroup,
     updateDashboardTiles,

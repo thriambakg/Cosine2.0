@@ -38,6 +38,7 @@ interface DashboardTabBarProps {
   onTabEdit: (tabId: string, newName: string, newColor?: string) => void;
   onTabGroup: (tabId: string, groupId: string) => void;
   onTabUngroup: (tabId: string) => void;
+  onTabMoveToGroup: (tabId: string, groupId: string) => void;
   onTabPin: (tabId: string) => void;
   onTabUnpin: (tabId: string) => void;
   onGroupCreate: () => void;
@@ -58,6 +59,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
   onTabEdit,
   onTabGroup,
   onTabUngroup,
+  onTabMoveToGroup,
   onTabPin,
   onTabUnpin,
   onGroupCreate,
@@ -95,6 +97,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
   const [draggedGroup, setDraggedGroup] = useState<DashboardGroup | null>(null);
   const [dragOverTab, setDragOverTab] = useState<string | null>(null);
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [dragPreviewPosition, setDragPreviewPosition] = useState<{ index: number; type: 'before' | 'after' } | null>(null);
 
   
   // Group expand/collapse state
@@ -102,6 +105,15 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
 
 
   const { groupedTabs, ungroupedTabs } = getTabsByGroup();
+
+  // Debug current drag state
+  console.log('🔍 Current drag state:', { 
+    draggedTab: draggedTab?.id, 
+    draggedGroup: draggedGroup?.id,
+    dragPreviewPosition,
+    totalTabs: tabs.length,
+    ungroupedTabsCount: ungroupedTabs.length
+  });
 
   const handleContextMenu = (event: React.MouseEvent, tab: DashboardTab) => {
     event.preventDefault();
@@ -183,8 +195,13 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
 
   // Drag and drop handlers
   const handleTabDragStart = (event: React.DragEvent, tab: DashboardTab) => {
+    console.log('🔄 handleTabDragStart called for tab:', tab.id);
     setDraggedTab(tab);
+    setDragPreviewPosition(null); // Clear any existing preview position
     event.dataTransfer.effectAllowed = 'move';
+    // Set drag data for consistency
+    event.dataTransfer.setData('text/plain', tab.id);
+    event.dataTransfer.setData('application/tab', JSON.stringify(tab));
   };
 
   const handleGroupDragStart = (event: React.DragEvent, group: DashboardGroup) => {
@@ -195,58 +212,101 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
   const handleTabDragOver = (event: React.DragEvent, tabId: string) => {
     event.preventDefault();
     setDragOverTab(tabId);
+    
+    if (draggedTab && draggedTab.id !== tabId) {
+      // Calculate preview position based on mouse position relative to tab
+      const tabElement = event.currentTarget as HTMLElement;
+      const rect = tabElement.getBoundingClientRect();
+      const mouseX = event.clientX;
+      const tabCenterX = rect.left + rect.width / 2;
+      
+      // Determine if drop should be before or after the tab
+      const shouldDropBefore = mouseX < tabCenterX;
+      
+      // Find the index of the target tab
+      const targetTabIndex = tabs.findIndex(tab => tab.id === tabId);
+      if (targetTabIndex !== -1) {
+        const previewPos = {
+          index: shouldDropBefore ? targetTabIndex : targetTabIndex + 1,
+          type: shouldDropBefore ? 'before' : 'after'
+        };
+        console.log('🎯 Tab drag over:', { 
+          draggedTab: draggedTab.id, 
+          targetTab: tabId, 
+          targetIndex: targetTabIndex,
+          mouseX, 
+          tabCenterX, 
+          shouldDropBefore, 
+          previewPos 
+        });
+        setDragPreviewPosition(previewPos);
+      }
+    }
   };
 
   const handleGroupDragOver = (event: React.DragEvent, groupId: string) => {
     event.preventDefault();
     setDragOverGroup(groupId);
+    
+    if (draggedGroup && draggedGroup.id !== groupId) {
+      // Calculate preview position based on mouse position relative to group
+      const groupElement = event.currentTarget as HTMLElement;
+      const rect = groupElement.getBoundingClientRect();
+      const mouseX = event.clientX;
+      const groupCenterX = rect.left + rect.width / 2;
+      
+      // Determine if drop should be before or after the group
+      const shouldDropBefore = mouseX < groupCenterX;
+      
+      // Find the index of the target group
+      const targetGroupIndex = tabGroups.findIndex(group => group.id === groupId);
+      if (targetGroupIndex !== -1) {
+        setDragPreviewPosition({
+          index: shouldDropBefore ? targetGroupIndex : targetGroupIndex + 1,
+          type: shouldDropBefore ? 'before' : 'after'
+        });
+      }
+    }
   };
 
   const handleDragLeave = () => {
     setDragOverTab(null);
     setDragOverGroup(null);
+    setDragPreviewPosition(null);
   };
 
   const handleTabDrop = (event: React.DragEvent, targetTabId: string) => {
     event.preventDefault();
     
-    if (draggedTab && draggedTab.id !== targetTabId) {
-      const targetTab = tabs.find(tab => tab.id === targetTabId);
-      if (targetTab) {
-        // Allow reordering between any tabs
-        const draggedTabIndex = tabs.findIndex(tab => tab.id === draggedTab.id);
-        const targetTabIndex = tabs.findIndex(tab => tab.id === targetTabId);
-        
-        if (draggedTabIndex !== -1 && targetTabIndex !== -1) {
-          onTabReorder(draggedTab.id, targetTabIndex);
-        }
-      }
+    if (draggedTab && draggedTab.id !== targetTabId && dragPreviewPosition) {
+      // Use the preview position for accurate drop placement
+      onTabReorder(draggedTab.id, dragPreviewPosition.index);
     }
     
     setDraggedTab(null);
     setDragOverTab(null);
+    setDragPreviewPosition(null);
   };
 
   const handleGroupDrop = (event: React.DragEvent, targetGroupId: string) => {
     event.preventDefault();
     
+    console.log('🔄 handleGroupDrop called with:', { draggedTab: draggedTab?.id, draggedGroup: draggedGroup?.id, targetGroupId });
+    
     if (draggedTab) {
       // Handle tab being dropped into a group
       console.log(`🔄 Adding tab ${draggedTab.id} to group ${targetGroupId}`);
       onTabGroup(draggedTab.id, targetGroupId);
-    } else if (draggedGroup && draggedGroup.id !== targetGroupId) {
-      // Handle group being dropped onto another group (reordering)
-      const targetGroupIndex = tabGroups.findIndex(group => group.id === targetGroupId);
-      
-      if (targetGroupIndex !== -1) {
-        onGroupReorder(draggedGroup.id, targetGroupIndex);
-      }
+    } else if (draggedGroup && draggedGroup.id !== targetGroupId && dragPreviewPosition) {
+      // Handle group being dropped onto another group (reordering) using preview position
+      onGroupReorder(draggedGroup.id, dragPreviewPosition.index);
     }
     
     setDraggedTab(null);
     setDraggedGroup(null);
     setDragOverTab(null);
     setDragOverGroup(null);
+    setDragPreviewPosition(null);
   };
 
   const handleDragEnd = () => {
@@ -254,6 +314,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
     setDraggedGroup(null);
     setDragOverTab(null);
     setDragOverGroup(null);
+    setDragPreviewPosition(null);
   };
 
   // Group dropdown handlers
@@ -261,6 +322,37 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
     if (tabId) {
       onTabActivate(tabId);
     }
+  };
+
+  // Function to render drag preview line
+  const renderDragPreviewLine = (index: number) => {
+    if (!dragPreviewPosition || dragPreviewPosition.index !== index) return null;
+    
+    console.log('🎨 Rendering preview line:', { 
+      index, 
+      dragPreviewPosition, 
+      shouldRender: dragPreviewPosition.index === index 
+    });
+    
+    return (
+      <Box
+        key={`preview-${index}`}
+        sx={{
+          position: 'absolute',
+          top: '50%',
+          left: dragPreviewPosition.type === 'before' ? '-2px' : 'auto',
+          right: dragPreviewPosition.type === 'after' ? '-2px' : 'auto',
+          width: '4px',
+          height: '24px',
+          transform: 'translateY(-50%)',
+          backgroundColor: '#f59e0b',
+          zIndex: 1000,
+          pointerEvents: 'none',
+          borderRadius: '2px',
+          boxShadow: '0 0 8px rgba(245, 158, 11, 0.6)'
+        }}
+      />
+    );
   };
 
   const renderTab = (tab: DashboardTab) => {
@@ -429,7 +521,13 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
           </Box>
           
           {/* Individual tabs */}
-          {groupTabs.map(tab => renderTab(tab))}
+          {groupTabs.map((tab, index) => (
+            <React.Fragment key={tab.id}>
+              {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
+              {renderTab(tab)}
+              {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
+            </React.Fragment>
+          ))}
         </Box>
       );
     }
@@ -440,9 +538,43 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
         {/* Group dropdown */}
         <FormControl size="small" sx={{ minWidth: 200 }}>
           <Select
-            value={activeTabInGroup?.id || ''}
+            value={(() => {
+              // Only use the active tab ID if it exists in the current group's tabs
+              const validTabIds = groupTabs.map(tab => tab.id);
+              return activeTabInGroup && validTabIds.includes(activeTabInGroup.id) ? activeTabInGroup.id : '';
+            })()}
             onChange={(e) => handleGroupTabSelect(e.target.value)}
             displayEmpty
+            renderValue={(value) => (
+              <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                {/* Color indicator - solid line */}
+                <Box
+                  sx={{
+                    width: 3,
+                    height: 20,
+                    backgroundColor: group.color,
+                    mr: 1
+                  }}
+                />
+                <Typography variant="body2" sx={{ color: group.color, fontWeight: 600, mr: 1 }}>
+                  {group.name}
+                </Typography>
+                <Chip
+                  label={groupTabs.length}
+                  size="small"
+                  sx={{
+                    height: 16,
+                    fontSize: '0.7rem',
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    color: '#60a5fa',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                    '& .MuiChip-label': {
+                      px: 1
+                    }
+                  }}
+                />
+              </Box>
+            )}
             draggable
             onDragStart={(e) => {
               e.stopPropagation();
@@ -519,7 +651,9 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
                   border: '1px solid #374151',
                   color: '#ffffff',
                   maxHeight: 300
-                }
+                },
+                onDragOver: (e) => e.preventDefault(), // Allow drag over
+                onDrop: (e) => e.preventDefault() // Prevent default drop behavior
               }
             }}
           >
@@ -550,41 +684,125 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
               </Box>
             </MenuItem>
             
-            {/* Group tabs */}
-            {groupTabs.map(tab => (
-              <MenuItem 
-                key={tab.id} 
-                value={tab.id}
-                sx={{
-                  backgroundColor: tab.id === activeTabId ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
-                  '&:hover': {
-                    backgroundColor: tab.id === activeTabId ? 'rgba(245, 158, 11, 0.3)' : 'rgba(59, 130, 246, 0.1)'
-                  }
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                  {/* Pin indicator */}
-                  {tab.isPinned && (
-                    <PinIcon sx={{ 
-                      fontSize: 12, 
-                      color: '#f59e0b', 
-                      mr: 0.5 
-                    }} />
-                  )}
-                  
-                  <Typography
-                    variant="body2"
+            {/* Group tabs - render as MenuItems with proper values but tab-like styling */}
+            {groupTabs.map((tab, index) => {
+              const isActive = tab.id === activeTabId;
+              return (
+                <React.Fragment key={tab.id}>
+                  {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
+                  <MenuItem 
+                    value={tab.id}
+                    draggable
+                    onDragStart={(e) => {
+                      console.log('🔄 Dropdown tab drag start:', tab.id);
+                      e.stopPropagation(); // Prevent group context menu
+                      // Set drag data to ensure it's available outside the Select component
+                      e.dataTransfer.setData('text/plain', tab.id);
+                      e.dataTransfer.setData('application/tab', JSON.stringify(tab));
+                      handleTabDragStart(e, tab);
+                    }}
+                    onDragOver={(e) => {
+                      e.stopPropagation(); // Prevent group context menu
+                      handleTabDragOver(e, tab.id);
+                    }}
+                    onDrop={(e) => {
+                      e.stopPropagation(); // Prevent group context menu
+                      handleTabDrop(e, tab.id);
+                    }}
+                    onDragEnd={handleDragEnd}
                     sx={{
-                      color: tab.id === activeTabId ? '#f59e0b' : '#ffffff',
-                      fontWeight: tab.id === activeTabId ? 600 : 400,
-                      flex: 1
+                      display: 'flex',
+                      alignItems: 'center',
+                      minWidth: '180px',
+                      maxWidth: '220px',
+                      height: '32px', // Scaled down from 40px
+                      backgroundColor: isActive ? '#1e293b' : 'transparent',
+                      borderBottom: isActive ? 'none' : '1px solid #374151',
+                      cursor: 'grab',
+                      position: 'relative',
+                      opacity: draggedTab?.id === tab.id ? 0.5 : 1,
+                      borderLeft: dragOverTab === tab.id ? '3px solid #f59e0b' : 'none',
+                      margin: '1px 0',
+                      '&:hover': {
+                        backgroundColor: isActive ? '#1e293b' : 'rgba(30, 41, 59, 0.5)'
+                      },
+                      '&:active': {
+                        cursor: 'grabbing'
+                      },
+                      '&:focus': {
+                        outline: 'none'
+                      },
+                      outline: 'none'
+                    }}
+                    onClick={() => onTabActivate(tab.id)}
+                    onContextMenu={(e) => {
+                      e.stopPropagation(); // Prevent group context menu
+                      handleContextMenu(e, tab);
                     }}
                   >
-                    {tab.name}
-                  </Typography>
-                </Box>
-              </MenuItem>
-            ))}
+                    {/* Color indicator - solid line (scaled down) */}
+                    {tab.color && (
+                      <Box
+                        sx={{
+                          width: 2, // Scaled down from 3px
+                          height: 16, // Scaled down from 20px
+                          backgroundColor: tab.color,
+                          ml: 0.5, // Scaled down from 1
+                          mr: 0.25 // Scaled down from 0.5
+                        }}
+                      />
+                    )}
+
+                    {/* Pin indicator */}
+                    {tab.isPinned && (
+                      <PinIcon sx={{ 
+                        fontSize: 10, // Scaled down from 12
+                        color: '#f59e0b', 
+                        ml: tab.color ? 0.25 : 0.5, // Scaled down
+                        mr: 0.25 // Scaled down from 0.5
+                      }} />
+                    )}
+
+                    {/* Tab content */}
+                    <Box sx={{ flex: 1, px: 1, minWidth: 0 }}> {/* Scaled down padding */}
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontSize: '0.75rem', // Scaled down font size
+                          color: isActive ? '#ffffff' : '#9ca3af',
+                          fontWeight: isActive ? 600 : 400,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {tab.name}
+                      </Typography>
+                    </Box>
+
+                    {/* Close button */}
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTabClose(tab.id);
+                      }}
+                      sx={{
+                        color: '#9ca3af',
+                        padding: '2px', // Scaled down padding
+                        '&:hover': {
+                          color: '#ffffff',
+                          backgroundColor: 'rgba(239, 68, 68, 0.1)'
+                        }
+                      }}
+                    >
+                      <CloseIcon sx={{ fontSize: 12 }} /> {/* Scaled down from small */}
+                    </IconButton>
+                  </MenuItem>
+                  {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
+                </React.Fragment>
+              );
+            })}
           </Select>
         </FormControl>
       </Box>
@@ -615,17 +833,67 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
           }
         }
       }}
+      onDragOver={(e) => {
+        // Allow drag over the entire tab bar area
+        e.preventDefault();
+      }}
+      onDrop={(e) => {
+        // Handle drops on the main tab bar area
+        e.preventDefault();
+        console.log('🔄 Drop on main tab bar area');
+      }}
     >
       {/* Tab groups */}
-      {tabGroups.map(group => renderGroup(group))}
+      {tabGroups.map((group, index) => (
+        <React.Fragment key={group.id}>
+          {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
+          {renderGroup(group)}
+          {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
+        </React.Fragment>
+      ))}
 
       {/* Divider between groups and ungrouped tabs */}
       {tabGroups.length > 0 && ungroupedTabs.length > 0 && (
         <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: '#374151' }} />
       )}
 
-      {/* Ungrouped tabs */}
-      {ungroupedTabs.map(tab => renderTab(tab))}
+      {/* Ungrouped tabs with drop zone */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          minHeight: '40px',
+          backgroundColor: dragOverTab === 'ungrouped-area' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+          borderLeft: dragOverTab === 'ungrouped-area' ? '3px solid #3b82f6' : 'none',
+          px: dragOverTab === 'ungrouped-area' ? 1 : 0,
+          transition: 'all 0.2s ease',
+          position: 'relative'
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOverTab('ungrouped-area');
+        }}
+        onDragLeave={() => {
+          setDragOverTab(null);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (draggedTab) {
+            console.log('🔄 Dropping tab in ungrouped area:', draggedTab.id);
+            onTabUngroup(draggedTab.id);
+          }
+          setDragOverTab(null);
+          setDraggedTab(null);
+        }}
+      >
+        {ungroupedTabs.map((tab, index) => (
+          <React.Fragment key={tab.id}>
+            {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
+            {renderTab(tab)}
+            {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
+          </React.Fragment>
+        ))}
+      </Box>
 
       {/* Add tab button */}
       <IconButton
@@ -702,24 +970,41 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
               </ListItemText>
             </MenuItem>
 
-            <MenuItem onClick={(e) => handleOpenGroupSubmenu(e, contextMenu.tab!)}>
-              <ListItemIcon>
-                <GroupIcon sx={{ color: '#9ca3af' }} />
-              </ListItemIcon>
-              <ListItemText>Add to Group</ListItemText>
-            </MenuItem>
+            {/* Show "Remove from Group" if tab is in a group */}
+            {(() => {
+              const tabInGroup = tabGroups.find(group => 
+                (group.tabs || group.tabIds || []).includes(contextMenu?.tab?.id || '')
+              );
+              return tabInGroup ? (
+                <MenuItem onClick={() => {
+                  onTabUngroup(contextMenu?.tab?.id || '');
+                  handleCloseContextMenu();
+                }}>
+                  <ListItemIcon>
+                    <UngroupIcon sx={{ color: '#9ca3af' }} />
+                  </ListItemIcon>
+                  <ListItemText>Remove from Group</ListItemText>
+                </MenuItem>
+              ) : null;
+            })()}
 
-            {false && (
-              <MenuItem onClick={() => {
-                onTabUngroup(contextMenu?.tab?.id || '');
-                handleCloseContextMenu();
-              }}>
-                <ListItemIcon>
-                  <UngroupIcon sx={{ color: '#9ca3af' }} />
-                </ListItemIcon>
-                <ListItemText>Remove from Group</ListItemText>
-              </MenuItem>
-            )}
+            {/* Show "Add to Group" or "Switch Group" submenu */}
+            {(() => {
+              const currentGroup = tabGroups.find(group => 
+                (group.tabs || group.tabIds || []).includes(contextMenu?.tab?.id || '')
+              );
+              const isInGroup = !!currentGroup;
+              const hasOtherGroups = tabGroups.length > (isInGroup ? 1 : 0);
+              
+              return hasOtherGroups ? (
+                <MenuItem onClick={(e) => handleOpenGroupSubmenu(e, contextMenu.tab!)}>
+                  <ListItemIcon>
+                    <GroupIcon sx={{ color: '#9ca3af' }} />
+                  </ListItemIcon>
+                  <ListItemText>{isInGroup ? 'Switch Group' : 'Add to Group'}</ListItemText>
+                </MenuItem>
+              ) : null;
+            })()}
 
             <Divider sx={{ borderColor: '#374151' }} />
 
@@ -756,42 +1041,66 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
       >
         {groupSubmenu?.tab && (
           <>
-            <MenuItem onClick={() => {
-              onTabUngroup(groupSubmenu.tab!.id);
-              handleCloseContextMenu();
-            }}>
-              <ListItemIcon>
-                <UngroupIcon sx={{ color: '#9ca3af' }} />
-              </ListItemIcon>
-              <ListItemText>No Group</ListItemText>
-            </MenuItem>
-            {tabGroups.map(group => (
-              <MenuItem 
-                key={group.id}
-                onClick={() => {
-                  onTabGroup(groupSubmenu.tab!.id, group.id);
+            {/* Show "Remove from Group" option if tab is currently in a group */}
+            {(() => {
+              const currentGroup = tabGroups.find(group => 
+                (group.tabs || group.tabIds || []).includes(groupSubmenu.tab!.id)
+              );
+              return currentGroup ? (
+                <MenuItem onClick={() => {
+                  onTabUngroup(groupSubmenu.tab!.id);
                   handleCloseContextMenu();
-                }}
-              >
-                <ListItemIcon>
-                  <Box
-                    sx={{
-                      width: 3,
-                      height: 20,
-                      backgroundColor: group.color
-                    }}
-                  />
-                </ListItemIcon>
-                <ListItemText>
-                  {group.name}
-                  {false && (
-                    <Typography variant="caption" sx={{ color: '#9ca3af', ml: 1 }}>
-                      (Current)
-                    </Typography>
-                  )}
-                </ListItemText>
-              </MenuItem>
-            ))}
+                }}>
+                  <ListItemIcon>
+                    <UngroupIcon sx={{ color: '#9ca3af' }} />
+                  </ListItemIcon>
+                  <ListItemText>Remove from Group</ListItemText>
+                </MenuItem>
+              ) : null;
+            })()}
+
+            {/* Show all groups for adding/switching */}
+            {tabGroups.map(group => {
+              const currentGroup = tabGroups.find(g => 
+                (g.tabs || g.tabIds || []).includes(groupSubmenu.tab!.id)
+              );
+              const isCurrentGroup = currentGroup?.id === group.id;
+              
+              return (
+                <MenuItem 
+                  key={group.id}
+                  onClick={() => {
+                    if (currentGroup && !isCurrentGroup) {
+                      // Switch to different group
+                      onTabMoveToGroup(groupSubmenu.tab!.id, group.id);
+                    } else if (!currentGroup) {
+                      // Add to group
+                      onTabGroup(groupSubmenu.tab!.id, group.id);
+                    }
+                    handleCloseContextMenu();
+                  }}
+                  disabled={isCurrentGroup}
+                >
+                  <ListItemIcon>
+                    <Box
+                      sx={{
+                        width: 3,
+                        height: 20,
+                        backgroundColor: group.color
+                      }}
+                    />
+                  </ListItemIcon>
+                  <ListItemText>
+                    {group.name}
+                    {isCurrentGroup && (
+                      <Typography variant="caption" sx={{ color: '#9ca3af', ml: 1 }}>
+                        (Current)
+                      </Typography>
+                    )}
+                  </ListItemText>
+                </MenuItem>
+              );
+            })}
           </>
         )}
       </Menu>
