@@ -121,9 +121,9 @@ def lambda_handler(event, context):
 def list_sessions(user_id: str) -> Dict[str, Any]:
     """Get list of user's chat sessions"""
     try:
-        # Query sessions for user, sorted by timestamp descending
+        # Query sessions for user, sorted by creation date descending
         response = table.query(
-            IndexName='UserSessionsIndex',
+            IndexName='CreatedAtIndex',
             KeyConditionExpression='user_id = :user_id',
             ExpressionAttributeValues={':user_id': user_id},
             ScanIndexForward=False,  # Most recent first
@@ -140,8 +140,8 @@ def list_sessions(user_id: str) -> Dict[str, Any]:
                 sessions[session_id] = {
                     'session_id': session_id,
                     'user_id': user_id,
-                    'created_at': item['timestamp'],
-                    'last_updated': item['timestamp'],
+                    'created_at': item['created_at'],
+                    'last_updated': item.get('last_updated', item['created_at']),
                     'title': item.get('title', f'Chat {session_id[:8]}'),
                     'message_count': 0,
                     'messages': []
