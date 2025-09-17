@@ -1261,13 +1261,13 @@ module "session_management_lambda" {
   timeout       = 30
   memory_size   = 256
 
-  source_path = "../backend_app/src/session_management/app"
+  source_dir = "../backend_app/src/session_management/app"
 
   environment_variables = {
     CHAT_SESSIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
   }
 
-  lambda_policies = [
+  additional_policy_arns = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn
