@@ -9,27 +9,30 @@ import {
   IconButton,
   Avatar,
   FormControl,
-  InputLabel,
   Select,
   MenuItem,
   Chip,
   Button,
   Stack,
   CircularProgress,
-  Card,
-  CardContent,
-  Alert,
+  Drawer,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Tooltip,
 } from '@mui/material';
 import {
   Send as SendIcon,
   SmartToy as BotIcon,
   Person as PersonIcon,
-  CloudUpload as UploadIcon,
   InsertDriveFile as FileIcon,
-  Settings as SettingsIcon,
-  MoreVert as MoreVertIcon,
-  WifiOff as WifiOffIcon,
-  Wifi as WifiIcon,
+  AttachFile as AttachFileIcon,
+  Chat as ChatIcon,
+  Add as AddIcon,
+  Close as CloseIcon,
+  Psychology as BrainIcon,
 } from '@mui/icons-material';
 
 interface Message {
@@ -37,14 +40,12 @@ interface Message {
   text: string;
   sender: 'user' | 'bot';
   timestamp: Date;
-  files?: UploadedFile[];
-  messageId?: string; // For tracking message delivery
   status?: 'sending' | 'sent' | 'delivered' | 'error';
+  files?: UploadedFile[];
 }
 
 interface UploadedFile {
   name: string;
-  type: string;
   size: number;
   content: string;
 }
@@ -58,9 +59,17 @@ interface WebSocketMessage {
   timestamp?: string;
 }
 
+interface ChatSession {
+  id: string;
+  title: string;
+  lastMessage: string;
+  timestamp: Date;
+  messageCount: number;
+}
+
 // Custom styled components for Wall Street chic
 const GlassCard = ({ children, sx = {}, ...props }: any) => (
-  <Card
+  <Box
     sx={{
       background: 'rgba(15, 23, 42, 0.95)',
       border: '2px solid #374151',
@@ -71,10 +80,8 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
     }}
     {...props}
   >
-    <CardContent sx={{ p: 0 }}>
-      {children}
-    </CardContent>
-  </Card>
+    {children}
+  </Box>
 );
 
 const MessageBubble = ({ isUser, children, status, ...props }: any) => (
@@ -173,30 +180,9 @@ const FilePreview = ({ children, ...props }: any) => (
       display: 'flex',
       alignItems: 'center',
       gap: 1,
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-      border: '1px solid #3b82f6',
-      borderRadius: '0px',
-    }}
-    {...props}
-  >
-    {children}
-  </Box>
-);
-
-const DropZone = ({ isDragging, children, ...props }: any) => (
-  <Box
-    sx={{
-      border: `2px dashed ${isDragging ? '#22c55e' : '#374151'}`,
-      borderRadius: '0px',
-      p: 3,
-      textAlign: 'center',
-      cursor: 'pointer',
-      transition: 'all 0.3s ease',
-      backgroundColor: isDragging ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
-      '&:hover': {
-        borderColor: '#22c55e',
-        backgroundColor: 'rgba(34, 197, 94, 0.1)',
-      },
+      backgroundColor: 'rgba(55, 65, 81, 0.5)',
+      borderRadius: '4px',
+      border: '1px solid #374151',
     }}
     {...props}
   >
@@ -212,11 +198,29 @@ export default function ChatPage() {
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
-  const [isDragging, setIsDragging] = useState(false);
+  // Connection status variables - used internally for WebSocket logic, not displayed in UI
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
   const [connectionEstablished, setConnectionEstablished] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [chatSessions] = useState<ChatSession[]>([
+    {
+      id: '1',
+      title: 'Stock Analysis Discussion',
+      lastMessage: 'Can you analyze AAPL stock performance?',
+      timestamp: new Date(),
+      messageCount: 15
+    },
+    {
+      id: '2', 
+      title: 'Portfolio Optimization',
+      lastMessage: 'Help me optimize my crypto portfolio',
+      timestamp: new Date(Date.now() - 86400000),
+      messageCount: 8
+    }
+  ]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -270,6 +274,7 @@ export default function ChatPage() {
       ws.onopen = () => {
         console.log('✅ WebSocket connected');
         setConnectionStatus('connected');
+        setConnectionError(null); // Clear any previous errors
         reconnectAttemptsRef.current = 0;
         
         // Send a connection establishment message (not a chat message) only if not already established
@@ -319,20 +324,29 @@ export default function ChatPage() {
             connectWebSocket();
           }, delay);
         } else if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-          setConnectionError('Failed to reconnect after multiple attempts');
+          setConnectionError('Unable to connect. Please refresh the page to try again.');
+          setConnectionStatus('error');
         }
       };
 
       ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
-        setConnectionStatus('error');
-        setConnectionError('WebSocket connection error');
+        // Log error for debugging but don't show to user
+        console.warn('🔧 WebSocket connection issue detected (handling gracefully):', error.type);
+        // Don't set error status immediately - let onclose handle reconnection
+        // This prevents showing error messages for temporary connection issues
+        console.log('🔄 WebSocket error occurred, waiting for connection to close for retry');
+        
+        // Only set error status if we've exhausted reconnection attempts
+        if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+          setConnectionStatus('error');
+          setConnectionError('Connection lost. Please refresh to reconnect.');
+        }
       };
 
     } catch (error) {
-      console.error('Error creating WebSocket connection:', error);
+      console.warn('🔧 WebSocket connection creation issue (handling gracefully):', error);
       setConnectionStatus('error');
-      setConnectionError('Failed to create WebSocket connection');
+      setConnectionError('Unable to establish connection. Please try again.');
     }
   }, [user?.id]);
 
@@ -345,7 +359,7 @@ export default function ChatPage() {
       case 'message_received':
         // Update message status to delivered
         setMessages(prev => prev.map(msg => 
-          msg.messageId === data.message_id 
+          msg.id === data.message_id 
             ? { ...msg, status: 'delivered' as const }
             : msg
         ));
@@ -382,6 +396,17 @@ export default function ChatPage() {
       connectWebSocket();
     }
 
+    // Add global error handler for unhandled WebSocket errors
+    const handleGlobalError = (event: ErrorEvent) => {
+      if (event.message && event.message.includes('WebSocket')) {
+        console.warn('🔧 Global WebSocket error caught (handling gracefully):', event.message);
+        // Don't propagate the error to avoid showing it to users
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener('error', handleGlobalError);
+
     return () => {
       if (websocketRef.current) {
         websocketRef.current.close();
@@ -389,6 +414,7 @@ export default function ChatPage() {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
+      window.removeEventListener('error', handleGlobalError);
     };
   }, [user?.id, ENV_CONFIG.websocketUrl]);
 
@@ -402,75 +428,41 @@ export default function ChatPage() {
 
   const handleFileUpload = (files: FileList) => {
     Array.from(files).forEach((file) => {
-      if (file.size > 10 * 1024 * 1024) {
-        const errorMessage: Message = {
-          id: Date.now().toString(),
-          text: `File "${file.name}" is too large (max 10MB)`,
-          sender: 'bot',
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
-        return;
-      }
-
       const reader = new FileReader();
       reader.onload = (e) => {
-        const result = e.target?.result as string;
-        const fileData: UploadedFile = {
+        const content = e.target?.result as string;
+        setUploadedFiles(prev => [...prev, {
           name: file.name,
-          type: file.type,
           size: file.size,
-          content: result.split(',')[1] || result,
-        };
-        setUploadedFiles((prev) => [...prev, fileData]);
+          content
+        }]);
       };
-      reader.readAsDataURL(file);
+      reader.readAsText(file);
     });
   };
 
-  const removeFile = (fileName: string) => {
-    setUploadedFiles((prev) => prev.filter((file) => file.name !== fileName));
+  const handleFileRemove = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files) {
-      handleFileUpload(e.dataTransfer.files);
-    }
-  };
-
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() && uploadedFiles.length === 0) return;
-    if (isLoadingChat || connectionStatus !== 'connected') return;
+  const handleSendMessage = () => {
+    if (!inputMessage.trim() || isLoadingChat) return;
 
     const messageId = `msg_${Date.now()}`;
     const userMessage: Message = {
       id: messageId,
-      text: inputMessage || (uploadedFiles.length > 0 ? `📁 Uploaded ${uploadedFiles.length} file(s): ${uploadedFiles.map(f => f.name).join(', ')}` : ''),
+      text: inputMessage,
       sender: 'user',
       timestamp: new Date(),
-      files: uploadedFiles,
-      messageId,
       status: 'sending',
+      files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages(prev => [...prev, userMessage]);
     setInputMessage('');
     setUploadedFiles([]);
     setIsLoadingChat(true);
 
-    // Send message via WebSocket
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
       const messageData = {
         type: 'chat',
@@ -515,34 +507,6 @@ export default function ChatPage() {
     }
   };
 
-  const getConnectionStatusIcon = () => {
-    switch (connectionStatus) {
-      case 'connected':
-        return <WifiIcon sx={{ color: '#22c55e' }} />;
-      case 'connecting':
-        return <CircularProgress size={20} sx={{ color: '#3b82f6' }} />;
-      case 'disconnected':
-      case 'error':
-        return <WifiOffIcon sx={{ color: '#ef4444' }} />;
-      default:
-        return <WifiOffIcon sx={{ color: '#9ca3af' }} />;
-    }
-  };
-
-  const getConnectionStatusText = () => {
-    switch (connectionStatus) {
-      case 'connected':
-        return 'Connected';
-      case 'connecting':
-        return 'Connecting...';
-      case 'disconnected':
-        return 'Disconnected';
-      case 'error':
-        return 'Connection Error';
-      default:
-        return 'Unknown';
-    }
-  };
 
   if (isLoading) {
     return (
@@ -557,256 +521,422 @@ export default function ChatPage() {
   }
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)' }}>
-      {/* Header */}
-      <GlassCard sx={{ p: 2, borderBottom: '2px solid #374151' }}>
-        <Box display="flex" alignItems="center" justifyContent="space-between">
-          <Box display="flex" alignItems="center" gap={2}>
-            <Avatar sx={{ bgcolor: '#3b82f6', width: 40, height: 40 }}>
-              <BotIcon />
-            </Avatar>
-            <Box>
-              <Typography variant="h6" fontWeight={700} color="white" sx={{ textTransform: 'uppercase' }}>
-                Cosine AI Assistant
-              </Typography>
-              <Typography variant="body2" color="#3b82f6" sx={{ textTransform: 'uppercase' }}>
-                Financial Analysis Expert
-              </Typography>
+    <Box sx={{ 
+      height: 'calc(100vh - 64px)', 
+      maxHeight: 'calc(100vh - 64px)',
+      display: 'flex', 
+      background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
+      {/* Background Effects */}
+      <Box sx={{
+        position: 'absolute',
+        inset: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.3)'
+      }} />
+
+      {/* Sidebar */}
+      <Drawer
+        variant="persistent"
+        anchor="left"
+        open={sidebarOpen}
+        sx={{
+          width: sidebarOpen ? (sidebarCollapsed ? 60 : 300) : 0,
+          flexShrink: 0,
+          transition: 'width 0.3s ease-in-out',
+          '& .MuiDrawer-paper': {
+            width: sidebarOpen ? (sidebarCollapsed ? 60 : 300) : 0,
+            boxSizing: 'border-box',
+            backgroundColor: 'transparent',
+            border: 'none',
+            position: 'relative',
+            transition: 'width 0.3s ease-in-out',
+            overflow: 'hidden',
+          },
+        }}
+      >
+        <GlassCard sx={{ height: 'calc(100vh - 64px)', maxHeight: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Sidebar Header */}
+          <Box sx={{ p: 2, borderBottom: '2px solid #374151', minHeight: 64 }}>
+            <Box display="flex" alignItems="center" justifyContent="space-between">
+              {!sidebarCollapsed && (
+                <Box display="flex" alignItems="center" gap={1}>
+                  <Tooltip title="Collapse sidebar">
+                    <IconButton 
+                      onClick={() => setSidebarCollapsed(true)}
+                      sx={{ color: '#3b82f6', p: 0 }}
+                    >
+                      <ChatIcon />
+                    </IconButton>
+                  </Tooltip>
+                  <Typography variant="h6" fontWeight={700} color="white" sx={{ textTransform: 'uppercase' }}>
+                    Chat History
+                  </Typography>
+                </Box>
+              )}
+              {sidebarCollapsed && (
+                <Box display="flex" alignItems="center" justifyContent="center" sx={{ width: '100%' }}>
+                  <Tooltip title="Expand sidebar">
+                    <IconButton 
+                      onClick={() => setSidebarCollapsed(false)}
+                      sx={{ color: '#3b82f6', p: 0 }}
+                    >
+                      <ChatIcon />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              )}
+              {!sidebarCollapsed && (
+                <Box display="flex" alignItems="center" gap={1}>
+                  <Tooltip title="Close sidebar">
+                    <IconButton 
+                      onClick={() => setSidebarOpen(false)}
+                      sx={{ color: '#9ca3af' }}
+                    >
+                      <CloseIcon />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              )}
             </Box>
           </Box>
-          <Box display="flex" alignItems="center" gap={2}>
-            {/* Connection Status */}
-            <Box display="flex" alignItems="center" gap={1}>
-              {getConnectionStatusIcon()}
-              <Typography variant="body2" color="white" sx={{ textTransform: 'uppercase' }}>
-                {getConnectionStatusText()}
-              </Typography>
-            </Box>
-            
-            <FormControl size="small" sx={{ minWidth: 150 }}>
-              <InputLabel sx={{ color: '#9ca3af' }}>AI Model</InputLabel>
-              <Select
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
+
+          {/* New Chat Button */}
+          {!sidebarCollapsed && (
+            <Box sx={{ p: 2 }}>
+              <Button
+                fullWidth
+                variant="outlined"
+                startIcon={<AddIcon />}
                 sx={{
+                  borderColor: '#374151',
                   color: 'white',
-                  '& .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#374151',
-                  },
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#22c55e',
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#22c55e',
+                  textTransform: 'uppercase',
+                  '&:hover': {
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
                   },
                 }}
               >
-                <MenuItem value="claude-3-sonnet">Claude 3 Sonnet</MenuItem>
-                <MenuItem value="claude-3-haiku">Claude 3 Haiku</MenuItem>
-                <MenuItem value="gpt-4">GPT-4</MenuItem>
-              </Select>
-            </FormControl>
-            <IconButton sx={{ color: '#9ca3af' }}>
-              <SettingsIcon />
-            </IconButton>
-            <IconButton sx={{ color: '#9ca3af' }}>
-              <MoreVertIcon />
-            </IconButton>
-          </Box>
-        </Box>
-      </GlassCard>
-
-      {/* Connection Error Alert */}
-      {connectionError && (
-        <Alert 
-          severity="error" 
-          sx={{ 
-            m: 2, 
-            backgroundColor: 'rgba(239, 68, 68, 0.1)', 
-            border: '1px solid #ef4444',
-            color: '#ef4444'
-          }}
-          onClose={() => setConnectionError(null)}
-        >
-          {connectionError}
-        </Alert>
-      )}
-
-      {/* Messages */}
-      <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
-        <Stack spacing={2}>
-          {messages.map((message) => (
-            <Box key={message.id} display="flex" gap={2}>
-              <Avatar sx={{ bgcolor: message.sender === 'user' ? '#22c55e' : '#374151', width: 32, height: 32 }}>
-                {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}
-              </Avatar>
-              <Box sx={{ flex: 1 }}>
-                <MessageBubble isUser={message.sender === 'user'} status={message.status}>
-                  {message.sender === 'bot' && typingMessages.has(message.id) ? (
-                    <TypingText 
-                      text={message.text} 
-                      speed={20}
-                      onComplete={() => {
-                        setTypingMessages(prev => {
-                          const newSet = new Set(prev);
-                          newSet.delete(message.id);
-                          return newSet;
-                        });
-                      }}
-                    />
-                  ) : (
-                    <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                      {message.text}
-                    </Typography>
-                  )}
-                  {message.files && message.files.length > 0 && (
-                    <Stack spacing={1} mt={1}>
-                      {message.files.map((file) => (
-                        <FilePreview key={file.name}>
-                          <FileIcon sx={{ color: '#22c55e' }} />
-                          <Typography variant="body2" color="white">
-                            {file.name}
-                          </Typography>
-                          <Typography variant="caption" color="#9ca3af">
-                            ({(file.size / 1024).toFixed(1)} KB)
-                          </Typography>
-                        </FilePreview>
-                      ))}
-                    </Stack>
-                  )}
-                </MessageBubble>
-                <Typography variant="caption" color="#9ca3af" sx={{ ml: 1, textTransform: 'uppercase' }}>
-                  {message.timestamp.toLocaleTimeString()}
-                </Typography>
-              </Box>
-            </Box>
-          ))}
-          {isLoadingChat && (
-            <Box display="flex" gap={2}>
-              <Avatar sx={{ bgcolor: '#374151', width: 32, height: 32 }}>
-                <BotIcon />
-              </Avatar>
-              <Box display="flex" alignItems="center" gap={1}>
-                <CircularProgress size={20} sx={{ color: '#22c55e' }} />
-                <Typography variant="body2" color="#9ca3af" sx={{ textTransform: 'uppercase' }}>
-                  AI is thinking...
-                </Typography>
-              </Box>
+                New Chat
+              </Button>
             </Box>
           )}
-          <div ref={messagesEndRef} />
-        </Stack>
-      </Box>
+          
+          {/* Collapsed New Chat Button */}
+          {sidebarCollapsed && (
+            <Box sx={{ p: 1, display: 'flex', justifyContent: 'center' }}>
+              <Tooltip title="New Chat">
+                <IconButton
+                  sx={{
+                    color: '#9ca3af',
+                    '&:hover': {
+                      color: '#3b82f6',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                  }}
+                >
+                  <AddIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
 
-      {/* File Upload Area */}
-      {uploadedFiles.length > 0 && (
-        <Box sx={{ p: 2, borderTop: '1px solid #374151' }}>
-          <Typography variant="body2" color="#9ca3af" mb={1} sx={{ textTransform: 'uppercase' }}>
-            Uploaded Files:
-          </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            {uploadedFiles.map((file) => (
-              <Chip
-                key={file.name}
-                label={file.name}
-                onDelete={() => removeFile(file.name)}
-                sx={{
-                  bgcolor: 'rgba(34, 197, 94, 0.1)',
-                  color: '#22c55e',
-                  border: '1px solid #22c55e',
-                  borderRadius: '0px',
-                  '& .MuiChip-deleteIcon': {
-                    color: '#22c55e',
+          {/* Chat Sessions */}
+          <Box sx={{ flex: 1, overflow: 'auto', px: sidebarCollapsed ? 0.5 : 1, minHeight: 0 }}>
+            <List>
+              {chatSessions.map((session) => (
+                <ListItem key={session.id} disablePadding>
+                  <ListItemButton
+                    sx={{
+                      borderRadius: '4px',
+                      mb: 1,
+                      p: sidebarCollapsed ? 1 : 2,
+                      justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                      '&:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      },
+                    }}
+                  >
+                    {sidebarCollapsed ? (
+                      <Tooltip title={session.title} placement="right">
+                        <ChatIcon sx={{ color: '#9ca3af' }} />
+                      </Tooltip>
+                    ) : (
+                      <>
+                        <ListItemIcon>
+                          <ChatIcon sx={{ color: '#9ca3af' }} />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={
+                            <Typography variant="body2" color="white" sx={{ fontWeight: 500 }}>
+                              {session.title}
+                            </Typography>
+                          }
+                          secondary={
+                            <Typography variant="caption" color="#9ca3af" sx={{ display: 'block' }}>
+                              {session.lastMessage}
+                              <br />
+                              {session.timestamp.toLocaleDateString()} • {session.messageCount} messages
+                            </Typography>
+                          }
+                        />
+                      </>
+                    )}
+                  </ListItemButton>
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+
+          {/* AI Model Selector */}
+          <Box sx={{ p: sidebarCollapsed ? 1 : 2, borderTop: '2px solid #374151' }}>
+            {sidebarCollapsed ? (
+              <Box display="flex" alignItems="center" justifyContent="center">
+                <Tooltip title={`AI Model: ${selectedModel}`} placement="right">
+                  <BrainIcon sx={{ color: '#9ca3af' }} />
+                </Tooltip>
+              </Box>
+            ) : (
+              <Box>
+                <Typography variant="caption" color="#9ca3af" sx={{ textTransform: 'uppercase', mb: 1, display: 'block' }}>
+                  AI Model
+                </Typography>
+                <FormControl size="small" fullWidth>
+                  <Select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    sx={{
+                      color: 'white',
+                      '& .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#374151',
+                      },
+                      '& .MuiSelect-select': {
+                        padding: '8px 12px',
+                        fontSize: '0.875rem',
+                      },
+                      '&:hover .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#6b7280',
+                      },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#3b82f6',
+                      },
+                    }}
+                  >
+                    <MenuItem value="claude-3-sonnet">Claude 3 Sonnet</MenuItem>
+                    <MenuItem value="claude-3-haiku">Claude 3 Haiku</MenuItem>
+                    <MenuItem value="gpt-4">GPT-4</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+            )}
+          </Box>
+        </GlassCard>
+      </Drawer>
+
+      {/* Main Chat Area */}
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', height: 'calc(100vh - 64px)', maxHeight: 'calc(100vh - 64px)', overflow: 'hidden' }}>
+        {/* Floating Menu */}
+        <Box sx={{ 
+          position: 'absolute', 
+          top: 16, 
+          right: 16, 
+          zIndex: 1000,
+          display: 'flex',
+          gap: 1,
+          alignItems: 'center'
+        }}>
+          {/* Sidebar Toggle - Only shows when sidebar is completely closed */}
+          {!sidebarOpen && (
+            <Tooltip title="Open Chat History">
+              <IconButton 
+                onClick={() => setSidebarOpen(true)}
+                sx={{ 
+                  color: '#3b82f6',
+                  backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                  border: '1px solid #374151',
+                  '&:hover': {
+                    color: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
                   },
                 }}
-              />
+              >
+                <ChatIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+          
+        </Box>
+
+        {/* Messages */}
+        <Box sx={{ flex: 1, overflow: 'auto', p: 2, minHeight: 0 }}>
+          <Stack spacing={2}>
+            {messages.map((message) => (
+              <Box key={message.id} display="flex" gap={2}>
+                <Avatar sx={{ bgcolor: message.sender === 'user' ? '#22c55e' : '#374151', width: 32, height: 32 }}>
+                  {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}
+                </Avatar>
+                <Box sx={{ flex: 1 }}>
+                  <MessageBubble isUser={message.sender === 'user'} status={message.status}>
+                    {message.sender === 'bot' && typingMessages.has(message.id) ? (
+                      <TypingText 
+                        text={message.text} 
+                        speed={2}
+                        onComplete={() => {
+                          setTypingMessages(prev => {
+                            const newSet = new Set(prev);
+                            newSet.delete(message.id);
+                            return newSet;
+                          });
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+                        {message.text}
+                      </Typography>
+                    )}
+                    {message.files && message.files.length > 0 && (
+                      <Stack spacing={1} mt={1}>
+                        {message.files.map((file) => (
+                          <FilePreview key={file.name}>
+                            <FileIcon sx={{ color: '#22c55e' }} />
+                            <Typography variant="body2" color="white">
+                              {file.name}
+                            </Typography>
+                            <Typography variant="caption" color="#9ca3af">
+                              ({(file.size / 1024).toFixed(1)} KB)
+                            </Typography>
+                          </FilePreview>
+                        ))}
+                      </Stack>
+                    )}
+                  </MessageBubble>
+                  <Typography variant="caption" color="#9ca3af" sx={{ ml: 1, textTransform: 'uppercase' }}>
+                    {message.timestamp.toLocaleTimeString()}
+                  </Typography>
+                </Box>
+              </Box>
             ))}
+            {isLoadingChat && (
+              <Box display="flex" gap={2}>
+                <Avatar sx={{ bgcolor: '#374151', width: 32, height: 32 }}>
+                  <BotIcon />
+                </Avatar>
+                <Box display="flex" alignItems="center" gap={1}>
+                  <CircularProgress size={20} sx={{ color: '#22c55e' }} />
+                  <Typography variant="body2" color="#9ca3af" sx={{ textTransform: 'uppercase' }}>
+                    AI is thinking...
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+            <div ref={messagesEndRef} />
           </Stack>
         </Box>
-      )}
 
-      {/* Input Area */}
-      <GlassCard sx={{ p: 2, borderTop: '2px solid #374151' }}>
-        <DropZone
-          isDragging={isDragging}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept=".csv,.txt,.pdf,.png,.jpg,.jpeg"
-            onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
-            style={{ display: 'none' }}
-          />
-          <UploadIcon sx={{ fontSize: 48, color: '#22c55e', mb: 1 }} />
-          <Typography variant="body1" color="white" sx={{ textTransform: 'uppercase' }}>
-            Drop files here or click to upload
-          </Typography>
-          <Typography variant="body2" color="#9ca3af" sx={{ textTransform: 'uppercase' }}>
-            Supports CSV, TXT, PDF, PNG, JPG (max 10MB each)
-          </Typography>
-        </DropZone>
-        
-        <Box display="flex" gap={1} mt={2}>
-          <TextField
-            fullWidth
-            multiline
-            maxRows={4}
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask me anything about finance, stocks, or portfolio analysis..."
-            disabled={connectionStatus !== 'connected'}
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                color: 'white',
-                borderRadius: '0px',
-                '& fieldset': {
-                  borderColor: '#374151',
+        {/* File Upload Area - Compact */}
+        {uploadedFiles.length > 0 && (
+          <GlassCard sx={{ p: 1, borderTop: '2px solid #374151', flexShrink: 0 }}>
+            <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+              <Typography variant="caption" color="#9ca3af" sx={{ textTransform: 'uppercase' }}>
+                Files:
+              </Typography>
+              {uploadedFiles.map((file, index) => (
+                <Chip
+                  key={index}
+                  label={file.name}
+                  size="small"
+                  onDelete={() => handleFileRemove(index)}
+                  sx={{
+                    backgroundColor: '#374151',
+                    color: 'white',
+                    fontSize: '0.75rem',
+                    height: 24,
+                    '& .MuiChip-deleteIcon': {
+                      color: '#9ca3af',
+                      fontSize: '1rem',
+                    },
+                  }}
+                />
+              ))}
+            </Box>
+          </GlassCard>
+        )}
+
+        {/* Input Area - Compact with Paperclip */}
+        <GlassCard sx={{ p: 2, borderTop: '2px solid #374151', flexShrink: 0 }}>
+          <Box display="flex" alignItems="flex-end" gap={1}>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={(e) => handleFileUpload(e.target.files!)}
+              multiple
+              style={{ display: 'none' }}
+            />
+            <Tooltip title="Upload files">
+              <IconButton
+                onClick={() => fileInputRef.current?.click()}
+                sx={{
+                  color: '#9ca3af',
+                  '&:hover': {
+                    color: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                }}
+              >
+                <AttachFileIcon />
+              </IconButton>
+            </Tooltip>
+            <TextField
+              fullWidth
+              multiline
+              maxRows={3}
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Ask me about stocks, crypto, portfolio optimization..."
+              disabled={isLoadingChat}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                  color: 'white',
+                  '& fieldset': {
+                    borderColor: '#374151',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: '#6b7280',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: '#3b82f6',
+                  },
                 },
-                '&:hover fieldset': {
-                  borderColor: '#22c55e',
+                '& .MuiInputBase-input::placeholder': {
+                  color: '#9ca3af',
+                  opacity: 1,
                 },
-                '&.Mui-focused fieldset': {
-                  borderColor: '#22c55e',
+              }}
+            />
+            <IconButton
+              onClick={handleSendMessage}
+              disabled={isLoadingChat || !inputMessage.trim()}
+              sx={{
+                color: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                '&:hover': {
+                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
                 },
-                '&.Mui-disabled': {
+                '&:disabled': {
+                  color: '#6b7280',
                   backgroundColor: 'rgba(55, 65, 81, 0.3)',
                 },
-              },
-              '& .MuiInputBase-input::placeholder': {
-                color: '#9ca3af',
-                opacity: 1,
-              },
-            }}
-          />
-          <Button
-            variant="contained"
-            onClick={handleSendMessage}
-            disabled={isLoadingChat || (!inputMessage.trim() && uploadedFiles.length === 0) || connectionStatus !== 'connected'}
-            sx={{
-              bgcolor: '#22c55e',
-              color: 'white',
-              borderRadius: '0px',
-              minWidth: 48,
-              height: 48,
-              '&:hover': {
-                bgcolor: '#16a34a',
-              },
-              '&:disabled': {
-                bgcolor: '#374151',
-                color: '#9ca3af',
-              },
-            }}
-          >
-            <SendIcon />
-          </Button>
-        </Box>
-      </GlassCard>
+              }}
+            >
+              <SendIcon />
+            </IconButton>
+          </Box>
+        </GlassCard>
+      </Box>
     </Box>
   );
 }
