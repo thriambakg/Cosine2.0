@@ -298,8 +298,17 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     
     try {
       console.log('📋 Deleting session:', sessionId);
-      await api.sessions.deleteSession(sessionId, userId);
       
+      // Check if this is a local session (starts with 'local_')
+      if (sessionId.startsWith('local_')) {
+        // For local sessions, just remove from local cache
+        console.log('📋 Deleting local session from cache only');
+      } else {
+        // For backend sessions, make API call
+        await api.sessions.deleteSession(sessionId, userId);
+      }
+      
+      // Remove from local state regardless of session type
       setSessions(prev => prev.filter(s => s.session_id !== sessionId));
       
       // Clear current session if it's the one being deleted

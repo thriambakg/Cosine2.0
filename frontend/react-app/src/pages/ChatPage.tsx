@@ -34,6 +34,7 @@ import {
   Add as AddIcon,
   Close as CloseIcon,
   Psychology as BrainIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 
 interface Message {
@@ -195,6 +196,7 @@ export default function ChatPage() {
     isLoading: persistenceLoading,
     createNewSession,
     loadSession,
+    deleteSession,
     addMessage: addPersistedMessage,
   } = useChatPersistence(user?.id || '');
   
@@ -442,6 +444,20 @@ export default function ChatPage() {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleDeleteSession = async (sessionId: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent triggering the session load
+    try {
+      await deleteSession(sessionId);
+      console.log('📋 Session deleted:', sessionId);
+    } catch (error) {
+      console.error('📋 Error deleting session:', error);
+    }
+  };
+
+  const getFirstUserMessage = (messages: any[]) => {
+    return messages.find(msg => msg.sender === 'user')?.text || 'No user messages';
+  };
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoadingChat) return;
 
@@ -648,8 +664,8 @@ export default function ChatPage() {
                     onClick={() => loadSession(session.session_id)}
                     sx={{
                       borderRadius: '4px',
-                      mb: 1,
-                      p: sidebarCollapsed ? 1 : 2,
+                      mb: 0.5,
+                      p: sidebarCollapsed ? 0.5 : 1,
                       justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
                       backgroundColor: currentSession?.session_id === session.session_id ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
                       '&:hover': {
@@ -659,27 +675,40 @@ export default function ChatPage() {
                   >
                     {sidebarCollapsed ? (
                       <Tooltip title={session.title} placement="right">
-                        <ChatIcon sx={{ color: '#9ca3af' }} />
+                        <ChatIcon sx={{ color: '#9ca3af', fontSize: '1.2rem' }} />
                       </Tooltip>
                     ) : (
                       <>
-                        <ListItemIcon>
-                          <ChatIcon sx={{ color: '#9ca3af' }} />
+                        <ListItemIcon sx={{ minWidth: '32px' }}>
+                          <ChatIcon sx={{ color: '#9ca3af', fontSize: '1.1rem' }} />
                         </ListItemIcon>
                         <ListItemText
                           primary={
-                            <Typography variant="body2" color="white" sx={{ fontWeight: 500 }}>
+                            <Typography variant="caption" color="white" sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
                               {session.title}
                             </Typography>
                           }
                           secondary={
-                            <Typography variant="caption" color="#9ca3af" sx={{ display: 'block' }}>
-                              {session.messages.length > 0 ? session.messages[session.messages.length - 1].text.substring(0, 50) + '...' : 'No messages'}
+                            <Typography variant="caption" color="#9ca3af" sx={{ display: 'block', fontSize: '0.7rem' }}>
+                              {session.messages.length > 0 ? getFirstUserMessage(session.messages).substring(0, 40) + '...' : 'No messages'}
                               <br />
-                              {new Date(session.last_updated).toLocaleDateString()} • {session.message_count} messages
+                              {new Date(session.last_updated).toLocaleDateString()} • {session.message_count} msgs
                             </Typography>
                           }
                         />
+                        <IconButton
+                          onClick={(e) => handleDeleteSession(session.session_id, e)}
+                          sx={{
+                            color: '#9ca3af',
+                            padding: '2px',
+                            '&:hover': {
+                              color: '#ef4444',
+                              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            },
+                          }}
+                        >
+                          <DeleteIcon sx={{ fontSize: '0.9rem' }} />
+                        </IconButton>
                       </>
                     )}
                   </ListItemButton>
@@ -811,7 +840,7 @@ export default function ChatPage() {
                     )}
                   </MessageBubble>
                   <Typography variant="caption" color="#9ca3af" sx={{ ml: 1, textTransform: 'uppercase' }}>
-                    {message.timestamp.toLocaleTimeString()}
+                    {new Date(message.timestamp).toLocaleTimeString()}
                   </Typography>
                 </Box>
               </Box>

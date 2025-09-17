@@ -142,6 +142,10 @@ module "api_gateway" {
     sessions = {
       path_part = "sessions"
     }
+    sessions_session_id = {
+      path_part           = "{session_id}"
+      parent_resource_key = "sessions"
+    }
   }
 
   # Methods configuration
@@ -293,8 +297,16 @@ module "api_gateway" {
       lambda_arn              = module.session_management_lambda.function_arn
       request_parameters      = {}
     }
+    sessions_get_specific = {
+      resource_key            = "sessions_session_id"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.session_management_lambda.function_arn
+      request_parameters      = {}
+    }
     sessions_put = {
-      resource_key            = "sessions"
+      resource_key            = "sessions_session_id"
       http_method             = "PUT"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -302,7 +314,7 @@ module "api_gateway" {
       request_parameters      = {}
     }
     sessions_delete = {
-      resource_key            = "sessions"
+      resource_key            = "sessions_session_id"
       http_method             = "DELETE"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -399,15 +411,20 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "sessions"
     }
+    sessions_get_specific = {
+      function_arn  = module.session_management_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "sessions/{session_id}"
+    }
     sessions_put = {
       function_arn  = module.session_management_lambda.function_arn
       http_method   = "PUT"
-      resource_path = "sessions"
+      resource_path = "sessions/{session_id}"
     }
     sessions_delete = {
       function_arn  = module.session_management_lambda.function_arn
       http_method   = "DELETE"
-      resource_path = "sessions"
+      resource_path = "sessions/{session_id}"
     }
   }
 
