@@ -349,19 +349,34 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
   }, [userId, currentSession, saveCachedData]);
 
   const addMessage = useCallback((message: ChatMessage): void => {
+    console.log('📋 Adding message to persistence:', {
+      messageId: message.id,
+      sender: message.sender,
+      text: message.text.substring(0, 50) + '...',
+      currentSessionId: currentSession?.session_id,
+      currentMessageCount: currentSession?.messages?.length || 0
+    });
+    
     // Add to current session
     setCurrentSession(prev => {
       if (!prev) return prev;
-      return {
+      const updatedSession = {
         ...prev,
         messages: [...prev.messages, message],
         message_count: prev.message_count + 1,
         last_updated: Date.now()
       };
+      console.log('📋 Updated current session:', {
+        sessionId: updatedSession.session_id,
+        newMessageCount: updatedSession.message_count,
+        totalMessages: updatedSession.messages.length
+      });
+      return updatedSession;
     });
     
     // Add to pending messages for backend save
     pendingMessagesRef.current.push(message);
+    console.log('📋 Pending messages count:', pendingMessagesRef.current.length);
     
     // Update sessions list
     setSessions(prev => prev.map(s => 

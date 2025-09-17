@@ -38,7 +38,7 @@ def json_dumps_safe(obj: Any) -> str:
             return int(obj) if obj % 1 == 0 else float(obj)
         raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
     
-    return json_dumps_safe(obj, default=decimal_default)
+    return json.dumps(obj, default=decimal_default)
 
 def lambda_handler(event, context):
     """

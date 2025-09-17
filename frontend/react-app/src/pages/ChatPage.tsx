@@ -361,6 +361,14 @@ export default function ChatPage() {
           sender: 'bot',
           timestamp: new Date(data.timestamp || Date.now()),
         };
+        
+        console.log('🤖 Received AI response:', {
+          messageId: aiMessage.id,
+          contentLength: aiMessage.text.length,
+          currentSessionId: currentSession?.session_id,
+          currentMessageCount: currentSession?.messages?.length || 0
+        });
+        
         // Add to persistence system
         addPersistedMessage(aiMessage);
         // Add to typing messages to trigger typing animation
