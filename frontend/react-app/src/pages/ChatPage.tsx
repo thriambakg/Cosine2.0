@@ -60,13 +60,6 @@ interface WebSocketMessage {
   timestamp?: string;
 }
 
-interface ChatSession {
-  id: string;
-  title: string;
-  lastMessage: string;
-  timestamp: Date;
-  messageCount: number;
-}
 
 // Custom styled components for Wall Street chic
 const GlassCard = ({ children, sx = {}, ...props }: any) => (
@@ -200,13 +193,9 @@ export default function ChatPage() {
     currentSession,
     sessions,
     isLoading: persistenceLoading,
-    error: persistenceError,
     createNewSession,
     loadSession,
-    deleteSession,
-    updateSessionTitle,
     addMessage: addPersistedMessage,
-    loadSessionsFromBackend,
   } = useChatPersistence(user?.id || '');
   
   // Use messages from current session
@@ -358,12 +347,8 @@ export default function ChatPage() {
         break;
 
       case 'message_received':
-        // Update message status to delivered
-        setMessages(prev => prev.map(msg => 
-          msg.id === data.message_id 
-            ? { ...msg, status: 'delivered' as const }
-            : msg
-        ));
+        // Message status tracking is handled by persistence system
+        console.log('📨 Message received confirmation:', data.message_id);
         break;
 
       case 'ai_response':
@@ -374,7 +359,8 @@ export default function ChatPage() {
           sender: 'bot',
           timestamp: new Date(data.timestamp || Date.now()),
         };
-        setMessages(prev => [...prev, aiMessage]);
+        // Add to persistence system
+        addPersistedMessage(aiMessage);
         // Add to typing messages to trigger typing animation
         setTypingMessages(prev => new Set([...prev, aiMessage.id]));
         setIsLoadingChat(false);
@@ -427,6 +413,16 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
+  // Auto-create a new session if none exists (only once)
+  useEffect(() => {
+    if (user && !currentSession && !persistenceLoading && sessions.length === 0) {
+      createNewSession().catch(error => {
+        console.error('Failed to auto-create session:', error);
+        // Don't retry automatically to prevent infinite loops
+      });
+    }
+  }, [user?.id]); // Only depend on user.id to prevent infinite loops
+
   const handleFileUpload = (files: FileList) => {
     Array.from(files).forEach((file) => {
       const reader = new FileReader();
@@ -446,8 +442,18 @@ export default function ChatPage() {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoadingChat) return;
+
+    // Ensure we have a current session
+    if (!currentSession) {
+      try {
+        await createNewSession();
+      } catch (error) {
+        console.error('Failed to create new session:', error);
+        return;
+      }
+    }
 
     const messageId = `msg_${Date.now()}`;
     const userMessage: Message = {
@@ -459,7 +465,8 @@ export default function ChatPage() {
       files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    // Add message to persistence system
+    addPersistedMessage(userMessage);
     setInputMessage('');
     setUploadedFiles([]);
     setIsLoadingChat(true);
@@ -474,29 +481,13 @@ export default function ChatPage() {
 
       try {
         websocketRef.current.send(JSON.stringify(messageData));
-        
-        // Update message status to sent
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId 
-            ? { ...msg, status: 'sent' as const }
-            : msg
-        ));
+        // Message status will be updated via WebSocket response
       } catch (error) {
         console.error('Error sending message:', error);
-        setMessages(prev => prev.map(msg => 
-          msg.id === messageId 
-            ? { ...msg, status: 'error' as const }
-            : msg
-        ));
         setIsLoadingChat(false);
       }
     } else {
       console.error('WebSocket not connected');
-      setMessages(prev => prev.map(msg => 
-        msg.id === messageId 
-          ? { ...msg, status: 'error' as const }
-          : msg
-      ));
       setIsLoadingChat(false);
     }
   };
@@ -610,6 +601,8 @@ export default function ChatPage() {
                 fullWidth
                 variant="outlined"
                 startIcon={<AddIcon />}
+                onClick={() => createNewSession()}
+                disabled={persistenceLoading}
                 sx={{
                   borderColor: '#374151',
                   color: 'white',
@@ -620,7 +613,7 @@ export default function ChatPage() {
                   },
                 }}
               >
-                New Chat
+                {persistenceLoading ? 'Creating...' : 'New Chat'}
               </Button>
             </Box>
           )}
@@ -630,6 +623,8 @@ export default function ChatPage() {
             <Box sx={{ p: 1, display: 'flex', justifyContent: 'center' }}>
               <Tooltip title="New Chat">
                 <IconButton
+                  onClick={() => createNewSession()}
+                  disabled={persistenceLoading}
                   sx={{
                     color: '#9ca3af',
                     '&:hover': {
@@ -647,16 +642,18 @@ export default function ChatPage() {
           {/* Chat Sessions */}
           <Box sx={{ flex: 1, overflow: 'auto', px: sidebarCollapsed ? 0.5 : 1, minHeight: 0 }}>
             <List>
-              {chatSessions.map((session) => (
-                <ListItem key={session.id} disablePadding>
+              {sessions.map((session) => (
+                <ListItem key={session.session_id} disablePadding>
                   <ListItemButton
+                    onClick={() => loadSession(session.session_id)}
                     sx={{
                       borderRadius: '4px',
                       mb: 1,
                       p: sidebarCollapsed ? 1 : 2,
                       justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                      backgroundColor: currentSession?.session_id === session.session_id ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
                       '&:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        backgroundColor: currentSession?.session_id === session.session_id ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.1)',
                       },
                     }}
                   >
@@ -677,9 +674,9 @@ export default function ChatPage() {
                           }
                           secondary={
                             <Typography variant="caption" color="#9ca3af" sx={{ display: 'block' }}>
-                              {session.lastMessage}
+                              {session.messages.length > 0 ? session.messages[session.messages.length - 1].text.substring(0, 50) + '...' : 'No messages'}
                               <br />
-                              {session.timestamp.toLocaleDateString()} • {session.messageCount} messages
+                              {new Date(session.last_updated).toLocaleDateString()} • {session.message_count} messages
                             </Typography>
                           }
                         />
@@ -779,7 +776,7 @@ export default function ChatPage() {
                   {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}
                 </Avatar>
                 <Box sx={{ flex: 1 }}>
-                  <MessageBubble isUser={message.sender === 'user'} status={message.status}>
+                  <MessageBubble isUser={message.sender === 'user'} status={(message as any).status || 'sent'}>
                     {message.sender === 'bot' && typingMessages.has(message.id) ? (
                       <TypingText 
                         text={message.text} 
@@ -797,9 +794,9 @@ export default function ChatPage() {
                         {message.text}
                       </Typography>
                     )}
-                    {message.files && message.files.length > 0 && (
+                    {(message as any).files && (message as any).files.length > 0 && (
                       <Stack spacing={1} mt={1}>
-                        {message.files.map((file) => (
+                        {(message as any).files.map((file: any) => (
                           <FilePreview key={file.name}>
                             <FileIcon sx={{ color: '#22c55e' }} />
                             <Typography variant="body2" color="white">

@@ -201,6 +201,34 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       return response.session_id;
     } catch (error) {
       console.error('📋 Error creating session:', error);
+      
+      // If backend is unavailable, create a local-only session
+      if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
+        console.log('📋 Backend unavailable, creating local session...');
+        const localSessionId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const localSession: ChatSession = {
+          session_id: localSessionId,
+          title: title || `New Chat ${new Date().toLocaleDateString()}`,
+          model: model || 'claude-3-sonnet',
+          created_at: Date.now(),
+          last_updated: Date.now(),
+          message_count: 1,
+          messages: [{
+            id: `msg_${Date.now()}`,
+            text: "Hello! I'm Cosine, your AI financial analyst. How can I help you today?",
+            sender: 'bot',
+            timestamp: new Date()
+          }]
+        };
+        
+        setSessions(prev => [localSession, ...prev]);
+        setCurrentSession(localSession);
+        saveCachedData();
+        
+        console.log('📋 Created local session:', localSessionId);
+        return localSessionId;
+      }
+      
       setError('Failed to create new session');
       throw error;
     } finally {

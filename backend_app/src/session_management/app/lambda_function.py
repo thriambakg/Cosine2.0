@@ -22,6 +22,14 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
 
+def get_cors_headers() -> Dict[str, str]:
+    """Get standard CORS headers"""
+    return {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
+
 def lambda_handler(event, context):
     """
     Lambda handler for session management operations
@@ -42,12 +50,7 @@ def lambda_handler(event, context):
         if not user_id:
             return {
                 'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-                },
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                 'body': json.dumps({'error': 'user_id is required'})
             }
         
@@ -55,11 +58,7 @@ def lambda_handler(event, context):
         if http_method == 'OPTIONS':
             return {
                 'statusCode': 200,
-                'headers': {
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-                },
+                'headers': get_cors_headers(),
                 'body': ''
             }
         
@@ -77,7 +76,7 @@ def lambda_handler(event, context):
             if not session_id:
                 return {
                     'statusCode': 400,
-                    'headers': {'Content-Type': 'application/json'},
+                    'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                     'body': json.dumps({'error': 'session_id is required for PUT'})
                 }
             return update_session(user_id, session_id, json.loads(event.get('body', '{}')))
@@ -86,14 +85,14 @@ def lambda_handler(event, context):
             if not session_id:
                 return {
                     'statusCode': 400,
-                    'headers': {'Content-Type': 'application/json'},
+                    'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                     'body': json.dumps({'error': 'session_id is required for DELETE'})
                 }
             return delete_session(user_id, session_id)
         else:
             return {
                 'statusCode': 405,
-                'headers': {'Content-Type': 'application/json'},
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                 'body': json.dumps({'error': 'Method not allowed'})
             }
     
@@ -101,7 +100,7 @@ def lambda_handler(event, context):
         logger.error(f"Error in lambda_handler: {str(e)}")
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'error': 'Internal server error'})
         }
 
@@ -156,7 +155,7 @@ def list_sessions(user_id: str) -> Dict[str, Any]:
         
         return {
             'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({
                 'sessions': session_list,
                 'count': len(session_list)
@@ -167,7 +166,7 @@ def list_sessions(user_id: str) -> Dict[str, Any]:
         logger.error(f"Error listing sessions: {str(e)}")
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'error': 'Failed to list sessions'})
         }
 
@@ -184,7 +183,7 @@ def get_session(user_id: str, session_id: str) -> Dict[str, Any]:
         if not response.get('Items'):
             return {
                 'statusCode': 404,
-                'headers': {'Content-Type': 'application/json'},
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                 'body': json.dumps({'error': 'Session not found'})
             }
         
@@ -193,7 +192,7 @@ def get_session(user_id: str, session_id: str) -> Dict[str, Any]:
         if first_item.get('user_id') != user_id:
             return {
                 'statusCode': 403,
-                'headers': {'Content-Type': 'application/json'},
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                 'body': json.dumps({'error': 'Access denied'})
             }
         
@@ -237,7 +236,7 @@ def get_session(user_id: str, session_id: str) -> Dict[str, Any]:
         
         return {
             'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps(session_data)
         }
     
@@ -245,7 +244,7 @@ def get_session(user_id: str, session_id: str) -> Dict[str, Any]:
         logger.error(f"Error getting session: {str(e)}")
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'error': 'Failed to get session'})
         }
 
@@ -297,7 +296,7 @@ def create_session(user_id: str, session_data: Dict[str, Any]) -> Dict[str, Any]
         
         return {
             'statusCode': 201,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({
                 'session_id': session_id,
                 'title': title,
@@ -311,7 +310,7 @@ def create_session(user_id: str, session_data: Dict[str, Any]) -> Dict[str, Any]
         logger.error(f"Error creating session: {str(e)}")
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'error': 'Failed to create session'})
         }
 
@@ -326,14 +325,14 @@ def update_session(user_id: str, session_id: str, update_data: Dict[str, Any]) -
         if 'Item' not in response:
             return {
                 'statusCode': 404,
-                'headers': {'Content-Type': 'application/json'},
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                 'body': json.dumps({'error': 'Session not found'})
             }
         
         if response['Item']['user_id'] != user_id:
             return {
                 'statusCode': 403,
-                'headers': {'Content-Type': 'application/json'},
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                 'body': json.dumps({'error': 'Access denied'})
             }
         
@@ -349,7 +348,7 @@ def update_session(user_id: str, session_id: str, update_data: Dict[str, Any]) -
         logger.error(f"Error updating session: {str(e)}")
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'error': 'Failed to update session'})
         }
 
@@ -390,7 +389,7 @@ def add_messages_to_session(user_id: str, session_id: str, messages: List[Dict[s
         
         return {
             'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({
                 'message': f'Added {added_count} messages to session',
                 'added_count': added_count
@@ -401,7 +400,7 @@ def add_messages_to_session(user_id: str, session_id: str, messages: List[Dict[s
         logger.error(f"Error adding messages: {str(e)}")
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'error': 'Failed to add messages'})
         }
 
@@ -432,7 +431,7 @@ def update_session_metadata(user_id: str, session_id: str, metadata: Dict[str, A
         
         return {
             'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'message': 'Session updated successfully'})
         }
     
@@ -440,7 +439,7 @@ def update_session_metadata(user_id: str, session_id: str, metadata: Dict[str, A
         logger.error(f"Error updating metadata: {str(e)}")
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'error': 'Failed to update session metadata'})
         }
 
@@ -455,14 +454,14 @@ def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:
         if 'Item' not in response:
             return {
                 'statusCode': 404,
-                'headers': {'Content-Type': 'application/json'},
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                 'body': json.dumps({'error': 'Session not found'})
             }
         
         if response['Item']['user_id'] != user_id:
             return {
                 'statusCode': 403,
-                'headers': {'Content-Type': 'application/json'},
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                 'body': json.dumps({'error': 'Access denied'})
             }
         
@@ -484,7 +483,7 @@ def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:
         
         return {
             'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'message': 'Session deleted successfully'})
         }
     
@@ -492,6 +491,6 @@ def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:
         logger.error(f"Error deleting session: {str(e)}")
         return {
             'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json.dumps({'error': 'Failed to delete session'})
         }
