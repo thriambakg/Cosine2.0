@@ -356,7 +356,7 @@ export default function ChatPage() {
       case 'ai_response':
         // Add AI response to messages
         const aiMessage: Message = {
-          id: data.message_id || `ai_${Date.now()}`,
+          id: data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           text: data.content || 'No response content',
           sender: 'bot',
           timestamp: new Date(data.timestamp || Date.now()),
@@ -479,7 +479,7 @@ export default function ChatPage() {
       }
     }
 
-    const messageId = `msg_${Date.now()}`;
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const userMessage: Message = {
       id: messageId,
       text: inputMessage,
@@ -700,7 +700,7 @@ export default function ChatPage() {
                             <Typography variant="caption" color="#9ca3af" sx={{ display: 'block', fontSize: '0.7rem' }}>
                               {session.messages.length > 0 ? getFirstUserMessage(session.messages).substring(0, 40) + '...' : 'No messages'}
                               <br />
-                              {new Date(session.last_updated).toLocaleDateString()} • {session.message_count} msgs
+                              {new Date(session.created_at || session.last_updated || Date.now()).toLocaleDateString()} • {session.message_count} msgs
                             </Typography>
                           }
                         />

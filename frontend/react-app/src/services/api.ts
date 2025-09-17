@@ -626,7 +626,7 @@ export const sessionManagementAPI = {
     create_welcome_message?: boolean;
   }): Promise<{ session_id: string, title: string, model: string, created_at: number, message_count: number }> => {
     const requestBody = {
-      title: sessionData.title || `New Chat ${new Date().toLocaleDateString()}`,
+      title: sessionData.title || new Date().toLocaleString(),
       model: sessionData.model || 'claude-3-sonnet',
       create_welcome_message: sessionData.create_welcome_message !== false
     };

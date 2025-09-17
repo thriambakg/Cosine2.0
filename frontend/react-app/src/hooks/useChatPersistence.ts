@@ -178,7 +178,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     try {
       console.log('📋 Creating new session...');
       const response = await api.sessions.createSession(userId, {
-        title: title || `New Chat ${new Date().toLocaleDateString()}`,
+        title: title || new Date().toLocaleString(),
         model: model || 'claude-3-sonnet',
         create_welcome_message: true
       });
@@ -206,15 +206,17 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
         console.log('📋 Backend unavailable, creating local session...');
         const localSessionId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const now = Date.now();
+        const sessionTitle = title || new Date().toLocaleString();
         const localSession: ChatSession = {
           session_id: localSessionId,
-          title: title || `New Chat ${new Date().toLocaleDateString()}`,
+          title: sessionTitle,
           model: model || 'claude-3-sonnet',
-          created_at: Date.now(),
-          last_updated: Date.now(),
+          created_at: now,
+          last_updated: now,
           message_count: 1,
           messages: [{
-            id: `msg_${Date.now()}`,
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             text: "Hello! I'm Cosine, your AI financial analyst. How can I help you today?",
             sender: 'bot',
             timestamp: new Date()
@@ -225,7 +227,13 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         setCurrentSession(localSession);
         saveCachedData();
         
-        console.log('📋 Created local session:', localSessionId);
+        console.log('📋 Created local session:', {
+          sessionId: localSessionId,
+          title: sessionTitle,
+          created_at: now,
+          last_updated: now,
+          dateString: new Date(now).toLocaleString()
+        });
         return localSessionId;
       }
       
