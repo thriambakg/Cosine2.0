@@ -45,7 +45,8 @@ def lambda_handler(event, context):
     try:
         # Parse request
         http_method = event.get('httpMethod', 'GET')
-        user_id = event.get('queryStringParameters', {}).get('user_id')
+        query_params = event.get('queryStringParameters') or {}
+        user_id = query_params.get('user_id') if query_params else None
         
         if not user_id:
             return {
@@ -63,25 +64,28 @@ def lambda_handler(event, context):
             }
         
         # Route to appropriate handler
+        path_params = event.get('pathParameters') or {}
         if http_method == 'GET':
-            session_id = event.get('pathParameters', {}).get('session_id')
+            session_id = path_params.get('session_id') if path_params else None
             if session_id:
                 return get_session(user_id, session_id)
             else:
                 return list_sessions(user_id)
         elif http_method == 'POST':
-            return create_session(user_id, json.loads(event.get('body', '{}')))
+            body = event.get('body', '{}')
+            return create_session(user_id, json.loads(body) if body else {})
         elif http_method == 'PUT':
-            session_id = event.get('pathParameters', {}).get('session_id')
+            session_id = path_params.get('session_id') if path_params else None
             if not session_id:
                 return {
                     'statusCode': 400,
                     'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                     'body': json.dumps({'error': 'session_id is required for PUT'})
                 }
-            return update_session(user_id, session_id, json.loads(event.get('body', '{}')))
+            body = event.get('body', '{}')
+            return update_session(user_id, session_id, json.loads(body) if body else {})
         elif http_method == 'DELETE':
-            session_id = event.get('pathParameters', {}).get('session_id')
+            session_id = path_params.get('session_id') if path_params else None
             if not session_id:
                 return {
                     'statusCode': 400,
