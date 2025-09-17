@@ -139,6 +139,9 @@ module "api_gateway" {
     alerts = {
       path_part = "alerts"
     }
+    sessions = {
+      path_part = "sessions"
+    }
   }
 
   # Methods configuration
@@ -273,6 +276,39 @@ module "api_gateway" {
       lambda_arn              = module.user_dashboard_lambda.function_arn
       request_parameters      = {}
     }
+    # Session Management methods
+    sessions_get = {
+      resource_key            = "sessions"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.session_management_lambda.function_arn
+      request_parameters      = {}
+    }
+    sessions_post = {
+      resource_key            = "sessions"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.session_management_lambda.function_arn
+      request_parameters      = {}
+    }
+    sessions_put = {
+      resource_key            = "sessions"
+      http_method             = "PUT"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.session_management_lambda.function_arn
+      request_parameters      = {}
+    }
+    sessions_delete = {
+      resource_key            = "sessions"
+      http_method             = "DELETE"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.session_management_lambda.function_arn
+      request_parameters      = {}
+    }
   }
 
   # Lambda permissions configuration
@@ -352,6 +388,26 @@ module "api_gateway" {
       function_arn  = module.stock_alerts_lambda.function_arn
       http_method   = "DELETE"
       resource_path = "alerts"
+    }
+    sessions_get = {
+      function_arn  = module.session_management_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "sessions"
+    }
+    sessions_post = {
+      function_arn  = module.session_management_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "sessions"
+    }
+    sessions_put = {
+      function_arn  = module.session_management_lambda.function_arn
+      http_method   = "PUT"
+      resource_path = "sessions"
+    }
+    sessions_delete = {
+      function_arn  = module.session_management_lambda.function_arn
+      http_method   = "DELETE"
+      resource_path = "sessions"
     }
   }
 
@@ -1186,6 +1242,32 @@ module "robinhood_integration_lambda" {
 
   # Additional IAM policies
   additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_invoke_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Session Management Lambda Function
+module "session_management_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-session-management-${var.environment}"
+  description   = "Lambda function for managing chat sessions and message persistence"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 256
+
+  source_path = "../backend_app/src/session_management/app"
+
+  environment_variables = {
+    CHAT_SESSIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+  }
+
+  lambda_policies = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn

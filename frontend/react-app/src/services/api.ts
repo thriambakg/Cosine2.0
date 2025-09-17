@@ -601,6 +601,64 @@ export const dashboardAPI = {
   },
 };
 
+// Session Management API
+export const sessionManagementAPI = {
+  // Get all sessions for a user
+  getSessions: async (userId: string): Promise<{ sessions: any[], count: number }> => {
+    console.log('📋 API - Getting sessions for user:', userId);
+    return apiRequest<{ sessions: any[], count: number }>(`/sessions?user_id=${userId}`, {
+      method: 'GET',
+    });
+  },
+
+  // Get a specific session with all messages
+  getSession: async (sessionId: string, userId: string): Promise<any> => {
+    console.log('📋 API - Getting session:', { sessionId, userId });
+    return apiRequest<any>(`/sessions/${sessionId}?user_id=${userId}`, {
+      method: 'GET',
+    });
+  },
+
+  // Create a new session
+  createSession: async (userId: string, sessionData: {
+    title?: string;
+    model?: string;
+    create_welcome_message?: boolean;
+  }): Promise<{ session_id: string, title: string, model: string, created_at: number, message_count: number }> => {
+    const requestBody = {
+      title: sessionData.title || `New Chat ${new Date().toLocaleDateString()}`,
+      model: sessionData.model || 'claude-3-sonnet',
+      create_welcome_message: sessionData.create_welcome_message !== false
+    };
+    console.log('📋 API - Creating session:', { userId, requestBody });
+    return apiRequest<{ session_id: string, title: string, model: string, created_at: number, message_count: number }>(`/sessions?user_id=${userId}`, {
+      method: 'POST',
+      body: JSON.stringify(requestBody),
+    });
+  },
+
+  // Update session (add messages or update metadata)
+  updateSession: async (sessionId: string, userId: string, updateData: {
+    messages?: Array<{ content: string, sender: string, message_type?: string, metadata?: any }>;
+    title?: string;
+    model?: string;
+  }): Promise<any> => {
+    console.log('📋 API - Updating session:', { sessionId, userId, updateData });
+    return apiRequest<any>(`/sessions/${sessionId}?user_id=${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updateData),
+    });
+  },
+
+  // Delete a session
+  deleteSession: async (sessionId: string, userId: string): Promise<{ message: string }> => {
+    console.log('📋 API - Deleting session:', { sessionId, userId });
+    return apiRequest<{ message: string }>(`/sessions/${sessionId}?user_id=${userId}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
 export const api = {
   stockVolatility: stockVolatilityAPI,
   stockData: stockDataAPI,
@@ -611,6 +669,7 @@ export const api = {
   chat: chatAPI,
   health: apiHealthAPI,
   dashboard: dashboardAPI,
+  sessions: sessionManagementAPI,
 };
 
 export default api;

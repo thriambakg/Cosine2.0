@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { ENV_CONFIG } from '@/config/environment';
+import { useChatPersistence } from '@/hooks/useChatPersistence';
 import {
   Box,
   Typography,
@@ -193,7 +194,23 @@ const FilePreview = ({ children, ...props }: any) => (
 export default function ChatPage() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
-  const [messages, setMessages] = useState<Message[]>([]);
+  
+  // Chat persistence system
+  const {
+    currentSession,
+    sessions,
+    isLoading: persistenceLoading,
+    error: persistenceError,
+    createNewSession,
+    loadSession,
+    deleteSession,
+    updateSessionTitle,
+    addMessage: addPersistedMessage,
+    loadSessionsFromBackend,
+  } = useChatPersistence(user?.id || '');
+  
+  // Use messages from current session
+  const messages = currentSession?.messages || [];
   const [inputMessage, setInputMessage] = useState('');
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -205,22 +222,6 @@ export default function ChatPage() {
   const [connectionEstablished, setConnectionEstablished] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [chatSessions] = useState<ChatSession[]>([
-    {
-      id: '1',
-      title: 'Stock Analysis Discussion',
-      lastMessage: 'Can you analyze AAPL stock performance?',
-      timestamp: new Date(),
-      messageCount: 15
-    },
-    {
-      id: '2', 
-      title: 'Portfolio Optimization',
-      lastMessage: 'Help me optimize my crypto portfolio',
-      timestamp: new Date(Date.now() - 86400000),
-      messageCount: 8
-    }
-  ]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);

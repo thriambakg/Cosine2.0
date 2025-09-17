@@ -28,20 +28,18 @@ class SessionManager:
         self.s3_client = boto3.client('s3')
         
         # Get table names from environment variables
-        self.sessions_table_name = os.environ.get('SESSIONS_TABLE_NAME')
-        self.session_context_table_name = os.environ.get('SESSION_CONTEXT_TABLE_NAME')
+        self.chat_sessions_table_name = os.environ.get('CHAT_SESSIONS_TABLE_NAME')
         self.session_archives_bucket = os.environ.get('SESSION_ARCHIVES_BUCKET')
         
         # Initialize tables
-        self.sessions_table = self.dynamodb.Table(self.sessions_table_name) if self.sessions_table_name else None
-        self.session_context_table = self.dynamodb.Table(self.session_context_table_name) if self.session_context_table_name else None
+        self.chat_sessions_table = self.dynamodb.Table(self.chat_sessions_table_name) if self.chat_sessions_table_name else None
         
         # Configuration
         self.session_ttl_days = int(os.environ.get('SESSION_TTL_DAYS', '30'))
         self.context_ttl_days = int(os.environ.get('CONTEXT_TTL_DAYS', '7'))
         self.max_context_size = int(os.environ.get('MAX_CONTEXT_SIZE', '100000'))  # 100KB
         
-        logger.info(f"SessionManager initialized with tables: {self.sessions_table_name}, {self.session_context_table_name}")
+        logger.info(f"SessionManager initialized with table: {self.chat_sessions_table_name}")
     
     def create_session(self, user_id: str, page_context: Dict[str, Any]) -> str:
         """
@@ -55,53 +53,37 @@ class SessionManager:
             session_id: Unique identifier for the new session
         """
         try:
-            session_id = f"session_{user_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            session_id = str(uuid.uuid4())
+            timestamp = int(time.time())
             
             # Extract webpage information
             webpage_info = self._extract_webpage_info(page_context)
             
-            # Create session record
-            session_data = {
-                'PK': f"USER#{user_id}",
-                'SK': f"SESSION#{session_id}",
-                'GSI1PK': f"USER#{user_id}",
-                'GSI1SK': f"ACTIVE#{int(time.time())}",
-                'GSI2PK': "ACTIVE_SESSIONS",
-                'GSI2SK': f"{user_id}#{int(time.time())}",
+            # Create session metadata
+            metadata_item = {
                 'session_id': session_id,
+                'message_id': 'SESSION_METADATA',
                 'user_id': user_id,
-                'created_at': int(time.time()),
-                'last_activity': int(time.time()),
+                'timestamp': timestamp,
+                'title': f'Chat {datetime.now().strftime("%m/%d %H:%M")}',
+                'model': 'claude-3-sonnet',
+                'created_at': timestamp,
+                'last_updated': timestamp,
+                'message_count': 0,
                 'page_url': webpage_info.get('url', ''),
                 'page_title': webpage_info.get('title', ''),
                 'user_intent': webpage_info.get('user_intent', 'general'),
-                'conversation_count': 0,
-                'status': 'active',
-                'ttl': int(time.time()) + (self.session_ttl_days * 24 * 60 * 60)
-            }
-            
-            # Store session in DynamoDB
-            self.sessions_table.put_item(Item=session_data)
-            
-            # Create initial context
-            initial_context = {
-                'session_id': session_id,
-                'user_id': user_id,
-                'webpage_content': webpage_info.get('content', ''),
-                'conversation_history': [],
                 'session_variables': {
                     'page_type': webpage_info.get('page_type', 'unknown'),
                     'financial_data': webpage_info.get('financial_data', {}),
                     'user_actions': webpage_info.get('user_actions', []),
                     'relevant_tools': webpage_info.get('relevant_tools', [])
                 },
-                'agent_memory': '',
-                'created_at': int(time.time()),
-                'last_updated': int(time.time())
+                'expires_at': int(time.time()) + (self.session_ttl_days * 24 * 60 * 60)
             }
             
-            # Store initial context
-            self._store_session_context(session_id, initial_context)
+            # Store session metadata
+            self.chat_sessions_table.put_item(Item=metadata_item)
             
             logger.info(f"Created new session {session_id} for user {user_id}")
             return session_id
@@ -122,16 +104,11 @@ class SessionManager:
             session_context: Complete session context or None if not found
         """
         try:
-            # Validate session ownership
-            if not self._validate_session_access(session_id, user_id):
-                logger.warning(f"Invalid session access attempt: {session_id} by {user_id}")
-                return None
-            
             # Get session metadata
-            session_response = self.sessions_table.get_item(
+            session_response = self.chat_sessions_table.get_item(
                 Key={
-                    'PK': f"USER#{user_id}",
-                    'SK': f"SESSION#{session_id}"
+                    'session_id': session_id,
+                    'message_id': 'SESSION_METADATA'
                 }
             )
             
@@ -141,31 +118,38 @@ class SessionManager:
             
             session_metadata = session_response['Item']
             
-            # Get session context
-            context_response = self.session_context_table.get_item(
-                Key={
-                    'PK': f"SESSION#{session_id}",
-                    'SK': "CURRENT_CONTEXT"
-                }
-            )
-            
-            if 'Item' not in context_response:
-                logger.warning(f"Context not found for session: {session_id}")
+            # Validate user ownership
+            if session_metadata.get('user_id') != user_id:
+                logger.warning(f"Invalid session access attempt: {session_id} by {user_id}")
                 return None
             
-            context_data = context_response['Item']
+            # Get all messages for the session
+            messages_response = self.chat_sessions_table.query(
+                KeyConditionExpression='session_id = :session_id',
+                ExpressionAttributeValues={':session_id': session_id},
+                ScanIndexForward=True  # Chronological order
+            )
+            
+            # Build conversation history from messages
+            conversation_history = []
+            for item in messages_response.get('Items', []):
+                if 'message_content' in item:  # Skip metadata item
+                    conversation_history.append({
+                        'timestamp': item['timestamp'],
+                        'user_message': item.get('message_content', '') if item.get('sender') == 'user' else '',
+                        'agent_response': item.get('message_content', '') if item.get('sender') == 'bot' else ''
+                    })
             
             # Combine metadata and context
             session_context = {
                 'session_id': session_id,
                 'user_id': user_id,
                 'metadata': session_metadata,
-                'context': context_data,
-                'webpage_content': context_data.get('webpage_content', ''),
-                'conversation_history': context_data.get('conversation_history', []),
-                'session_variables': context_data.get('session_variables', {}),
-                'agent_memory': context_data.get('agent_memory', ''),
-                'last_updated': context_data.get('last_updated', 0)
+                'webpage_content': session_metadata.get('page_url', ''),
+                'conversation_history': conversation_history,
+                'session_variables': session_metadata.get('session_variables', {}),
+                'agent_memory': '',  # Will be populated by agent
+                'last_updated': session_metadata.get('last_updated', 0)
             }
             
             # Update last activity
@@ -199,59 +183,66 @@ class SessionManager:
             if not self._validate_session_access(session_id, user_id):
                 return False
             
-            # Get current context
-            current_context = self.get_session_context(session_id, user_id)
-            if not current_context:
-                return False
+            timestamp = int(time.time())
             
-            # Update conversation history
-            conversation_history = current_context['conversation_history']
-            conversation_history.append({
-                'timestamp': int(time.time()),
-                'user_message': new_message,
-                'agent_response': agent_response
-            })
+            # Store user message
+            if new_message:
+                user_message_item = {
+                    'session_id': session_id,
+                    'message_id': f'msg_{timestamp}_{uuid.uuid4().hex[:8]}',
+                    'user_id': user_id,
+                    'timestamp': timestamp,
+                    'message_content': new_message,
+                    'sender': 'user',
+                    'message_type': 'text',
+                    'expires_at': int(time.time()) + (self.session_ttl_days * 24 * 60 * 60)
+                }
+                self.chat_sessions_table.put_item(Item=user_message_item)
             
-            # Keep only last 50 messages to manage size
-            if len(conversation_history) > 50:
-                conversation_history = conversation_history[-50:]
-            
-            # Update session variables
-            session_variables = current_context['session_variables']
-            if updated_variables:
-                session_variables.update(updated_variables)
-            
-            # Create updated context
-            updated_context = {
-                'PK': f"SESSION#{session_id}",
-                'SK': "CURRENT_CONTEXT",
-                'GSI1PK': f"SESSION#{session_id}",
-                'GSI1SK': f"CONTEXT#{int(time.time())}",
-                'session_id': session_id,
-                'user_id': user_id,
-                'webpage_content': current_context['webpage_content'],
-                'conversation_history': conversation_history,
-                'session_variables': session_variables,
-                'agent_memory': current_context['agent_memory'],
-                'last_updated': int(time.time()),
-                'ttl': int(time.time()) + (self.context_ttl_days * 24 * 60 * 60)
-            }
-            
-            # Store updated context
-            self.session_context_table.put_item(Item=updated_context)
+            # Store agent response
+            if agent_response:
+                agent_message_item = {
+                    'session_id': session_id,
+                    'message_id': f'msg_{timestamp + 1}_{uuid.uuid4().hex[:8]}',
+                    'user_id': user_id,
+                    'timestamp': timestamp + 1,
+                    'message_content': agent_response,
+                    'sender': 'bot',
+                    'message_type': 'text',
+                    'expires_at': int(time.time()) + (self.session_ttl_days * 24 * 60 * 60)
+                }
+                self.chat_sessions_table.put_item(Item=agent_message_item)
             
             # Update session metadata
-            self.sessions_table.update_item(
-                Key={
-                    'PK': f"USER#{user_id}",
-                    'SK': f"SESSION#{session_id}"
-                },
-                UpdateExpression="SET conversation_count = conversation_count + :inc, last_activity = :activity",
-                ExpressionAttributeValues={
-                    ':inc': 1,
-                    ':activity': int(time.time())
-                }
-            )
+            update_expression_parts = []
+            expression_attribute_values = {}
+            
+            # Update message count
+            message_count_increment = 0
+            if new_message:
+                message_count_increment += 1
+            if agent_response:
+                message_count_increment += 1
+            
+            if message_count_increment > 0:
+                update_expression_parts.append('ADD message_count :count')
+                expression_attribute_values[':count'] = message_count_increment
+            
+            # Update last_updated
+            update_expression_parts.append('SET last_updated = :timestamp')
+            expression_attribute_values[':timestamp'] = timestamp
+            
+            # Update session variables if provided
+            if updated_variables:
+                update_expression_parts.append('SET session_variables = :vars')
+                expression_attribute_values[':vars'] = updated_variables
+            
+            if update_expression_parts:
+                self.chat_sessions_table.update_item(
+                    Key={'session_id': session_id, 'message_id': 'SESSION_METADATA'},
+                    UpdateExpression=' '.join(update_expression_parts),
+                    ExpressionAttributeValues=expression_attribute_values
+                )
             
             logger.info(f"Updated context for session {session_id}")
             return True
@@ -272,11 +263,16 @@ class SessionManager:
             sessions: List of session metadata
         """
         try:
-            response = self.sessions_table.query(
+            response = self.chat_sessions_table.query(
                 IndexName='UserSessionsIndex',
-                KeyConditionExpression='GSI1PK = :user_id',
+                KeyConditionExpression='user_id = :user_id',
                 ExpressionAttributeValues={
-                    ':user_id': f"USER#{user_id}"
+                    ':user_id': user_id
+                },
+                FilterExpression='message_id = :metadata',
+                ExpressionAttributeValues={
+                    ':user_id': user_id,
+                    ':metadata': 'SESSION_METADATA'
                 },
                 ScanIndexForward=False,  # Most recent first
                 Limit=limit
@@ -287,12 +283,13 @@ class SessionManager:
                 sessions.append({
                     'session_id': item['session_id'],
                     'created_at': item['created_at'],
-                    'last_activity': item['last_activity'],
+                    'last_updated': item['last_updated'],
+                    'title': item.get('title', f'Chat {item["session_id"][:8]}'),
+                    'model': item.get('model', 'claude-3-sonnet'),
+                    'message_count': item.get('message_count', 0),
                     'page_url': item.get('page_url', ''),
                     'page_title': item.get('page_title', ''),
-                    'user_intent': item.get('user_intent', 'general'),
-                    'conversation_count': item.get('conversation_count', 0),
-                    'status': item.get('status', 'active')
+                    'user_intent': item.get('user_intent', 'general')
                 })
             
             return sessions
@@ -318,41 +315,42 @@ class SessionManager:
             if not session_context:
                 return False
             
+            # Get all messages for the session
+            messages_response = self.chat_sessions_table.query(
+                KeyConditionExpression='session_id = :session_id',
+                ExpressionAttributeValues={':session_id': session_id}
+            )
+            
             # Create archive data
             archive_data = {
                 'session_id': session_id,
                 'user_id': user_id,
                 'archived_at': int(time.time()),
                 'session_metadata': session_context['metadata'],
-                'context': session_context['context'],
                 'conversation_history': session_context['conversation_history'],
-                'session_variables': session_context['session_variables']
+                'session_variables': session_context['session_variables'],
+                'all_messages': messages_response.get('Items', [])
             }
             
-            # Store in S3
-            archive_key = f"archives/{user_id}/{session_id}/session_data.json"
-            self.s3_client.put_object(
-                Bucket=self.session_archives_bucket,
-                Key=archive_key,
-                Body=json.dumps(archive_data, indent=2),
-                ContentType='application/json'
-            )
+            # Store in S3 if bucket is configured
+            if self.session_archives_bucket:
+                archive_key = f"archives/{user_id}/{session_id}/session_data.json"
+                self.s3_client.put_object(
+                    Bucket=self.session_archives_bucket,
+                    Key=archive_key,
+                    Body=json.dumps(archive_data, indent=2),
+                    ContentType='application/json'
+                )
             
-            # Mark session as archived
-            self.sessions_table.update_item(
-                Key={
-                    'PK': f"USER#{user_id}",
-                    'SK': f"SESSION#{session_id}"
-                },
-                UpdateExpression="SET #status = :status, archived_at = :archived_at",
-                ExpressionAttributeNames={
-                    '#status': 'status'
-                },
-                ExpressionAttributeValues={
-                    ':status': 'archived',
-                    ':archived_at': int(time.time())
-                }
-            )
+            # Delete session from DynamoDB
+            with self.chat_sessions_table.batch_writer() as batch:
+                for item in messages_response['Items']:
+                    batch.delete_item(
+                        Key={
+                            'session_id': item['session_id'],
+                            'message_id': item['message_id']
+                        }
+                    )
             
             logger.info(f"Archived session {session_id} for user {user_id}")
             return True
@@ -428,14 +426,14 @@ class SessionManager:
     def _validate_session_access(self, session_id: str, user_id: str) -> bool:
         """Validate that user has access to the session"""
         try:
-            response = self.sessions_table.get_item(
+            response = self.chat_sessions_table.get_item(
                 Key={
-                    'PK': f"USER#{user_id}",
-                    'SK': f"SESSION#{session_id}"
+                    'session_id': session_id,
+                    'message_id': 'SESSION_METADATA'
                 }
             )
             
-            return 'Item' in response and response['Item'].get('status') == 'active'
+            return 'Item' in response and response['Item'].get('user_id') == user_id
             
         except Exception as e:
             logger.error(f"Error validating session access: {str(e)}")
@@ -444,12 +442,12 @@ class SessionManager:
     def _update_session_activity(self, session_id: str, user_id: str) -> None:
         """Update last activity timestamp for session"""
         try:
-            self.sessions_table.update_item(
+            self.chat_sessions_table.update_item(
                 Key={
-                    'PK': f"USER#{user_id}",
-                    'SK': f"SESSION#{session_id}"
+                    'session_id': session_id,
+                    'message_id': 'SESSION_METADATA'
                 },
-                UpdateExpression="SET last_activity = :activity",
+                UpdateExpression="SET last_updated = :activity",
                 ExpressionAttributeValues={
                     ':activity': int(time.time())
                 }
@@ -457,23 +455,6 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Error updating session activity: {str(e)}")
     
-    def _store_session_context(self, session_id: str, context: Dict[str, Any]) -> None:
-        """Store session context in DynamoDB"""
-        try:
-            context_item = {
-                'PK': f"SESSION#{session_id}",
-                'SK': "CURRENT_CONTEXT",
-                'GSI1PK': f"SESSION#{session_id}",
-                'GSI1SK': f"CONTEXT#{int(time.time())}",
-                **context,
-                'ttl': int(time.time()) + (self.context_ttl_days * 24 * 60 * 60)
-            }
-            
-            self.session_context_table.put_item(Item=context_item)
-            
-        except Exception as e:
-            logger.error(f"Error storing session context: {str(e)}")
-            raise
 
 # Global session manager instance
 session_manager = SessionManager()
