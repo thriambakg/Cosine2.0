@@ -86,9 +86,9 @@ resource "aws_ecr_repository_policy" "frontend" {
   })
 }
 
-# ECR Repository policy for chat agent Lambda access
-resource "aws_ecr_repository_policy" "chat_agent" {
-  repository = aws_ecr_repository.chat_agent.name
+# ECR Repository policy for Lambda access (applies to all repositories using this module)
+resource "aws_ecr_repository_policy" "lambda_access" {
+  repository = aws_ecr_repository.frontend.name
 
   policy = jsonencode({
     Version = "2012-10-17"
