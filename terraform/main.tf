@@ -321,6 +321,39 @@ module "api_gateway" {
       lambda_arn              = module.session_management_lambda.function_arn
       request_parameters      = {}
     }
+    # Billing API methods
+    billing_credits_get = {
+      resource_key            = "billing_action"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.billing_lambda.function_arn
+      request_parameters      = {}
+    }
+    billing_credits_post = {
+      resource_key            = "billing_action"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.billing_lambda.function_arn
+      request_parameters      = {}
+    }
+    billing_usage_get = {
+      resource_key            = "billing_action"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.billing_lambda.function_arn
+      request_parameters      = {}
+    }
+    billing_purchase_post = {
+      resource_key            = "billing_action"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.billing_lambda.function_arn
+      request_parameters      = {}
+    }
   }
 
   # Lambda permissions configuration

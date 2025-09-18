@@ -49,8 +49,8 @@ staging_subdomain = "staging"
 production_subdomain = ""
 
 # Chat Agent Container Configuration
-# Use versioned tags for production deployments to prevent conflicts
-chat_agent_image_tag = "v1.0.0"
+# Use dynamic versioned tags from build process for production deployments
+# chat_agent_image_tag = "v1.0.0"  # Commented out - will use dynamic tag from build process
 
 # Note: When enabling custom domain in production:
 # 1. Purchase and register your domain (investcosine.com) ✅ DONE
