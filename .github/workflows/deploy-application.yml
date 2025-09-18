@@ -172,11 +172,73 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
+  update-lambda-container:
+    name: 'Update Lambda Container Image'
+    runs-on: ubuntu-latest
+    needs: [determine-environment, build-chat-agent-container, deploy-application]
+    if: ${{ !github.event.inputs.destroy && needs.deploy-application.result == 'success' }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Update Lambda Function Code
+        run: |
+          echo "🔧 Updating Lambda function container image..."
+          echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+          echo "Image URI: ${{ needs.build-chat-agent-container.outputs.ecr-image-uri }}"
+          
+          # Update the Lambda function code to use the new container image
+          aws lambda update-function-code \
+            --function-name "cosine-chat-agent-${{ needs.determine-environment.outputs.environment }}" \
+            --image-uri "${{ needs.build-chat-agent-container.outputs.ecr-image-uri }}" \
+            --region us-east-1
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Lambda function code updated successfully"
+            echo "⏳ Waiting 10 seconds for Lambda to pull the new image..."
+            sleep 10
+          else
+            echo "❌ Failed to update Lambda function code"
+            exit 1
+          fi
+
+      - name: Verify Lambda Image Update
+        run: |
+          echo "🔍 Verifying Lambda function is using the correct image..."
+          
+          # Get current Lambda configuration
+          CURRENT_IMAGE_URI=$(aws lambda get-function \
+            --function-name "cosine-chat-agent-${{ needs.determine-environment.outputs.environment }}" \
+            --region us-east-1 \
+            --query 'Configuration.Code.ImageUri' \
+            --output text)
+          
+          EXPECTED_IMAGE_URI="${{ needs.build-chat-agent-container.outputs.ecr-image-uri }}"
+          
+          echo "Expected Image URI: $EXPECTED_IMAGE_URI"
+          echo "Current Image URI: $CURRENT_IMAGE_URI"
+          
+          if [ "$CURRENT_IMAGE_URI" = "$EXPECTED_IMAGE_URI" ]; then
+            echo "✅ Lambda function is using the correct image!"
+          else
+            echo "❌ Lambda function is NOT using the correct image!"
+            echo "This indicates Lambda didn't update its container image properly"
+            exit 1
+          fi
+
 
   comment-pr:
     name: 'Comment on PR'
     runs-on: ubuntu-latest
-    needs: [determine-environment, deploy-application]
+    needs: [determine-environment, deploy-application, update-lambda-container]
     if: always() && github.event_name == 'pull_request'
     steps:
       - name: Comment PR with Results
@@ -195,11 +257,13 @@ jobs:
             - **Base Infrastructure Required:** ✅ Verified
             - **Chat Agent Container:** ✅ Built and pushed to ECR
             - **Infrastructure Deployment:** ${infraStatus === 'success' ? '✅ Success' : infraStatus === 'failure' ? '❌ Failed' : '⏳ In Progress'}
+            - **Lambda Container Update:** ${{ needs.update-lambda-container.result == 'success' ? '✅ Success' : needs.update-lambda-container.result == 'failure' ? '❌ Failed' : '⏳ In Progress' }}
             
             ### 🔧 Build Results:
             - **Container Image:** ✅ Built with all dependencies (strands-agents, financial libraries, etc.)
             - **ECR Repository:** ✅ cosine-chat-agent-${{ needs.determine-environment.outputs.environment }}
             - **Lambda Function:** ✅ Container-based deployment ready
+            - **Lambda Container Update:** ✅ Forced Lambda to pull latest container image
             
             ### 🔍 Security Scans:
             - **TFLint:** ✅ Passed
