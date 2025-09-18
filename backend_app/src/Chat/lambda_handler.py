@@ -482,18 +482,36 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             session_context = session_manager.get_session_context(session_id, user_id)
             
             if not session_context:
-                logger.warning(f"🔍 DEBUG: Session {session_id} not found, creating new session")
-                # Create new session with webpage context
-                page_context = event_body.get('context', {})
-                session_id = session_manager.create_session(user_id, page_context)
-                session_context = session_manager.get_session_context(session_id, user_id)
-                is_new_session = True
+                logger.error(f"❌ Session {session_id} not found for user {user_id} - this should not happen if frontend is working correctly")
+                # DO NOT create a new session here - this would break continuity
+                # Return an error instead
+                return {
+                    'statusCode': 404,
+                    'body': {
+                        'error': 'Session not found',
+                        'message': f'Session {session_id} not found for user {user_id}',
+                        'session_id': session_id,
+                        'user_id': user_id
+                    }
+                }
         else:
-            # Fallback to default session for backward compatibility
-            logger.info("🔍 DEBUG: No session_id or user_id provided, using default session")
-            session_id = 'default'
-            user_id = 'default'
-            is_new_session = True
+            # Only create a new session if no session_id was provided
+            if not session_id:
+                logger.info("🔍 DEBUG: No session_id provided, creating new session")
+                page_context = event_body.get('context', {})
+                session_id = session_manager.create_session(user_id or 'default', page_context)
+                session_context = session_manager.get_session_context(session_id, user_id or 'default')
+                is_new_session = True
+            else:
+                logger.error(f"❌ Missing user_id for session {session_id}")
+                return {
+                    'statusCode': 400,
+                    'body': {
+                        'error': 'Missing user_id',
+                        'message': f'user_id is required for session {session_id}',
+                        'session_id': session_id
+                    }
+                }
         
         # Get session-aware agent
         if session_context:

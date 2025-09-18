@@ -494,6 +494,12 @@ export default function ChatPage() {
         message: userMessage.text,
         model: selectedModel,
         files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+        sessionId: currentSession?.session_id,
+        userId: user?.id,
+        context: {
+          currentPage: 'chat',
+          sessionId: currentSession?.session_id
+        }
       };
 
       try {
