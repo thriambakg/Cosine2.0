@@ -212,7 +212,7 @@ jobs:
         run: |
           cd terraform
           echo "🔍 Running terraform plan..."
-          terraform init -backend-config="environments/production.auto.tfvars"
+          terraform init -backend-config="backend-configs/production.tfbackend"
           terraform plan -var-file="environments/production.auto.tfvars" -var-file="additional_vars.tfvars"
           
       - name: Run Terraform Apply
