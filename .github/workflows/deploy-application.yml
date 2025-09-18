@@ -141,7 +141,13 @@ jobs:
           
           # Extract the image URI from the build output
           # The script outputs "Built Image URI: <uri>" in CI mode or "Deployed Image URI: <uri>" in full mode
-          ECR_IMAGE_URI=$(echo "$BUILD_OUTPUT" | grep -E "(Built Image URI:|Deployed Image URI:)" | cut -d' ' -f4-)
+          echo "🔍 Debug: Looking for image URI in build output..."
+          echo "🔍 Matching lines:"
+          echo "$BUILD_OUTPUT" | grep -E "(Built Image URI:|Deployed Image URI:)" || echo "No matching lines found"
+          
+          ECR_IMAGE_URI=$(echo "$BUILD_OUTPUT" | grep -E "(Built Image URI:|Deployed Image URI:)" | sed 's/.*URI: //')
+          
+          echo "🔍 Raw extracted URI: '$ECR_IMAGE_URI'"
           
           if [ -z "$ECR_IMAGE_URI" ]; then
             echo "❌ Failed to extract ECR image URI from deployment output"
