@@ -154,9 +154,26 @@ jobs:
           echo "ecr-image-uri=$ECR_IMAGE_URI" >> $GITHUB_OUTPUT
           echo "Built and pushed: $ECR_IMAGE_URI"
 
+  deploy-ecr-resources:
+    name: 'Deploy ECR Resources'
+    needs: [determine-environment]
+    uses: thriambakg/Cosine-pipelines/.github/workflows/terraform-reusable.yml@master
+    with:
+      terraform_directory: 'terraform'
+      infrastructure_type: 'application'
+      environment: ${{ needs.determine-environment.outputs.environment }}
+      destroy: ${{ github.event.inputs.destroy == 'true' }}
+      force_apply: ${{ github.event.inputs.force_apply == 'true' }}
+      base_infra_dependency: true
+      has_lambda_layer: false
+      terraform_targets: 'module.chat_agent_ecr'
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
   deploy-application:
     name: 'Deploy Application'
-    needs: [determine-environment, build-chat-agent-container]
+    needs: [determine-environment, build-chat-agent-container, deploy-ecr-resources]
     uses: thriambakg/Cosine-pipelines/.github/workflows/terraform-reusable.yml@master
     with:
       terraform_directory: 'terraform'
@@ -176,7 +193,7 @@ jobs:
   comment-pr:
     name: 'Comment on PR'
     runs-on: ubuntu-latest
-    needs: [determine-environment, deploy-application]
+    needs: [determine-environment, deploy-ecr-resources, deploy-application]
     if: always() && github.event_name == 'pull_request'
     steps:
       - name: Comment PR with Results
