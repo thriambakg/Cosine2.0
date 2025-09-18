@@ -17,6 +17,15 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 
+def json_dumps_safe(obj):
+    """JSON dumps with Decimal support for DynamoDB"""
+    def decimal_default(obj):
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+    
+    return json.dumps(obj, default=decimal_default)
+
 # Get the WebSocket API Gateway endpoint from environment variable
 websocket_endpoint = os.environ.get('WEBSOCKET_ENDPOINT')
 if not websocket_endpoint:
@@ -54,7 +63,7 @@ def lambda_handler(event, context):
         API Gateway response
     """
     try:
-        logger.info(f"Received event: {json.dumps(event)}")
+        logger.info(f"Received event: {json_dumps_safe(event)}")
         
         # Extract connection ID and message body
         connection_id = event.get('requestContext', {}).get('connectionId')
@@ -73,7 +82,7 @@ def lambda_handler(event, context):
             logger.error(f"Connection {connection_id} not found")
             return {
                 'statusCode': 400,
-                'body': json.dumps({'error': 'Connection not found'})
+                'body': json_dumps_safe({'error': 'Connection not found'})
             }
         
         user_id = connection_info['user_id']
@@ -86,7 +95,7 @@ def lambda_handler(event, context):
         logger.error(f"Error in message processor: {str(e)}")
         return {
             'statusCode': 500,
-            'body': json.dumps({'error': 'Internal server error'})
+            'body': json_dumps_safe({'error': 'Internal server error'})
         }
 
 def get_connection_info(connection_id):
@@ -148,7 +157,7 @@ def process_message(connection_id, user_id, session_id, message_data):
             logger.info(f"Connection establishment completed for connection {connection_id} - RETURNING EARLY")
             return {
                 'statusCode': 200,
-                'body': json.dumps({'message': 'Connection established'})
+                'body': json_dumps_safe({'message': 'Connection established'})
             }
         
         # Check if this is the first message (welcome message)
@@ -272,14 +281,14 @@ def process_message(connection_id, user_id, session_id, message_data):
         
         return {
             'statusCode': 200,
-            'body': json.dumps({'message': 'Message processed successfully'})
+            'body': json_dumps_safe({'message': 'Message processed successfully'})
         }
         
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}")
         return {
             'statusCode': 500,
-            'body': json.dumps({'error': 'Failed to process message'})
+            'body': json_dumps_safe({'error': 'Failed to process message'})
         }
 
 def call_chat_agent(user_id, message_text, model, files):
@@ -309,7 +318,7 @@ def call_chat_agent(user_id, message_text, model, files):
             }
         }
         
-        logger.info(f"Calling chat agent with payload: {json.dumps(payload)}")
+        logger.info(f"Calling chat agent with payload: {json_dumps_safe(payload)}")
         
         # Call the chat agent Lambda function
         # Note: You'll need to update this to the actual chat agent Lambda function name
@@ -318,12 +327,12 @@ def call_chat_agent(user_id, message_text, model, files):
         response = lambda_client.invoke(
             FunctionName=chat_agent_function_name,
             InvocationType='RequestResponse',
-            Payload=json.dumps(payload)
+            Payload=json_dumps_safe(payload)
         )
         
         # Parse the response
         response_payload = json.loads(response['Payload'].read().decode('utf-8'))
-        logger.info(f"Chat agent response: {json.dumps(response_payload)}")
+        logger.info(f"Chat agent response: {json_dumps_safe(response_payload)}")
         
         if response_payload.get('statusCode') == 200:
             response_body = json.loads(response_payload.get('body', '{}'))
@@ -350,7 +359,7 @@ def send_message_to_client(connection_id, message):
     try:
         api_gateway.post_to_connection(
             ConnectionId=connection_id,
-            Data=json.dumps(message)
+            Data=json_dumps_safe(message)
         )
         return True
     except Exception as e:

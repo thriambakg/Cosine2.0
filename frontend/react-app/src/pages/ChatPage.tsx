@@ -423,15 +423,8 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
-  // Auto-create a new session if none exists (only once)
-  useEffect(() => {
-    if (user && !currentSession && !persistenceLoading && sessions.length === 0) {
-      createNewSession().catch(error => {
-        console.error('Failed to auto-create session:', error);
-        // Don't retry automatically to prevent infinite loops
-      });
-    }
-  }, [user?.id]); // Only depend on user.id to prevent infinite loops
+  // Remove auto-creation - let user start typing first
+  // Sessions will be created when user actually sends a message
 
   const handleFileUpload = (files: FileList) => {
     Array.from(files).forEach((file) => {
@@ -469,7 +462,7 @@ export default function ChatPage() {
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoadingChat) return;
 
-    // Ensure we have a current session
+    // Create a new session if none exists (only when user actually sends a message)
     if (!currentSession) {
       try {
         await createNewSession();
@@ -807,6 +800,28 @@ export default function ChatPage() {
         {/* Messages */}
         <Box sx={{ flex: 1, overflow: 'auto', p: 2, minHeight: 0 }}>
           <Stack spacing={2}>
+            {messages.length === 0 && !currentSession && (
+              <Box sx={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                height: '100%',
+                textAlign: 'center',
+                color: '#9ca3af'
+              }}>
+                <BotIcon sx={{ fontSize: 64, mb: 2, opacity: 0.5 }} />
+                <Typography variant="h6" gutterBottom>
+                  Welcome to Cosine AI
+                </Typography>
+                <Typography variant="body1" sx={{ mb: 1 }}>
+                  Start a conversation by typing a message below
+                </Typography>
+                <Typography variant="body2" sx={{ opacity: 0.7 }}>
+                  Or select a previous chat from the sidebar
+                </Typography>
+              </Box>
+            )}
             {messages.map((message) => (
               <Box key={message.id} display="flex" gap={2}>
                 <Avatar sx={{ bgcolor: message.sender === 'user' ? '#22c55e' : '#374151', width: 32, height: 32 }}>

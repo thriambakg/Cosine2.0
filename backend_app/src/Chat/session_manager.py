@@ -269,15 +269,10 @@ class SessionManager:
         """
         try:
             response = self.chat_sessions_table.query(
-                IndexName='UserSessionsIndex',
+                IndexName='CreatedAtIndex',
                 KeyConditionExpression='user_id = :user_id',
                 ExpressionAttributeValues={
                     ':user_id': user_id
-                },
-                FilterExpression='message_id = :metadata',
-                ExpressionAttributeValues={
-                    ':user_id': user_id,
-                    ':metadata': 'SESSION_METADATA'
                 },
                 ScanIndexForward=False,  # Most recent first
                 Limit=limit
