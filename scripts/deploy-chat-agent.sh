@@ -134,19 +134,32 @@ build_docker_image() {
         exit 1
     fi
     
-    # Build the image
-    # Use regular docker build instead of buildx to avoid issues
+    # Build the image with local tag first
     docker build -t $ECR_REPOSITORY:$IMAGE_TAG $CHAT_AGENT_DIR/
     if [ $? -eq 0 ]; then
-        log_success "Docker image built successfully with tag: $IMAGE_TAG"
+        log_success "Docker image built successfully with local tag: $ECR_REPOSITORY:$IMAGE_TAG"
     else
         log_error "Failed to build Docker image"
         exit 1
     fi
     
-    # Also tag as latest
-    docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REPOSITORY:latest
-    log_success "Docker image also tagged as latest"
+    # Tag for ECR push
+    docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_IMAGE_URI
+    if [ $? -eq 0 ]; then
+        log_success "Docker image tagged for ECR: $ECR_IMAGE_URI"
+    else
+        log_error "Failed to tag Docker image for ECR"
+        exit 1
+    fi
+    
+    # Also tag as latest for ECR
+    docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_IMAGE_URI_LATEST
+    if [ $? -eq 0 ]; then
+        log_success "Docker image also tagged as latest for ECR: $ECR_IMAGE_URI_LATEST"
+    else
+        log_error "Failed to tag Docker image as latest for ECR"
+        exit 1
+    fi
 }
 
 # Push image to ECR
