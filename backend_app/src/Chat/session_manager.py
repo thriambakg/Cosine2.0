@@ -183,10 +183,14 @@ class SessionManager:
             success: True if update was successful
         """
         try:
+            logger.info(f"🔍 DEBUG: update_session_context called for session {session_id}, user {user_id}")
+            
             # Validate session access
             if not self._validate_session_access(session_id, user_id):
+                logger.error(f"❌ Session validation failed for session {session_id}, user {user_id}")
                 return False
             
+            logger.info(f"✅ Session validation passed for session {session_id}")
             timestamp = int(time.time())
             
             # Get current session
@@ -197,9 +201,12 @@ class SessionManager:
                 }
             )
             
+            logger.info(f"🔍 DEBUG: Session get_item response: {'Item' in response}")
             if 'Item' not in response:
-                logger.error(f"Session {session_id} not found for user {user_id}")
+                logger.error(f"❌ Session {session_id} not found for user {user_id}")
                 return False
+            
+            logger.info(f"✅ Session {session_id} found for user {user_id}")
             
             session_item = response['Item']
             messages = session_item.get('messages', [])
@@ -214,6 +221,7 @@ class SessionManager:
                     'message_type': 'text'
                 }
                 messages.append(user_message)
+                logger.info(f"✅ Added user message: {user_message['id']}")
             
             # Add agent response
             if agent_response:
@@ -225,6 +233,9 @@ class SessionManager:
                     'message_type': 'text'
                 }
                 messages.append(agent_message)
+                logger.info(f"✅ Added agent message: {agent_message['id']}")
+            
+            logger.info(f"🔍 DEBUG: Total messages after adding: {len(messages)}")
             
             # Update session with new messages
             update_expression_parts = ['SET messages = :messages', 'message_count = :count', 'last_updated = :timestamp']
@@ -239,6 +250,7 @@ class SessionManager:
                 update_expression_parts.append('session_variables = :vars')
                 expression_attribute_values[':vars'] = updated_variables
             
+            logger.info(f"🔍 DEBUG: Updating DynamoDB with {len(messages)} messages")
             self.chat_sessions_table.update_item(
                 Key={
                     'user_id': user_id,
@@ -248,7 +260,7 @@ class SessionManager:
                 ExpressionAttributeValues=expression_attribute_values
             )
             
-            logger.info(f"Updated context for session {session_id}")
+            logger.info(f"✅ Successfully updated context for session {session_id} with {len(messages)} messages")
             return True
             
         except Exception as e:

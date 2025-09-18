@@ -556,9 +556,15 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             # Update session context with new conversation
             if session_context and user_id:
                 logger.info(f"🔍 DEBUG: Updating session context for session {session_id}")
-                session_manager.update_session_context(
+                update_success = session_manager.update_session_context(
                     session_id, user_id, user_message, response_content
                 )
+                if update_success:
+                    logger.info(f"✅ Successfully updated session context for session {session_id}")
+                else:
+                    logger.error(f"❌ Failed to update session context for session {session_id}")
+            else:
+                logger.warning(f"⚠️ Cannot update session context - session_context: {session_context is not None}, user_id: {user_id is not None}")
             
             response_body = {
                 'response': response_content,
