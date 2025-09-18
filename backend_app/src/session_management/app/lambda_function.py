@@ -47,8 +47,7 @@ def lambda_handler(event, context):
     Expected event structure:
     {
         "httpMethod": "GET|POST|PUT|DELETE",
-        "pathParameters": {"session_id": "optional"},
-        "queryStringParameters": {"user_id": "required"},
+        "queryStringParameters": {"user_id": "required", "session_id": "required for specific session operations"},
         "body": "JSON string for POST/PUT"
     }
     """
@@ -74,9 +73,8 @@ def lambda_handler(event, context):
             }
         
         # Route to appropriate handler
-        path_params = event.get('pathParameters') or {}
+        session_id = query_params.get('session_id') if query_params else None
         if http_method == 'GET':
-            session_id = path_params.get('session_id') if path_params else None
             if session_id:
                 return get_session(user_id, session_id)
             else:
@@ -85,7 +83,6 @@ def lambda_handler(event, context):
             body = event.get('body', '{}')
             return create_session(user_id, json.loads(body) if body else {})
         elif http_method == 'PUT':
-            session_id = path_params.get('session_id') if path_params else None
             if not session_id:
                 return {
                     'statusCode': 400,
@@ -95,7 +92,6 @@ def lambda_handler(event, context):
             body = event.get('body', '{}')
             return update_session(user_id, session_id, json.loads(body) if body else {})
         elif http_method == 'DELETE':
-            session_id = path_params.get('session_id') if path_params else None
             if not session_id:
                 return {
                     'statusCode': 400,

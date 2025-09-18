@@ -131,10 +131,10 @@ module "api_gateway" {
       path_part = "dashboard"
     }
     dashboard_reorder = {
-      path_part = "reorder"
+      path_part = "dashboard-reorder"
     }
     dashboard_tiles = {
-      path_part = "tiles"
+      path_part = "dashboard-tiles"
     }
     alerts = {
       path_part = "alerts"
@@ -368,23 +368,23 @@ module "api_gateway" {
     dashboard_reorder_put = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
-      resource_path = "reorder"
+      resource_path = "dashboard-reorder"
     }
 
     tiles_post = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "POST"
-      resource_path = "tiles"
+      resource_path = "dashboard-tiles"
     }
     tiles_delete = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "DELETE"
-      resource_path = "tiles"
+      resource_path = "dashboard-tiles"
     }
     tiles_put = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
-      resource_path = "tiles"
+      resource_path = "dashboard-tiles"
     }
     alerts_get = {
       function_arn  = module.stock_alerts_lambda.function_arn
