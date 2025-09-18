@@ -284,7 +284,7 @@ jobs:
           CURRENT_IMAGE_URI=$(aws lambda get-function \
             --function-name "$FUNCTION_NAME" \
             --region us-east-1 \
-            --query 'Configuration.Code.ImageUri' \
+            --query 'Code.ImageUri' \
             --output text 2>/dev/null || echo "Failed to get image URI")
           
           echo "🔍 Current Image URI: '$CURRENT_IMAGE_URI'"
