@@ -131,10 +131,10 @@ module "api_gateway" {
       path_part = "dashboard"
     }
     dashboard_reorder = {
-      path_part = "dashboard/reorder"
+      path_part = "reorder"
     }
     dashboard_tiles = {
-      path_part = "dashboard/tiles"
+      path_part = "tiles"
     }
     alerts = {
       path_part = "alerts"
@@ -142,8 +142,8 @@ module "api_gateway" {
     sessions = {
       path_part = "sessions"
     }
-    session_id = {
-      path_part = "{session_id}"
+    session = {
+      path_part = "session"
     }
   }
 
@@ -297,7 +297,7 @@ module "api_gateway" {
       request_parameters      = {}
     }
     sessions_get_specific = {
-      resource_key            = "session_id"
+      resource_key            = "session"
       http_method             = "GET"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -305,7 +305,7 @@ module "api_gateway" {
       request_parameters      = {}
     }
     sessions_put = {
-      resource_key            = "session_id"
+      resource_key            = "session"
       http_method             = "PUT"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -313,7 +313,7 @@ module "api_gateway" {
       request_parameters      = {}
     }
     sessions_delete = {
-      resource_key            = "session_id"
+      resource_key            = "session"
       http_method             = "DELETE"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -368,23 +368,23 @@ module "api_gateway" {
     dashboard_reorder_put = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
-      resource_path = "dashboard/reorder"
+      resource_path = "reorder"
     }
 
     tiles_post = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "POST"
-      resource_path = "dashboard/tiles"
+      resource_path = "tiles"
     }
     tiles_delete = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "DELETE"
-      resource_path = "dashboard/tiles"
+      resource_path = "tiles"
     }
     tiles_put = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
-      resource_path = "dashboard/tiles"
+      resource_path = "tiles"
     }
     alerts_get = {
       function_arn  = module.stock_alerts_lambda.function_arn
@@ -414,17 +414,17 @@ module "api_gateway" {
     sessions_get_specific = {
       function_arn  = module.session_management_lambda.function_arn
       http_method   = "GET"
-      resource_path = "{session_id}"
+      resource_path = "session"
     }
     sessions_put = {
       function_arn  = module.session_management_lambda.function_arn
       http_method   = "PUT"
-      resource_path = "{session_id}"
+      resource_path = "session"
     }
     sessions_delete = {
       function_arn  = module.session_management_lambda.function_arn
       http_method   = "DELETE"
-      resource_path = "{session_id}"
+      resource_path = "session"
     }
   }
 

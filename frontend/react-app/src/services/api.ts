@@ -614,7 +614,7 @@ export const sessionManagementAPI = {
   // Get a specific session with all messages
   getSession: async (sessionId: string, userId: string): Promise<any> => {
     console.log('📋 API - Getting session:', { sessionId, userId });
-    return apiRequest<any>(`/${sessionId}?user_id=${userId}`, {
+    return apiRequest<any>(`/session?session_id=${sessionId}&user_id=${userId}`, {
       method: 'GET',
     });
   },
@@ -644,7 +644,7 @@ export const sessionManagementAPI = {
     model?: string;
   }): Promise<any> => {
     console.log('📋 API - Updating session:', { sessionId, userId, updateData });
-    return apiRequest<any>(`/${sessionId}?user_id=${userId}`, {
+    return apiRequest<any>(`/session?session_id=${sessionId}&user_id=${userId}`, {
       method: 'PUT',
       body: JSON.stringify(updateData),
     });
@@ -653,7 +653,7 @@ export const sessionManagementAPI = {
   // Delete a session
   deleteSession: async (sessionId: string, userId: string): Promise<{ message: string }> => {
     console.log('📋 API - Deleting session:', { sessionId, userId });
-    return apiRequest<{ message: string }>(`/${sessionId}?user_id=${userId}`, {
+    return apiRequest<{ message: string }>(`/session?session_id=${sessionId}&user_id=${userId}`, {
       method: 'DELETE',
     });
   },
