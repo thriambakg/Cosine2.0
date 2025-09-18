@@ -139,14 +139,14 @@ jobs:
             exit 1
           fi
           
-          # Extract the deployed image URI from the build output
-          # The script outputs "Deployed Image URI: <uri>" at the end
-          ECR_IMAGE_URI=$(echo "$BUILD_OUTPUT" | grep "Deployed Image URI:" | cut -d' ' -f4-)
+          # Extract the image URI from the build output
+          # The script outputs "Built Image URI: <uri>" in CI mode or "Deployed Image URI: <uri>" in full mode
+          ECR_IMAGE_URI=$(echo "$BUILD_OUTPUT" | grep -E "(Built Image URI:|Deployed Image URI:)" | cut -d' ' -f4-)
           
           if [ -z "$ECR_IMAGE_URI" ]; then
             echo "❌ Failed to extract ECR image URI from deployment output"
             echo "Available output lines:"
-            echo "$BUILD_OUTPUT" | grep -E "(Image URI|Deployed|Version)"
+            echo "$BUILD_OUTPUT" | grep -E "(Image URI|Built|Deployed|Version)"
             exit 1
           fi
           
