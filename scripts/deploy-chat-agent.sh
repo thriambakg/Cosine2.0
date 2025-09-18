@@ -129,6 +129,7 @@ build_docker_image() {
     fi
     
     # Build the image
+    # Use regular docker build instead of buildx to avoid issues
     docker build -t $ECR_REPOSITORY:$IMAGE_TAG $CHAT_AGENT_DIR/
     if [ $? -eq 0 ]; then
         log_success "Docker image built successfully with tag: $IMAGE_TAG"
@@ -253,6 +254,11 @@ main() {
         log_error "Docker is not running. Please start Docker daemon."
         exit 1
     fi
+    
+    # Disable Docker Buildx to use legacy builder (more reliable in CI)
+    log_info "Configuring Docker to use legacy builder..."
+    export DOCKER_BUILDKIT=0
+    export COMPOSE_DOCKER_CLI_BUILD=0
     
     log_success "Prerequisites check passed"
     
