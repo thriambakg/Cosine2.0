@@ -806,8 +806,11 @@ resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
   policy_arn = aws_iam_policy.lambda_secrets_policy.arn
 }
 
-# Attach session management policy
-# Session management policy attachment removed - using direct DynamoDB access instead
+# Attach ECR policy for container image access
+resource "aws_iam_role_policy_attachment" "chat_agent_ecr_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaECRAccessRole"
+}
 
 # Bedrock policy for chat agent
 resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
