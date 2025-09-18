@@ -269,7 +269,7 @@ def update_session(user_id: str, session_id: str, update_data: Dict[str, Any]) -
     try:
         # Check if session exists and user owns it
         response = table.get_item(
-            Key={'session_id': session_id, 'message_id': 'SESSION_METADATA'}
+            Key={'user_id': user_id, 'session_id': session_id}
         )
         
         if 'Item' not in response:
