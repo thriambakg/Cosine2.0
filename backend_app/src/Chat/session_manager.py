@@ -428,12 +428,12 @@ class SessionManager:
         try:
             response = self.chat_sessions_table.get_item(
                 Key={
-                    'session_id': session_id,
-                    'message_id': 'SESSION_METADATA'
+                    'user_id': user_id,
+                    'session_id': session_id
                 }
             )
             
-            return 'Item' in response and response['Item'].get('user_id') == user_id
+            return 'Item' in response
             
         except Exception as e:
             logger.error(f"Error validating session access: {str(e)}")

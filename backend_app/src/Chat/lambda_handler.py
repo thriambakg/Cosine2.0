@@ -547,11 +547,8 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 # Fallback: convert to string
                 response_content = str(agent_response)
             
-            # Ensure we only send one response - trim any extra content
+            # Clean up response content
             response_content = response_content.strip()
-            if '\n\n' in response_content:
-                # If there are multiple paragraphs, take only the first one
-                response_content = response_content.split('\n\n')[0]
             
             logger.info(f"🔍 DEBUG: Extracted response content: {response_content}")
             logger.info(f"🔍 DEBUG: Response content type: {type(response_content)}")
