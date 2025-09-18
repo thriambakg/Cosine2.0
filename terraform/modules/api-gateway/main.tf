@@ -27,8 +27,7 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_method.this,
     aws_api_gateway_integration.this,
     aws_api_gateway_method_response.this,
-    aws_api_gateway_integration_response.this,
-    module.options_integrations
+    aws_api_gateway_integration_response.this
   ]
 
   lifecycle {
@@ -185,14 +184,4 @@ resource "aws_lambda_permission" "lambda_permissions" {
 # Data source for current region
 data "aws_region" "current" {}
 
-# OPTIONS Integrations Module
-module "options_integrations" {
-  source = "./options-integrations"
-
-  rest_api_id = aws_api_gateway_rest_api.this.id
-  resources = {
-    for key, resource in aws_api_gateway_resource.this : key => {
-      resource_id = resource.id
-    }
-  }
-}
+# OPTIONS Integrations Module removed - using explicit OPTIONS methods instead
