@@ -807,10 +807,7 @@ resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
 }
 
 # Attach session management policy
-resource "aws_iam_role_policy_attachment" "chat_agent_session_management_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = data.terraform_remote_state.base_infra.outputs.session_management_config.session_management_policy_arn
-}
+# Session management policy attachment removed - using direct DynamoDB access instead
 
 # Bedrock policy for chat agent
 resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
@@ -866,12 +863,12 @@ resource "aws_lambda_function" "chat_agent" {
       CHAT_CONNECTIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name
       CHAT_SESSIONS_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
 
-      # Session Management Configuration
-      SESSIONS_TABLE_NAME        = data.terraform_remote_state.base_infra.outputs.session_management_config.sessions_table_name
-      SESSION_CONTEXT_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.session_management_config.session_context_table_name
-      SESSION_ARCHIVES_BUCKET    = data.terraform_remote_state.base_infra.outputs.session_management_config.session_archives_bucket_name
-      SESSION_TTL_DAYS           = data.terraform_remote_state.base_infra.outputs.session_management_config.session_ttl_days
-      CONTEXT_TTL_DAYS           = data.terraform_remote_state.base_infra.outputs.session_management_config.context_ttl_days
+      # Session Management Configuration - using consolidated chat_sessions table
+      SESSIONS_TABLE_NAME        = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+      SESSION_CONTEXT_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+      SESSION_ARCHIVES_BUCKET    = "" # Not configured - using DynamoDB TTL instead
+      SESSION_TTL_DAYS           = "30"
+      CONTEXT_TTL_DAYS           = "30"
       MAX_CONTEXT_SIZE           = "100000"
     }
   }
