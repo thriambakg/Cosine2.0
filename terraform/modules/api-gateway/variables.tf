@@ -28,7 +28,8 @@ variable "tags" {
 variable "resources" {
   description = "Map of API Gateway resources to create"
   type = map(object({
-    path_part = string
+    path_part           = string
+    parent_resource_key = optional(string)
   }))
   default = {}
 }

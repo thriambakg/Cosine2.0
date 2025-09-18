@@ -53,7 +53,7 @@ resource "aws_api_gateway_resource" "this" {
   for_each = var.resources
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  parent_id   = aws_api_gateway_rest_api.this.root_resource_id
+  parent_id   = each.value.parent_resource_key != null ? aws_api_gateway_resource.this[each.value.parent_resource_key].id : aws_api_gateway_rest_api.this.root_resource_id
   path_part   = each.value.path_part
 
   depends_on = [
@@ -177,7 +177,7 @@ resource "aws_api_gateway_integration_response" "this" {
 resource "aws_lambda_permission" "lambda_permissions" {
   for_each = var.lambda_permissions
 
-  statement_id  = "AllowExecutionFromAPIGateway_${each.key}"
+  statement_id  = "AllowExecutionFromAPIGateway_${each.key}_${replace(each.value.resource_path, "/", "_")}"
   action        = "lambda:InvokeFunction"
   function_name = each.value.function_arn
   principal     = "apigateway.amazonaws.com"
