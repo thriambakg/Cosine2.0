@@ -88,8 +88,8 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Make build script executable
-        run: chmod +x scripts/build-chat-agent-container.sh
+      - name: Make deployment script executable
+        run: chmod +x scripts/deploy-chat-agent.sh
 
       - name: Build and Push Chat Agent Container
         id: build
@@ -104,54 +104,44 @@ jobs:
           echo "🔍 Checking AWS credentials..."
           aws sts get-caller-identity || echo "❌ AWS credentials not available"
           
-          echo "🔍 Checking if build script exists..."
-          ls -la scripts/build-chat-agent-container.sh || echo "❌ Build script not found"
+          echo "🔍 Checking if deployment script exists..."
+          ls -la scripts/deploy-chat-agent.sh || echo "❌ Deployment script not found"
           
-          echo "🔍 Making build script executable..."
-          chmod +x scripts/build-chat-agent-container.sh
+          echo "🔍 Making deployment script executable..."
+          chmod +x scripts/deploy-chat-agent.sh
           
           echo "🔍 Testing script syntax..."
-          bash -n scripts/build-chat-agent-container.sh || echo "❌ Script has syntax errors"
+          bash -n scripts/deploy-chat-agent.sh || echo "❌ Script has syntax errors"
           
           echo "🔍 Checking script dependencies..."
           echo "AWS CLI version: $(aws --version)"
           echo "Docker version: $(docker --version)"
           
-          echo "🔍 Running build script..."
-          # Run the build script and capture output
+          echo "🔍 Running deployment script (build and push only)..."
+          # Run only the build and push parts, not the terraform deployment
+          # We'll capture the version and image URI for terraform
           set +e  # Don't exit on error
-          BUILD_OUTPUT=$(./scripts/build-chat-agent-container.sh 2>&1)
+          CI_MODE=true BUILD_OUTPUT=$(./scripts/deploy-chat-agent.sh 2>&1)
           BUILD_EXIT_CODE=$?
           set -e  # Re-enable exit on error
           
-          echo "🔍 Build script exit code: $BUILD_EXIT_CODE"
-          echo "🔍 Build script output:"
+          echo "🔍 Deployment script exit code: $BUILD_EXIT_CODE"
+          echo "🔍 Deployment script output:"
           echo "$BUILD_OUTPUT"
           
-          # Also try to run the script directly to see any immediate errors
-          echo "🔍 Testing script execution step by step..."
-          echo "Testing if script can start..."
-          timeout 10s bash -c 'source scripts/build-chat-agent-container.sh; echo "Script sourced successfully"' || echo "Script sourcing failed"
-          
-          echo "🔍 Running build script directly to see errors:"
-          echo "Starting script execution..."
-          ./scripts/build-chat-agent-container.sh
-          SCRIPT_EXIT_CODE=$?
-          echo "Script completed with exit code: $SCRIPT_EXIT_CODE"
-          
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
-            echo "❌ Build script failed with exit code: $BUILD_EXIT_CODE"
+            echo "❌ Deployment script failed with exit code: $BUILD_EXIT_CODE"
             exit 1
           fi
           
-          # Extract the primary image URI from the build output
-          # The script outputs "Primary Image URI: <uri>" at the end
-          ECR_IMAGE_URI=$(echo "$BUILD_OUTPUT" | grep "Primary Image URI:" | cut -d' ' -f4-)
+          # Extract the deployed image URI from the build output
+          # The script outputs "Deployed Image URI: <uri>" at the end
+          ECR_IMAGE_URI=$(echo "$BUILD_OUTPUT" | grep "Deployed Image URI:" | cut -d' ' -f4-)
           
           if [ -z "$ECR_IMAGE_URI" ]; then
-            echo "❌ Failed to extract ECR image URI from build output"
+            echo "❌ Failed to extract ECR image URI from deployment output"
             echo "Available output lines:"
-            echo "$BUILD_OUTPUT" | grep -E "(Image URI|Primary|Latest)"
+            echo "$BUILD_OUTPUT" | grep -E "(Image URI|Deployed|Version)"
             exit 1
           fi
           

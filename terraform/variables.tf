@@ -147,7 +147,13 @@ variable "ses_from_email" {
 # ============================================================================
 
 variable "chat_agent_image_uri" {
-  description = "Full ECR image URI for the chat agent container (including tag). If empty, uses latest tag."
+  description = "Full ECR image URI for the chat agent container (including tag). If empty, uses repository URL with chat_agent_image_tag."
   type        = string
   default     = ""
+}
+
+variable "chat_agent_image_tag" {
+  description = "Image tag for the chat agent container. Defaults to 'latest' for development, should be versioned for production."
+  type        = string
+  default     = "latest"
 }

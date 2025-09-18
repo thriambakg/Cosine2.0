@@ -885,7 +885,7 @@ resource "aws_lambda_function" "chat_agent" {
 
   # Container-based deployment
   package_type = "Image"
-  image_uri    = var.chat_agent_image_uri != "" ? var.chat_agent_image_uri : "${module.chat_agent_ecr.repository_url}:latest"
+  image_uri    = var.chat_agent_image_uri != "" ? var.chat_agent_image_uri : "${module.chat_agent_ecr.repository_url}:${var.chat_agent_image_tag}"
 
   environment {
     variables = {

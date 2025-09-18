@@ -48,6 +48,10 @@ staging_subdomain = "staging"
 # Production subdomain (empty string = root domain, or set to "app", "www", etc.)
 production_subdomain = ""
 
+# Chat Agent Container Configuration
+# Use versioned tags for production deployments to prevent conflicts
+chat_agent_image_tag = "v1.0.0"
+
 # Note: When enabling custom domain in production:
 # 1. Purchase and register your domain (investcosine.com) ✅ DONE
 # 2. After terraform apply, update your domain's nameservers to Route53
