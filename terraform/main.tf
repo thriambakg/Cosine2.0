@@ -806,11 +806,7 @@ resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
   policy_arn = aws_iam_policy.lambda_secrets_policy.arn
 }
 
-# Attach ECR policy for container image access
-resource "aws_iam_role_policy_attachment" "chat_agent_ecr_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaECRAccessRole"
-}
+# ECR permissions not needed - Lambda service handles container image access automatically
 
 # Bedrock policy for chat agent
 resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
