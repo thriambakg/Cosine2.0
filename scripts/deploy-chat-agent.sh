@@ -76,8 +76,8 @@ set_ecr_variables() {
     IMAGE_TAG="$VERSION"
     ECR_IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
     
-    # Also create a latest tag for convenience
-    ECR_IMAGE_URI_LATEST="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+    # Note: We no longer use 'latest' tag to avoid Lambda caching issues
+    # ECR_IMAGE_URI_LATEST="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
     
     # Log the version source
     if git rev-parse --git-dir > /dev/null 2>&1; then
@@ -92,7 +92,7 @@ set_ecr_variables() {
     log_info "  Version: $VERSION"
     log_info "  Image Tag: $IMAGE_TAG"
     log_info "  Image URI: $ECR_IMAGE_URI"
-    log_info "  Latest URI: $ECR_IMAGE_URI_LATEST"
+    # log_info "  Latest URI: $ECR_IMAGE_URI_LATEST"
 }
 
 # Login to ECR
@@ -152,14 +152,9 @@ build_docker_image() {
         exit 1
     fi
     
-    # Also tag as latest for ECR
-    docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_IMAGE_URI_LATEST
-    if [ $? -eq 0 ]; then
-        log_success "Docker image also tagged as latest for ECR: $ECR_IMAGE_URI_LATEST"
-    else
-        log_error "Failed to tag Docker image as latest for ECR"
-        exit 1
-    fi
+    # Note: We no longer tag as 'latest' to avoid Lambda caching issues
+    # docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_IMAGE_URI_LATEST
+    log_info "Using only versioned tag to avoid Lambda caching issues"
 }
 
 # Push image to ECR
@@ -175,20 +170,9 @@ push_docker_image() {
         exit 1
     fi
     
-    # Push latest tag
-    log_info "Pushing latest tag..."
-    docker push $ECR_IMAGE_URI_LATEST
-    if [ $? -eq 0 ]; then
-        log_success "Docker image pushed successfully as latest"
-        
-        # Verify the latest tag points to the correct image
-        log_info "Verifying latest tag points to correct image..."
-        LATEST_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $ECR_IMAGE_URI_LATEST 2>/dev/null || echo "Unable to get digest")
-        log_info "Latest tag digest: $LATEST_DIGEST"
-    else
-        log_error "Failed to push Docker image as latest - this may cause Lambda to use old image!"
-        exit 1
-    fi
+    # Note: We no longer push 'latest' tag to avoid Lambda caching issues
+    # docker push $ECR_IMAGE_URI_LATEST
+    log_info "Skipping latest tag push to avoid Lambda caching issues"
 }
 
 # Verify image exists in ECR
@@ -202,6 +186,37 @@ verify_ecr_image() {
     else
         log_error "Versioned image not found in ECR repository: $IMAGE_TAG"
         exit 1
+    fi
+}
+
+# Verify Lambda is using correct image
+verify_lambda_image() {
+    log_info "Verifying Lambda function is using correct image..."
+    
+    # Get Lambda function configuration
+    LAMBDA_CONFIG=$(aws lambda get-function --function-name "${PROJECT_NAME}-chat-agent-${ENVIRONMENT}" --region $AWS_REGION 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        log_error "Failed to get Lambda function configuration"
+        return 1
+    fi
+    
+    # Extract the image URI from the configuration
+    CURRENT_IMAGE_URI=$(echo "$LAMBDA_CONFIG" | jq -r '.Configuration.Code.ImageUri' 2>/dev/null)
+    if [ $? -ne 0 ] || [ "$CURRENT_IMAGE_URI" = "null" ]; then
+        log_error "Failed to extract image URI from Lambda configuration"
+        return 1
+    fi
+    
+    log_info "Lambda current image URI: $CURRENT_IMAGE_URI"
+    log_info "Expected image URI: $FULL_IMAGE_URI"
+    
+    if [ "$CURRENT_IMAGE_URI" = "$FULL_IMAGE_URI" ]; then
+        log_success "Lambda function is using the correct image!"
+    else
+        log_error "Lambda function is NOT using the correct image!"
+        log_error "Expected: $FULL_IMAGE_URI"
+        log_error "Current:  $CURRENT_IMAGE_URI"
+        return 1
     fi
 }
 
@@ -321,6 +336,10 @@ main() {
     else
         log_info "Step 7: Deploying with Terraform..."
         deploy_with_terraform
+        
+        # Verify Lambda is using the correct image
+        log_info "Step 8: Verifying Lambda function deployment..."
+        verify_lambda_image
         
         log_success "Chat agent deployment completed successfully!"
         log_info "Deployed Image URI: $ECR_IMAGE_URI"
