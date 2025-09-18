@@ -806,7 +806,41 @@ resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
   policy_arn = aws_iam_policy.lambda_secrets_policy.arn
 }
 
-# ECR permissions not needed - Lambda service handles container image access automatically
+# ECR policy for container image access
+resource "aws_iam_policy" "lambda_ecr_policy" {
+  name        = "${var.project_name}-lambda-ecr-policy-${var.environment}"
+  description = "Policy for Lambda functions to access ECR repositories"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
+        ]
+        Resource = module.chat_agent_ecr.repository_arn
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Attach ECR policy for container image access
+resource "aws_iam_role_policy_attachment" "chat_agent_ecr_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.lambda_ecr_policy.arn
+}
 
 # Bedrock policy for chat agent
 resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
