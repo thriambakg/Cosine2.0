@@ -264,22 +264,37 @@ jobs:
         run: |
           echo "🔍 Verifying Lambda function is using the correct image..."
           
-          # Get current Lambda configuration
-          CURRENT_IMAGE_URI=$(aws lambda get-function \
-            --function-name "cosine-chat-agent-${{ needs.determine-environment.outputs.environment }}" \
-            --region us-east-1 \
-            --query 'Configuration.Code.ImageUri' \
-            --output text)
-          
+          FUNCTION_NAME="cosine-chat-agent-${{ needs.determine-environment.outputs.environment }}"
           EXPECTED_IMAGE_URI="${{ needs.build-chat-agent-container.outputs.ecr-image-uri }}"
           
-          echo "Expected Image URI: $EXPECTED_IMAGE_URI"
-          echo "Current Image URI: $CURRENT_IMAGE_URI"
+          echo "🔍 Function name: $FUNCTION_NAME"
+          echo "🔍 Expected Image URI: $EXPECTED_IMAGE_URI"
+          
+          # First, let's check if the function exists
+          echo "🔍 Checking if Lambda function exists..."
+          aws lambda get-function --function-name "$FUNCTION_NAME" --region us-east-1 --query 'Configuration.FunctionName' --output text || echo "❌ Function not found or access denied"
+          
+          # Get full Lambda configuration for debugging
+          echo "🔍 Getting full Lambda configuration..."
+          FULL_CONFIG=$(aws lambda get-function --function-name "$FUNCTION_NAME" --region us-east-1 || echo "Failed to get function")
+          echo "$FULL_CONFIG"
+          
+          # Get current Lambda configuration
+          echo "🔍 Getting current image URI..."
+          CURRENT_IMAGE_URI=$(aws lambda get-function \
+            --function-name "$FUNCTION_NAME" \
+            --region us-east-1 \
+            --query 'Configuration.Code.ImageUri' \
+            --output text 2>/dev/null || echo "Failed to get image URI")
+          
+          echo "🔍 Current Image URI: '$CURRENT_IMAGE_URI'"
           
           if [ "$CURRENT_IMAGE_URI" = "$EXPECTED_IMAGE_URI" ]; then
             echo "✅ Lambda function is using the correct image!"
           else
             echo "❌ Lambda function is NOT using the correct image!"
+            echo "Expected: $EXPECTED_IMAGE_URI"
+            echo "Current:  $CURRENT_IMAGE_URI"
             echo "This indicates Lambda didn't update its container image properly"
             exit 1
           fi
