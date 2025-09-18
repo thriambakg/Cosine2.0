@@ -30,7 +30,6 @@ def get_cors_headers() -> Dict[str, str]:
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization'
     }
-
 def json_dumps_safe(obj: Any) -> str:
     """JSON dumps with Decimal support for DynamoDB"""
     def decimal_default(obj):
