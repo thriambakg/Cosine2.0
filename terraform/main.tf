@@ -842,6 +842,18 @@ resource "aws_iam_role_policy_attachment" "chat_agent_ecr_policy" {
   policy_arn = aws_iam_policy.lambda_ecr_policy.arn
 }
 
+# Attach DynamoDB policy for chat agent
+resource "aws_iam_role_policy_attachment" "chat_agent_dynamodb_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
+}
+
+# Attach KMS policy for DynamoDB encryption
+resource "aws_iam_role_policy_attachment" "chat_agent_kms_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.lambda_kms_policy.arn
+}
+
 # Bedrock policy for chat agent
 resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
   name = "${var.project_name}-chat-agent-bedrock-policy-${var.environment}"
