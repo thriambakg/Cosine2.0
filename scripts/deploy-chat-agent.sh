@@ -45,14 +45,14 @@ get_version() {
     if git rev-parse --git-dir > /dev/null 2>&1; then
         # Use git commit hash for versioning
         VERSION="v1.0.0-$(git rev-parse --short HEAD)"
-        log_info "Using git-based version: $VERSION"
+        echo "Using git-based version: $VERSION" >&2  # Log to stderr, not stdout
     else
         # Fallback to timestamp
         TIMESTAMP=$(date +%Y%m%d-%H%M%S)
         VERSION="v1.0.0-$TIMESTAMP"
-        log_warning "Not in a git repository, using timestamp version: $VERSION"
+        echo "Not in a git repository, using timestamp version: $VERSION" >&2  # Log to stderr, not stdout
     fi
-    echo "$VERSION"
+    echo "$VERSION"  # Only output the version to stdout
 }
 
 # Get AWS Account ID
@@ -69,7 +69,8 @@ get_aws_account_id() {
 
 # Set ECR variables
 set_ecr_variables() {
-    VERSION=$(get_version)
+    # Get version and capture any log messages to stderr
+    VERSION=$(get_version 2>/dev/null)
     ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
     ECR_REPOSITORY="${PROJECT_NAME}-chat-agent-${ENVIRONMENT}"
     
