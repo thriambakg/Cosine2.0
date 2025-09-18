@@ -130,13 +130,11 @@ module "api_gateway" {
     dashboard = {
       path_part = "dashboard"
     }
-    reorder = {
-      path_part           = "reorder"
-      parent_resource_key = "dashboard"
+    dashboard_reorder = {
+      path_part = "dashboard/reorder"
     }
-    tiles = {
-      path_part           = "tiles"
-      parent_resource_key = "dashboard"
+    dashboard_tiles = {
+      path_part = "dashboard/tiles"
     }
     alerts = {
       path_part = "alerts"
@@ -249,7 +247,7 @@ module "api_gateway" {
     }
     # Dashboard Reorder method
     dashboard_reorder_put = {
-      resource_key            = "reorder"
+      resource_key            = "dashboard_reorder"
       http_method             = "PUT"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -258,7 +256,7 @@ module "api_gateway" {
     }
     # Dashboard Tiles methods
     tiles_post = {
-      resource_key            = "tiles"
+      resource_key            = "dashboard_tiles"
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -266,7 +264,7 @@ module "api_gateway" {
       request_parameters      = {}
     }
     tiles_delete = {
-      resource_key            = "tiles"
+      resource_key            = "dashboard_tiles"
       http_method             = "DELETE"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -274,7 +272,7 @@ module "api_gateway" {
       request_parameters      = {}
     }
     tiles_put = {
-      resource_key            = "tiles"
+      resource_key            = "dashboard_tiles"
       http_method             = "PUT"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
