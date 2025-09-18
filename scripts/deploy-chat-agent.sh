@@ -216,6 +216,7 @@ verify_lambda_image() {
         log_error "Lambda function is NOT using the correct image!"
         log_error "Expected: $FULL_IMAGE_URI"
         log_error "Current:  $CURRENT_IMAGE_URI"
+        log_error "This indicates Lambda didn't update its container image properly"
         return 1
     fi
 }
@@ -240,6 +241,7 @@ deploy_with_terraform() {
     
     log_info "Using full image URI: $FULL_IMAGE_URI"
     log_info "Deployment trigger: $IMAGE_TAG"
+    log_info "Image digest: $(docker inspect --format='{{index .RepoDigests 0}}' $ECR_IMAGE_URI 2>/dev/null || echo 'Unable to get digest')"
     
     log_info "Using image tag: $IMAGE_TAG"
     
@@ -269,6 +271,22 @@ deploy_with_terraform() {
         log_success "Terraform deployment completed successfully!"
     else
         log_error "Terraform deployment failed"
+        exit 1
+    fi
+    
+    # Force Lambda to update its container image
+    log_info "Forcing Lambda function to update container image..."
+    aws lambda update-function-code \
+        --function-name "${PROJECT_NAME}-chat-agent-${ENVIRONMENT}" \
+        --image-uri "$FULL_IMAGE_URI" \
+        --region $AWS_REGION
+    
+    if [ $? -eq 0 ]; then
+        log_success "Lambda function code updated successfully with new image"
+        log_info "Waiting 10 seconds for Lambda to pull the new image..."
+        sleep 10
+    else
+        log_error "Failed to update Lambda function code"
         exit 1
     fi
 }

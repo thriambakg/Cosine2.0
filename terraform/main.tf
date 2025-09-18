@@ -890,7 +890,7 @@ resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
 # Chat Agent Lambda Function (Container-based)
 resource "aws_lambda_function" "chat_agent" {
   function_name = "${var.project_name}-chat-agent-${var.environment}"
-  description   = "Lambda function for chat agent with financial analysis capabilities - Container-based deployment - Trigger: ${var.chat_agent_deployment_trigger}"
+  description   = "Lambda function for chat agent with financial analysis capabilities - Container-based deployment - Trigger: ${var.chat_agent_deployment_trigger} - Image: ${var.chat_agent_image_uri != "" ? var.chat_agent_image_uri : "${module.chat_agent_ecr.repository_url}:${var.chat_agent_image_tag}"}"
   role          = aws_iam_role.chat_agent_execution_role.arn
   timeout       = 300
   memory_size   = 1024 # Memory for chat agent processing
@@ -901,9 +901,13 @@ resource "aws_lambda_function" "chat_agent" {
 
   # Force redeployment when image changes
   lifecycle {
-    ignore_changes        = [last_modified]
     create_before_destroy = true
   }
+
+  # Force Lambda function replacement when image URI changes
+  # replace_triggered_by = [
+  #   var.chat_agent_image_uri
+  # ]
 
   environment {
     variables = {
@@ -911,6 +915,7 @@ resource "aws_lambda_function" "chat_agent" {
       LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
       DEPLOYMENT_TIMESTAMP        = timestamp()
       IMAGE_URI                   = var.chat_agent_image_uri != "" ? var.chat_agent_image_uri : "${module.chat_agent_ecr.repository_url}:${var.chat_agent_image_tag}"
+      DEPLOYMENT_HASH             = substr(md5(var.chat_agent_image_uri != "" ? var.chat_agent_image_uri : "${module.chat_agent_ecr.repository_url}:${var.chat_agent_image_tag}"), 0, 8)
       USER_PROFILES_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
       ALERTS_TABLE_NAME           = data.terraform_remote_state.base_infra.outputs.alerts_table_name
       CHAT_CONNECTIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name
