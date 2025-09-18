@@ -431,7 +431,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "13"
+  deployment_trigger = "14"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -878,7 +878,7 @@ resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
 # Chat Agent Lambda Function (Container-based)
 resource "aws_lambda_function" "chat_agent" {
   function_name = "${var.project_name}-chat-agent-${var.environment}"
-  description   = "Lambda function for chat agent with financial analysis capabilities - Container-based deployment"
+  description   = "Lambda function for chat agent with financial analysis capabilities - Container-based deployment - Trigger: ${var.chat_agent_deployment_trigger}"
   role          = aws_iam_role.chat_agent_execution_role.arn
   timeout       = 300
   memory_size   = 1024 # Memory for chat agent processing
@@ -887,10 +887,18 @@ resource "aws_lambda_function" "chat_agent" {
   package_type = "Image"
   image_uri    = var.chat_agent_image_uri != "" ? var.chat_agent_image_uri : "${module.chat_agent_ecr.repository_url}:${var.chat_agent_image_tag}"
 
+  # Force redeployment when image changes
+  lifecycle {
+    ignore_changes        = [last_modified]
+    create_before_destroy = true
+  }
+
   environment {
     variables = {
       ENVIRONMENT                 = var.environment
       LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
+      DEPLOYMENT_TIMESTAMP        = timestamp()
+      IMAGE_URI                   = var.chat_agent_image_uri != "" ? var.chat_agent_image_uri : "${module.chat_agent_ecr.repository_url}:${var.chat_agent_image_tag}"
       USER_PROFILES_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
       ALERTS_TABLE_NAME           = data.terraform_remote_state.base_infra.outputs.alerts_table_name
       CHAT_CONNECTIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name

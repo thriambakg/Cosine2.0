@@ -176,11 +176,18 @@ push_docker_image() {
     fi
     
     # Push latest tag
+    log_info "Pushing latest tag..."
     docker push $ECR_IMAGE_URI_LATEST
     if [ $? -eq 0 ]; then
         log_success "Docker image pushed successfully as latest"
+        
+        # Verify the latest tag points to the correct image
+        log_info "Verifying latest tag points to correct image..."
+        LATEST_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $ECR_IMAGE_URI_LATEST 2>/dev/null || echo "Unable to get digest")
+        log_info "Latest tag digest: $LATEST_DIGEST"
     else
-        log_warning "Failed to push Docker image as latest"
+        log_error "Failed to push Docker image as latest - this may cause Lambda to use old image!"
+        exit 1
     fi
 }
 
@@ -210,8 +217,14 @@ deploy_with_terraform() {
         exit 1
     fi
     
-    # Set the image tag variable for Terraform
-    export TF_VAR_chat_agent_image_tag="$IMAGE_TAG"
+    # Set the image URI variable for Terraform (full URI with versioned tag)
+    FULL_IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+    export TF_VAR_chat_agent_image_uri="$FULL_IMAGE_URI"
+    export TF_VAR_chat_agent_image_tag=""  # Clear tag since we're using full URI
+    export TF_VAR_chat_agent_deployment_trigger="$IMAGE_TAG"  # Force Lambda redeployment
+    
+    log_info "Using full image URI: $FULL_IMAGE_URI"
+    log_info "Deployment trigger: $IMAGE_TAG"
     
     log_info "Using image tag: $IMAGE_TAG"
     

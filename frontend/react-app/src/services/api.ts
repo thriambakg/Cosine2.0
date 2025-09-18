@@ -499,7 +499,7 @@ export const dashboardAPI = {
   },
 
   reorderTabs: async (tabIds: string[], userId: string): Promise<{ message: string; order: string[] }> => {
-    return apiRequest<{ message: string; order: string[] }>(`/dashboard?userId=${userId}`, {
+    return apiRequest<{ message: string; order: string[] }>(`/dashboard-reorder?userId=${userId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json'
@@ -521,10 +521,10 @@ export const dashboardAPI = {
       userId,
       groupIds,
       requestBody,
-      url: `/dashboard?userId=${userId}`
+      url: `/dashboard-reorder?userId=${userId}`
     });
     
-    return apiRequest<{ message: string; order: string[] }>(`/dashboard?userId=${userId}`, {
+    return apiRequest<{ message: string; order: string[] }>(`/dashboard-reorder?userId=${userId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json'
@@ -546,7 +546,7 @@ export const dashboardAPI = {
   },
 
   addTile: async (tile: Partial<DashboardTile>, tabId?: string, userId?: string): Promise<{ tile: DashboardTile; message: string }> => {
-    return apiRequest<{ tile: DashboardTile; message: string }>(`/dashboard?userId=${userId}`, {
+    return apiRequest<{ tile: DashboardTile; message: string }>(`/dashboard-tiles?userId=${userId}`, {
       method: 'POST',
       body: JSON.stringify({ 
         type: 'add_tile',
@@ -557,21 +557,21 @@ export const dashboardAPI = {
   },
 
   updateTile: async (tileId: string, updates: Partial<DashboardTile>): Promise<{ message: string }> => {
-    return apiRequest<{ message: string }>(`/tiles/${tileId}`, {
+    return apiRequest<{ message: string }>(`/dashboard-tiles/${tileId}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
   },
 
   updateTilePosition: async (tileId: string, positionUpdate: TilePositionUpdate): Promise<{ message: string }> => {
-    return apiRequest<{ message: string }>(`/tiles/${tileId}/position`, {
+    return apiRequest<{ message: string }>(`/dashboard-tiles/${tileId}/position`, {
       method: 'PUT',
       body: JSON.stringify(positionUpdate),
     });
   },
 
   removeTile: async (tileId: string): Promise<{ message: string }> => {
-    return apiRequest<{ message: string }>(`/tiles/${tileId}`, {
+    return apiRequest<{ message: string }>(`/dashboard-tiles/${tileId}`, {
       method: 'DELETE',
     });
   },

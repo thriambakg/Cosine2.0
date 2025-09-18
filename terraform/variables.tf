@@ -157,3 +157,9 @@ variable "chat_agent_image_tag" {
   type        = string
   default     = "latest"
 }
+
+variable "chat_agent_deployment_trigger" {
+  description = "Trigger to force Lambda function redeployment when image changes"
+  type        = string
+  default     = ""
+}
