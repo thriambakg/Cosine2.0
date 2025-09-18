@@ -130,42 +130,20 @@ def list_sessions(user_id: str) -> Dict[str, Any]:
             Limit=50  # Limit to prevent large responses
         )
         
-        # Group messages by session
-        sessions = {}
+        # Convert items to session list (each item is a complete session)
+        session_list = []
         for item in response.get('Items', []):
-            session_id = item['session_id']
-            message_id = item['message_id']
-            
-            if session_id not in sessions:
-                sessions[session_id] = {
-                    'session_id': session_id,
-                    'user_id': user_id,
-                    'created_at': item['created_at'],
-                    'last_updated': item.get('last_updated', item['created_at']),
-                    'title': item.get('title', f'Chat {session_id[:8]}'),
-                    'message_count': 0,
-                    'messages': []
-                }
-            
-            # Add message to session
-            if 'message_content' in item:
-                sessions[session_id]['messages'].append({
-                    'message_id': message_id,
-                    'timestamp': item['timestamp'],
-                    'content': item['message_content'],
-                    'sender': item.get('sender', 'user'),
-                    'message_type': item.get('message_type', 'text')
-                })
-                sessions[session_id]['message_count'] += 1
-                sessions[session_id]['last_updated'] = max(sessions[session_id]['last_updated'], item['timestamp'])
-        
-        # Convert to list and sort by last_updated
-        session_list = list(sessions.values())
-        session_list.sort(key=lambda x: x['last_updated'], reverse=True)
-        
-        # Limit messages to last 10 per session for list view
-        for session in session_list:
-            session['messages'] = session['messages'][-10:] if len(session['messages']) > 10 else session['messages']
+            session = {
+                'session_id': item['session_id'],
+                'user_id': user_id,
+                'created_at': item['created_at'],
+                'last_updated': item.get('last_updated', item['created_at']),
+                'title': item.get('title', f'Chat {item["session_id"][:8]}'),
+                'model': item.get('model', 'claude-3-sonnet'),
+                'message_count': item.get('message_count', 0),
+                'messages': item.get('messages', [])
+            }
+            session_list.append(session)
         
         return {
             'statusCode': 200,
@@ -187,63 +165,36 @@ def list_sessions(user_id: str) -> Dict[str, Any]:
 def get_session(user_id: str, session_id: str) -> Dict[str, Any]:
     """Get full session with all messages"""
     try:
-        # Query all messages for the session
-        response = table.query(
-            KeyConditionExpression='session_id = :session_id',
-            ExpressionAttributeValues={':session_id': session_id},
-            ScanIndexForward=True  # Chronological order
+        # Get the specific session using both user_id (PK) and session_id (SK)
+        response = table.get_item(
+            Key={
+                'user_id': user_id,
+                'session_id': session_id
+            }
         )
         
-        if not response.get('Items'):
+        if 'Item' not in response:
             return {
                 'statusCode': 404,
                 'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
                 'body': json_dumps_safe({'error': 'Session not found'})
             }
         
-        # Verify user owns this session
-        first_item = response['Items'][0]
-        if first_item.get('user_id') != user_id:
-            return {
-                'statusCode': 403,
-                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
-                'body': json_dumps_safe({'error': 'Access denied'})
-            }
+        session_data = response['Item']
         
-        # Build session object
-        messages = []
-        session_metadata = None
+        # Ensure messages array exists and is properly formatted
+        messages = session_data.get('messages', [])
+        if not isinstance(messages, list):
+            messages = []
         
-        for item in response['Items']:
-            if 'message_content' in item:
-                messages.append({
-                    'message_id': item['message_id'],
-                    'timestamp': item['timestamp'],
-                    'content': item['message_content'],
-                    'sender': item.get('sender', 'user'),
-                    'message_type': item.get('message_type', 'text'),
-                    'metadata': item.get('metadata', {})
-                })
-            elif item['message_id'] == 'SESSION_METADATA':
-                session_metadata = item
-        
-        if not session_metadata:
-            # Create default metadata if not found
-            session_metadata = {
-                'session_id': session_id,
-                'user_id': user_id,
-                'title': f'Chat {session_id[:8]}',
-                'created_at': messages[0]['timestamp'] if messages else int(time.time()),
-                'model': 'claude-3-sonnet'
-            }
-        
+        # Format session data
         session_data = {
             'session_id': session_id,
             'user_id': user_id,
-            'title': session_metadata.get('title', f'Chat {session_id[:8]}'),
-            'created_at': session_metadata.get('created_at', int(time.time())),
-            'last_updated': messages[-1]['timestamp'] if messages else session_metadata.get('created_at'),
-            'model': session_metadata.get('model', 'claude-3-sonnet'),
+            'title': session_data.get('title', f'Chat {session_id[:8]}'),
+            'created_at': session_data.get('created_at', int(time.time())),
+            'last_updated': session_data.get('last_updated', session_data.get('created_at')),
+            'model': session_data.get('model', 'claude-3-sonnet'),
             'message_count': len(messages),
             'messages': messages
         }
@@ -270,43 +221,32 @@ def create_session(user_id: str, session_data: Dict[str, Any]) -> Dict[str, Any]
         title = session_data.get('title', f'New Chat {datetime.now().strftime("%m/%d %H:%M")}')
         model = session_data.get('model', 'claude-3-sonnet')
         
-        # Create session metadata
-        metadata_item = {
-            'session_id': session_id,
-            'message_id': 'SESSION_METADATA',
+        # Create session with welcome message
+        welcome_message = None
+        if session_data.get('create_welcome_message', True):
+            welcome_message = {
+                'id': f'msg_{timestamp}_{uuid.uuid4().hex[:8]}',
+                'text': "Hello! I'm Cosine, your AI financial analyst. How can I help you today?",
+                'sender': 'bot',
+                'timestamp': timestamp + 1,
+                'message_type': 'text'
+            }
+        
+        # Create single session item
+        session_item = {
             'user_id': user_id,
-            'timestamp': timestamp,
+            'session_id': session_id,
             'title': title,
             'model': model,
             'created_at': timestamp,
             'last_updated': timestamp,
-            'message_count': 0,
+            'message_count': 1 if welcome_message else 0,
+            'messages': [welcome_message] if welcome_message else [],
             'expires_at': int(time.time()) + (30 * 24 * 60 * 60)  # 30 days TTL
         }
         
-        # Store metadata
-        table.put_item(Item=metadata_item)
-        
-        # Create welcome message if specified
-        if session_data.get('create_welcome_message', True):
-            welcome_item = {
-                'session_id': session_id,
-                'message_id': f'msg_{timestamp}_{uuid.uuid4().hex[:8]}',
-                'user_id': user_id,
-                'timestamp': timestamp + 1,  # Slightly after metadata
-                'message_content': "Hello! I'm Cosine, your AI financial analyst. How can I help you today?",
-                'sender': 'bot',
-                'message_type': 'text',
-                'expires_at': int(time.time()) + (30 * 24 * 60 * 60)
-            }
-            table.put_item(Item=welcome_item)
-            
-            # Update message count
-            table.update_item(
-                Key={'session_id': session_id, 'message_id': 'SESSION_METADATA'},
-                UpdateExpression='SET message_count = :count',
-                ExpressionAttributeValues={':count': 1}
-            )
+        # Store session
+        table.put_item(Item=session_item)
         
         return {
             'statusCode': 201,
@@ -316,7 +256,7 @@ def create_session(user_id: str, session_data: Dict[str, Any]) -> Dict[str, Any]
                 'title': title,
                 'model': model,
                 'created_at': timestamp,
-                'message_count': 1 if session_data.get('create_welcome_message', True) else 0
+                'message_count': session_item['message_count']
             })
         }
     
@@ -369,35 +309,47 @@ def update_session(user_id: str, session_id: str, update_data: Dict[str, Any]) -
 def add_messages_to_session(user_id: str, session_id: str, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Add messages to an existing session"""
     try:
-        timestamp = int(time.time())
-        added_count = 0
-        
-        for message in messages:
-            message_id = f'msg_{timestamp}_{uuid.uuid4().hex[:8]}'
-            
-            message_item = {
-                'session_id': session_id,
-                'message_id': message_id,
+        # Get current session
+        response = table.get_item(
+            Key={
                 'user_id': user_id,
-                'timestamp': timestamp,
-                'message_content': message.get('content', ''),
-                'sender': message.get('sender', 'user'),
-                'message_type': message.get('message_type', 'text'),
-                'metadata': message.get('metadata', {}),
-                'expires_at': int(time.time()) + (30 * 24 * 60 * 60)
+                'session_id': session_id
             }
-            
-            table.put_item(Item=message_item)
-            added_count += 1
-            timestamp += 1  # Ensure chronological order
+        )
         
-        # Update session metadata
+        if 'Item' not in response:
+            return {
+                'statusCode': 404,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe({'error': 'Session not found'})
+            }
+        
+        session_item = response['Item']
+        current_messages = session_item.get('messages', [])
+        
+        # Add new messages
+        timestamp = int(time.time())
+        for i, message in enumerate(messages):
+            new_message = {
+                'id': message.get('id', f'msg_{timestamp + i}_{uuid.uuid4().hex[:8]}'),
+                'text': message.get('content', message.get('text', '')),
+                'sender': message.get('sender', 'user'),
+                'timestamp': message.get('timestamp', timestamp + i),
+                'message_type': message.get('message_type', 'text')
+            }
+            current_messages.append(new_message)
+        
+        # Update session with new messages
         table.update_item(
-            Key={'session_id': session_id, 'message_id': 'SESSION_METADATA'},
-            UpdateExpression='ADD message_count :count SET last_updated = :timestamp',
+            Key={
+                'user_id': user_id,
+                'session_id': session_id
+            },
+            UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
             ExpressionAttributeValues={
-                ':count': added_count,
-                ':timestamp': int(time.time())
+                ':messages': current_messages,
+                ':count': len(current_messages),
+                ':timestamp': timestamp
             }
         )
         
@@ -405,8 +357,8 @@ def add_messages_to_session(user_id: str, session_id: str, messages: List[Dict[s
             'statusCode': 200,
             'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json_dumps_safe({
-                'message': f'Added {added_count} messages to session',
-                'added_count': added_count
+                'message': f'Added {len(messages)} messages to session',
+                'added_count': len(messages)
             })
         }
     
@@ -458,42 +410,15 @@ def update_session_metadata(user_id: str, session_id: str, metadata: Dict[str, A
         }
 
 def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:
-    """Delete a chat session and all its messages"""
+    """Delete a chat session"""
     try:
-        # First, verify user owns the session
-        response = table.get_item(
-            Key={'session_id': session_id, 'message_id': 'SESSION_METADATA'}
-        )
-        
-        if 'Item' not in response:
-            return {
-                'statusCode': 404,
-                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
-                'body': json_dumps_safe({'error': 'Session not found'})
+        # Delete the session item using both user_id (PK) and session_id (SK)
+        table.delete_item(
+            Key={
+                'user_id': user_id,
+                'session_id': session_id
             }
-        
-        if response['Item']['user_id'] != user_id:
-            return {
-                'statusCode': 403,
-                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
-                'body': json_dumps_safe({'error': 'Access denied'})
-            }
-        
-        # Query all messages in the session
-        response = table.query(
-            KeyConditionExpression='session_id = :session_id',
-            ExpressionAttributeValues={':session_id': session_id}
         )
-        
-        # Delete all items in batch
-        with table.batch_writer() as batch:
-            for item in response['Items']:
-                batch.delete_item(
-                    Key={
-                        'session_id': item['session_id'],
-                        'message_id': item['message_id']
-                    }
-                )
         
         return {
             'statusCode': 200,

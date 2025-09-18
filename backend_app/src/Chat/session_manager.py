@@ -104,11 +104,11 @@ class SessionManager:
             session_context: Complete session context or None if not found
         """
         try:
-            # Get session metadata
+            # Get complete session data using new schema
             session_response = self.chat_sessions_table.get_item(
                 Key={
-                    'session_id': session_id,
-                    'message_id': 'SESSION_METADATA'
+                    'user_id': user_id,
+                    'session_id': session_id
                 }
             )
             
@@ -116,40 +116,45 @@ class SessionManager:
                 logger.warning(f"Session not found: {session_id}")
                 return None
             
-            session_metadata = session_response['Item']
+            session_item = session_response['Item']
             
-            # Validate user ownership
-            if session_metadata.get('user_id') != user_id:
+            # Validate user ownership (already done by the key structure)
+            if session_item.get('user_id') != user_id:
                 logger.warning(f"Invalid session access attempt: {session_id} by {user_id}")
                 return None
             
-            # Get all messages for the session
-            messages_response = self.chat_sessions_table.query(
-                KeyConditionExpression='session_id = :session_id',
-                ExpressionAttributeValues={':session_id': session_id},
-                ScanIndexForward=True  # Chronological order
-            )
-            
-            # Build conversation history from messages
+            # Build conversation history from messages array
             conversation_history = []
-            for item in messages_response.get('Items', []):
-                if 'message_content' in item:  # Skip metadata item
+            messages = session_item.get('messages', [])
+            
+            for message in messages:
+                if message.get('sender') == 'user':
                     conversation_history.append({
-                        'timestamp': item['timestamp'],
-                        'user_message': item.get('message_content', '') if item.get('sender') == 'user' else '',
-                        'agent_response': item.get('message_content', '') if item.get('sender') == 'bot' else ''
+                        'timestamp': message['timestamp'],
+                        'user_message': message.get('text', ''),
+                        'agent_response': ''
                     })
+                elif message.get('sender') == 'bot':
+                    # Add to the last conversation entry or create new one
+                    if conversation_history and conversation_history[-1]['agent_response'] == '':
+                        conversation_history[-1]['agent_response'] = message.get('text', '')
+                    else:
+                        conversation_history.append({
+                            'timestamp': message['timestamp'],
+                            'user_message': '',
+                            'agent_response': message.get('text', '')
+                        })
             
             # Combine metadata and context
             session_context = {
                 'session_id': session_id,
                 'user_id': user_id,
-                'metadata': session_metadata,
-                'webpage_content': session_metadata.get('page_url', ''),
+                'metadata': session_item,
+                'webpage_content': session_item.get('page_url', ''),
                 'conversation_history': conversation_history,
-                'session_variables': session_metadata.get('session_variables', {}),
+                'session_variables': session_item.get('session_variables', {}),
                 'agent_memory': '',  # Will be populated by agent
-                'last_updated': session_metadata.get('last_updated', 0)
+                'last_updated': session_item.get('last_updated', 0)
             }
             
             # Update last activity
@@ -185,64 +190,64 @@ class SessionManager:
             
             timestamp = int(time.time())
             
-            # Store user message
-            if new_message:
-                user_message_item = {
-                    'session_id': session_id,
-                    'message_id': f'msg_{timestamp}_{uuid.uuid4().hex[:8]}',
+            # Get current session
+            response = self.chat_sessions_table.get_item(
+                Key={
                     'user_id': user_id,
-                    'timestamp': timestamp,
-                    'message_content': new_message,
+                    'session_id': session_id
+                }
+            )
+            
+            if 'Item' not in response:
+                logger.error(f"Session {session_id} not found for user {user_id}")
+                return False
+            
+            session_item = response['Item']
+            messages = session_item.get('messages', [])
+            
+            # Add user message
+            if new_message:
+                user_message = {
+                    'id': f'msg_{timestamp}_{uuid.uuid4().hex[:8]}',
+                    'text': new_message,
                     'sender': 'user',
-                    'message_type': 'text',
-                    'expires_at': int(time.time()) + (self.session_ttl_days * 24 * 60 * 60)
+                    'timestamp': timestamp,
+                    'message_type': 'text'
                 }
-                self.chat_sessions_table.put_item(Item=user_message_item)
+                messages.append(user_message)
             
-            # Store agent response
+            # Add agent response
             if agent_response:
-                agent_message_item = {
-                    'session_id': session_id,
-                    'message_id': f'msg_{timestamp + 1}_{uuid.uuid4().hex[:8]}',
-                    'user_id': user_id,
-                    'timestamp': timestamp + 1,
-                    'message_content': agent_response,
+                agent_message = {
+                    'id': f'msg_{timestamp + 1}_{uuid.uuid4().hex[:8]}',
+                    'text': agent_response,
                     'sender': 'bot',
-                    'message_type': 'text',
-                    'expires_at': int(time.time()) + (self.session_ttl_days * 24 * 60 * 60)
+                    'timestamp': timestamp + 1,
+                    'message_type': 'text'
                 }
-                self.chat_sessions_table.put_item(Item=agent_message_item)
+                messages.append(agent_message)
             
-            # Update session metadata
-            update_expression_parts = []
-            expression_attribute_values = {}
-            
-            # Update message count
-            message_count_increment = 0
-            if new_message:
-                message_count_increment += 1
-            if agent_response:
-                message_count_increment += 1
-            
-            if message_count_increment > 0:
-                update_expression_parts.append('ADD message_count :count')
-                expression_attribute_values[':count'] = message_count_increment
-            
-            # Update last_updated
-            update_expression_parts.append('SET last_updated = :timestamp')
-            expression_attribute_values[':timestamp'] = timestamp
+            # Update session with new messages
+            update_expression_parts = ['SET messages = :messages', 'message_count = :count', 'last_updated = :timestamp']
+            expression_attribute_values = {
+                ':messages': messages,
+                ':count': len(messages),
+                ':timestamp': timestamp
+            }
             
             # Update session variables if provided
             if updated_variables:
-                update_expression_parts.append('SET session_variables = :vars')
+                update_expression_parts.append('session_variables = :vars')
                 expression_attribute_values[':vars'] = updated_variables
             
-            if update_expression_parts:
-                self.chat_sessions_table.update_item(
-                    Key={'session_id': session_id, 'message_id': 'SESSION_METADATA'},
-                    UpdateExpression=' '.join(update_expression_parts),
-                    ExpressionAttributeValues=expression_attribute_values
-                )
+            self.chat_sessions_table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression=' '.join(update_expression_parts),
+                ExpressionAttributeValues=expression_attribute_values
+            )
             
             logger.info(f"Updated context for session {session_id}")
             return True
@@ -444,8 +449,8 @@ class SessionManager:
         try:
             self.chat_sessions_table.update_item(
                 Key={
-                    'session_id': session_id,
-                    'message_id': 'SESSION_METADATA'
+                    'user_id': user_id,
+                    'session_id': session_id
                 },
                 UpdateExpression="SET last_updated = :activity",
                 ExpressionAttributeValues={

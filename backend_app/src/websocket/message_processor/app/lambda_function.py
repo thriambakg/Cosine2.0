@@ -166,20 +166,46 @@ def process_message(connection_id, user_id, session_id, message_data):
             if not send_message_to_client(connection_id, welcome_message):
                 logger.warning(f"Failed to send welcome message to connection {connection_id}")
         
-        # Store user message in DynamoDB
-        user_message_item = {
-            'session_id': session_id,
-            'message_id': message_id,
-            'user_id': user_id,
-            'message_type': 'user',
-            'content': message_text,
-            'model': model,
-            'files': files if files else None,
-            'timestamp': int(datetime.now().timestamp()),
-            'expires_at': int((datetime.now() + timedelta(days=90)).timestamp())
+        # Add user message to session
+        timestamp = int(datetime.now().timestamp())
+        user_message = {
+            'id': message_id,
+            'text': message_text,
+            'sender': 'user',
+            'timestamp': timestamp,
+            'message_type': 'text',
+            'files': files if files else None
         }
         
-        chat_sessions_table.put_item(Item=user_message_item)
+        # Get current session and add user message
+        try:
+            response = chat_sessions_table.get_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                }
+            )
+            
+            if 'Item' in response:
+                session_item = response['Item']
+                messages = session_item.get('messages', [])
+                messages.append(user_message)
+                
+                # Update session with new message
+                chat_sessions_table.update_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                    ExpressionAttributeValues={
+                        ':messages': messages,
+                        ':count': len(messages),
+                        ':timestamp': timestamp
+                    }
+                )
+        except Exception as e:
+            logger.error(f"Error saving user message: {str(e)}")
         
         # Send acknowledgment to user
         ack_message = {
@@ -193,19 +219,46 @@ def process_message(connection_id, user_id, session_id, message_data):
         # Call the existing chat agent Lambda
         ai_response = call_chat_agent(user_id, message_text, model, files)
         
-        # Store AI response in DynamoDB
+        # Add AI response to session
         ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}"
-        ai_message_item = {
-            'session_id': session_id,
-            'message_id': ai_message_id,
-            'user_id': 'ai',
-            'message_type': 'ai',
-            'content': ai_response,
-            'timestamp': int(datetime.now().timestamp()),
-            'expires_at': int((datetime.now() + timedelta(days=90)).timestamp())
+        ai_timestamp = int(datetime.now().timestamp())
+        ai_message = {
+            'id': ai_message_id,
+            'text': ai_response,
+            'sender': 'bot',
+            'timestamp': ai_timestamp,
+            'message_type': 'text'
         }
         
-        chat_sessions_table.put_item(Item=ai_message_item)
+        # Get current session and add AI message
+        try:
+            response = chat_sessions_table.get_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                }
+            )
+            
+            if 'Item' in response:
+                session_item = response['Item']
+                messages = session_item.get('messages', [])
+                messages.append(ai_message)
+                
+                # Update session with AI message
+                chat_sessions_table.update_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                    ExpressionAttributeValues={
+                        ':messages': messages,
+                        ':count': len(messages),
+                        ':timestamp': ai_timestamp
+                    }
+                )
+        except Exception as e:
+            logger.error(f"Error saving AI message: {str(e)}")
         
         # Send AI response to client
         ai_response_message = {
