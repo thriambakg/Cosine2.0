@@ -131,10 +131,12 @@ module "api_gateway" {
       path_part = "dashboard"
     }
     reorder = {
-      path_part = "reorder"
+      path_part           = "reorder"
+      parent_resource_key = "dashboard"
     }
     tiles = {
-      path_part = "tiles"
+      path_part           = "tiles"
+      parent_resource_key = "dashboard"
     }
     alerts = {
       path_part = "alerts"
@@ -368,7 +370,7 @@ module "api_gateway" {
     dashboard_reorder_put = {
       function_arn  = module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
-      resource_path = "reorder"
+      resource_path = "dashboard/reorder"
     }
 
     tiles_post = {

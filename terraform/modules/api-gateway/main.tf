@@ -177,7 +177,7 @@ resource "aws_api_gateway_integration_response" "this" {
 resource "aws_lambda_permission" "lambda_permissions" {
   for_each = var.lambda_permissions
 
-  statement_id  = "AllowExecutionFromAPIGateway_${each.key}_${replace(replace(replace(each.value.resource_path, "/", "_"), "{", ""), "}", "")}"
+  statement_id  = "AllowExecutionFromAPIGateway_${each.key}"
   action        = "lambda:InvokeFunction"
   function_name = each.value.function_arn
   principal     = "apigateway.amazonaws.com"
