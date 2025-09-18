@@ -45,12 +45,10 @@ get_version() {
     if git rev-parse --git-dir > /dev/null 2>&1; then
         # Use git commit hash for versioning
         VERSION="v1.0.0-$(git rev-parse --short HEAD)"
-        echo "Using git-based version: $VERSION" >&2  # Log to stderr, not stdout
     else
         # Fallback to timestamp
         TIMESTAMP=$(date +%Y%m%d-%H%M%S)
         VERSION="v1.0.0-$TIMESTAMP"
-        echo "Not in a git repository, using timestamp version: $VERSION" >&2  # Log to stderr, not stdout
     fi
     echo "$VERSION"  # Only output the version to stdout
 }
@@ -69,8 +67,8 @@ get_aws_account_id() {
 
 # Set ECR variables
 set_ecr_variables() {
-    # Get version and capture any log messages to stderr
-    VERSION=$(get_version 2>/dev/null)
+    # Get version (function is now silent)
+    VERSION=$(get_version)
     ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
     ECR_REPOSITORY="${PROJECT_NAME}-chat-agent-${ENVIRONMENT}"
     
@@ -80,6 +78,13 @@ set_ecr_variables() {
     
     # Also create a latest tag for convenience
     ECR_IMAGE_URI_LATEST="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+    
+    # Log the version source
+    if git rev-parse --git-dir > /dev/null 2>&1; then
+        log_info "Using git-based version: $VERSION"
+    else
+        log_warning "Not in a git repository, using timestamp version: $VERSION"
+    fi
     
     log_info "ECR Configuration:"
     log_info "  Registry: $ECR_REGISTRY"
