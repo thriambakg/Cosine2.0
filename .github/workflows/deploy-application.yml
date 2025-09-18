@@ -246,22 +246,24 @@ jobs:
         with:
           script: |
             const infraStatus = '${{ needs.deploy-application.result }}';
+            const lambdaUpdateStatus = '${{ needs.update-lambda-container.result }}';
+            const environment = '${{ needs.determine-environment.outputs.environment }}';
             
-            const comment = `## 🚀 Application Infrastructure Plan - ${{ needs.determine-environment.outputs.environment }}
+            const comment = `## 🚀 Application Infrastructure Plan - ${environment}
             
             Chat agent container built and Terraform plan generated with security scans completed.
             
             ### 📋 Summary:
-            - **Environment:** ${{ needs.determine-environment.outputs.environment }}
+            - **Environment:** ${environment}
             - **Infrastructure Type:** Application
             - **Base Infrastructure Required:** ✅ Verified
             - **Chat Agent Container:** ✅ Built and pushed to ECR
             - **Infrastructure Deployment:** ${infraStatus === 'success' ? '✅ Success' : infraStatus === 'failure' ? '❌ Failed' : '⏳ In Progress'}
-            - **Lambda Container Update:** ${{ needs.update-lambda-container.result == 'success' ? '✅ Success' : needs.update-lambda-container.result == 'failure' ? '❌ Failed' : '⏳ In Progress' }}
+            - **Lambda Container Update:** ${lambdaUpdateStatus === 'success' ? '✅ Success' : lambdaUpdateStatus === 'failure' ? '❌ Failed' : '⏳ In Progress'}
             
             ### 🔧 Build Results:
             - **Container Image:** ✅ Built with all dependencies (strands-agents, financial libraries, etc.)
-            - **ECR Repository:** ✅ cosine-chat-agent-${{ needs.determine-environment.outputs.environment }}
+            - **ECR Repository:** ✅ cosine-chat-agent-${environment}
             - **Lambda Function:** ✅ Container-based deployment ready
             - **Lambda Container Update:** ✅ Forced Lambda to pull latest container image
             
