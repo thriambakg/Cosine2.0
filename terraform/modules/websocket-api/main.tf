@@ -73,7 +73,7 @@ resource "aws_apigatewayv2_integration" "connect" {
   integration_type     = "AWS_PROXY"
   integration_uri      = var.connection_lambda_arn
   integration_method   = "POST"
-  timeout_milliseconds = 300000 # 5 minutes to match Lambda timeout
+  timeout_milliseconds = 29000 # Maximum allowed (29 seconds)
 }
 
 # Lambda Integration for $disconnect route
@@ -82,7 +82,7 @@ resource "aws_apigatewayv2_integration" "disconnect" {
   integration_type     = "AWS_PROXY"
   integration_uri      = var.connection_lambda_arn
   integration_method   = "POST"
-  timeout_milliseconds = 300000 # 5 minutes to match Lambda timeout
+  timeout_milliseconds = 29000 # Maximum allowed (29 seconds)
 }
 
 # Lambda Integration for $default route
@@ -91,7 +91,7 @@ resource "aws_apigatewayv2_integration" "default" {
   integration_type     = "AWS_PROXY"
   integration_uri      = var.message_lambda_arn
   integration_method   = "POST"
-  timeout_milliseconds = 300000 # 5 minutes to match Lambda timeout
+  timeout_milliseconds = 29000 # Maximum allowed (29 seconds)
 }
 
 # Lambda Integration for message route
@@ -100,7 +100,7 @@ resource "aws_apigatewayv2_integration" "message" {
   integration_type     = "AWS_PROXY"
   integration_uri      = var.message_lambda_arn
   integration_method   = "POST"
-  timeout_milliseconds = 300000 # 5 minutes to match Lambda timeout
+  timeout_milliseconds = 29000 # Maximum allowed (29 seconds)
 }
 
 # Route for $connect
