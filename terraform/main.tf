@@ -321,23 +321,7 @@ module "api_gateway" {
       lambda_arn              = module.session_management_lambda.function_arn
       request_parameters      = {}
     }
-    # Explicit OPTIONS methods for sessions endpoints (using main module's CORS support)
-    sessions_options = {
-      resource_key            = "sessions"
-      http_method             = "OPTIONS"
-      integration_type        = "MOCK"
-      integration_http_method = "POST"
-      lambda_arn              = ""
-      request_parameters      = {}
-    }
-    sessions_session_id_options = {
-      resource_key            = "sessions_session_id"
-      http_method             = "OPTIONS"
-      integration_type        = "MOCK"
-      integration_http_method = "POST"
-      lambda_arn              = ""
-      request_parameters      = {}
-    }
+    # OPTIONS methods are now automatically created by the API Gateway module
   }
 
   # Lambda permissions configuration
@@ -448,7 +432,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "8"
+  deployment_trigger = "11"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
