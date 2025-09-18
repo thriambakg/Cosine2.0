@@ -206,9 +206,9 @@ export default function ChatPage() {
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
-  // Connection status variables - used internally for WebSocket logic, not displayed in UI
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+  // Connection status variables - used internally for WebSocket logic
+  const [_connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
+  const [_connectionError, setConnectionError] = useState<string | null>(null);
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
   const [connectionEstablished, setConnectionEstablished] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);

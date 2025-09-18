@@ -103,7 +103,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
           
           // Restore current session if it exists
           if (currentSessionId && cachedSessions) {
-            const session = cachedSessions.find(s => s.session_id === currentSessionId);
+            const session = cachedSessions.find((s: ChatSession) => s.session_id === currentSessionId);
             if (session) {
               setCurrentSession(session);
             }
@@ -203,7 +203,8 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       console.error('📋 Error creating session:', error);
       
       // If backend is unavailable, create a local-only session
-      if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
+      const errorObj = error as any;
+      if (errorObj.code === 'ERR_NETWORK' || errorObj.message?.includes('Network Error')) {
         console.log('📋 Backend unavailable, creating local session...');
         const localSessionId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const now = Date.now();
