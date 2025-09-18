@@ -61,9 +61,8 @@ class SessionManager:
             
             # Create session metadata
             metadata_item = {
-                'session_id': session_id,
-                'message_id': 'SESSION_METADATA',
                 'user_id': user_id,
+                'session_id': session_id,
                 'timestamp': timestamp,
                 'title': f'Chat {datetime.now().strftime("%m/%d %H:%M")}',
                 'model': 'claude-3-sonnet',

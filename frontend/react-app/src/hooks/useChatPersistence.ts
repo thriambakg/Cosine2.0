@@ -48,7 +48,7 @@ interface UseChatPersistenceReturn {
 
 const CACHE_KEY = 'cosine_chat_sessions';
 const CACHE_EXPIRY_KEY = 'cosine_chat_cache_expiry';
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 
 export const useChatPersistence = (userId: string): UseChatPersistenceReturn => {
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);

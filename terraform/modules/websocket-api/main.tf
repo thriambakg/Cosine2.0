@@ -69,34 +69,38 @@ resource "aws_apigatewayv2_deployment" "this" {
 
 # Lambda Integration for $connect route
 resource "aws_apigatewayv2_integration" "connect" {
-  api_id             = aws_apigatewayv2_api.this.id
-  integration_type   = "AWS_PROXY"
-  integration_uri    = var.connection_lambda_arn
-  integration_method = "POST"
+  api_id               = aws_apigatewayv2_api.this.id
+  integration_type     = "AWS_PROXY"
+  integration_uri      = var.connection_lambda_arn
+  integration_method   = "POST"
+  timeout_milliseconds = 300000 # 5 minutes to match Lambda timeout
 }
 
 # Lambda Integration for $disconnect route
 resource "aws_apigatewayv2_integration" "disconnect" {
-  api_id             = aws_apigatewayv2_api.this.id
-  integration_type   = "AWS_PROXY"
-  integration_uri    = var.connection_lambda_arn
-  integration_method = "POST"
+  api_id               = aws_apigatewayv2_api.this.id
+  integration_type     = "AWS_PROXY"
+  integration_uri      = var.connection_lambda_arn
+  integration_method   = "POST"
+  timeout_milliseconds = 300000 # 5 minutes to match Lambda timeout
 }
 
 # Lambda Integration for $default route
 resource "aws_apigatewayv2_integration" "default" {
-  api_id             = aws_apigatewayv2_api.this.id
-  integration_type   = "AWS_PROXY"
-  integration_uri    = var.message_lambda_arn
-  integration_method = "POST"
+  api_id               = aws_apigatewayv2_api.this.id
+  integration_type     = "AWS_PROXY"
+  integration_uri      = var.message_lambda_arn
+  integration_method   = "POST"
+  timeout_milliseconds = 300000 # 5 minutes to match Lambda timeout
 }
 
 # Lambda Integration for message route
 resource "aws_apigatewayv2_integration" "message" {
-  api_id             = aws_apigatewayv2_api.this.id
-  integration_type   = "AWS_PROXY"
-  integration_uri    = var.message_lambda_arn
-  integration_method = "POST"
+  api_id               = aws_apigatewayv2_api.this.id
+  integration_type     = "AWS_PROXY"
+  integration_uri      = var.message_lambda_arn
+  integration_method   = "POST"
+  timeout_milliseconds = 300000 # 5 minutes to match Lambda timeout
 }
 
 # Route for $connect
