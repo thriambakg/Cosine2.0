@@ -65,6 +65,7 @@ def get_alpha_vantage_api_key():
 
 def rate_limit_check(ticker):
     """Enhanced rate limiting check to avoid Yahoo Finance blocks"""
+    global request_timestamps
     current_time = time.time()
     cache_key = f"rate_limit_{ticker}"
     

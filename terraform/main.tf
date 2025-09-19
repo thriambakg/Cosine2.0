@@ -1209,7 +1209,8 @@ module "stock_data_lambda" {
   # Additional IAM policies
   additional_policy_arns = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_secrets_policy.arn
   ]
 
   tags = var.common_tags
