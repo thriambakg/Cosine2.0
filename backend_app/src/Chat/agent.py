@@ -586,11 +586,11 @@ MODELS = {
         region="us-east-1"
     ),
     'gpt-4': BedrockModel(
-        model_id="amazon.titan-text-express-v1",  # Using Titan as GPT-4 alternative
+        model_id="anthropic.claude-3-sonnet-20240229-v1:0",  # Using Claude-3-Sonnet as GPT-4 alternative for now
         region="us-east-1"
     ),
     'gpt-3.5-turbo': BedrockModel(
-        model_id="amazon.titan-text-lite-v1",  # Using Titan as GPT-3.5 alternative
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",  # Using Claude-3-Haiku as GPT-3.5 alternative for now
         region="us-east-1"
     )
 }
@@ -924,7 +924,11 @@ def create_financial_agent(model_name: str = 'claude-3-sonnet') -> Agent:
     Create a financial agent with the specified model
     
     Args:
-        model_name: Name of the model to use ('claude-3-sonnet', 'claude-3-haiku', 'gpt-4', 'gpt-3.5-turbo')
+        model_name: Name of the model to use:
+                   - 'claude-3-sonnet': Claude 3 Sonnet (default)
+                   - 'claude-3-haiku': Claude 3 Haiku (faster, cheaper)
+                   - 'gpt-4': Maps to Claude 3 Sonnet (until proper GPT-4 access is configured)
+                   - 'gpt-3.5-turbo': Maps to Claude 3 Haiku (until proper GPT-3.5 access is configured)
         
     Returns:
         Agent: Configured financial agent

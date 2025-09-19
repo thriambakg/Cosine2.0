@@ -32,7 +32,11 @@ class ContextAwareAgent:
         
         Args:
             session_context: Complete session context from SessionManager
-            model_name: Name of the model to use ('claude-3-sonnet', 'claude-3-haiku', 'gpt-4', 'gpt-3.5-turbo')
+            model_name: Name of the model to use:
+                       - 'claude-3-sonnet': Claude 3 Sonnet (default)
+                       - 'claude-3-haiku': Claude 3 Haiku (faster, cheaper)
+                       - 'gpt-4': Maps to Claude 3 Sonnet (until proper GPT-4 access is configured)
+                       - 'gpt-3.5-turbo': Maps to Claude 3 Haiku (until proper GPT-3.5 access is configured)
             
         Returns:
             agent: Context-aware agent instance
