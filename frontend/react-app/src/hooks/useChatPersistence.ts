@@ -94,7 +94,8 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         clearTimeout(retryTimeoutRef.current);
       }
       // Save any pending messages before unmounting
-      if (pendingMessagesRef.current.length > 0) {
+      const hasPendingMessages = Object.values(pendingMessagesRef.current).some(messages => messages.length > 0);
+      if (hasPendingMessages) {
         saveMessagesToBackend();
       }
     };
@@ -696,7 +697,8 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         if (!retryTimeoutRef.current) {
           retryTimeoutRef.current = setTimeout(() => {
             retryTimeoutRef.current = null;
-            if (pendingMessagesRef.current.length > 0 && !isSavingRef.current) {
+            const hasPendingMessages = Object.values(pendingMessagesRef.current).some(messages => messages.length > 0);
+            if (hasPendingMessages && !isSavingRef.current) {
               console.log('📋 Retrying to save messages after session creation delay');
               saveMessagesToBackend();
             }
@@ -718,7 +720,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     localStorage.removeItem(CACHE_EXPIRY_KEY);
     setSessions([]);
     setCurrentSession(null);
-    pendingMessagesRef.current = [];
+    pendingMessagesRef.current = {};
     console.log('📋 Cleared local chat cache');
   }, []);
 
@@ -756,7 +758,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     ));
     
     // Clear pending messages since we're truncating
-    pendingMessagesRef.current = [];
+    pendingMessagesRef.current = {};
     
     console.log(`📋 Truncated messages after ${messageId}: ${truncatedMessages.length} messages remaining`);
   }, [currentSession]);
