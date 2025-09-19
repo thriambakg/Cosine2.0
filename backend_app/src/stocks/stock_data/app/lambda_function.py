@@ -521,52 +521,38 @@ def calculate_stats_from_chart_data(chart_data, current_price, period):
         
         print(f"📊 Calculating stats from {len(prices)} price points for period {period}")
         
-        # Calculate period return (start to end)
+        # Calculate total return using portfolio risk formula
         start_price = prices[0]
-        period_return = ((current_price - start_price) / start_price) * 100.0 if start_price > 0 else 0.0
+        total_return = (current_price / start_price) - 1 if start_price > 0 else 0.0
+        
+        # Calculate annual return using portfolio risk formula: total_return * (252 / len(df))
+        annual_return = total_return * (252 / len(prices)) * 100.0  # Convert to percentage
         
         # Calculate week return (last 7 data points if available)
         week_return = 0.0
         if len(prices) >= 7:
             week_ago_price = prices[-7] if len(prices) >= 7 else prices[0]
-            week_return = ((current_price - week_ago_price) / week_ago_price) * 100.0 if week_ago_price > 0 else 0.0
+            week_total_return = (current_price / week_ago_price) - 1 if week_ago_price > 0 else 0.0
+            # Scale week return to annual equivalent, then convert to weekly
+            week_return = week_total_return * (252 / 7) * 100.0  # Convert to percentage
         else:
-            # If less than 7 points, use period return scaled to week
-            if period == '1d':
-                week_return = period_return * 7  # Scale 1-day to 1-week
-            elif period == '7d':
-                week_return = period_return
-            else:
-                week_return = period_return / (len(prices) / 7)  # Scale to week
+            # If less than 7 points, scale annual return to week
+            week_return = annual_return / 52  # Annual to weekly
         
-        # Calculate annual return based on period
-        if period == '1d':
-            annual_return = period_return * 365  # Scale 1-day to annual
-        elif period == '7d':
-            annual_return = period_return * (365/7)  # Scale 7-day to annual
-        elif period == '30d':
-            annual_return = period_return * (365/30)  # Scale 30-day to annual
-        else:  # 1y
-            annual_return = period_return  # Already annual
-        
-        # Calculate volatility (standard deviation of returns)
+        # Calculate volatility using portfolio risk formula: log returns with sqrt(252) annualization
         volatility = 0.0
         if len(prices) > 1:
-            returns = []
+            import numpy as np
+            # Calculate log returns using portfolio risk formula
+            log_returns = []
             for i in range(1, len(prices)):
                 if prices[i-1] > 0:
-                    daily_return = (prices[i] - prices[i-1]) / prices[i-1]
-                    returns.append(daily_return)
+                    log_return = np.log(prices[i] / prices[i-1])
+                    log_returns.append(log_return)
             
-            if returns:
-                import numpy as np
-                # Annualize volatility based on period
-                if period == '1d':
-                    volatility = np.std(returns) * np.sqrt(1440) * 100.0  # 1-minute intervals to annual
-                elif period == '7d':
-                    volatility = np.std(returns) * np.sqrt(24) * 100.0  # 1-hour intervals to annual
-                else:
-                    volatility = np.std(returns) * np.sqrt(252) * 100.0  # Daily intervals to annual
+            if log_returns:
+                # Annualize volatility using portfolio risk formula: std * sqrt(252)
+                volatility = np.std(log_returns) * np.sqrt(252) * 100.0  # Convert to percentage
         
         print(f"📈 Calculated stats: week_return={week_return:.2f}%, annual_return={annual_return:.2f}%, volatility={volatility:.2f}%")
         
