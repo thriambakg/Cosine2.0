@@ -191,6 +191,11 @@ def process_message(connection_id, user_id, session_id, message_data):
                 'body': json_dumps_safe({'message': 'Connection established'})
             }
         
+        # Handle message editing
+        if message_type == 'edit_message':
+            logger.info(f"Processing edit message for connection {connection_id}")
+            return handle_edit_message(connection_id, user_id, session_id, message_data)
+        
         # Check if this is the first message (welcome message)
         is_first_message = message_data.get('is_first_message', False)
         
@@ -398,3 +403,175 @@ def send_message_to_client(connection_id, message):
     except Exception as e:
         logger.error(f"Error sending message to client: {str(e)}")
         return False
+
+def handle_edit_message(connection_id, user_id, session_id, message_data):
+    """
+    Handle message editing - truncate messages after edited message and regenerate response
+    
+    Args:
+        connection_id: WebSocket connection ID
+        user_id: User ID
+        session_id: Session ID
+        message_data: Edit message data containing messageId, newText (messageIndex is optional)
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        message_id = message_data.get('messageId')
+        new_text = message_data.get('newText')
+        model = message_data.get('model', 'claude-3-sonnet')
+        
+        if not all([message_id, new_text]):
+            logger.error(f"Missing required fields for edit message: messageId={message_id}, newText={new_text}")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Missing required fields for edit message'})
+            }
+        
+        logger.info(f"Editing message {message_id} in session {session_id}")
+        
+        # Get current session
+        response = chat_sessions_table.get_item(
+            Key={
+                'user_id': user_id,
+                'session_id': session_id
+            }
+        )
+        
+        if 'Item' not in response:
+            logger.error(f"Session {session_id} not found for user {user_id}")
+            return {
+                'statusCode': 404,
+                'body': json_dumps_safe({'error': 'Session not found'})
+            }
+        
+        session_item = response['Item']
+        messages = session_item.get('messages', [])
+        
+        # Validate that we have messages
+        if not messages:
+            logger.error(f"No messages found in session {session_id}")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'No messages in session'})
+            }
+        
+        # Find the message to edit by ID
+        message_to_edit_index = None
+        for i, msg in enumerate(messages):
+            if msg['id'] == message_id:
+                message_to_edit_index = i
+                break
+        
+        if message_to_edit_index is None:
+            logger.error(f"Message {message_id} not found in session {session_id}")
+            return {
+                'statusCode': 404,
+                'body': json_dumps_safe({'error': 'Message not found'})
+            }
+        
+        message_to_edit = messages[message_to_edit_index]
+        if message_to_edit['sender'] != 'user':
+            logger.error(f"Message {message_id} is not a user message")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Can only edit user messages'})
+            }
+        
+        # Truncate messages after the edited message
+        truncated_messages = messages[:message_to_edit_index + 1]  # Keep messages up to and including the edited one
+        truncated_messages[-1]['text'] = new_text  # Update the edited message text
+        
+        logger.info(f"Truncated {len(messages)} messages to {len(truncated_messages)} messages")
+        
+        # Update the session with truncated messages
+        timestamp = int(datetime.now().timestamp())
+        chat_sessions_table.update_item(
+            Key={
+                'user_id': user_id,
+                'session_id': session_id
+            },
+            UpdateExpression='SET messages = :messages, message_count = :message_count, last_updated = :last_updated',
+            ExpressionAttributeValues={
+                ':messages': truncated_messages,
+                ':message_count': len(truncated_messages),
+                ':last_updated': timestamp
+            }
+        )
+        
+        logger.info(f"Updated session {session_id} with truncated messages")
+        
+        # Send acknowledgment
+        ack_message = {
+            'type': 'edit_acknowledged',
+            'message_id': message_id,
+            'message_index': message_to_edit_index,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        send_message_to_client(connection_id, ack_message)
+        
+        # Call chat agent to generate new response
+        ai_response = call_chat_agent(user_id, new_text, model, [], session_id)
+        
+        if ai_response:
+            # Add AI response to session
+            ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}"
+            ai_timestamp = int(datetime.now().timestamp())
+            ai_message = {
+                'id': ai_message_id,
+                'text': ai_response,
+                'sender': 'bot',
+                'timestamp': ai_timestamp,
+                'message_type': 'text'
+            }
+            
+            # Add AI response to truncated messages
+            updated_messages = truncated_messages + [ai_message]
+            
+            # Update session with new AI response
+            chat_sessions_table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression='SET messages = :messages, message_count = :message_count, last_updated = :last_updated',
+                ExpressionAttributeValues={
+                    ':messages': updated_messages,
+                    ':message_count': len(updated_messages),
+                    ':last_updated': ai_timestamp
+                }
+            )
+            
+            # Send AI response to client
+            ai_response_message = {
+                'type': 'ai_response',
+                'message_id': ai_message_id,
+                'content': ai_response,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            send_message_to_client(connection_id, ai_response_message)
+            
+            logger.info(f"Sent AI response for edited message {message_id}")
+        else:
+            logger.error(f"Failed to get AI response for edited message {message_id}")
+            error_message = {
+                'type': 'error',
+                'message': 'Failed to generate response for edited message',
+                'timestamp': datetime.now().isoformat()
+            }
+            send_message_to_client(connection_id, error_message)
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({'message': 'Message edit processed successfully'})
+        }
+        
+    except Exception as e:
+        logger.error(f"Error handling edit message: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': 'Failed to process edit message'})
+        }

@@ -35,6 +35,7 @@ import {
   Close as CloseIcon,
   Psychology as BrainIcon,
   Delete as DeleteIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 
 interface Message {
@@ -87,10 +88,10 @@ const MessageBubble = ({ isUser, children, status, ...props }: any) => (
       borderRadius: '0px',
       position: 'relative',
       ...(isUser ? {
-        backgroundColor: '#dc2626',
+        backgroundColor: 'rgba(59, 130, 246, 0.8)',
         color: 'white',
         marginLeft: 'auto',
-        border: '1px solid #b91c1c',
+        border: '1px solid #3b82f6',
       } : {
         backgroundColor: 'rgba(15, 23, 42, 0.8)',
         color: 'white',
@@ -214,18 +215,40 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
+  // Message editing state
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const websocketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
+  const editContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isLoading && !user) {
       navigate('/');
     }
   }, [user, isLoading, navigate]);
+
+  // Handle click outside to cancel editing
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (editingMessage && editContainerRef.current && !editContainerRef.current.contains(event.target as Node)) {
+        handleCancelEdit();
+      }
+    };
+
+    if (editingMessage) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [editingMessage]);
 
   // WebSocket connection management
   const connectWebSocket = useCallback(() => {
@@ -376,6 +399,12 @@ export default function ChatPage() {
         setIsLoadingChat(false);
         break;
 
+      case 'edit_acknowledged':
+        console.log('✏️ Edit acknowledged:', data.message_id);
+        // The edit was processed successfully
+        // The AI response will come as a separate 'ai_response' message
+        break;
+
       case 'error':
         console.error('WebSocket error message:', data.message);
         setConnectionError(data.message || 'Unknown error');
@@ -443,6 +472,51 @@ export default function ChatPage() {
 
   const handleFileRemove = (index: number) => {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleEditMessage = (message: Message, messageIndex: number) => {
+    setEditingMessage(message);
+    setEditingMessageIndex(messageIndex);
+    setEditText(message.text);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingMessage || editingMessageIndex === null || !editText.trim()) return;
+    
+    try {
+      // Send edit message via WebSocket
+      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+        const messageData = {
+          type: 'edit_message',
+          messageId: editingMessage.id,
+          newText: editText,
+          model: selectedModel,
+          sessionId: currentSession?.session_id,
+          userId: user?.id,
+          context: {
+            currentPage: 'chat',
+            sessionId: currentSession?.session_id
+          }
+        };
+
+        websocketRef.current.send(JSON.stringify(messageData));
+        
+        // Clear editing state
+        setEditingMessage(null);
+        setEditingMessageIndex(null);
+        setEditText('');
+        
+        setIsLoadingChat(true);
+      }
+    } catch (error) {
+      console.error('Error sending edit message:', error);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+    setEditingMessageIndex(null);
+    setEditText('');
   };
 
   const handleDeleteSession = async (sessionId: string, event: React.MouseEvent) => {
@@ -828,49 +902,148 @@ export default function ChatPage() {
                 </Typography>
               </Box>
             )}
-            {messages.map((message) => (
+            {messages.map((message, messageIndex) => (
               <Box key={message.id} display="flex" gap={2}>
-                <Avatar sx={{ bgcolor: message.sender === 'user' ? '#22c55e' : '#374151', width: 32, height: 32 }}>
+                <Avatar sx={{ bgcolor: message.sender === 'user' ? '#3b82f6' : '#374151', width: 32, height: 32 }}>
                   {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}
                 </Avatar>
                 <Box sx={{ flex: 1 }}>
                   <MessageBubble isUser={message.sender === 'user'} status={(message as any).status || 'sent'}>
-                    {message.sender === 'bot' && typingMessages.has(message.id) ? (
-                      <TypingText 
-                        text={message.text} 
-                        speed={2}
-                        onComplete={() => {
-                          setTypingMessages(prev => {
-                            const newSet = new Set(prev);
-                            newSet.delete(message.id);
-                            return newSet;
-                          });
-                        }}
-                      />
+                    {editingMessage && editingMessage.id === message.id ? (
+                      <Box ref={editContainerRef} sx={{ position: 'relative' }}>
+                        <TextField
+                          fullWidth
+                          multiline
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              handleCancelEdit();
+                            } else if (e.key === 'Enter' && e.shiftKey === false) {
+                              e.preventDefault();
+                              if (editText.trim()) {
+                                handleSaveEdit();
+                              }
+                            }
+                          }}
+                          variant="outlined"
+                          sx={{
+                            '& .MuiOutlinedInput-root': {
+                              color: 'white',
+                              paddingRight: '60px', // Space for send button
+                              '& fieldset': {
+                                borderColor: '#374151',
+                              },
+                              '&:hover fieldset': {
+                                borderColor: '#3b82f6',
+                              },
+                              '&.Mui-focused fieldset': {
+                                borderColor: '#3b82f6',
+                              },
+                            },
+                          }}
+                        />
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            bottom: 8,
+                            right: 8,
+                            display: 'flex',
+                            gap: 0.5,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Tooltip title="Cancel (Esc)">
+                            <IconButton
+                              size="small"
+                              onClick={handleCancelEdit}
+                              sx={{
+                                color: '#9ca3af',
+                                '&:hover': { color: '#ef4444' },
+                                width: 28,
+                                height: 28,
+                              }}
+                            >
+                              <CloseIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Send (Enter)">
+                            <IconButton
+                              size="small"
+                              onClick={handleSaveEdit}
+                              disabled={!editText.trim()}
+                              sx={{
+                                color: editText.trim() ? '#22c55e' : '#6b7280',
+                                '&:hover': { 
+                                  color: editText.trim() ? '#16a34a' : '#6b7280',
+                                  backgroundColor: editText.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
+                                },
+                                width: 28,
+                                height: 28,
+                              }}
+                            >
+                              <SendIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </Box>
                     ) : (
-                      <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                        {message.text}
-                      </Typography>
-                    )}
-                    {(message as any).files && (message as any).files.length > 0 && (
-                      <Stack spacing={1} mt={1}>
-                        {(message as any).files.map((file: any) => (
-                          <FilePreview key={file.name}>
-                            <FileIcon sx={{ color: '#22c55e' }} />
-                            <Typography variant="body2" color="white">
-                              {file.name}
-                            </Typography>
-                            <Typography variant="caption" color="#9ca3af">
-                              ({(file.size / 1024).toFixed(1)} KB)
-                            </Typography>
-                          </FilePreview>
-                        ))}
-                      </Stack>
+                      <>
+                        {message.sender === 'bot' && typingMessages.has(message.id) ? (
+                          <TypingText 
+                            text={message.text} 
+                            speed={2}
+                            onComplete={() => {
+                              setTypingMessages(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(message.id);
+                                return newSet;
+                              });
+                            }}
+                          />
+                        ) : (
+                          <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+                            {message.text}
+                          </Typography>
+                        )}
+                        {(message as any).files && (message as any).files.length > 0 && (
+                          <Stack spacing={1} mt={1}>
+                            {(message as any).files.map((file: any) => (
+                              <FilePreview key={file.name}>
+                                <FileIcon sx={{ color: '#22c55e' }} />
+                                <Typography variant="body2" color="white">
+                                  {file.name}
+                                </Typography>
+                                <Typography variant="caption" color="#9ca3af">
+                                  ({(file.size / 1024).toFixed(1)} KB)
+                                </Typography>
+                              </FilePreview>
+                            ))}
+                          </Stack>
+                        )}
+                      </>
                     )}
                   </MessageBubble>
-                  <Typography variant="caption" color="#9ca3af" sx={{ ml: 1, textTransform: 'uppercase' }}>
-                    {new Date(message.timestamp).toLocaleTimeString()}
-                  </Typography>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Typography variant="caption" color="#9ca3af" sx={{ textTransform: 'uppercase' }}>
+                      {new Date(message.timestamp).toLocaleTimeString()}
+                    </Typography>
+                    {message.sender === 'user' && !editingMessage && (
+                      <Tooltip title="Edit message">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditMessage(message, messageIndex)}
+                          sx={{ 
+                            color: '#9ca3af',
+                            '&:hover': { color: '#3b82f6' }
+                          }}
+                        >
+                          <EditIcon sx={{ fontSize: 14 }} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Box>
                 </Box>
               </Box>
             ))}
