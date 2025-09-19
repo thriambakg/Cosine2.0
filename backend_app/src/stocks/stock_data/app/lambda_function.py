@@ -1,4 +1,5 @@
 import json
+import os
 import yfinance as yf
 import numpy as np
 import pandas as pd
@@ -8,21 +9,62 @@ import requests
 import time
 import random
 import hashlib
+import boto3
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Rate limiting configuration
-RATE_LIMIT_DELAY = 2.0  # Minimum delay between requests
-MAX_RETRIES = 3
-RETRY_DELAY = 5.0
+# Rate limiting configuration - increased to avoid 429 errors
+RATE_LIMIT_DELAY = 5.0  # Minimum delay between requests (increased from 2.0)
+MAX_RETRIES = 5  # Increased retries
+RETRY_DELAY = 10.0  # Increased base delay
+
+# Alpha Vantage API key - will be fetched from Secrets Manager
+ALPHA_VANTAGE_API_KEY = None
+ALPHA_VANTAGE_SECRET_NAME = "cosine-alpha-vantage-api-production"  # Will be set via environment variable
 
 # In-memory cache for rate limiting (simple approach for Lambda)
 request_timestamps = {}
 
+def get_alpha_vantage_api_key():
+    """
+    Fetch Alpha Vantage API key from AWS Secrets Manager
+    """
+    global ALPHA_VANTAGE_API_KEY
+    
+    if ALPHA_VANTAGE_API_KEY is not None:
+        return ALPHA_VANTAGE_API_KEY
+    
+    try:
+        # Initialize Secrets Manager client
+        secrets_client = boto3.client('secretsmanager')
+        
+        # Get secret name from environment variable or use default
+        secret_name = os.environ.get('ALPHA_VANTAGE_SECRET_NAME', ALPHA_VANTAGE_SECRET_NAME)
+        
+        logger.info(f"Fetching Alpha Vantage API key from secret: {secret_name}")
+        
+        # Retrieve the secret
+        response = secrets_client.get_secret_value(SecretId=secret_name)
+        secret_data = json.loads(response['SecretString'])
+        
+        # Extract API key
+        api_key = secret_data.get('api_key')
+        if not api_key or api_key == "PLACEHOLDER_ALPHA_VANTAGE_API_KEY":
+            logger.warning("Alpha Vantage API key not properly configured in Secrets Manager")
+            return None
+        
+        ALPHA_VANTAGE_API_KEY = api_key
+        logger.info("Successfully retrieved Alpha Vantage API key from Secrets Manager")
+        return ALPHA_VANTAGE_API_KEY
+        
+    except Exception as e:
+        logger.error(f"Failed to retrieve Alpha Vantage API key from Secrets Manager: {str(e)}")
+        return None
+
 def rate_limit_check(ticker):
-    """Check if we should delay requests to avoid rate limiting"""
+    """Enhanced rate limiting check to avoid Yahoo Finance blocks"""
     current_time = time.time()
     cache_key = f"rate_limit_{ticker}"
     
@@ -30,19 +72,33 @@ def rate_limit_check(ticker):
         last_request = request_timestamps[cache_key]
         time_since_last = current_time - last_request
         
-        if time_since_last < RATE_LIMIT_DELAY:
-            delay_needed = RATE_LIMIT_DELAY - time_since_last
-            logger.info(f"Rate limiting: waiting {delay_needed:.2f}s before next request for {ticker}")
-            time.sleep(delay_needed)
+        # Use progressive delays based on how many requests we've made
+        required_delay = RATE_LIMIT_DELAY
+        if len(request_timestamps) > 3:  # If we've made multiple requests recently
+            required_delay = RATE_LIMIT_DELAY * 2  # Double the delay
+        
+        if time_since_last < required_delay:
+            delay_needed = required_delay - time_since_last
+            # Add jitter to make requests less predictable
+            jitter = random.uniform(1.0, 3.0)
+            total_delay = delay_needed + jitter
+            logger.info(f"Rate limiting: waiting {total_delay:.2f}s before next request for {ticker}")
+            time.sleep(total_delay)
     
     request_timestamps[cache_key] = time.time()
+    
+    # Clean up old timestamps to prevent memory issues
+    if len(request_timestamps) > 50:
+        # Remove timestamps older than 1 hour
+        cutoff_time = current_time - 3600
+        request_timestamps = {k: v for k, v in request_timestamps.items() if v > cutoff_time}
 
 def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES):
     """Make Yahoo Finance request with retry logic and rate limiting"""
     for attempt in range(max_retries):
         try:
-            # Add random delay to spread out requests
-            delay = random.uniform(0.5, 2.0)
+            # Add random delay to spread out requests (increased to avoid rate limits)
+            delay = random.uniform(2.0, 5.0)  # Increased from 0.5-2.0 to 2.0-5.0
             time.sleep(delay)
             
             logger.info(f"Making Yahoo Finance request (attempt {attempt + 1}/{max_retries})")
@@ -51,16 +107,22 @@ def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES):
             if response.status_code == 200:
                 return response
             elif response.status_code == 429:
-                # Rate limited - wait longer before retry
-                wait_time = RETRY_DELAY * (2 ** attempt)  # Exponential backoff
-                logger.warning(f"Rate limited (429). Waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
+                # Rate limited - exponential backoff with jitter
+                wait_time = RETRY_DELAY * (2 ** attempt) + random.uniform(5.0, 15.0)
+                logger.warning(f"Rate limited (429). Waiting {wait_time:.2f}s before retry {attempt + 1}/{max_retries}")
+                time.sleep(wait_time)
+                continue
+            elif response.status_code == 403:
+                # Forbidden - likely IP blocked, wait much longer
+                wait_time = RETRY_DELAY * (3 ** attempt) + random.uniform(10.0, 30.0)
+                logger.warning(f"Forbidden (403). Waiting {wait_time:.2f}s before retry {attempt + 1}/{max_retries}")
                 time.sleep(wait_time)
                 continue
             else:
                 logger.error(f"HTTP request failed with status {response.status_code}")
                 if attempt == max_retries - 1:
                     return response
-                time.sleep(RETRY_DELAY)
+                time.sleep(RETRY_DELAY + random.uniform(2.0, 5.0))
                 continue
                 
         except requests.exceptions.RequestException as e:
@@ -396,8 +458,8 @@ def fetch_historical_data_direct(ticker, period="1y"):
         
         logger.info(f"Fetching historical data for {ticker} with period {period}")
         
-        # Add delay between requests
-        time.sleep(random.uniform(1.0, 2.0))
+        # Add longer delay between requests to avoid rate limiting
+        time.sleep(random.uniform(3.0, 6.0))  # Increased from 1.0-2.0 to 3.0-6.0
         
         response = requests.get(url, params=params, headers=headers, timeout=30)
         
@@ -451,8 +513,8 @@ def fetch_additional_stats_direct(ticker):
         
         logger.info(f"Fetching additional stats for {ticker}")
         
-        # Add delay between requests
-        time.sleep(random.uniform(1.0, 2.0))
+        # Add longer delay between requests to avoid rate limiting
+        time.sleep(random.uniform(3.0, 6.0))  # Increased from 1.0-2.0 to 3.0-6.0
         
         response = requests.get(url, params=params, headers=headers, timeout=30)
         
@@ -520,8 +582,8 @@ def fetch_stock_data_fallback(ticker, period="1y"):
         # If that fails, try the original fallback method
         logger.info(f"Direct HTTP method failed, trying original fallback for {ticker}")
         
-        # Add random delay to avoid rate limiting
-        delay = random.uniform(1.0, 3.0)
+        # Add longer random delay to avoid rate limiting
+        delay = random.uniform(5.0, 10.0)  # Increased from 1.0-3.0 to 5.0-10.0
         logger.info(f"Adding {delay:.2f}s delay to avoid rate limiting")
         time.sleep(delay)
         
@@ -1492,6 +1554,302 @@ def generate_mock_stock_data(ticker, period="1y"):
         'timestamp': datetime.now().isoformat()
     }
 
+def fetch_stock_data_alpha_vantage(ticker, period="1y"):
+    """
+    Fetch stock data using Alpha Vantage REST API.
+    
+    Based on https://www.alphavantage.co/documentation/
+    Uses direct HTTP requests to their REST endpoints.
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        period (str): Time period for historical data
+        
+    Returns:
+        dict: Stock statistics matching crypto stats format
+    """
+    try:
+        logger.info(f"=== Using Alpha Vantage REST API for {ticker} ===")
+        
+        # Get API key from Secrets Manager
+        api_key = get_alpha_vantage_api_key()
+        if not api_key:
+            logger.error("Alpha Vantage API key not available")
+            return {"error": "Alpha Vantage API key not configured"}
+        
+        # Map period to Alpha Vantage API functions
+        # Based on https://www.alphavantage.co/documentation/
+        if period == '1d':
+            # Intraday data for 1 day
+            function = 'TIME_SERIES_INTRADAY'
+            interval = '60min'  # 1-hour intervals for 1 day
+            outputsize = 'compact'  # Last 100 data points
+        elif period == '7d':
+            # Intraday data for 7 days
+            function = 'TIME_SERIES_INTRADAY'
+            interval = '60min'  # 1-hour intervals
+            outputsize = 'full'  # Full data for 7 days
+        elif period == '30d':
+            # Daily data for 30 days
+            function = 'TIME_SERIES_DAILY'
+            interval = None  # Not used for daily
+            outputsize = 'compact'  # Last 100 days
+        else:  # 1y
+            # Daily data for 1 year
+            function = 'TIME_SERIES_DAILY'
+            interval = None  # Not used for daily
+            outputsize = 'full'  # Full year of data
+        
+        # Build Alpha Vantage API URL
+        base_url = "https://www.alphavantage.co/query"
+        params = {
+            'function': function,
+            'symbol': ticker,
+            'apikey': api_key,
+            'outputsize': outputsize,
+            'datatype': 'json'
+        }
+        
+        # Add interval for intraday data
+        if interval:
+            params['interval'] = interval
+        
+        logger.info(f"Alpha Vantage API URL: {base_url}")
+        logger.info(f"Alpha Vantage API params: {params}")
+        
+        # Make HTTP request to Alpha Vantage
+        response = requests.get(base_url, params=params, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"Alpha Vantage API returned status {response.status_code}")
+            return {"error": f"Alpha Vantage API error: {response.status_code}"}
+        
+        data = response.json()
+        
+        # Check for API errors
+        if 'Error Message' in data:
+            logger.error(f"Alpha Vantage API error: {data['Error Message']}")
+            return {"error": f"Alpha Vantage API error: {data['Error Message']}"}
+        
+        if 'Note' in data:
+            logger.warning(f"Alpha Vantage API note: {data['Note']}")
+            return {"error": "Alpha Vantage API rate limited"}
+        
+        # Extract time series data based on function
+        if function == 'TIME_SERIES_INTRADAY':
+            time_series_key = f'Time Series ({interval})'
+        else:  # TIME_SERIES_DAILY
+            time_series_key = 'Time Series (Daily)'
+        
+        if time_series_key not in data:
+            logger.error(f"Alpha Vantage API response missing time series: {list(data.keys())}")
+            return {"error": "Alpha Vantage API response format error"}
+        
+        time_series = data[time_series_key]
+        
+        if not time_series:
+            logger.error(f"No time series data returned for {ticker}")
+            return {"error": f"No data available from Alpha Vantage for {ticker}"}
+        
+        # Convert to sorted list of (timestamp, data) tuples
+        sorted_data = []
+        for timestamp_str, price_data in time_series.items():
+            try:
+                # Parse timestamp (Alpha Vantage format: "2024-01-15 16:00:00" or "2024-01-15")
+                if ' ' in timestamp_str:
+                    timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+                else:
+                    timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d')
+                
+                sorted_data.append((timestamp, price_data))
+            except ValueError as e:
+                logger.warning(f"Could not parse timestamp {timestamp_str}: {e}")
+                continue
+        
+        # Sort by timestamp
+        sorted_data.sort(key=lambda x: x[0])
+        
+        if not sorted_data:
+            return {"error": f"No valid data points for {ticker}"}
+        
+        # Extract price data
+        prices = []
+        for timestamp, price_data in sorted_data:
+            try:
+                close_price = float(price_data['4. close'])
+                prices.append((timestamp, close_price))
+            except (KeyError, ValueError) as e:
+                logger.warning(f"Could not parse price data for {timestamp}: {e}")
+                continue
+        
+        if not prices:
+            return {"error": f"No valid price data for {ticker}"}
+        
+        # Calculate statistics
+        current_price = prices[-1][1]
+        previous_price = prices[-2][1] if len(prices) > 1 else current_price
+        price_change_24h = ((current_price - previous_price) / previous_price) * 100.0
+        
+        # Calculate period returns
+        start_price = prices[0][1]
+        period_return = ((current_price - start_price) / start_price) * 100.0
+        
+        # Calculate 7-day return
+        if len(prices) >= 7:
+            week_ago_price = prices[-7][1]
+            week_return = ((current_price - week_ago_price) / week_ago_price) * 100.0
+        else:
+            week_return = period_return
+        
+        # For annual return, scale based on period
+        if period == '1d':
+            annual_return = period_return * 365
+        elif period == '7d':
+            annual_return = period_return * (365/7)
+        elif period == '30d':
+            annual_return = period_return * (365/30)
+        else:  # 1y
+            annual_return = period_return
+        
+        # Calculate volatility
+        if len(prices) > 1:
+            returns = []
+            for i in range(1, len(prices)):
+                daily_return = (prices[i][1] - prices[i-1][1]) / prices[i-1][1]
+                returns.append(daily_return)
+            
+            if returns:
+                volatility = np.std(returns) * np.sqrt(252) * 100.0  # Annualized
+            else:
+                volatility = 0.0
+        else:
+            volatility = 0.0
+        
+        # Prepare chart data
+        chart_data = []
+        for timestamp, price in prices[-100:]:  # Last 100 points
+            chart_data.append({
+                'time': int(timestamp.timestamp()),
+                'close': round(price, 2)
+            })
+        
+        result = {
+            'current_price': round(current_price, 2),
+            'price_change_24h': round(price_change_24h, 2),
+            'week_return': round(week_return, 2),
+            'annual_return': round(annual_return, 2),
+            'volatility': round(volatility / 100, 4),  # Convert to decimal
+            'chart_data': chart_data,
+            'data_source': 'Alpha Vantage REST API',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        logger.info(f"Alpha Vantage REST API successful for {ticker}")
+        logger.info(f"Chart data points: {len(chart_data)}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Alpha Vantage REST API failed for {ticker}: {str(e)}")
+        return {"error": f"Alpha Vantage API failed: {str(e)}"}
+
+def fetch_stock_data_yfinance(ticker, period="1y"):
+    """
+    Fetch stock data using yfinance library with improved rate limiting.
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        period (str): Time period for historical data
+        
+    Returns:
+        dict: Stock statistics matching crypto stats format
+    """
+    try:
+        logger.info(f"=== Using yfinance library for {ticker} ===")
+        
+        # Apply enhanced rate limiting
+        rate_limit_check(ticker)
+        
+        # Create yfinance Ticker object
+        stock = yf.Ticker(ticker)
+        
+        # Get historical data with error handling
+        try:
+            hist = stock.history(period=period)
+            if hist.empty:
+                return {"error": f"No data found for ticker {ticker}"}
+        except Exception as hist_error:
+            logger.error(f"yfinance history failed for {ticker}: {str(hist_error)}")
+            if ("429" in str(hist_error) or "Too Many Requests" in str(hist_error) or 
+                "Expecting value" in str(hist_error) or "No price data" in str(hist_error)):
+                return {"error": f"yfinance rate limited or failed: {str(hist_error)}"}
+            else:
+                raise hist_error
+        
+        # Calculate basic statistics
+        current_price = hist['Close'].iloc[-1]
+        previous_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+        price_change_24h = ((current_price - previous_close) / previous_close) * 100.0
+        
+        # Calculate period returns
+        start_price = hist['Close'].iloc[0]
+        period_return = ((current_price - start_price) / start_price) * 100.0
+        
+        # Calculate 7-day return
+        if len(hist) >= 7:
+            week_ago_price = hist['Close'].iloc[-7]
+            week_return = ((current_price - week_ago_price) / week_ago_price) * 100.0
+        else:
+            week_return = period_return
+        
+        # For annual return, scale based on period
+        if period == '1d':
+            annual_return = period_return * 365
+        elif period == '7d':
+            annual_return = period_return * (365/7)
+        elif period == '30d':
+            annual_return = period_return * (365/30)
+        else:  # 1y
+            annual_return = period_return
+        
+        # Calculate volatility
+        log_returns = np.log(hist['Close'] / hist['Close'].shift(1)).dropna()
+        if len(log_returns) > 1:
+            if period == '1d':
+                volatility = log_returns.std() * np.sqrt(1440) * 100.0
+            elif period == '7d':
+                volatility = log_returns.std() * np.sqrt(24) * 100.0
+            else:
+                volatility = log_returns.std() * np.sqrt(252) * 100.0
+        else:
+            volatility = 0.0
+        
+        # Prepare chart data
+        chart_data = []
+        for date, row in hist.tail(100).iterrows():  # Last 100 points
+            chart_data.append({
+                'time': int(date.timestamp()),
+                'close': round(float(row['Close']), 2)
+            })
+        
+        result = {
+            'current_price': round(current_price, 2),
+            'price_change_24h': round(price_change_24h, 2),
+            'week_return': round(week_return, 2),
+            'annual_return': round(annual_return, 2),
+            'volatility': round(volatility / 100, 4),  # Convert to decimal
+            'chart_data': chart_data,
+            'data_source': 'Yahoo Finance via yfinance',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        logger.info(f"yfinance successful for {ticker}")
+        logger.info(f"Chart data points: {len(chart_data)}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"yfinance failed for {ticker}: {str(e)}")
+        return {"error": f"yfinance API failed: {str(e)}"}
+
 def fetch_stock_stats(ticker, period="1y"):
     """
     Main function to fetch stock statistics in crypto stats format for tile compatibility.
@@ -1507,9 +1865,39 @@ def fetch_stock_stats(ticker, period="1y"):
     try:
         logger.info(f"=== Fetching stock stats for {ticker} with period {period} ===")
         
-        # Method 1: Try yfinance library with rate limiting
+        # Method 1: Try yfinance library first (free, but rate limited)
         try:
             logger.info(f"Method 1: Trying yfinance library for {ticker}")
+            result = fetch_stock_data_yfinance(ticker, period)
+            if 'error' not in result:
+                logger.info(f"Method 1 (yfinance) successful for {ticker}")
+                return result
+        except Exception as e:
+            logger.warning(f"Method 1 (yfinance) failed for {ticker}: {str(e)}")
+        
+        # Method 2: Try direct HTTP Yahoo Finance (free fallback)
+        try:
+            logger.info(f"Method 2: Trying direct HTTP Yahoo Finance for {ticker}")
+            result = fetch_stock_data_direct_http(ticker, period)
+            if 'error' not in result:
+                logger.info(f"Method 2 (direct HTTP) successful for {ticker}")
+                return result
+        except Exception as e:
+            logger.warning(f"Method 2 (direct HTTP) failed for {ticker}: {str(e)}")
+        
+        # Method 3: Try Alpha Vantage API (costs money, use sparingly)
+        try:
+            logger.info(f"Method 3: Trying Alpha Vantage API for {ticker}")
+            result = fetch_stock_data_alpha_vantage(ticker, period)
+            if 'error' not in result:
+                logger.info(f"Method 3 (Alpha Vantage) successful for {ticker}")
+                return result
+        except Exception as e:
+            logger.warning(f"Method 3 (Alpha Vantage) failed for {ticker}: {str(e)}")
+        
+        # Method 4: Try enhanced HTTP fallback (original yfinance comprehensive method)
+        try:
+            logger.info(f"Method 4: Trying enhanced HTTP fallback for {ticker}")
             stock_data = fetch_stock_data(ticker, period)
             
             # Convert comprehensive data to crypto stats format
@@ -1536,35 +1924,15 @@ def fetch_stock_stats(ticker, period="1y"):
                     'data_source': stock_data.get('data_source', 'Yahoo Finance'),
                     'timestamp': stock_data.get('timestamp', datetime.now().isoformat())
                 }
-                logger.info(f"Method 1 successful for {ticker}")
+                logger.info(f"Method 4 (enhanced HTTP) successful for {ticker}")
                 logger.info(f"Result structure: {list(result.keys())}")
                 logger.info(f"Current price in result: {result.get('current_price')}")
                 logger.info(f"Chart data points: {len(result.get('chart_data', []))}")
                 return result
         except Exception as e:
-            logger.warning(f"Method 1 failed for {ticker}: {str(e)}")
+            logger.warning(f"Method 4 (enhanced HTTP) failed for {ticker}: {str(e)}")
         
-        # Method 2: Try direct HTTP fallback
-        try:
-            logger.info(f"Method 2: Trying direct HTTP fallback for {ticker}")
-            result = fetch_stock_data_direct_http(ticker, period)
-            if 'error' not in result:
-                logger.info(f"Method 2 successful for {ticker}")
-                return result
-        except Exception as e:
-            logger.warning(f"Method 2 failed for {ticker}: {str(e)}")
-        
-        # Method 3: Try enhanced HTTP fallback
-        try:
-            logger.info(f"Method 3: Trying enhanced HTTP fallback for {ticker}")
-            result = fetch_stock_data_fallback(ticker, period)
-            if 'error' not in result:
-                logger.info(f"Method 3 successful for {ticker}")
-                return result
-        except Exception as e:
-            logger.warning(f"Method 3 failed for {ticker}: {str(e)}")
-        
-        # Method 4: Return mock data as last resort
+        # Method 5: Return mock data as last resort
         logger.warning(f"All methods failed for {ticker}, returning mock data")
         return generate_mock_stock_data(ticker, period)
         
