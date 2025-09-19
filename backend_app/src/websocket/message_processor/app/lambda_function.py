@@ -312,9 +312,10 @@ def call_chat_agent(user_id, message_text, model, files):
             'userId': user_id,
             'model': model,
             'files': files,
+            'sessionId': session_id,  # Use the session_id from the function parameter
             'context': {
                 'currentPage': 'chat',
-                'sessionId': f"session_{user_id}_{int(datetime.now().timestamp())}"
+                'sessionId': session_id  # Use the session_id from the function parameter
             }
         }
         
