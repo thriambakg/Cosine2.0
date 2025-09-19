@@ -121,8 +121,7 @@ def handle_connect(event, connection_id):
         return {
             'statusCode': 200,
             'body': json.dumps({
-                'message': 'Connected successfully',
-                'session_id': session_id
+                'message': 'Connected successfully'
             })
         }
         
@@ -154,7 +153,7 @@ def handle_disconnect(event, connection_id):
         deleted_item = response.get('Attributes')
         if deleted_item:
             user_id = deleted_item.get('user_id')
-            session_id = deleted_item.get('session_id')
+            session_id = deleted_item.get('session_id', 'unknown')
             logger.info(f"User {user_id} disconnected from session {session_id}")
         else:
             logger.warning(f"Connection {connection_id} not found in database")
