@@ -54,7 +54,7 @@ interface UploadedFile {
 }
 
 interface WebSocketMessage {
-  type: 'connection_established' | 'message_received' | 'ai_response' | 'error' | 'connection_establish';
+  type: 'connection_established' | 'message_received' | 'ai_response' | 'error' | 'connection_establish' | 'edit_acknowledged';
   message_id?: string;
   session_id?: string;
   content?: string;
@@ -199,6 +199,7 @@ export default function ChatPage() {
     loadSession,
     deleteSession,
     addMessage: addPersistedMessage,
+    truncateMessagesAfter,
   } = useChatPersistence(user?.id || '');
   
   // Use messages from current session
@@ -401,7 +402,11 @@ export default function ChatPage() {
 
       case 'edit_acknowledged':
         console.log('✏️ Edit acknowledged:', data.message_id);
-        // The edit was processed successfully
+        // Immediately update the local messages to reflect the edit and truncation
+        if (editingMessage) {
+          truncateMessagesAfter(editingMessage.id, editText);
+          console.log(`✏️ Updated messages: truncated after ${editingMessage.id}`);
+        }
         // The AI response will come as a separate 'ai_response' message
         break;
 

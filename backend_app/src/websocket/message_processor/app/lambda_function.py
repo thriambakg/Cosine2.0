@@ -429,7 +429,8 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
                 'body': json_dumps_safe({'error': 'Missing required fields for edit message'})
             }
         
-        logger.info(f"Editing message {message_id} in session {session_id}")
+        logger.info(f"🔍 EDIT: Starting edit process for message {message_id} in session {session_id}")
+        logger.info(f"🔍 EDIT: Looking for message {message_id} in session {session_id} for user {user_id}")
         
         # Get current session
         response = chat_sessions_table.get_item(
@@ -440,7 +441,7 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         )
         
         if 'Item' not in response:
-            logger.error(f"Session {session_id} not found for user {user_id}")
+            logger.error(f"❌ EDIT: Session {session_id} not found for user {user_id}")
             return {
                 'statusCode': 404,
                 'body': json_dumps_safe({'error': 'Session not found'})
@@ -449,41 +450,51 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         session_item = response['Item']
         messages = session_item.get('messages', [])
         
+        logger.info(f"🔍 EDIT: Found session with {len(messages)} messages")
+        
         # Validate that we have messages
         if not messages:
-            logger.error(f"No messages found in session {session_id}")
+            logger.error(f"❌ EDIT: No messages found in session {session_id}")
             return {
                 'statusCode': 400,
                 'body': json_dumps_safe({'error': 'No messages in session'})
             }
         
         # Find the message to edit by ID
+        logger.info(f"🔍 EDIT: Searching for message ID {message_id} in {len(messages)} messages...")
         message_to_edit_index = None
         for i, msg in enumerate(messages):
+            logger.info(f"🔍 EDIT: Checking message {i}: ID={msg.get('id', 'NO_ID')}, sender={msg.get('sender', 'NO_SENDER')}")
             if msg['id'] == message_id:
                 message_to_edit_index = i
+                logger.info(f"✅ EDIT: Found message {message_id} at index {i}")
                 break
         
         if message_to_edit_index is None:
-            logger.error(f"Message {message_id} not found in session {session_id}")
+            logger.error(f"❌ EDIT: Message {message_id} not found in session {session_id}")
+            logger.error(f"❌ EDIT: Available message IDs: {[msg.get('id', 'NO_ID') for msg in messages]}")
             return {
                 'statusCode': 404,
                 'body': json_dumps_safe({'error': 'Message not found'})
             }
         
         message_to_edit = messages[message_to_edit_index]
+        logger.info(f"🔍 EDIT: Found message to edit: sender={message_to_edit.get('sender')}, text_length={len(message_to_edit.get('text', ''))}")
+        
         if message_to_edit['sender'] != 'user':
-            logger.error(f"Message {message_id} is not a user message")
+            logger.error(f"❌ EDIT: Message {message_id} is not a user message (sender: {message_to_edit.get('sender')})")
             return {
                 'statusCode': 400,
                 'body': json_dumps_safe({'error': 'Can only edit user messages'})
             }
         
         # Truncate messages after the edited message
+        original_message_count = len(messages)
         truncated_messages = messages[:message_to_edit_index + 1]  # Keep messages up to and including the edited one
         truncated_messages[-1]['text'] = new_text  # Update the edited message text
         
-        logger.info(f"Truncated {len(messages)} messages to {len(truncated_messages)} messages")
+        logger.info(f"✅ EDIT: Successfully truncated {original_message_count} messages to {len(truncated_messages)} messages")
+        logger.info(f"✅ EDIT: Updated message text from '{message_to_edit.get('text', '')[:50]}...' to '{new_text[:50]}...'")
         
         # Update the session with truncated messages
         timestamp = int(datetime.now().timestamp())
@@ -500,9 +511,9 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
             }
         )
         
-        logger.info(f"Updated session {session_id} with truncated messages")
+        logger.info(f"✅ EDIT: Updated session {session_id} in DynamoDB with {len(truncated_messages)} truncated messages")
         
-        # Send acknowledgment
+        # Send acknowledgment to frontend
         ack_message = {
             'type': 'edit_acknowledged',
             'message_id': message_id,
@@ -511,11 +522,15 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         }
         
         send_message_to_client(connection_id, ack_message)
+        logger.info(f"✅ EDIT: Sent edit_acknowledged to frontend for message {message_id}")
         
-        # Call chat agent to generate new response
+        # Call chat agent to generate new response with updated context
+        logger.info(f"🔍 EDIT: Calling chat agent with new context (session will automatically get truncated messages)")
         ai_response = call_chat_agent(user_id, new_text, model, [], session_id)
         
         if ai_response:
+            logger.info(f"✅ EDIT: Chat agent generated response, length: {len(ai_response.get('response', ''))}")
+            
             # Add AI response to session
             ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}"
             ai_timestamp = int(datetime.now().timestamp())
@@ -529,6 +544,8 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
             
             # Add AI response to truncated messages
             updated_messages = truncated_messages + [ai_message]
+            
+            logger.info(f"✅ EDIT: Adding AI response to session, total messages now: {len(updated_messages)}")
             
             # Update session with new AI response
             chat_sessions_table.update_item(
@@ -544,6 +561,8 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
                 }
             )
             
+            logger.info(f"✅ EDIT: Updated session {session_id} with new AI response in DynamoDB")
+            
             # Send AI response to client
             ai_response_message = {
                 'type': 'ai_response',
@@ -554,9 +573,9 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
             
             send_message_to_client(connection_id, ai_response_message)
             
-            logger.info(f"Sent AI response for edited message {message_id}")
+            logger.info(f"✅ EDIT: Successfully sent AI response for edited message {message_id}")
         else:
-            logger.error(f"Failed to get AI response for edited message {message_id}")
+            logger.error(f"❌ EDIT: Failed to get AI response for edited message {message_id}")
             error_message = {
                 'type': 'error',
                 'message': 'Failed to generate response for edited message',

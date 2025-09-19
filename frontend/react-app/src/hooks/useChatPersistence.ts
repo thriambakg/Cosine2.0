@@ -33,6 +33,7 @@ interface UseChatPersistenceReturn {
   
   // Message management
   addMessage: (message: ChatMessage) => void;
+  truncateMessagesAfter: (messageId: string, newText?: string) => void;
   saveMessagesToBackend: () => Promise<void>;
   
   // Local cache management
@@ -446,6 +447,45 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     console.log('📋 Cleared local chat cache');
   }, []);
 
+  const truncateMessagesAfter = useCallback((messageId: string, newText?: string) => {
+    if (!currentSession) return;
+    
+    // Find the message to truncate after
+    const messageIndex = currentSession.messages.findIndex(msg => msg.id === messageId);
+    if (messageIndex === -1) return;
+    
+    // Create truncated messages array
+    const truncatedMessages = currentSession.messages.slice(0, messageIndex + 1);
+    
+    // Update the message text if provided
+    if (newText !== undefined) {
+      truncatedMessages[messageIndex] = {
+        ...truncatedMessages[messageIndex],
+        text: newText
+      };
+    }
+    
+    // Update current session with truncated messages
+    const updatedSession = {
+      ...currentSession,
+      messages: truncatedMessages,
+      message_count: truncatedMessages.length,
+      last_updated: Date.now()
+    };
+    
+    setCurrentSession(updatedSession);
+    
+    // Update sessions array
+    setSessions(prev => prev.map(session => 
+      session.session_id === currentSession.session_id ? updatedSession : session
+    ));
+    
+    // Clear pending messages since we're truncating
+    pendingMessagesRef.current = [];
+    
+    console.log(`📋 Truncated messages after ${messageId}: ${truncatedMessages.length} messages remaining`);
+  }, [currentSession]);
+
   return {
     // Current session state
     currentSession,
@@ -461,6 +501,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     
     // Message management
     addMessage,
+    truncateMessagesAfter,
     saveMessagesToBackend,
     
     // Local cache management
