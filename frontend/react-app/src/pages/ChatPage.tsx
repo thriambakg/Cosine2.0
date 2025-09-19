@@ -550,13 +550,42 @@ export default function ChatPage() {
     if (!inputMessage.trim() || isLoadingChat) return;
 
     // Create a new session if none exists (only when user actually sends a message)
-    if (!currentSession) {
+    let sessionToUse = currentSession;
+    let sessionId = sessionToUse?.session_id;
+    
+    if (!sessionToUse || !sessionId) {
       try {
-        await createNewSession();
+        // createNewSession returns the session_id
+        sessionId = await createNewSession();
+        console.log('📋 Created new session with ID:', sessionId);
+        
+        // Get the updated session from state
+        sessionToUse = currentSession;
+        
+        // If state hasn't updated yet, create a minimal session object
+        if (!sessionToUse && sessionId) {
+          sessionToUse = {
+            session_id: sessionId,
+            title: new Date().toLocaleString(),
+            model: selectedModel,
+            created_at: Date.now(),
+            last_updated: Date.now(),
+            message_count: 0,
+            messages: []
+          };
+        }
       } catch (error) {
         console.error('Failed to create new session:', error);
+        setIsLoadingChat(false);
         return;
       }
+    }
+
+    // Double-check we have a valid session before proceeding
+    if (!sessionToUse?.session_id) {
+      console.error('No valid session available for message sending');
+      setIsLoadingChat(false);
+      return;
     }
 
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -581,11 +610,11 @@ export default function ChatPage() {
         message: userMessage.text,
         model: selectedModel,
         files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
-        sessionId: currentSession?.session_id,
+        sessionId: sessionId, // Use the validated sessionId
         userId: user?.id,
         context: {
           currentPage: 'chat',
-          sessionId: currentSession?.session_id
+          sessionId: sessionId // Use the validated sessionId
         }
       };
 
