@@ -155,7 +155,10 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         created_at: session.created_at,
         last_updated: session.last_updated,
         message_count: session.message_count || 0,
-        messages: session.messages || []
+        messages: (session.messages || []).map((msg: any) => ({
+          ...msg,
+          timestamp: new Date((msg.timestamp || Date.now()) * 1000) // Convert seconds to milliseconds
+        }))
       }));
       
       setSessions(transformedSessions);

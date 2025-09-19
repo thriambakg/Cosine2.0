@@ -50,6 +50,7 @@ const FloatingClock: React.FC<FloatingClockProps> = ({
   });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isForeground, setIsForeground] = useState<boolean>(false);
   const clockRef = useRef<HTMLDivElement>(null);
 
   // Common timezones
@@ -87,10 +88,26 @@ const FloatingClock: React.FC<FloatingClockProps> = ({
   const handleTimezoneChange = (timezone: string) => {
     setSelectedTimezone(timezone);
     sessionStorage.setItem('floating-clock-timezone', timezone);
+    
+    // Dispatch event for other components to listen to
+    window.dispatchEvent(new CustomEvent('clock-timezone-changed', {
+      detail: { timezone }
+    }));
+    
     handleSettingsClose();
   };
 
 
+
+  const handleClockClick = () => {
+    // Bring clock to foreground when clicked
+    setIsForeground(true);
+    
+    // Reset foreground state after a short delay
+    setTimeout(() => {
+      setIsForeground(false);
+    }, 2000);
+  };
 
   const handleMouseDown = (event: React.MouseEvent) => {
     if (event.target === event.currentTarget || (event.target as HTMLElement).closest('[data-drag-handle]')) {
@@ -236,6 +253,7 @@ const FloatingClock: React.FC<FloatingClockProps> = ({
     <Box
       ref={clockRef}
       className={className}
+      onClick={handleClockClick}
       onMouseDown={handleMouseDown}
       sx={{
         position: 'fixed',
@@ -247,15 +265,16 @@ const FloatingClock: React.FC<FloatingClockProps> = ({
         backdropFilter: 'blur(10px)',
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
         padding: 2,
-        zIndex: 1000,
+        zIndex: isForeground ? 1300 : 1000, // Higher z-index when in foreground
         minWidth: 200,
         display: 'flex',
         flexDirection: 'column',
         gap: 1,
         cursor: isDragging ? 'grabbing' : 'grab',
         userSelect: 'none',
-        transform: isDragging ? 'scale(1.02)' : 'scale(1)',
-        transition: isDragging ? 'none' : 'transform 0.2s ease',
+        transform: isDragging ? 'scale(1.02)' : isForeground ? 'scale(1.05)' : 'scale(1)',
+        transition: isDragging ? 'none' : 'all 0.2s ease',
+        borderColor: isForeground ? '#f59e0b' : '#374151', // Highlight when in foreground
       }}
     >
              {/* Timezone Display */}
@@ -383,6 +402,11 @@ const FloatingClock: React.FC<FloatingClockProps> = ({
                    const newValue = e.target.checked;
                    setUseMilitaryTime(newValue);
                    sessionStorage.setItem('floating-clock-military-time', JSON.stringify(newValue));
+                   
+                   // Dispatch event for other components to listen to
+                   window.dispatchEvent(new CustomEvent('clock-military-time-changed', {
+                     detail: { militaryTime: newValue }
+                   }));
                  }}
                 sx={{
                   '& .MuiSwitch-switchBase.Mui-checked': {

@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 from session_manager import session_manager
-from agent import financial_agent, enhanced_tools
+from agent import financial_agent, enhanced_tools, create_financial_agent
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -26,31 +26,33 @@ class ContextAwareAgent:
         
         logger.info("ContextAwareAgent system initialized")
     
-    def get_session_agent(self, session_context: Dict[str, Any]) -> Any:
+    def get_session_agent(self, session_context: Dict[str, Any], model_name: str = 'claude-3-sonnet') -> Any:
         """
-        Get or create a session-specific agent with proper context
+        Get or create a session-specific agent with proper context and model
         
         Args:
             session_context: Complete session context from SessionManager
+            model_name: Name of the model to use ('claude-3-sonnet', 'claude-3-haiku', 'gpt-4', 'gpt-3.5-turbo')
             
         Returns:
             agent: Context-aware agent instance
         """
         try:
             session_id = session_context['session_id']
+            agent_key = f"{session_id}_{model_name}"  # Include model in cache key
             
-            # Check if we already have a cached agent for this session
-            if session_id in self.session_agents:
-                logger.info(f"Using cached agent for session {session_id}")
-                return self.session_agents[session_id]
+            # Check if we already have a cached agent for this session and model
+            if agent_key in self.session_agents:
+                logger.info(f"Using cached agent for session {session_id} with model {model_name}")
+                return self.session_agents[agent_key]
             
-            # Create new session-specific agent
-            agent = self._create_session_agent(session_context)
+            # Create new session-specific agent with the specified model
+            agent = self._create_session_agent(session_context, model_name)
             
             # Cache the agent
-            self.session_agents[session_id] = agent
+            self.session_agents[agent_key] = agent
             
-            logger.info(f"Created new context-aware agent for session {session_id}")
+            logger.info(f"Created new context-aware agent for session {session_id} with model {model_name}")
             return agent
             
         except Exception as e:
@@ -58,12 +60,13 @@ class ContextAwareAgent:
             # Fallback to base agent
             return self.base_agent
     
-    def _create_session_agent(self, session_context: Dict[str, Any]) -> Any:
+    def _create_session_agent(self, session_context: Dict[str, Any], model_name: str = 'claude-3-sonnet') -> Any:
         """
-        Create a new agent instance with session-specific context
+        Create a new agent instance with session-specific context and model
         
         Args:
             session_context: Complete session context
+            model_name: Name of the model to use
             
         Returns:
             agent: New agent instance with session context
@@ -75,13 +78,21 @@ class ContextAwareAgent:
             # Get session-specific tools
             session_tools = self._get_session_tools(session_context)
             
-            # Create new agent instance with session context
+            # Create new agent instance with session context and specified model
             from strands import Agent
+            from agent import MODELS
+            
+            if model_name not in MODELS:
+                logger.warning(f"Unknown model '{model_name}', falling back to claude-3-sonnet")
+                model_name = 'claude-3-sonnet'
+            
+            selected_model = MODELS[model_name]
+            logger.info(f"Creating session agent with model: {model_name}")
             
             session_agent = Agent(
                 system_prompt=system_prompt,
                 tools=session_tools,
-                model=self.base_agent.model
+                model=selected_model
             )
             
             # Add session memory if available

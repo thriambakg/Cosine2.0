@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { ENV_CONFIG } from '@/config/environment';
 import { useChatPersistence } from '@/hooks/useChatPersistence';
+import { useClock } from '@/contexts/ClockContext';
 import {
   Box,
   Typography,
@@ -189,6 +190,7 @@ const FilePreview = ({ children, ...props }: any) => (
 export default function ChatPage() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
+  const { clockTimezone, clockMilitaryTime } = useClock();
   
   // Chat persistence system
   const {
@@ -545,6 +547,69 @@ export default function ChatPage() {
     return messages.find(msg => msg.sender === 'user')?.text || 'No user messages';
   };
 
+  // Format timestamp using clock's timezone and military time settings
+  const formatTimestamp = (timestamp: Date): string => {
+    try {
+      let timeString: string;
+      
+      if (clockTimezone === 'local') {
+        // Use local timezone
+        if (clockMilitaryTime) {
+          timeString = timestamp.toLocaleTimeString('en-US', { 
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        } else {
+          timeString = timestamp.toLocaleTimeString('en-US', { 
+            hour12: true,
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        }
+      } else if (clockTimezone === 'UTC') {
+        // Use UTC timezone
+        if (clockMilitaryTime) {
+          timeString = timestamp.toLocaleTimeString('en-US', { 
+            timeZone: 'UTC',
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        } else {
+          timeString = timestamp.toLocaleTimeString('en-US', { 
+            timeZone: 'UTC',
+            hour12: true,
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        }
+      } else {
+        // Use specified timezone
+        if (clockMilitaryTime) {
+          timeString = timestamp.toLocaleTimeString('en-US', { 
+            timeZone: clockTimezone,
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        } else {
+          timeString = timestamp.toLocaleTimeString('en-US', { 
+            timeZone: clockTimezone,
+            hour12: true,
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        }
+      }
+      
+      return timeString;
+    } catch (error) {
+      console.error('Error formatting timestamp:', error);
+      return timestamp.toLocaleTimeString();
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoadingChat) return;
 
@@ -815,7 +880,7 @@ export default function ChatPage() {
                             <Typography variant="caption" color="#9ca3af" sx={{ display: 'block', fontSize: '0.7rem' }}>
                               {session.messages.length > 0 ? getFirstUserMessage(session.messages).substring(0, 40) + '...' : 'No messages'}
                               <br />
-                              {new Date(session.created_at || session.last_updated || Date.now()).toLocaleDateString()} • {session.message_count} msgs
+                              {new Date((session.created_at || session.last_updated || Date.now()) * 1000).toLocaleDateString()} • {session.message_count} msgs
                             </Typography>
                           }
                         />
@@ -1069,7 +1134,7 @@ export default function ChatPage() {
                   </MessageBubble>
                   <Box display="flex" alignItems="center" gap={1}>
                     <Typography variant="caption" color="#9ca3af" sx={{ textTransform: 'uppercase' }}>
-                      {new Date(message.timestamp).toLocaleTimeString()}
+                      {formatTimestamp(message.timestamp)}
                     </Typography>
                     {message.sender === 'user' && !editingMessage && (
                       <Tooltip title="Edit message">

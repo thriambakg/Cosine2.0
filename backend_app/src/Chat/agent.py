@@ -575,11 +575,28 @@ class FinancialTools:
 # Load environment variables from .env file
 load_dotenv()
 
-# Configure the Bedrock model to use Claude 3 Sonnet (working model)
-model = BedrockModel(
-    model_id="anthropic.claude-3-sonnet-20240229-v1:0",
-    region="us-east-1"
-)
+# Configure different Bedrock models
+MODELS = {
+    'claude-3-sonnet': BedrockModel(
+        model_id="anthropic.claude-3-sonnet-20240229-v1:0",
+        region="us-east-1"
+    ),
+    'claude-3-haiku': BedrockModel(
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
+        region="us-east-1"
+    ),
+    'gpt-4': BedrockModel(
+        model_id="amazon.titan-text-express-v1",  # Using Titan as GPT-4 alternative
+        region="us-east-1"
+    ),
+    'gpt-3.5-turbo': BedrockModel(
+        model_id="amazon.titan-text-lite-v1",  # Using Titan as GPT-3.5 alternative
+        region="us-east-1"
+    )
+}
+
+# Default model (for backward compatibility)
+model = MODELS['claude-3-sonnet']
 
 # Define an enhanced financial analysis system prompt with explicit tool orchestration
 FINANCIAL_ANALYSIS_PROMPT = """
@@ -901,12 +918,32 @@ enhanced_tools = [
     http_request  # Web request tool
 ]
 
-# Define the enhanced financial analysis agent with proper Strands configuration
-financial_agent = Agent(
-    system_prompt=FINANCIAL_ANALYSIS_PROMPT,
-    tools=enhanced_tools,
-    model=model
-)
+# Function to create agents with different models
+def create_financial_agent(model_name: str = 'claude-3-sonnet') -> Agent:
+    """
+    Create a financial agent with the specified model
+    
+    Args:
+        model_name: Name of the model to use ('claude-3-sonnet', 'claude-3-haiku', 'gpt-4', 'gpt-3.5-turbo')
+        
+    Returns:
+        Agent: Configured financial agent
+    """
+    if model_name not in MODELS:
+        logger.warning(f"Unknown model '{model_name}', falling back to claude-3-sonnet")
+        model_name = 'claude-3-sonnet'
+    
+    selected_model = MODELS[model_name]
+    logger.info(f"Creating financial agent with model: {model_name}")
+    
+    return Agent(
+        system_prompt=FINANCIAL_ANALYSIS_PROMPT,
+        tools=enhanced_tools,
+        model=selected_model
+    )
+
+# Default financial agent (for backward compatibility)
+financial_agent = create_financial_agent('claude-3-sonnet')
 
 def analyze_stock(stock_symbol, user_question=None):
     """

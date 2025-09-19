@@ -188,14 +188,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 logger.info(f"🔍 DEBUG: Parsed event_body: {event_body}")
             except json.JSONDecodeError as e:
                 logger.error(f"🔍 DEBUG: JSON decode error: {e}")
-                return {
-                    'statusCode': 400,
-                    'headers': cors_headers,
-                    'body': json.dumps({
-                        'error': 'Invalid JSON in request body',
-                        'message': 'Please provide valid JSON in the request body'
-                    })
-                }
+            return {
+                'statusCode': 400,
+                'headers': cors_headers,
+                'body': json.dumps({
+                    'error': 'Invalid JSON in request body',
+                    'message': 'Please provide valid JSON in the request body'
+                })
+            }
         else:
             logger.warning("🔍 DEBUG: No body or action found in event")
             event_body = event
@@ -457,9 +457,18 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 user_id = context.get('userId', '').strip()
                 logger.info(f"🔍 DEBUG: Found user_id in 'context.userId' field: '{user_id}'")
         
+        # Extract model
+        model = 'claude-3-sonnet'  # Default model
+        if 'model' in event_body:
+            model = event_body.get('model', 'claude-3-sonnet').strip()
+            logger.info(f"🔍 DEBUG: Found model in 'model' field: '{model}'")
+        else:
+            logger.info(f"🔍 DEBUG: No model found in event_body, using default: '{model}'")
+        
         logger.info(f"🔍 DEBUG: Final extracted user_message: '{user_message}'")
         logger.info(f"🔍 DEBUG: Final extracted session_id: '{session_id}'")
         logger.info(f"🔍 DEBUG: Final extracted user_id: '{user_id}'")
+        logger.info(f"🔍 DEBUG: Final extracted model: '{model}'")
         
         if not user_message:
             logger.error(f"🔍 DEBUG: No message found in event_body: {event_body}")
@@ -516,7 +525,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             if not session_id:
                 logger.info("🔍 DEBUG: No session_id provided, creating new session")
                 page_context = event_body.get('context', {})
-                session_id = session_manager.create_session(user_id or 'default', page_context)
+                session_id = session_manager.create_session(user_id or 'default', page_context, model)
                 session_context = session_manager.get_session_context(session_id, user_id or 'default')
                 is_new_session = True
             else:
@@ -530,14 +539,15 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                     }
                 }
         
-        # Get session-aware agent
+        # Get session-aware agent with the specified model
         if session_context:
-            logger.info(f"🔍 DEBUG: Getting session-aware agent for session {session_id}")
-            agent = context_aware_agent.get_session_agent(session_context)
+            logger.info(f"🔍 DEBUG: Getting session-aware agent for session {session_id} with model {model}")
+            agent = context_aware_agent.get_session_agent(session_context, model)
         else:
-            # Fallback to base agent
-            logger.info("🔍 DEBUG: Using base financial agent as fallback")
-            agent, _, FinancialTools = get_financial_agent()
+            # Fallback to base agent with specified model
+            logger.info(f"🔍 DEBUG: Using base financial agent as fallback with model {model}")
+            from agent import create_financial_agent
+            agent = create_financial_agent(model)
         
         # Check if this is a new session and send welcome message
         if is_new_session and (not user_message or user_message.strip() == '' or user_message.lower() in ['hi', 'hello', 'start', 'begin']):
@@ -550,9 +560,9 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 'user_id': user_id,
                 'timestamp': int(time.time())
             }
-            
-            return {
-                'statusCode': 200,
+        
+        return {
+            'statusCode': 200,
                 'body': response_body
             }
         
@@ -592,7 +602,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             if session_context and user_id:
                 logger.info(f"🔍 DEBUG: Updating session context for session {session_id}")
                 update_success = session_manager.update_session_context(
-                    session_id, user_id, user_message, response_content
+                    session_id, user_id, user_message, response_content, model=model
                 )
                 if update_success:
                     logger.info(f"✅ Successfully updated session context for session {session_id}")
@@ -625,8 +635,8 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 'body': {
                     'error': 'Agent execution failed',
                     'message': str(agent_error)
-                }
             }
+        }
         
     except Exception as e:
         logger.error(f"🔍 DEBUG: Error in chat processing: {str(e)}")

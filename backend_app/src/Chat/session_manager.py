@@ -41,13 +41,14 @@ class SessionManager:
         
         logger.info(f"SessionManager initialized with table: {self.chat_sessions_table_name}")
     
-    def create_session(self, user_id: str, page_context: Dict[str, Any]) -> str:
+    def create_session(self, user_id: str, page_context: Dict[str, Any], model: str = 'claude-3-sonnet') -> str:
         """
         Create a new chat session with initial context
         
         Args:
             user_id: Unique identifier for the user
             page_context: Context from the current webpage
+            model: Initial model for the session
             
         Returns:
             session_id: Unique identifier for the new session
@@ -65,7 +66,7 @@ class SessionManager:
                 'session_id': session_id,
                 'timestamp': timestamp,
                 'title': f'Chat {datetime.now().strftime("%m/%d %H:%M")}',
-                'model': 'claude-3-sonnet',
+                'model': model,
                 'created_at': timestamp,
                 'last_updated': timestamp,
                 'message_count': 0,
@@ -168,7 +169,8 @@ class SessionManager:
     
     def update_session_context(self, session_id: str, user_id: str, 
                              new_message: str, agent_response: str,
-                             updated_variables: Optional[Dict[str, Any]] = None) -> bool:
+                             updated_variables: Optional[Dict[str, Any]] = None,
+                             model: Optional[str] = None) -> bool:
         """
         Update session context with new conversation data
         
@@ -178,6 +180,7 @@ class SessionManager:
             new_message: User's new message
             agent_response: Agent's response
             updated_variables: Updated session variables
+            model: Model used to process the message
             
         Returns:
             success: True if update was successful
@@ -230,10 +233,11 @@ class SessionManager:
                     'text': agent_response,
                     'sender': 'bot',
                     'timestamp': timestamp + 1,
-                    'message_type': 'text'
+                    'message_type': 'text',
+                    'model': model or 'claude-3-sonnet'  # Include model information
                 }
                 messages.append(agent_message)
-                logger.info(f"✅ Added agent message: {agent_message['id']}")
+                logger.info(f"✅ Added agent message: {agent_message['id']} with model: {model}")
             
             logger.info(f"🔍 DEBUG: Total messages after adding: {len(messages)}")
             
