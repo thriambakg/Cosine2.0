@@ -238,7 +238,7 @@ class SessionManager:
             logger.info(f"🔍 DEBUG: Total messages after adding: {len(messages)}")
             
             # Update session with new messages
-            update_expression_parts = ['SET messages = :messages', 'message_count = :count', 'last_updated = :timestamp']
+            update_expression_parts = ['SET messages = :messages, message_count = :count, last_updated = :timestamp']
             expression_attribute_values = {
                 ':messages': messages,
                 ':count': len(messages),

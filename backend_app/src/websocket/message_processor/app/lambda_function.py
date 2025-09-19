@@ -592,14 +592,14 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         ai_response = call_chat_agent(user_id, new_text, model, [], session_id)
         
         if ai_response:
-            logger.info(f"✅ EDIT: Chat agent generated response, length: {len(ai_response.get('response', ''))}")
+            logger.info(f"✅ EDIT: Chat agent generated response, length: {len(ai_response)}")
             
             # Add AI response to session
             ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
             ai_timestamp = int(datetime.now().timestamp())
             ai_message = {
                 'id': ai_message_id,
-                'text': ai_response,
+                'text': ai_response,  # ai_response is already a string
                 'sender': 'bot',
                 'timestamp': ai_timestamp,
                 'message_type': 'text'
