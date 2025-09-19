@@ -97,7 +97,8 @@ def lambda_handler(event, context):
             }
         
         # Update connection record with session_id for future reference
-        if not connection_info.get('session_id'):
+        # Only update if session_id field doesn't exist or is None
+        if 'session_id' not in connection_info or not connection_info.get('session_id'):
             update_connection_session(connection_id, session_id)
         
         # Process the message

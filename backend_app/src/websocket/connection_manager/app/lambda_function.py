@@ -102,12 +102,11 @@ def handle_connect(event, connection_id):
                 'body': json.dumps({'error': 'User ID required'})
             }
         
-        # Store connection in DynamoDB without generating session ID
+        # Store connection in DynamoDB without session ID
         # Session ID will be determined by the messages sent through this connection
         connection_item = {
             'connection_id': connection_id,
             'user_id': user_id,
-            'session_id': None,  # Will be set when first message is received
             'connected_at': int(datetime.now().timestamp()),
             'expires_at': int((datetime.now() + timedelta(hours=24)).timestamp())
         }
