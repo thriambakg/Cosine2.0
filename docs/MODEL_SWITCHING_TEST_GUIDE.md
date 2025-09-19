@@ -8,10 +8,7 @@ This guide helps you test that all 8 models can be switched between during a sin
 |-----------|--------------|----------|----------|--------|
 | claude-3-sonnet | Claude 3 Sonnet | anthropic.claude-3-sonnet-20240229-v1:0 | Anthropic | ✅ Working |
 | claude-3-haiku | Claude 3 Haiku | anthropic.claude-3-haiku-20240307-v1:0 | Anthropic | ✅ Working |
-| claude-sonnet-4 | Claude Sonnet 4 | anthropic.claude-sonnet-4-20250514-v1:0 | Anthropic | 🔍 Needs Testing |
-| nova-premier | Amazon Nova Premier | amazon.nova-premier-v1:0 | Amazon | 🔍 Needs Testing |
 | nova-lite | Amazon Nova Lite | amazon.nova-lite-v1:0 | Amazon | 🔍 Needs Testing |
-| llama3-3-70b | Llama 3.3 70B | us.meta.llama3-3-70b-instruct-v1:0 | Meta | 🔍 Needs Testing |
 | gpt-oss-120b | GPT-OSS 120B | openai.gpt-oss-120b-1:0 | OpenAI | ✅ Working |
 | gpt-oss-20b | GPT-OSS 20B | openai.gpt-oss-20b-1:0 | OpenAI | 🔍 Needs Testing |
 

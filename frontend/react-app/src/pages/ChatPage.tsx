@@ -1184,10 +1184,7 @@ export default function ChatPage() {
                   >
                     <MenuItem value="claude-3-sonnet">Claude 3 Sonnet</MenuItem>
                     <MenuItem value="claude-3-haiku">Claude 3 Haiku</MenuItem>
-                    <MenuItem value="claude-sonnet-4">Claude Sonnet 4</MenuItem>
-                    <MenuItem value="nova-premier">Amazon Nova Premier</MenuItem>
                     <MenuItem value="nova-lite">Amazon Nova Lite</MenuItem>
-                    <MenuItem value="llama3-3-70b">Llama 3.3 70B</MenuItem>
                     <MenuItem value="gpt-oss-120b">GPT-OSS 120B</MenuItem>
                     <MenuItem value="gpt-oss-20b">GPT-OSS 20B</MenuItem>
                   </Select>
