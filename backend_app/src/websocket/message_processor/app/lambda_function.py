@@ -176,9 +176,14 @@ def process_message(connection_id, user_id, session_id, message_data):
         message_text = message_data.get('message', '')
         model = message_data.get('model', 'claude-3-sonnet')
         files = message_data.get('files', [])
-        message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+        
+        # Use message ID from frontend if provided, otherwise generate one
+        frontend_message_id = message_data.get('messageId')
+        message_id = frontend_message_id or f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
         
         logger.info(f"Processing message type: {message_type} for connection {connection_id}")
+        logger.info(f"Frontend messageId: {frontend_message_id}")
+        logger.info(f"Using message_id: {message_id}")
         logger.info(f"Full message data: {message_data}")
         
         # Handle connection establishment message

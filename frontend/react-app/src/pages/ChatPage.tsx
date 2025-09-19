@@ -607,6 +607,7 @@ export default function ChatPage() {
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
       const messageData = {
         type: 'chat',
+        messageId: userMessage.id, // Include the message ID from frontend
         message: userMessage.text,
         model: selectedModel,
         files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
