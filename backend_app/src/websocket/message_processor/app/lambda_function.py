@@ -86,7 +86,19 @@ def lambda_handler(event, context):
             }
         
         user_id = connection_info['user_id']
-        session_id = connection_info['session_id']
+        
+        # Get session_id from message data (sent by frontend)
+        session_id = message_data.get('sessionId')
+        if not session_id:
+            logger.error(f"No sessionId provided in message data")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Session ID required'})
+            }
+        
+        # Update connection record with session_id for future reference
+        if not connection_info.get('session_id'):
+            update_connection_session(connection_id, session_id)
         
         # Process the message
         return process_message(connection_id, user_id, session_id, message_data)
@@ -116,6 +128,24 @@ def get_connection_info(connection_id):
     except Exception as e:
         logger.error(f"Error getting connection info: {str(e)}")
         return None
+
+def update_connection_session(connection_id, session_id):
+    """
+    Update connection record with session ID
+    
+    Args:
+        connection_id: WebSocket connection ID
+        session_id: Session ID to store
+    """
+    try:
+        chat_connections_table.update_item(
+            Key={'connection_id': connection_id},
+            UpdateExpression='SET session_id = :session_id',
+            ExpressionAttributeValues={':session_id': session_id}
+        )
+        logger.info(f"Updated connection {connection_id} with session_id {session_id}")
+    except Exception as e:
+        logger.error(f"Error updating connection session: {str(e)}")
 
 def process_message(connection_id, user_id, session_id, message_data):
     """
