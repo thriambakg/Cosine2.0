@@ -151,9 +151,9 @@ def lambda_handler(event, context):
     - Chart data for visualization
     """
     try:
-        logger.info(f"=== LAMBDA HANDLER START ===")
-        logger.info(f"Event received: {event}")
-        logger.info(f"Event type: {type(event)}")
+        print(f"🚀 === LAMBDA HANDLER START (ENHANCED LOGGING VERSION) ===")
+        print(f"📋 Event received: {event}")
+        print(f"📋 Event type: {type(event)}")
         
         # Parse the event to get parameters
         if isinstance(event, str):
@@ -211,7 +211,7 @@ def lambda_handler(event, context):
                 })
             }
         
-        logger.info(f"Calling fetch_stock_stats with ticker={ticker}, period={period}")
+        print(f"🎯 Calling fetch_stock_stats with ticker={ticker}, period={period}")
         
         # Fetch stock statistics in crypto stats format for tile compatibility
         stock_stats = fetch_stock_stats(ticker, period)
@@ -1570,16 +1570,16 @@ def fetch_stock_data_alpha_vantage(ticker, period="1y"):
         dict: Stock statistics matching crypto stats format
     """
     try:
-        logger.info(f"🔑 === USING ALPHA VANTAGE REST API FOR {ticker.upper()} ===")
+        print(f"🔑 === USING ALPHA VANTAGE REST API FOR {ticker.upper()} ===")
         
         # Get API key from Secrets Manager
-        logger.info(f"🔍 Fetching Alpha Vantage API key from Secrets Manager...")
+        print(f"🔍 Fetching Alpha Vantage API key from Secrets Manager...")
         api_key = get_alpha_vantage_api_key()
         if not api_key:
-            logger.error("❌ Alpha Vantage API key not available")
+            print("❌ Alpha Vantage API key not available")
             return {"error": "Alpha Vantage API key not configured"}
         else:
-            logger.info(f"✅ Alpha Vantage API key successfully retrieved (length: {len(api_key)})")
+            print(f"✅ Alpha Vantage API key successfully retrieved (length: {len(api_key)})")
         
         # Map period to Alpha Vantage API functions
         # Based on https://www.alphavantage.co/documentation/
@@ -1588,25 +1588,25 @@ def fetch_stock_data_alpha_vantage(ticker, period="1y"):
             function = 'TIME_SERIES_INTRADAY'
             interval = '60min'  # 1-hour intervals for 1 day
             outputsize = 'compact'  # Last 100 data points
-            logger.info(f"📅 Using Alpha Vantage INTRADAY API for 1-day data (60min intervals)")
+            print(f"📅 Using Alpha Vantage INTRADAY API for 1-day data (60min intervals)")
         elif period == '7d':
             # Intraday data for 7 days
             function = 'TIME_SERIES_INTRADAY'
             interval = '60min'  # 1-hour intervals
             outputsize = 'full'  # Full data for 7 days
-            logger.info(f"📅 Using Alpha Vantage INTRADAY API for 7-day data (60min intervals)")
+            print(f"📅 Using Alpha Vantage INTRADAY API for 7-day data (60min intervals)")
         elif period == '30d':
             # Daily data for 30 days
             function = 'TIME_SERIES_DAILY'
             interval = None  # Not used for daily
             outputsize = 'compact'  # Last 100 days
-            logger.info(f"📅 Using Alpha Vantage DAILY API for 30-day data")
+            print(f"📅 Using Alpha Vantage DAILY API for 30-day data")
         else:  # 1y
             # Daily data for 1 year
             function = 'TIME_SERIES_DAILY'
             interval = None  # Not used for daily
             outputsize = 'full'  # Full year of data
-            logger.info(f"📅 Using Alpha Vantage DAILY API for 1-year data")
+            print(f"📅 Using Alpha Vantage DAILY API for 1-year data")
         
         # Build Alpha Vantage API URL
         base_url = "https://www.alphavantage.co/query"
@@ -1622,15 +1622,15 @@ def fetch_stock_data_alpha_vantage(ticker, period="1y"):
         if interval:
             params['interval'] = interval
         
-        logger.info(f"🌐 Alpha Vantage API URL: {base_url}")
-        logger.info(f"📋 Alpha Vantage API params: function={function}, symbol={ticker}, outputsize={outputsize}")
+        print(f"🌐 Alpha Vantage API URL: {base_url}")
+        print(f"📋 Alpha Vantage API params: function={function}, symbol={ticker}, outputsize={outputsize}")
         if interval:
-            logger.info(f"⏰ Alpha Vantage interval: {interval}")
+            print(f"⏰ Alpha Vantage interval: {interval}")
         
         # Make HTTP request to Alpha Vantage
-        logger.info(f"🚀 Making HTTP request to Alpha Vantage API...")
+        print(f"🚀 Making HTTP request to Alpha Vantage API...")
         response = requests.get(base_url, params=params, timeout=30)
-        logger.info(f"📡 Alpha Vantage API response status: {response.status_code}")
+        print(f"📡 Alpha Vantage API response status: {response.status_code}")
         
         if response.status_code != 200:
             logger.error(f"Alpha Vantage API returned status {response.status_code}")
@@ -1875,56 +1875,56 @@ def fetch_stock_stats(ticker, period="1y"):
         dict: Stock statistics matching crypto stats format
     """
     try:
-        logger.info(f"🚀 === STARTING STOCK DATA FETCH FOR {ticker.upper()} (period: {period}) ===")
+        print(f"🚀 === STARTING STOCK DATA FETCH FOR {ticker.upper()} (period: {period}) ===")
         
         # Method 1: Try yfinance library first (free, but rate limited)
         try:
-            logger.info(f"📊 Method 1: Attempting yfinance library for {ticker}")
+            print(f"📊 Method 1: Attempting yfinance library for {ticker}")
             result = fetch_stock_data_yfinance(ticker, period)
             if 'error' not in result:
-                logger.info(f"✅ Method 1 (yfinance) SUCCESS for {ticker} - Data source: {result.get('data_source', 'yfinance')}")
-                logger.info(f"📈 Result summary: Price=${result.get('current_price', 'N/A')}, Change={result.get('price_change_24h', 'N/A')}%, Chart points={len(result.get('chart_data', []))}")
+                print(f"✅ Method 1 (yfinance) SUCCESS for {ticker} - Data source: {result.get('data_source', 'yfinance')}")
+                print(f"📈 Result summary: Price=${result.get('current_price', 'N/A')}, Change={result.get('price_change_24h', 'N/A')}%, Chart points={len(result.get('chart_data', []))}")
                 return result
             else:
-                logger.warning(f"❌ Method 1 (yfinance) FAILED for {ticker}: {result.get('error', 'Unknown error')}")
+                print(f"❌ Method 1 (yfinance) FAILED for {ticker}: {result.get('error', 'Unknown error')}")
         except Exception as e:
-            logger.warning(f"❌ Method 1 (yfinance) EXCEPTION for {ticker}: {str(e)}")
+            print(f"❌ Method 1 (yfinance) EXCEPTION for {ticker}: {str(e)}")
         
         # Method 2: Try direct HTTP Yahoo Finance (free fallback)
         try:
-            logger.info(f"🌐 Method 2: Attempting direct HTTP Yahoo Finance for {ticker}")
+            print(f"🌐 Method 2: Attempting direct HTTP Yahoo Finance for {ticker}")
             result = fetch_stock_data_direct_http(ticker, period)
             if 'error' not in result:
-                logger.info(f"✅ Method 2 (direct HTTP) SUCCESS for {ticker} - Data source: {result.get('data_source', 'Direct HTTP')}")
-                logger.info(f"📈 Result summary: Price=${result.get('current_price', 'N/A')}, Change={result.get('price_change_24h', 'N/A')}%, Chart points={len(result.get('chart_data', []))}")
+                print(f"✅ Method 2 (direct HTTP) SUCCESS for {ticker} - Data source: {result.get('data_source', 'Direct HTTP')}")
+                print(f"📈 Result summary: Price=${result.get('current_price', 'N/A')}, Change={result.get('price_change_24h', 'N/A')}%, Chart points={len(result.get('chart_data', []))}")
                 return result
             else:
-                logger.warning(f"❌ Method 2 (direct HTTP) FAILED for {ticker}: {result.get('error', 'Unknown error')}")
+                print(f"❌ Method 2 (direct HTTP) FAILED for {ticker}: {result.get('error', 'Unknown error')}")
         except Exception as e:
-            logger.warning(f"❌ Method 2 (direct HTTP) EXCEPTION for {ticker}: {str(e)}")
+            print(f"❌ Method 2 (direct HTTP) EXCEPTION for {ticker}: {str(e)}")
         
         # Method 3: Try Alpha Vantage API (costs money, use sparingly)
         try:
-            logger.info(f"🔑 Method 3: Attempting Alpha Vantage REST API for {ticker}")
-            logger.info(f"🔍 Checking Alpha Vantage API key availability...")
+            print(f"🔑 Method 3: Attempting Alpha Vantage REST API for {ticker}")
+            print(f"🔍 Checking Alpha Vantage API key availability...")
             api_key = get_alpha_vantage_api_key()
             if not api_key:
-                logger.warning(f"⚠️ Alpha Vantage API key not available, skipping Method 3 for {ticker}")
+                print(f"⚠️ Alpha Vantage API key not available, skipping Method 3 for {ticker}")
             else:
-                logger.info(f"🔑 Alpha Vantage API key found, proceeding with API call for {ticker}")
+                print(f"🔑 Alpha Vantage API key found, proceeding with API call for {ticker}")
                 result = fetch_stock_data_alpha_vantage(ticker, period)
                 if 'error' not in result:
-                    logger.info(f"✅ Method 3 (Alpha Vantage) SUCCESS for {ticker} - Data source: {result.get('data_source', 'Alpha Vantage')}")
-                    logger.info(f"📈 Result summary: Price=${result.get('current_price', 'N/A')}, Change={result.get('price_change_24h', 'N/A')}%, Chart points={len(result.get('chart_data', []))}")
+                    print(f"✅ Method 3 (Alpha Vantage) SUCCESS for {ticker} - Data source: {result.get('data_source', 'Alpha Vantage')}")
+                    print(f"📈 Result summary: Price=${result.get('current_price', 'N/A')}, Change={result.get('price_change_24h', 'N/A')}%, Chart points={len(result.get('chart_data', []))}")
                     return result
                 else:
-                    logger.warning(f"❌ Method 3 (Alpha Vantage) FAILED for {ticker}: {result.get('error', 'Unknown error')}")
+                    print(f"❌ Method 3 (Alpha Vantage) FAILED for {ticker}: {result.get('error', 'Unknown error')}")
         except Exception as e:
-            logger.warning(f"❌ Method 3 (Alpha Vantage) EXCEPTION for {ticker}: {str(e)}")
+            print(f"❌ Method 3 (Alpha Vantage) EXCEPTION for {ticker}: {str(e)}")
         
         # Method 4: Try enhanced HTTP fallback (original yfinance comprehensive method)
         try:
-            logger.info(f"🔄 Method 4: Attempting enhanced HTTP fallback for {ticker}")
+            print(f"🔄 Method 4: Attempting enhanced HTTP fallback for {ticker}")
             stock_data = fetch_stock_data(ticker, period)
             
             # Convert comprehensive data to crypto stats format
@@ -1951,22 +1951,22 @@ def fetch_stock_stats(ticker, period="1y"):
                     'data_source': stock_data.get('data_source', 'Yahoo Finance'),
                     'timestamp': stock_data.get('timestamp', datetime.now().isoformat())
                 }
-                logger.info(f"✅ Method 4 (enhanced HTTP) SUCCESS for {ticker} - Data source: {result.get('data_source', 'Enhanced HTTP')}")
-                logger.info(f"📈 Result summary: Price=${result.get('current_price', 'N/A')}, Change={result.get('price_change_24h', 'N/A')}%, Chart points={len(result.get('chart_data', []))}")
+                print(f"✅ Method 4 (enhanced HTTP) SUCCESS for {ticker} - Data source: {result.get('data_source', 'Enhanced HTTP')}")
+                print(f"📈 Result summary: Price=${result.get('current_price', 'N/A')}, Change={result.get('price_change_24h', 'N/A')}%, Chart points={len(result.get('chart_data', []))}")
                 return result
             else:
-                logger.warning(f"❌ Method 4 (enhanced HTTP) FAILED for {ticker}: {stock_data.get('error', 'Unknown error')}")
+                print(f"❌ Method 4 (enhanced HTTP) FAILED for {ticker}: {stock_data.get('error', 'Unknown error')}")
         except Exception as e:
-            logger.warning(f"❌ Method 4 (enhanced HTTP) EXCEPTION for {ticker}: {str(e)}")
+            print(f"❌ Method 4 (enhanced HTTP) EXCEPTION for {ticker}: {str(e)}")
         
         # Method 5: Return mock data as last resort
-        logger.warning(f"🚨 ALL METHODS FAILED for {ticker}, falling back to mock data")
+        print(f"🚨 ALL METHODS FAILED for {ticker}, falling back to mock data")
         mock_result = generate_mock_stock_data(ticker, period)
-        logger.info(f"🎭 Mock data generated for {ticker}: Price=${mock_result.get('current_price', 'N/A')}, Chart points={len(mock_result.get('chart_data', []))}")
+        print(f"🎭 Mock data generated for {ticker}: Price=${mock_result.get('current_price', 'N/A')}, Chart points={len(mock_result.get('chart_data', []))}")
         return mock_result
         
     except Exception as e:
-        logger.error(f"💥 fetch_stock_stats COMPLETE FAILURE for {ticker}: {str(e)}")
+        print(f"💥 fetch_stock_stats COMPLETE FAILURE for {ticker}: {str(e)}")
         mock_result = generate_mock_stock_data(ticker, period)
-        logger.info(f"🎭 Emergency mock data generated for {ticker}: Price=${mock_result.get('current_price', 'N/A')}")
+        print(f"🎭 Emergency mock data generated for {ticker}: Price=${mock_result.get('current_price', 'N/A')}")
         return mock_result
