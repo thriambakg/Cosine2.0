@@ -89,17 +89,26 @@ def lambda_handler(event, context):
         user_id = connection_info['user_id']
         
         # Get session_id from message data (sent by frontend)
+        logger.info(f"🔍 DEBUG: Full message_data received: {json_dumps_safe(message_data)}")
+        logger.info(f"🔍 DEBUG: message_data keys: {list(message_data.keys()) if message_data else 'None'}")
+        
+        message_type = message_data.get('type', 'chat')
         session_id = message_data.get('sessionId')
-        if not session_id:
-            logger.error(f"No sessionId provided in message data")
+        logger.info(f"🔍 DEBUG: Message type: {message_type}, Extracted sessionId: {session_id}")
+        
+        # Session ID is required for all message types except connection_establish
+        if not session_id and message_type != 'connection_establish':
+            logger.error(f"❌ No sessionId provided in message data for message type: {message_type}")
+            logger.error(f"❌ Available keys in message_data: {list(message_data.keys()) if message_data else 'None'}")
+            logger.error(f"❌ Full message_data: {json_dumps_safe(message_data)}")
             return {
                 'statusCode': 400,
                 'body': json_dumps_safe({'error': 'Session ID required'})
             }
         
         # Update connection record with session_id for future reference
-        # Only update if session_id field doesn't exist or is None
-        if 'session_id' not in connection_info or not connection_info.get('session_id'):
+        # Only update if session_id field doesn't exist or is None, and we have a session_id
+        if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
             update_connection_session(connection_id, session_id)
         
         # Process the message
@@ -178,7 +187,7 @@ def process_message(connection_id, user_id, session_id, message_data):
             # Send connection established message
             connection_message = {
                 'type': 'connection_established',
-                'session_id': session_id,
+                'session_id': session_id,  # May be None for connection_establish
                 'message': 'Connected to Cosine AI Chat',
                 'timestamp': datetime.now().isoformat()
             }
