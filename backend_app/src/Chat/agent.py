@@ -590,11 +590,11 @@ MODELS = {
         region="us-east-1"
     ),
     'nova-premier': BedrockModel(
-        model_id="us.amazon.nova-premier-v1:0",
+        model_id="amazon.nova-premier-v1:0",
         region="us-east-1"
     ),
     'nova-lite': BedrockModel(
-        model_id="us.amazon.nova-lite-v1:0",
+        model_id="amazon.nova-lite-v1:0",
         region="us-east-1"
     ),
     'llama3-3-70b': BedrockModel(

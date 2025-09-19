@@ -11,7 +11,7 @@ This guide helps you test that all 8 models can be switched between during a sin
 | claude-sonnet-4 | Claude Sonnet 4 | anthropic.claude-sonnet-4-20250514-v1:0 | Anthropic | 🔍 Needs Testing |
 | nova-premier | Amazon Nova Premier | amazon.nova-premier-v1:0 | Amazon | 🔍 Needs Testing |
 | nova-lite | Amazon Nova Lite | amazon.nova-lite-v1:0 | Amazon | 🔍 Needs Testing |
-| llama3-3-70b | Llama 3.3 70B | us.meta.llama3-3-70b-instruct-v1:0 | Meta | ✅ Fixed |
+| llama3-3-70b | Llama 3.3 70B | us.meta.llama3-3-70b-instruct-v1:0 | Meta | 🔍 Needs Testing |
 | gpt-oss-120b | GPT-OSS 120B | openai.gpt-oss-120b-1:0 | OpenAI | ✅ Working |
 | gpt-oss-20b | GPT-OSS 20B | openai.gpt-oss-20b-1:0 | OpenAI | 🔍 Needs Testing |
 
@@ -49,10 +49,15 @@ For each model, create a new chat session and test:
 
 **Error**: `Invocation of model ID [model] with on-demand throughput isn't supported`
 
-**Solution**: Update model ID to use inference profile format:
+**Solution**: Some models require inference profiles instead of direct model IDs:
 ```python
-# Instead of: "amazon.nova-premier-v1:0"
-# Use: "us.amazon.nova-premier-v1:0"
+# Meta Llama models require inference profiles
+# Instead of: "meta.llama3-3-70b-instruct-v1:0"
+# Use: "us.meta.llama3-3-70b-instruct-v1:0"
+
+# Amazon Nova models use direct model IDs
+"amazon.nova-premier-v1:0"  # ✅ Correct
+"us.amazon.nova-premier-v1:0"  # ❌ Wrong format
 ```
 
 ### Issue 2: AccessDeniedException

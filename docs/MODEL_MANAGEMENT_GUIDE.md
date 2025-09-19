@@ -92,7 +92,8 @@ Resource = [
   "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
   "arn:aws:bedrock:*::foundation-model/amazon.nova-premier-v1:0",
   "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0",
-  "arn:aws:bedrock:*::foundation-model/meta.llama3-3-70b-instruct-v1:0",
+  # Inference profiles (for models that require them)
+  "arn:aws:bedrock:*:*:inference-profile/us.meta.llama3-3-70b-instruct-v1:0",
   "arn:aws:bedrock:*::foundation-model/openai.gpt-oss-120b-1:0",
   "arn:aws:bedrock:*::foundation-model/openai.gpt-oss-20b-1:0",
   
@@ -269,8 +270,8 @@ anthropic.claude-sonnet-4-20250514-v1:0
 amazon.nova-premier-v1:0
 amazon.nova-lite-v1:0
 
-# Meta Llama
-meta.llama3-3-70b-instruct-v1:0
+# Meta Llama (requires inference profile)
+us.meta.llama3-3-70b-instruct-v1:0
 
 # OpenAI GPT-OSS
 openai.gpt-oss-120b-1:0
@@ -296,8 +297,8 @@ As of the last update, the system includes these models:
 | claude-3-sonnet | Claude 3 Sonnet | anthropic.claude-3-sonnet-20240229-v1:0 | Anthropic |
 | claude-3-haiku | Claude 3 Haiku | anthropic.claude-3-haiku-20240307-v1:0 | Anthropic |
 | claude-sonnet-4 | Claude Sonnet 4 | anthropic.claude-sonnet-4-20250514-v1:0 | Anthropic |
-| nova-premier | Amazon Nova Premier | us.amazon.nova-premier-v1:0 | Amazon |
-| nova-lite | Amazon Nova Lite | us.amazon.nova-lite-v1:0 | Amazon |
+| nova-premier | Amazon Nova Premier | amazon.nova-premier-v1:0 | Amazon |
+| nova-lite | Amazon Nova Lite | amazon.nova-lite-v1:0 | Amazon |
 | llama3-3-70b | Llama 3.3 70B | us.meta.llama3-3-70b-instruct-v1:0 | Meta |
 | gpt-oss-120b | GPT-OSS 120B | openai.gpt-oss-120b-1:0 | OpenAI |
 | gpt-oss-20b | GPT-OSS 20B | openai.gpt-oss-20b-1:0 | OpenAI |
