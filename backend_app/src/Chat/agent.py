@@ -585,12 +585,28 @@ MODELS = {
         model_id="anthropic.claude-3-haiku-20240307-v1:0",
         region="us-east-1"
     ),
+    'claude-sonnet-4': BedrockModel(
+        model_id="anthropic.claude-sonnet-4-20250514-v1:0",
+        region="us-east-1"
+    ),
+    'nova-premier': BedrockModel(
+        model_id="amazon.nova-premier-v1:0",
+        region="us-east-1"
+    ),
+    'nova-lite': BedrockModel(
+        model_id="amazon.nova-lite-v1:0",
+        region="us-east-1"
+    ),
+    'llama3-3-70b': BedrockModel(
+        model_id="meta.llama3-3-70b-instruct-v1:0",
+        region="us-east-1"
+    ),
     'gpt-oss-120b': BedrockModel(
-        model_id="openai.gpt-oss-120b",
+        model_id="openai.gpt-oss-120b-1:0",
         region="us-east-1"
     ),
     'gpt-oss-20b': BedrockModel(
-        model_id="openai.gpt-oss-20b",
+        model_id="openai.gpt-oss-20b-1:0",
         region="us-east-1"
     )
 }
