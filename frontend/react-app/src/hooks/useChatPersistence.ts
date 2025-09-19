@@ -307,29 +307,53 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     setError(null);
     
     try {
-      console.log('📋 Deleting session:', sessionId);
+      console.log('🔴 DELETE: Starting session deletion:', sessionId);
+      
+      // Clear current session immediately to stop any ongoing UI updates
+      if (currentSession?.session_id === sessionId) {
+        console.log('🔴 DELETE: Clearing current session immediately');
+        setCurrentSession(null);
+      }
+      
+      // Clear any pending messages for this session
+      pendingMessagesRef.current = [];
+      console.log('🔴 DELETE: Cleared pending messages');
       
       // Check if this is a local session (starts with 'local_')
       if (sessionId.startsWith('local_')) {
         // For local sessions, just remove from local cache
-        console.log('📋 Deleting local session from cache only');
+        console.log('🔴 DELETE: Deleting local session from cache only');
       } else {
         // For backend sessions, make API call
+        console.log('🔴 DELETE: Calling backend to delete session');
         await api.sessions.deleteSession(sessionId, userId);
+        console.log('🔴 DELETE: Backend deletion successful');
       }
       
       // Remove from local state regardless of session type
-      setSessions(prev => prev.filter(s => s.session_id !== sessionId));
+      setSessions(prev => {
+        const filtered = prev.filter(s => s.session_id !== sessionId);
+        console.log(`🔴 DELETE: Removed session from local state. Remaining: ${filtered.length}`);
+        return filtered;
+      });
       
-      // Clear current session if it's the one being deleted
-      if (currentSession?.session_id === sessionId) {
-        setCurrentSession(null);
-      }
+      // Force clear all cached data for this session
+      const cacheKey = `chat_sessions_${userId}`;
+      const cachedSessions = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+      const filteredCached = cachedSessions.filter((s: any) => s.session_id !== sessionId);
+      localStorage.setItem(cacheKey, JSON.stringify(filteredCached));
+      console.log('🔴 DELETE: Cleared session from localStorage cache');
       
+      // Clear any pending messages cache
+      const pendingKey = `pending_messages_${sessionId}`;
+      localStorage.removeItem(pendingKey);
+      console.log('🔴 DELETE: Cleared pending messages cache');
+      
+      // Save updated cached data
       saveCachedData();
-      console.log('📋 Deleted session:', sessionId);
+      console.log('✅ DELETE: Session deletion completed successfully');
     } catch (error) {
-      console.error('📋 Error deleting session:', error);
+      console.error('❌ DELETE: Error deleting session:', error);
       setError('Failed to delete session');
     } finally {
       setIsLoading(false);

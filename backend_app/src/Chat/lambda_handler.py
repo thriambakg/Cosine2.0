@@ -496,6 +496,21 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                         'user_id': user_id
                     }
                 }
+            
+            # Check for kill signal before processing
+            if session_context.get('killed_at'):
+                logger.warning(f"🔴 KILL: Session {session_id} has been killed (killed_at: {session_context.get('killed_at')}, reason: {session_context.get('kill_reason', 'unknown')})")
+                return {
+                    'statusCode': 410,  # Gone status code
+                    'body': {
+                        'error': 'Session terminated',
+                        'message': f'Session {session_id} has been terminated',
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'killed_at': session_context.get('killed_at'),
+                        'kill_reason': session_context.get('kill_reason', 'unknown')
+                    }
+                }
         else:
             # Only create a new session if no session_id was provided
             if not session_id:

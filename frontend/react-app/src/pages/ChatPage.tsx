@@ -227,6 +227,14 @@ export default function ChatPage() {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
+  
+  // Clear loading state when session is deleted
+  useEffect(() => {
+    if (!currentSession && isLoadingChat) {
+      console.log('🔴 DELETE: Clearing loading state due to session deletion');
+      setIsLoadingChat(false);
+    }
+  }, [currentSession, isLoadingChat]);
   const editContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

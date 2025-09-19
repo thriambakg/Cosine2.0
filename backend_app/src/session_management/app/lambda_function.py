@@ -406,8 +406,31 @@ def update_session_metadata(user_id: str, session_id: str, metadata: Dict[str, A
         }
 
 def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:
-    """Delete a chat session"""
+    """Delete a chat session and send kill signal to any active processing"""
     try:
+        logger.info(f"🔴 KILL: Starting session deletion for session {session_id}")
+        
+        # First, set a kill flag in the session to stop any active chat agent processing
+        try:
+            table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression='SET killed_at = :kill_timestamp, kill_reason = :kill_reason',
+                ExpressionAttributeValues={
+                    ':kill_timestamp': int(datetime.now().timestamp()),
+                    ':kill_reason': 'session_deleted'
+                },
+                ConditionExpression='attribute_exists(user_id) AND attribute_exists(session_id)'
+            )
+            logger.info(f"🔴 KILL: Set kill flag for session {session_id}")
+        except Exception as kill_error:
+            logger.warning(f"⚠️ KILL: Could not set kill flag for session {session_id}: {str(kill_error)}")
+        
+        # Wait a moment for the kill signal to propagate
+        time.sleep(0.5)
+        
         # Delete the session item using both user_id (PK) and session_id (SK)
         table.delete_item(
             Key={
@@ -416,6 +439,8 @@ def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:
             }
         )
         
+        logger.info(f"✅ KILL: Successfully deleted session {session_id}")
+        
         return {
             'statusCode': 200,
             'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
@@ -423,7 +448,7 @@ def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:
         }
     
     except Exception as e:
-        logger.error(f"Error deleting session: {str(e)}")
+        logger.error(f"❌ KILL: Error deleting session: {str(e)}")
         return {
             'statusCode': 500,
             'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},

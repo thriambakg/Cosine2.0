@@ -329,7 +329,7 @@ def process_message(connection_id, user_id, session_id, message_data):
 
 def call_chat_agent(user_id, message_text, model, files, session_id):
     """
-    Call the existing chat agent Lambda function
+    Call the existing chat agent Lambda function with kill signal checking
     
     Args:
         user_id: User ID
@@ -342,6 +342,25 @@ def call_chat_agent(user_id, message_text, model, files, session_id):
         AI response text
     """
     try:
+        # Check for kill signal before calling chat agent
+        logger.info(f"🔍 KILL CHECK: Checking for kill signal on session {session_id}")
+        
+        # Get session to check for kill signal
+        session_response = chat_sessions_table.get_item(
+            Key={
+                'user_id': user_id,
+                'session_id': session_id
+            }
+        )
+        
+        if 'Item' in session_response:
+            session_item = session_response['Item']
+            if session_item.get('killed_at'):
+                logger.warning(f"🔴 KILL: Session {session_id} has been killed, aborting chat agent call")
+                return "Session has been terminated. Please start a new conversation."
+        
+        logger.info(f"✅ KILL CHECK: Session {session_id} is active, proceeding with chat agent call")
+        
         # Prepare payload for chat agent
         payload = {
             'action': 'chat',
@@ -375,6 +394,10 @@ def call_chat_agent(user_id, message_text, model, files, session_id):
         if response_payload.get('statusCode') == 200:
             response_body = json.loads(response_payload.get('body', '{}'))
             return response_body.get('response', 'I apologize, but I encountered an error processing your request.')
+        elif response_payload.get('statusCode') == 410:
+            # Session terminated (410 Gone)
+            logger.warning(f"🔴 KILL: Chat agent returned 410 - session terminated")
+            return "Session has been terminated. Please start a new conversation."
         else:
             logger.error(f"Chat agent returned error: {response_payload}")
             return 'I apologize, but I encountered an error processing your request. Please try again.'
