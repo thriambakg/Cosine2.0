@@ -6,6 +6,7 @@ Handles chat messages and integrates with the existing chat agent
 import json
 import os
 import logging
+import uuid
 import boto3
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -166,7 +167,7 @@ def process_message(connection_id, user_id, session_id, message_data):
         message_text = message_data.get('message', '')
         model = message_data.get('model', 'claude-3-sonnet')
         files = message_data.get('files', [])
-        message_id = f"msg_{int(datetime.now().timestamp() * 1000)}"
+        message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
         
         logger.info(f"Processing message type: {message_type} for connection {connection_id}")
         logger.info(f"Full message data: {message_data}")
@@ -265,7 +266,7 @@ def process_message(connection_id, user_id, session_id, message_data):
         ai_response = call_chat_agent(user_id, message_text, model, files, session_id)
         
         # Add AI response to session
-        ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}"
+        ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
         ai_timestamp = int(datetime.now().timestamp())
         ai_message = {
             'id': ai_message_id,
@@ -483,18 +484,43 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
                 'body': json_dumps_safe({'error': 'No messages in session'})
             }
         
-        # Find the message to edit by ID
+        # Find the message to edit by ID (with flexible matching for different ID formats)
         logger.info(f"🔍 EDIT: Searching for message ID {message_id} in {len(messages)} messages...")
         message_to_edit_index = None
+        
+        # Extract timestamp from the message_id (e.g., "msg_1758247366374_j7xptuhfj" -> "1758247366374")
+        search_timestamp = None
+        if message_id.startswith('msg_'):
+            # Try to extract timestamp from different formats
+            parts = message_id.split('_')
+            if len(parts) >= 2:
+                try:
+                    search_timestamp = parts[1]  # Get the timestamp part
+                    logger.info(f"🔍 EDIT: Extracted timestamp for search: {search_timestamp}")
+                except:
+                    pass
+        
         for i, msg in enumerate(messages):
-            logger.info(f"🔍 EDIT: Checking message {i}: ID={msg.get('id', 'NO_ID')}, sender={msg.get('sender', 'NO_SENDER')}")
-            if msg['id'] == message_id:
+            msg_id = msg.get('id', 'NO_ID')
+            logger.info(f"🔍 EDIT: Checking message {i}: ID={msg_id}, sender={msg.get('sender', 'NO_SENDER')}")
+            
+            # Try exact match first
+            if msg_id == message_id:
                 message_to_edit_index = i
-                logger.info(f"✅ EDIT: Found message {message_id} at index {i}")
+                logger.info(f"✅ EDIT: Found exact match for message {message_id} at index {i}")
                 break
+            
+            # Try timestamp-based match if exact match fails
+            if search_timestamp and msg_id.startswith('msg_'):
+                msg_parts = msg_id.split('_')
+                if len(msg_parts) >= 2 and msg_parts[1] == search_timestamp:
+                    message_to_edit_index = i
+                    logger.info(f"✅ EDIT: Found timestamp match for message {message_id} (matched {msg_id}) at index {i}")
+                    break
         
         if message_to_edit_index is None:
             logger.error(f"❌ EDIT: Message {message_id} not found in session {session_id}")
+            logger.error(f"❌ EDIT: Search timestamp: {search_timestamp}")
             logger.error(f"❌ EDIT: Available message IDs: {[msg.get('id', 'NO_ID') for msg in messages]}")
             return {
                 'statusCode': 404,
@@ -555,7 +581,7 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
             logger.info(f"✅ EDIT: Chat agent generated response, length: {len(ai_response.get('response', ''))}")
             
             # Add AI response to session
-            ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}"
+            ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
             ai_timestamp = int(datetime.now().timestamp())
             ai_message = {
                 'id': ai_message_id,
