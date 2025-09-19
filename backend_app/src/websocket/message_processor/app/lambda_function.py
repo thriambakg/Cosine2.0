@@ -226,7 +226,7 @@ def process_message(connection_id, user_id, session_id, message_data):
         send_message_to_client(connection_id, ack_message)
         
         # Call the existing chat agent Lambda
-        ai_response = call_chat_agent(user_id, message_text, model, files)
+        ai_response = call_chat_agent(user_id, message_text, model, files, session_id)
         
         # Add AI response to session
         ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}"
@@ -291,7 +291,7 @@ def process_message(connection_id, user_id, session_id, message_data):
             'body': json_dumps_safe({'error': 'Failed to process message'})
         }
 
-def call_chat_agent(user_id, message_text, model, files):
+def call_chat_agent(user_id, message_text, model, files, session_id):
     """
     Call the existing chat agent Lambda function
     
@@ -300,6 +300,7 @@ def call_chat_agent(user_id, message_text, model, files):
         message_text: User's message
         model: Selected AI model
         files: Uploaded files
+        session_id: Session ID
         
     Returns:
         AI response text
