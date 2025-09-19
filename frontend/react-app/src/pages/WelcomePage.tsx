@@ -7,11 +7,9 @@ import {
   Button,
   Card,
   Grid,
-  CardContent,
   CardActionArea,
   Avatar,
   Chip,
-  IconButton,
   Fade,
   Slide,
 } from '@mui/material';
@@ -19,16 +17,12 @@ import {
   TrendingUp as TrendingUpIcon,
   AccountBalance as AccountBalanceIcon,
   SmartToy as BotIcon,
-  Add as AddIcon,
   ArrowForward as ArrowRightIcon,
   BarChart as BarChartIcon,
   Security as SecurityIcon,
-  Speed as SpeedIcon,
   Star as StarIcon,
   AutoAwesome as AutoAwesomeIcon,
-  Chat as ChatIcon,
   Dashboard as DashboardIcon,
-  Settings as SettingsIcon,
 } from '@mui/icons-material';
 
 import { useAuth } from '../contexts/AuthContext';
@@ -177,7 +171,7 @@ const WelcomePage: React.FC = () => {
             </Typography>
             <Chip
               icon={<StarIcon sx={{ fontSize: '16px !important', color: '#fbbf24' }} />}
-              label={`Welcome, ${user?.name || 'Trader'}!`}
+              label={`Welcome, ${user?.firstName || 'Trader'}!`}
               sx={{
                 backgroundColor: 'rgba(59, 130, 246, 0.2)',
                 backdropFilter: 'blur(4px)',
@@ -197,7 +191,7 @@ const WelcomePage: React.FC = () => {
         <Slide direction="up" in timeout={1200}>
           <Box sx={{ mb: 8 }}>
             <Grid container spacing={3} justifyContent="center">
-              {stats.map((stat, index) => (
+              {stats.map((stat) => (
                 <Grid item xs={6} sm={3} key={stat.label}>
                   <Card sx={{
                     backgroundColor: 'rgba(15, 23, 42, 0.9)',
@@ -252,7 +246,7 @@ const WelcomePage: React.FC = () => {
               Get Started
             </Typography>
             <Grid container spacing={4}>
-              {features.map((feature, index) => (
+              {features.map((feature) => (
                 <Grid item xs={12} sm={6} md={3} key={feature.id}>
                   <Card 
                     sx={{
@@ -342,7 +336,7 @@ const WelcomePage: React.FC = () => {
               Quick Actions
             </Typography>
             <Grid container spacing={3} justifyContent="center">
-              {quickActions.map((action, index) => (
+              {quickActions.map((action) => (
                 <Grid item xs={12} sm={4} key={action.title}>
                   <Card sx={{
                     backgroundColor: 'rgba(15, 23, 42, 0.9)',

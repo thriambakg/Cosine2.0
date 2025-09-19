@@ -592,10 +592,29 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 # Fallback: convert to string
                 response_content = str(agent_response)
             
-            # Clean up response content
-            response_content = response_content.strip()
+            # Clean up response content by removing metadata
+            def clean_response_content(content):
+                """Remove metadata tags from agent response"""
+                import re
+                
+                # Remove search_quality_reflection blocks
+                content = re.sub(r'<search_quality_reflection>.*?</search_quality_reflection>', '', content, flags=re.DOTALL)
+                
+                # Remove search_quality_score blocks
+                content = re.sub(r'<search_quality_score>\d+</search_quality_score>', '', content)
+                
+                # Remove result tags
+                content = re.sub(r'<result>', '', content)
+                content = re.sub(r'</result>', '', content)
+                
+                # Clean up extra whitespace
+                content = content.strip()
+                
+                return content
             
-            logger.info(f"🔍 DEBUG: Extracted response content: {response_content}")
+            response_content = clean_response_content(response_content)
+            
+            logger.info(f"🔍 DEBUG: Extracted and cleaned response content: {response_content}")
             logger.info(f"🔍 DEBUG: Response content type: {type(response_content)}")
             
             # Update session context with new conversation

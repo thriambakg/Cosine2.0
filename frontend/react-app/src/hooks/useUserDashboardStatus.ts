@@ -42,11 +42,12 @@ export const useUserDashboardStatus = (): UserDashboardStatus => {
     }
 
     // Check if we have any content
-    const hasDashboards = (tabManagement.dashboards?.length || 0) > 0;
     const hasTabs = (tabManagement.tabs?.length || 0) > 0;
     const hasTiles = tabManagement.tabs?.some(tab => (tab.tiles?.length || 0) > 0) || false;
     
-    const isEmpty = !hasDashboards && !hasTabs && !hasTiles;
+    // For now, we'll consider tabs as dashboards since that's how the new system works
+    const hasDashboards = hasTabs;
+    const isEmpty = !hasDashboards && !hasTiles;
 
     setStatus({
       hasDashboards,
@@ -55,7 +56,7 @@ export const useUserDashboardStatus = (): UserDashboardStatus => {
       isLoading: false,
       isEmpty
     });
-  }, [user, tabManagement.tabs, tabManagement.dashboards]);
+  }, [user, tabManagement.tabs]);
 
   return status;
 };

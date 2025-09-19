@@ -259,6 +259,20 @@ export default function ChatPage() {
   useEffect(() => {
     const currentSessionId = currentSession?.session_id;
     
+    // Debug session switching
+    console.log('🔄 SESSION EFFECT: Current session:', {
+      sessionId: currentSessionId,
+      messageCount: currentSession?.messages?.length || 0,
+      messages: currentSession?.messages?.map(m => ({ id: m.id, sender: m.sender, text: m.text.substring(0, 30) + '...' })) || []
+    });
+    
+    // If we're switching to a session that has no messages but we expect it to have messages,
+    // trigger a reload from the persistence system
+    if (currentSessionId && currentSession && currentSession.messages.length === 0) {
+      console.log('🔄 SESSION EFFECT: Session has no messages, checking if we should reload');
+      // The persistence system should handle this through its caching mechanism
+    }
+    
     // If we switched to a different session, handle the transition
     if (previousSessionIdRef.current && 
         previousSessionIdRef.current !== currentSessionId) {
@@ -293,6 +307,28 @@ export default function ChatPage() {
     
     previousSessionIdRef.current = currentSessionId || null;
   }, [currentSession?.session_id, pendingMessages, addPersistedMessage]);
+
+  // Process cached messages immediately when they're added for the current session
+  useEffect(() => {
+    const currentSessionId = currentSession?.session_id;
+    if (currentSessionId && pendingMessages[currentSessionId]) {
+      console.log('🔄 IMMEDIATE: Processing cached messages for current session:', currentSessionId);
+      const cachedMessages = pendingMessages[currentSessionId];
+      
+      // Add cached messages to the persistence system
+      cachedMessages.forEach(message => {
+        addPersistedMessage(message);
+        setTypingMessages(prev => new Set([...prev, message.id]));
+      });
+      
+      // Clear cached messages for this session
+      setPendingMessages(prev => {
+        const updated = { ...prev };
+        delete updated[currentSessionId];
+        return updated;
+      });
+    }
+  }, [pendingMessages, currentSession?.session_id, addPersistedMessage]);
 
   // Safety timeout to clear loading state after 60 seconds for each session
   useEffect(() => {
@@ -844,6 +880,13 @@ export default function ChatPage() {
     console.log('📤 Message marked as sent:', messageId, 'Total sent messages:', sentMessageIds.size + 1);
 
     // Add message to persistence system
+    console.log('📤 Adding user message to persistence:', {
+      messageId: userMessage.id,
+      text: userMessage.text,
+      sessionId: sessionToUse?.session_id,
+      currentMessageCount: currentSession?.messages?.length || 0
+    });
+    
     addPersistedMessage(userMessage);
     setInputMessage('');
     setUploadedFiles([]);

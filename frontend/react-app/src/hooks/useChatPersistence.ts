@@ -58,8 +58,9 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
   const [error, setError] = useState<string | null>(null);
   const [autoSave, setAutoSave] = useState(true);
   const [sessionTTLDays, setSessionTTLDays] = useState(30);
+  const [pendingMessageCounts, setPendingMessageCounts] = useState<Record<string, number>>({});
   
-  const pendingMessagesRef = useRef<ChatMessage[]>([]);
+  const pendingMessagesRef = useRef<Record<string, ChatMessage[]>>({});
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSaveTimeRef = useRef<number>(0);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -73,12 +74,15 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     }
   }, [userId]);
 
-  // Auto-save messages when they change
+  // Auto-save messages when they change (session-specific)
   useEffect(() => {
-    if (autoSave && pendingMessagesRef.current.length > 0) {
+    const sessionId = currentSession?.session_id;
+    const pendingCount = sessionId ? (pendingMessageCounts[sessionId] || 0) : 0;
+    
+    if (autoSave && pendingCount > 0) {
       debouncedSave();
     }
-  }, [pendingMessagesRef.current.length, autoSave]);
+  }, [currentSession?.session_id, pendingMessageCounts, autoSave]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -263,11 +267,81 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     try {
       console.log('📋 Loading session:', sessionId);
       
-      // First check if we have it cached
+      // First check if we have it cached - always use cache if available to preserve local state
       const cachedSession = sessions.find(s => s.session_id === sessionId);
-      if (cachedSession && cachedSession.messages.length > 0) {
+      if (cachedSession) {
+        console.log('📋 Using cached session (preserving local state):', {
+          sessionId,
+          messageCount: cachedSession.messages.length,
+          messages: cachedSession.messages.map(m => ({ id: m.id, sender: m.sender, text: m.text.substring(0, 30) + '...' })),
+          lastUpdated: new Date(cachedSession.last_updated).toLocaleTimeString()
+        });
         setCurrentSession(cachedSession);
         setIsLoading(false);
+        
+        // Only load from backend in the background if the session is old enough
+        const sessionAge = Date.now() - cachedSession.last_updated;
+        if (sessionAge > 30000) { // 30 seconds
+          console.log('📋 Session is old, will sync with backend in background');
+          // Load from backend in background without changing current session
+          setTimeout(async () => {
+            try {
+              const response = await api.sessions.getSession(sessionId, userId);
+              const backendSession: ChatSession = {
+                session_id: response.session_id,
+                title: response.title,
+                model: response.model,
+                created_at: response.created_at,
+                last_updated: response.last_updated,
+                message_count: response.message_count,
+                messages: (response.messages || []).map((msg: any) => ({
+                  ...msg,
+                  timestamp: new Date((msg.timestamp || Date.now()) * 1000)
+                }))
+              };
+              
+              // Only update sessions list if backend has more messages than local cache
+              setSessions(prev => prev.map(s => {
+                if (s.session_id === sessionId) {
+                  // Use currentSession message count if it's the same session, otherwise use sessions list
+                  const localMessageCount = (currentSession?.session_id === sessionId) 
+                    ? currentSession.messages.length 
+                    : s.messages.length;
+                  const backendMessageCount = backendSession.messages.length;
+                  
+                  console.log('📋 Background sync comparison:', {
+                    sessionId,
+                    localMessages: localMessageCount,
+                    backendMessages: backendMessageCount,
+                    usingCurrentSession: currentSession?.session_id === sessionId
+                  });
+                  
+                  // Only use backend data if it has more messages (meaning new messages were saved)
+                  if (backendMessageCount > localMessageCount) {
+                    console.log('📋 Using backend data (has more messages)');
+                    
+                    // Also update currentSession if it's the same session
+                    if (currentSession?.session_id === sessionId) {
+                      console.log('📋 Updating current session with backend data');
+                      setCurrentSession(backendSession);
+                    }
+                    
+                    return backendSession;
+                  } else {
+                    console.log('📋 Keeping local cache (backend has same or fewer messages)');
+                    return s;
+                  }
+                }
+                return s;
+              }));
+              
+              console.log('📋 Background sync completed for session:', sessionId);
+            } catch (error) {
+              console.log('📋 Background sync failed (this is ok):', error);
+            }
+          }, 1000);
+        }
+        
         return;
       }
       
@@ -281,8 +355,17 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         created_at: response.created_at,
         last_updated: response.last_updated,
         message_count: response.message_count,
-        messages: response.messages || []
+        messages: (response.messages || []).map((msg: any) => ({
+          ...msg,
+          timestamp: new Date((msg.timestamp || Date.now()) * 1000) // Convert seconds to milliseconds
+        }))
       };
+      
+      console.log('📋 Loaded session from backend:', {
+        sessionId,
+        messageCount: loadedSession.messages.length,
+        messages: loadedSession.messages.map(m => ({ id: m.id, sender: m.sender, text: m.text.substring(0, 30) + '...' }))
+      });
       
       setCurrentSession(loadedSession);
       
@@ -323,9 +406,16 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         setCurrentSession(null);
       }
       
-      // Clear any pending messages for this session
-      pendingMessagesRef.current = [];
-      console.log('🔴 DELETE: Cleared pending messages');
+      // Clear any pending messages for this session (session-specific)
+      if (pendingMessagesRef.current[sessionId]) {
+        delete pendingMessagesRef.current[sessionId];
+        setPendingMessageCounts(prev => {
+          const updated = { ...prev };
+          delete updated[sessionId];
+          return updated;
+        });
+        console.log('🔴 DELETE: Cleared pending messages for session:', sessionId);
+      }
       
       // Check if this is a local session (starts with 'local_')
       if (sessionId.startsWith('local_')) {
@@ -401,7 +491,10 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     
     // Add to current session
     setCurrentSession(prev => {
-      if (!prev) return prev;
+      if (!prev) {
+        console.log('📋 No current session to add message to');
+        return prev;
+      }
       const updatedSession = {
         ...prev,
         messages: [...prev.messages, message],
@@ -416,19 +509,121 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       return updatedSession;
     });
     
-    // Add to pending messages for backend save
-    pendingMessagesRef.current.push(message);
-    console.log('📋 Pending messages count:', pendingMessagesRef.current.length);
+    // Add to pending messages for backend save (session-specific)
+    const sessionId = currentSession?.session_id;
+    if (sessionId) {
+      if (!pendingMessagesRef.current[sessionId]) {
+        pendingMessagesRef.current[sessionId] = [];
+      }
+      pendingMessagesRef.current[sessionId].push(message);
+      console.log('📋 Pending messages count for session', sessionId + ':', pendingMessagesRef.current[sessionId].length);
+      
+      // Update reactive state for useEffect dependency
+      setPendingMessageCounts(prev => ({
+        ...prev,
+        [sessionId]: pendingMessagesRef.current[sessionId].length
+      }));
+    }
     
-    // Update sessions list
-    setSessions(prev => prev.map(s => 
-      s.session_id === currentSession?.session_id 
-        ? { ...s, messages: [...s.messages, message], message_count: s.message_count + 1 }
-        : s
-    ));
+    // Update sessions list - only if we have a current session
+    if (currentSession?.session_id) {
+      setSessions(prev => {
+        const updated = prev.map(s => 
+          s.session_id === currentSession.session_id 
+            ? { ...s, messages: [...s.messages, message], message_count: s.message_count + 1 }
+            : s
+        );
+        
+        console.log('📋 Updated sessions list:', {
+          sessionId: currentSession.session_id,
+          totalSessions: updated.length,
+          targetSession: updated.find(s => s.session_id === currentSession.session_id)?.messages.length || 0
+        });
+        
+        return updated;
+      });
+    } else {
+      console.log('📋 Skipping sessions list update - no current session ID');
+    }
     
     saveCachedData();
   }, [currentSession, saveCachedData]);
+
+  // Update sessions list when currentSession changes and we have pending messages
+  useEffect(() => {
+    const sessionId = currentSession?.session_id;
+    if (sessionId && pendingMessagesRef.current[sessionId]?.length > 0) {
+      console.log('📋 Current session set, updating sessions list with pending messages:', {
+        sessionId: sessionId,
+        pendingMessages: pendingMessagesRef.current[sessionId].length
+      });
+      
+      setSessions(prev => {
+        const updated = prev.map(s => {
+          if (s.session_id === sessionId) {
+            // Add all pending messages that aren't already in the session
+            const existingMessageIds = new Set(s.messages.map(m => m.id));
+            const newMessages = pendingMessagesRef.current[sessionId].filter(m => !existingMessageIds.has(m.id));
+            
+            if (newMessages.length > 0) {
+              console.log('📋 Adding pending messages to session:', {
+                sessionId: s.session_id,
+                newMessages: newMessages.length,
+                totalMessages: s.messages.length + newMessages.length
+              });
+              
+              // Clear pending messages after adding them to the session
+              pendingMessagesRef.current[sessionId] = [];
+              setPendingMessageCounts(prev => ({
+                ...prev,
+                [sessionId]: 0
+              }));
+              
+              return {
+                ...s,
+                messages: [...s.messages, ...newMessages],
+                message_count: s.message_count + newMessages.length,
+                last_updated: Date.now()
+              };
+            }
+          }
+          return s;
+        });
+        
+        return updated;
+      });
+    }
+  }, [currentSession?.session_id]);
+
+  // Also update sessions list when currentSession messages change (for immediate updates)
+  useEffect(() => {
+    const sessionId = currentSession?.session_id;
+    if (sessionId && currentSession?.messages) {
+      setSessions(prev => {
+        const updated = prev.map(s => {
+          if (s.session_id === sessionId) {
+            // Update the session in the list to match currentSession
+            if (s.messages.length !== currentSession.messages.length) {
+              console.log('📋 Syncing current session to sessions list:', {
+                sessionId,
+                sessionsListMessages: s.messages.length,
+                currentSessionMessages: currentSession.messages.length
+              });
+              return {
+                ...s,
+                messages: currentSession.messages,
+                message_count: currentSession.message_count,
+                last_updated: currentSession.last_updated
+              };
+            }
+          }
+          return s;
+        });
+        
+        return updated;
+      });
+    }
+  }, [currentSession?.messages, currentSession?.session_id]);
 
   const debouncedSave = useCallback(() => {
     if (saveTimeoutRef.current) {
@@ -441,7 +636,14 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
   }, []);
 
   const saveMessagesToBackend = useCallback(async (): Promise<void> => {
-    if (!userId || !currentSession || pendingMessagesRef.current.length === 0) {
+    if (!userId || !currentSession) {
+      return;
+    }
+    
+    const sessionId = currentSession.session_id;
+    const pendingMessages = pendingMessagesRef.current[sessionId];
+    
+    if (!pendingMessages || pendingMessages.length === 0) {
       return;
     }
     
@@ -454,21 +656,25 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     isSavingRef.current = true;
     
     try {
-      console.log('📋 Saving messages to backend:', pendingMessagesRef.current.length);
+      console.log('📋 Saving messages to backend for session', sessionId + ':', pendingMessages.length);
       
-      const messagesToSave = pendingMessagesRef.current.map(msg => ({
+      const messagesToSave = pendingMessages.map(msg => ({
         content: msg.text,
         sender: msg.sender,
         message_type: 'text',
         metadata: { timestamp: msg.timestamp.getTime() }
       }));
       
-      await api.sessions.updateSession(currentSession.session_id, userId, {
+      await api.sessions.updateSession(sessionId, userId, {
         messages: messagesToSave
       });
       
-      // Clear pending messages and reset flags
-      pendingMessagesRef.current = [];
+      // Clear pending messages and reset flags (session-specific)
+      pendingMessagesRef.current[sessionId] = [];
+      setPendingMessageCounts(prev => ({
+        ...prev,
+        [sessionId]: 0
+      }));
       lastSaveTimeRef.current = Date.now();
       
       // Clear any pending retry timeouts since we succeeded

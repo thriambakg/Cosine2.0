@@ -13,10 +13,8 @@ import Robinhood from './pages/Robinhood';
 import PortfolioRisk from './pages/PortfolioRisk';
 import StockVolatilityPage from './pages/StockVolatilityPage';
 import StockAlertsPage from './pages/StockAlertsPage';
-import UnifiedDashboardPage from './pages/UnifiedDashboardPage';
 import OptionPricingPage from './pages/OptionPricingPage';
 import HeatmapPage from './pages/HeatmapPage';
-import WelcomePage from './pages/WelcomePage';
 import DashboardRouter from './components/DashboardRouter';
 
 import AuthCallbackPage from './pages/AuthCallbackPage';
