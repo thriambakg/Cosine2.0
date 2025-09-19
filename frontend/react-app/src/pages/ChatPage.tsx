@@ -971,7 +971,8 @@ export default function ChatPage() {
                   >
                     <MenuItem value="claude-3-sonnet">Claude 3 Sonnet</MenuItem>
                     <MenuItem value="claude-3-haiku">Claude 3 Haiku</MenuItem>
-                    <MenuItem value="gpt-4">GPT-4</MenuItem>
+                    <MenuItem value="gpt-oss-120b">GPT-OSS 120B</MenuItem>
+                    <MenuItem value="gpt-oss-20b">GPT-OSS 20B</MenuItem>
                   </Select>
                 </FormControl>
               </Box>

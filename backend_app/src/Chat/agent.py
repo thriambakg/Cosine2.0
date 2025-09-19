@@ -585,12 +585,12 @@ MODELS = {
         model_id="anthropic.claude-3-haiku-20240307-v1:0",
         region="us-east-1"
     ),
-    'gpt-4': BedrockModel(
-        model_id="anthropic.claude-3-sonnet-20240229-v1:0",  # Using Claude-3-Sonnet as GPT-4 alternative for now
+    'gpt-oss-120b': BedrockModel(
+        model_id="openai.gpt-oss-120b",
         region="us-east-1"
     ),
-    'gpt-3.5-turbo': BedrockModel(
-        model_id="anthropic.claude-3-haiku-20240307-v1:0",  # Using Claude-3-Haiku as GPT-3.5 alternative for now
+    'gpt-oss-20b': BedrockModel(
+        model_id="openai.gpt-oss-20b",
         region="us-east-1"
     )
 }
@@ -927,8 +927,8 @@ def create_financial_agent(model_name: str = 'claude-3-sonnet') -> Agent:
         model_name: Name of the model to use:
                    - 'claude-3-sonnet': Claude 3 Sonnet (default)
                    - 'claude-3-haiku': Claude 3 Haiku (faster, cheaper)
-                   - 'gpt-4': Maps to Claude 3 Sonnet (until proper GPT-4 access is configured)
-                   - 'gpt-3.5-turbo': Maps to Claude 3 Haiku (until proper GPT-3.5 access is configured)
+                   - 'gpt-oss-120b': OpenAI GPT-OSS 120B (high performance)
+                   - 'gpt-oss-20b': OpenAI GPT-OSS 20B (faster, efficient)
         
     Returns:
         Agent: Configured financial agent
