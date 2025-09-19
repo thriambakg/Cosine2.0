@@ -326,15 +326,24 @@ def process_message(connection_id, user_id, session_id, message_data):
         except Exception as e:
             logger.error(f"Error saving AI message: {str(e)}")
         
-        # Send AI response to client
-        ai_response_message = {
-            'type': 'ai_response',
-            'message_id': ai_message_id,
-            'content': ai_response,
-            'timestamp': datetime.now().isoformat()
-        }
+        # Send AI response to client (only if connection is still associated with this session)
+        connection_info = get_connection_info(connection_id)
+        current_session_id = connection_info.get('session_id') if connection_info else None
         
-        send_message_to_client(connection_id, ai_response_message)
+        if current_session_id == session_id:
+            ai_response_message = {
+                'type': 'ai_response',
+                'message_id': ai_message_id,
+                'content': ai_response,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            send_message_to_client(connection_id, ai_response_message)
+            logger.info(f"✅ Sent AI response to session {session_id}")
+        else:
+            logger.warning(f"⚠️ Skipping AI response - connection {connection_id} is now associated with session {current_session_id}, but response is for session {session_id}")
+            # Store the response in the correct session for later retrieval
+            # The user can refresh or reload the session to see the response
         
         return {
             'statusCode': 200,
@@ -700,9 +709,15 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
                 'timestamp': datetime.now().isoformat()
             }
             
-            send_message_to_client(connection_id, ai_response_message)
+            # Only send response if connection is still associated with this session
+            connection_info = get_connection_info(connection_id)
+            current_session_id = connection_info.get('session_id') if connection_info else None
             
-            logger.info(f"✅ EDIT: Successfully sent AI response for edited message {message_id}")
+            if current_session_id == session_id:
+                send_message_to_client(connection_id, ai_response_message)
+                logger.info(f"✅ EDIT: Successfully sent AI response for edited message {message_id}")
+            else:
+                logger.warning(f"⚠️ EDIT: Skipping AI response - connection {connection_id} is now associated with session {current_session_id}, but response is for session {session_id}")
         else:
             logger.error(f"❌ EDIT: Failed to get AI response for edited message {message_id}")
             error_message = {
@@ -710,7 +725,12 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
                 'message': 'Failed to generate response for edited message',
                 'timestamp': datetime.now().isoformat()
             }
-            send_message_to_client(connection_id, error_message)
+            # Only send error if connection is still associated with this session
+            connection_info = get_connection_info(connection_id)
+            current_session_id = connection_info.get('session_id') if connection_info else None
+            
+            if current_session_id == session_id:
+                send_message_to_client(connection_id, error_message)
         
         return {
             'statusCode': 200,
