@@ -62,6 +62,8 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
   const pendingMessagesRef = useRef<ChatMessage[]>([]);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSaveTimeRef = useRef<number>(0);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isSavingRef = useRef<boolean>(false);
 
   // Load cached data on mount
   useEffect(() => {
@@ -83,6 +85,9 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
+      }
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
       }
       // Save any pending messages before unmounting
       if (pendingMessagesRef.current.length > 0) {
@@ -440,6 +445,14 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       return;
     }
     
+    // Prevent multiple simultaneous save operations
+    if (isSavingRef.current) {
+      console.log('📋 Save already in progress, skipping duplicate call');
+      return;
+    }
+    
+    isSavingRef.current = true;
+    
     try {
       console.log('📋 Saving messages to backend:', pendingMessagesRef.current.length);
       
@@ -454,14 +467,43 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         messages: messagesToSave
       });
       
-      // Clear pending messages
+      // Clear pending messages and reset flags
       pendingMessagesRef.current = [];
       lastSaveTimeRef.current = Date.now();
       
+      // Clear any pending retry timeouts since we succeeded
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+      
       console.log('📋 Successfully saved messages to backend');
-    } catch (error) {
+    } catch (error: any) {
       console.error('📋 Error saving messages to backend:', error);
+      
+      // Handle 404 errors (session not found) gracefully
+      if (error?.response?.status === 404) {
+        console.log('📋 Session not found in backend yet, will retry later');
+        // Don't set error state for 404s - this is expected during session creation
+        
+        // Only schedule retry if one isn't already scheduled
+        if (!retryTimeoutRef.current) {
+          retryTimeoutRef.current = setTimeout(() => {
+            retryTimeoutRef.current = null;
+            if (pendingMessagesRef.current.length > 0 && !isSavingRef.current) {
+              console.log('📋 Retrying to save messages after session creation delay');
+              saveMessagesToBackend();
+            }
+          }, 5000); // Retry after 5 seconds
+        }
+        
+        return;
+      }
+      
+      // For other errors, set error state
       setError('Failed to save messages');
+    } finally {
+      isSavingRef.current = false;
     }
   }, [userId, currentSession]);
 

@@ -380,6 +380,8 @@ export default function ChatPage() {
     switch (data.type) {
       case 'connection_established':
         console.log('🔗 Session established:', data.session_id);
+        setConnectionEstablished(true);
+        // Note: Message saving is now handled by the persistence hook's retry mechanism
         break;
 
       case 'message_received':
@@ -548,20 +550,47 @@ export default function ChatPage() {
   };
 
   // Format timestamp using clock's timezone and military time settings
-  const formatTimestamp = (timestamp: Date): string => {
+  const formatTimestamp = (timestamp: Date | number | string): string => {
     try {
+      // Ensure we have a Date object
+      let dateObj: Date;
+      if (timestamp instanceof Date) {
+        dateObj = timestamp;
+      } else if (typeof timestamp === 'number') {
+        // Handle Unix timestamp (could be seconds or milliseconds)
+        if (timestamp > 1000000000000) {
+          // Milliseconds
+          dateObj = new Date(timestamp);
+        } else {
+          // Seconds
+          dateObj = new Date(timestamp * 1000);
+        }
+      } else if (typeof timestamp === 'string') {
+        dateObj = new Date(timestamp);
+      } else {
+        console.warn('Invalid timestamp format:', timestamp);
+        dateObj = new Date();
+      }
+
+      // Validate the date
+      if (isNaN(dateObj.getTime())) {
+        console.warn('Invalid date created from timestamp:', timestamp);
+        dateObj = new Date();
+      }
+
+
       let timeString: string;
       
       if (clockTimezone === 'local') {
         // Use local timezone
         if (clockMilitaryTime) {
-          timeString = timestamp.toLocaleTimeString('en-US', { 
+          timeString = dateObj.toLocaleTimeString('en-US', { 
             hour12: false,
             hour: '2-digit',
             minute: '2-digit'
           });
         } else {
-          timeString = timestamp.toLocaleTimeString('en-US', { 
+          timeString = dateObj.toLocaleTimeString('en-US', { 
             hour12: true,
             hour: '2-digit',
             minute: '2-digit'
@@ -570,14 +599,14 @@ export default function ChatPage() {
       } else if (clockTimezone === 'UTC') {
         // Use UTC timezone
         if (clockMilitaryTime) {
-          timeString = timestamp.toLocaleTimeString('en-US', { 
+          timeString = dateObj.toLocaleTimeString('en-US', { 
             timeZone: 'UTC',
             hour12: false,
             hour: '2-digit',
             minute: '2-digit'
           });
         } else {
-          timeString = timestamp.toLocaleTimeString('en-US', { 
+          timeString = dateObj.toLocaleTimeString('en-US', { 
             timeZone: 'UTC',
             hour12: true,
             hour: '2-digit',
@@ -587,14 +616,14 @@ export default function ChatPage() {
       } else {
         // Use specified timezone
         if (clockMilitaryTime) {
-          timeString = timestamp.toLocaleTimeString('en-US', { 
+          timeString = dateObj.toLocaleTimeString('en-US', { 
             timeZone: clockTimezone,
             hour12: false,
             hour: '2-digit',
             minute: '2-digit'
           });
         } else {
-          timeString = timestamp.toLocaleTimeString('en-US', { 
+          timeString = dateObj.toLocaleTimeString('en-US', { 
             timeZone: clockTimezone,
             hour12: true,
             hour: '2-digit',
@@ -605,8 +634,9 @@ export default function ChatPage() {
       
       return timeString;
     } catch (error) {
-      console.error('Error formatting timestamp:', error);
-      return timestamp.toLocaleTimeString();
+      console.error('Error formatting timestamp:', error, 'timestamp:', timestamp);
+      // Fallback to current time
+      return new Date().toLocaleTimeString();
     }
   };
 
