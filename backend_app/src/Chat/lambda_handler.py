@@ -426,6 +426,8 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         
         # Extract session_id and user_id from various possible locations
         logger.info("🔍 DEBUG: Checking for session_id and user_id in various fields...")
+        logger.info(f"🔍 DEBUG: Full event_body keys: {list(event_body.keys()) if isinstance(event_body, dict) else 'Not a dict'}")
+        logger.info(f"🔍 DEBUG: Full event_body: {event_body}")
         session_id = None
         user_id = None
         
