@@ -365,16 +365,17 @@ def fetch_stock_data_direct_http(ticker, period="1y"):
         # Get historical data for chart
         chart_data = fetch_historical_data_direct(ticker, period)
         
-        # Get additional statistics
-        stats_data = fetch_additional_stats_direct(ticker)
+        # Calculate returns and volatility from historical data instead of relying on blocked endpoint
+        current_price = current_data.get('current_price', 0)
+        week_return, annual_return, volatility = calculate_stats_from_chart_data(chart_data, current_price, period)
         
         # Combine all data into crypto stats format
         result = {
-            'current_price': current_data.get('current_price', 0),
+            'current_price': current_price,
             'price_change_24h': current_data.get('price_change_24h', 0),
-            'week_return': stats_data.get('week_return', 0),
-            'annual_return': stats_data.get('annual_return', 0),
-            'volatility': stats_data.get('volatility', 0),
+            'week_return': week_return,
+            'annual_return': annual_return,
+            'volatility': volatility,
             'chart_data': chart_data,
             'data_source': 'Yahoo Finance Direct HTTP',
             'timestamp': datetime.now().isoformat()
@@ -494,6 +495,86 @@ def fetch_historical_data_direct(ticker, period="1y"):
     except Exception as e:
         logger.error(f"Error fetching historical data for {ticker}: {str(e)}")
         return []
+
+def calculate_stats_from_chart_data(chart_data, current_price, period):
+    """
+    Calculate week_return, annual_return, and volatility from chart data.
+    
+    Args:
+        chart_data (list): List of {'time': timestamp, 'close': price} dictionaries
+        current_price (float): Current price
+        period (str): Time period ('1d', '7d', '30d', '1y')
+        
+    Returns:
+        tuple: (week_return, annual_return, volatility)
+    """
+    try:
+        if not chart_data or not current_price or len(chart_data) < 2:
+            print(f"⚠️ Insufficient chart data for calculations: {len(chart_data) if chart_data else 0} points")
+            return 0.0, 0.0, 0.0
+        
+        # Convert chart data to prices list
+        prices = [point['close'] for point in chart_data if point.get('close')]
+        if len(prices) < 2:
+            print(f"⚠️ Insufficient price data for calculations: {len(prices)} prices")
+            return 0.0, 0.0, 0.0
+        
+        print(f"📊 Calculating stats from {len(prices)} price points for period {period}")
+        
+        # Calculate period return (start to end)
+        start_price = prices[0]
+        period_return = ((current_price - start_price) / start_price) * 100.0 if start_price > 0 else 0.0
+        
+        # Calculate week return (last 7 data points if available)
+        week_return = 0.0
+        if len(prices) >= 7:
+            week_ago_price = prices[-7] if len(prices) >= 7 else prices[0]
+            week_return = ((current_price - week_ago_price) / week_ago_price) * 100.0 if week_ago_price > 0 else 0.0
+        else:
+            # If less than 7 points, use period return scaled to week
+            if period == '1d':
+                week_return = period_return * 7  # Scale 1-day to 1-week
+            elif period == '7d':
+                week_return = period_return
+            else:
+                week_return = period_return / (len(prices) / 7)  # Scale to week
+        
+        # Calculate annual return based on period
+        if period == '1d':
+            annual_return = period_return * 365  # Scale 1-day to annual
+        elif period == '7d':
+            annual_return = period_return * (365/7)  # Scale 7-day to annual
+        elif period == '30d':
+            annual_return = period_return * (365/30)  # Scale 30-day to annual
+        else:  # 1y
+            annual_return = period_return  # Already annual
+        
+        # Calculate volatility (standard deviation of returns)
+        volatility = 0.0
+        if len(prices) > 1:
+            returns = []
+            for i in range(1, len(prices)):
+                if prices[i-1] > 0:
+                    daily_return = (prices[i] - prices[i-1]) / prices[i-1]
+                    returns.append(daily_return)
+            
+            if returns:
+                import numpy as np
+                # Annualize volatility based on period
+                if period == '1d':
+                    volatility = np.std(returns) * np.sqrt(1440) * 100.0  # 1-minute intervals to annual
+                elif period == '7d':
+                    volatility = np.std(returns) * np.sqrt(24) * 100.0  # 1-hour intervals to annual
+                else:
+                    volatility = np.std(returns) * np.sqrt(252) * 100.0  # Daily intervals to annual
+        
+        print(f"📈 Calculated stats: week_return={week_return:.2f}%, annual_return={annual_return:.2f}%, volatility={volatility:.2f}%")
+        
+        return round(week_return, 2), round(annual_return, 2), round(volatility / 100, 4)  # Convert volatility to decimal
+        
+    except Exception as e:
+        print(f"❌ Error calculating stats from chart data: {str(e)}")
+        return 0.0, 0.0, 0.0
 
 def fetch_additional_stats_direct(ticker):
     """Fetch additional statistics using direct HTTP calls"""
