@@ -410,11 +410,7 @@ export default function ChatPage() {
 
       case 'edit_acknowledged':
         console.log('✏️ Edit acknowledged:', data.message_id);
-        // Immediately update the local messages to reflect the edit and truncation
-        if (editingMessage) {
-          truncateMessagesAfter(editingMessage.id, editText);
-          console.log(`✏️ Updated messages: truncated after ${editingMessage.id}`);
-        }
+        // UI has already been updated in handleSaveEdit, just log acknowledgment
         // The AI response will come as a separate 'ai_response' message
         break;
 
@@ -512,6 +508,9 @@ export default function ChatPage() {
           }
         };
 
+        // Immediately update the local UI to show the edited message and remove subsequent messages
+        truncateMessagesAfter(editingMessage.id, editText);
+        
         websocketRef.current.send(JSON.stringify(messageData));
         
         // Clear editing state
