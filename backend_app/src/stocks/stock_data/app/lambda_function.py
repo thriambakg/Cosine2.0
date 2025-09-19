@@ -1622,7 +1622,7 @@ def generate_mock_stock_data(ticker, period="1y"):
         'timestamp': datetime.now().isoformat()
     }
 
-def fetch_stock_data_alpha_vantage(ticker, period="1y"):
+def fetch_stock_data_alpha_vantage(ticker, period="1y", api_key=None):
     """
     Fetch stock data using Alpha Vantage REST API.
     
@@ -1632,6 +1632,7 @@ def fetch_stock_data_alpha_vantage(ticker, period="1y"):
     Args:
         ticker (str): Stock ticker symbol
         period (str): Time period for historical data
+        api_key (str): Alpha Vantage API key (fetched by caller for lazy loading)
         
     Returns:
         dict: Stock statistics matching crypto stats format
@@ -1639,14 +1640,12 @@ def fetch_stock_data_alpha_vantage(ticker, period="1y"):
     try:
         print(f"🔑 === USING ALPHA VANTAGE REST API FOR {ticker.upper()} ===")
         
-        # Get API key from Secrets Manager
-        print(f"🔍 Fetching Alpha Vantage API key from Secrets Manager...")
-        api_key = get_alpha_vantage_api_key()
+        # Use the provided API key (lazy loading from caller)
         if not api_key:
-            print("❌ Alpha Vantage API key not available")
-            return {"error": "Alpha Vantage API key not configured"}
+            print("❌ Alpha Vantage API key not provided")
+            return {"error": "Alpha Vantage API key not provided"}
         else:
-            print(f"✅ Alpha Vantage API key successfully retrieved (length: {len(api_key)})")
+            print(f"✅ Alpha Vantage API key provided (length: {len(api_key)})")
         
         # Map period to Alpha Vantage API functions
         # Based on https://www.alphavantage.co/documentation/
@@ -1973,13 +1972,14 @@ def fetch_stock_stats(ticker, period="1y"):
         # Method 3: Try Alpha Vantage API (costs money, use sparingly)
         try:
             print(f"🔑 Method 3: Attempting Alpha Vantage REST API for {ticker}")
-            print(f"🔍 Checking Alpha Vantage API key availability...")
+            # Only fetch API key when we actually need it (lazy loading)
+            print(f"🔍 Fetching Alpha Vantage API key from Secrets Manager...")
             api_key = get_alpha_vantage_api_key()
             if not api_key:
                 print(f"⚠️ Alpha Vantage API key not available, skipping Method 3 for {ticker}")
             else:
                 print(f"🔑 Alpha Vantage API key found, proceeding with API call for {ticker}")
-                result = fetch_stock_data_alpha_vantage(ticker, period)
+                result = fetch_stock_data_alpha_vantage(ticker, period, api_key)
                 if 'error' not in result:
                     print(f"✅ Method 3 (Alpha Vantage) SUCCESS for {ticker} - Data source: {result.get('data_source', 'Alpha Vantage')}")
                     print(f"📈 Result summary: Price=${result.get('current_price', 'N/A')}, Change={result.get('price_change_24h', 'N/A')}%, Chart points={len(result.get('chart_data', []))}")
