@@ -16,6 +16,8 @@ import StockAlertsPage from './pages/StockAlertsPage';
 import UnifiedDashboardPage from './pages/UnifiedDashboardPage';
 import OptionPricingPage from './pages/OptionPricingPage';
 import HeatmapPage from './pages/HeatmapPage';
+import WelcomePage from './pages/WelcomePage';
+import DashboardRouter from './components/DashboardRouter';
 
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import LoadingPage from './components/LoadingPage';
@@ -53,7 +55,7 @@ function AppContent() {
       <Route path="/" element={
         user ? (
           <AppLayout>
-            <UnifiedDashboardPage />
+            <DashboardRouter />
           </AppLayout>
         ) : <LandingPageMUI />
       } />

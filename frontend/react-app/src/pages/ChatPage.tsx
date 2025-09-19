@@ -207,15 +207,25 @@ export default function ChatPage() {
   // Use messages from current session
   const messages = currentSession?.messages || [];
   const [inputMessage, setInputMessage] = useState('');
-  const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
-  const [missedResponseNotification, setMissedResponseNotification] = useState<string | null>(null);
+  const [missedResponseNotification] = useState<string | null>(null);
   // Connection status variables - used internally for WebSocket logic
   const [_connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const [_connectionError, setConnectionError] = useState<string | null>(null);
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
   const [connectionEstablished, setConnectionEstablished] = useState(false);
+  
+  // Session-specific state tracking
+  const [sessionLoadingStates, setSessionLoadingStates] = useState<Record<string, boolean>>({});
+  const [pendingMessages, setPendingMessages] = useState<Record<string, Message[]>>({});
+  const [processedMessageIds, setProcessedMessageIds] = useState<Set<string>>(new Set());
+  const [sentMessageIds, setSentMessageIds] = useState<Set<string>>(new Set());
+  
+  // Helper function to get current session loading state
+  const getCurrentSessionLoading = useCallback(() => {
+    return currentSession?.session_id ? sessionLoadingStates[currentSession.session_id] || false : false;
+  }, [currentSession?.session_id, sessionLoadingStates]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
@@ -233,33 +243,46 @@ export default function ChatPage() {
   
   // Clear loading state when session is deleted or changed
   useEffect(() => {
-    if (!currentSession && isLoadingChat) {
+    if (!currentSession) {
       console.log('🔴 DELETE: Clearing loading state due to session deletion');
-      setIsLoadingChat(false);
+      
+      // Clear any session-specific state
+      setSessionLoadingStates({});
+      setPendingMessages({});
     }
-  }, [currentSession, isLoadingChat]);
+  }, [currentSession]);
 
-  // Clear loading state when switching to a different session
+  // Handle session switching and message caching
   const previousSessionIdRef = useRef<string | null>(null);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   useEffect(() => {
     const currentSessionId = currentSession?.session_id;
     
-    // If we switched to a different session while loading, clear the loading state
+    // If we switched to a different session, handle the transition
     if (previousSessionIdRef.current && 
-        previousSessionIdRef.current !== currentSessionId && 
-        isLoadingChat) {
-      console.log('🔄 SESSION SWITCH: Clearing loading state due to session change');
-      setIsLoadingChat(false);
+        previousSessionIdRef.current !== currentSessionId) {
       
-      // Show notification about missed response
-      setMissedResponseNotification('Response will appear when you switch back to the previous session');
+      console.log('🔄 SESSION SWITCH: From', previousSessionIdRef.current, 'to', currentSessionId);
       
-      // Clear notification after 5 seconds
-      setTimeout(() => {
-        setMissedResponseNotification(null);
-      }, 5000);
+      // Process any cached messages for the new session
+      if (currentSessionId && pendingMessages[currentSessionId]) {
+        console.log('🔄 SESSION SWITCH: Processing cached messages for session:', currentSessionId);
+        const cachedMessages = pendingMessages[currentSessionId];
+        
+        // Add cached messages to the persistence system
+        cachedMessages.forEach(message => {
+          addPersistedMessage(message);
+          setTypingMessages(prev => new Set([...prev, message.id]));
+        });
+        
+        // Clear cached messages for this session
+        setPendingMessages(prev => {
+          const updated = { ...prev };
+          delete updated[currentSessionId];
+          return updated;
+        });
+      }
       
       // Clear any pending timeout
       if (loadingTimeoutRef.current) {
@@ -269,28 +292,26 @@ export default function ChatPage() {
     }
     
     previousSessionIdRef.current = currentSessionId || null;
-  }, [currentSession?.session_id, isLoadingChat]);
+  }, [currentSession?.session_id, pendingMessages, addPersistedMessage]);
 
-  // Safety timeout to clear loading state after 60 seconds
+  // Safety timeout to clear loading state after 60 seconds for each session
   useEffect(() => {
-    if (isLoadingChat) {
+    const currentSessionId = currentSession?.session_id;
+    if (currentSessionId && sessionLoadingStates[currentSessionId]) {
       // Clear any existing timeout
       if (loadingTimeoutRef.current) {
         clearTimeout(loadingTimeoutRef.current);
       }
       
-      // Set new timeout
+      // Set new timeout for this session
       loadingTimeoutRef.current = setTimeout(() => {
-        console.log('⏰ TIMEOUT: Clearing loading state after 60 seconds');
-        setIsLoadingChat(false);
+        console.log('⏰ TIMEOUT: Clearing loading state after 60 seconds for session:', currentSessionId);
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [currentSessionId]: false
+        }));
         loadingTimeoutRef.current = null;
       }, 60000); // 60 seconds
-    } else {
-      // Clear timeout when loading stops
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-        loadingTimeoutRef.current = null;
-      }
     }
     
     // Cleanup on unmount
@@ -299,7 +320,7 @@ export default function ChatPage() {
         clearTimeout(loadingTimeoutRef.current);
       }
     };
-  }, [isLoadingChat]);
+  }, [currentSession?.session_id, sessionLoadingStates]);
   const editContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -453,26 +474,59 @@ export default function ChatPage() {
         break;
 
       case 'ai_response':
+        // Check if we've already processed this message
+        const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        if (processedMessageIds.has(messageId)) {
+          console.log('🤖 Duplicate AI response ignored:', messageId);
+          break;
+        }
+        
         // Add AI response to messages
         const aiMessage: Message = {
-          id: data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          id: messageId,
           text: data.content || 'No response content',
           sender: 'bot',
           timestamp: new Date(data.timestamp || Date.now()),
         };
         
+        // Mark message as processed
+        setProcessedMessageIds(prev => new Set([...prev, messageId]));
+        
         console.log('🤖 Received AI response:', {
           messageId: aiMessage.id,
           contentLength: aiMessage.text.length,
           currentSessionId: currentSession?.session_id,
+          responseSessionId: data.session_id,
           currentMessageCount: currentSession?.messages?.length || 0
         });
         
-        // Add to persistence system
-        addPersistedMessage(aiMessage);
-        // Add to typing messages to trigger typing animation
-        setTypingMessages(prev => new Set([...prev, aiMessage.id]));
-        setIsLoadingChat(false);
+        // Check if this response is for the currently viewed session
+        const responseSessionId = data.session_id;
+        if (responseSessionId === currentSession?.session_id) {
+          // Add to persistence system
+          addPersistedMessage(aiMessage);
+          // Add to typing messages to trigger typing animation
+          setTypingMessages(prev => new Set([...prev, aiMessage.id]));
+          // Clear loading state for this session
+          if (responseSessionId) {
+            setSessionLoadingStates(prev => ({
+              ...prev,
+              [responseSessionId]: false
+            }));
+          }
+        } else if (responseSessionId) {
+          // Cache the message for the session it belongs to
+          console.log('🤖 Caching AI response for session:', responseSessionId);
+          setPendingMessages(prev => ({
+            ...prev,
+            [responseSessionId]: [...(prev[responseSessionId] || []), aiMessage]
+          }));
+          // Clear loading state for that session
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [responseSessionId]: false
+          }));
+        }
         break;
 
       case 'edit_acknowledged':
@@ -484,7 +538,13 @@ export default function ChatPage() {
       case 'error':
         console.error('WebSocket error message:', data.message);
         setConnectionError(data.message || 'Unknown error');
-        setIsLoadingChat(false);
+        // Clear loading state for current session on error
+        if (currentSession?.session_id) {
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [currentSession.session_id]: false
+          }));
+        }
         break;
 
       default:
@@ -585,7 +645,13 @@ export default function ChatPage() {
         setEditingMessageIndex(null);
         setEditText('');
         
-        setIsLoadingChat(true);
+        // Set loading state for the current session
+        if (currentSession?.session_id) {
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [currentSession.session_id]: true
+          }));
+        }
       }
     } catch (error) {
       console.error('Error sending edit message:', error);
@@ -704,7 +770,7 @@ export default function ChatPage() {
   };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoadingChat) return;
+    if (!inputMessage.trim() || getCurrentSessionLoading()) return;
 
     // Create a new session if none exists (only when user actually sends a message)
     let sessionToUse = currentSession;
@@ -733,7 +799,6 @@ export default function ChatPage() {
         }
       } catch (error) {
         console.error('Failed to create new session:', error);
-        setIsLoadingChat(false);
         return;
       }
     }
@@ -741,11 +806,30 @@ export default function ChatPage() {
     // Double-check we have a valid session before proceeding
     if (!sessionToUse?.session_id) {
       console.error('No valid session available for message sending');
-      setIsLoadingChat(false);
       return;
     }
 
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${user?.id || 'anonymous'}`;
+    
+    // Check if we've already sent this message
+    if (sentMessageIds.has(messageId)) {
+      console.log('📤 Duplicate message prevented:', messageId);
+      return;
+    }
+    
+    // Also check if we've already sent a message with the same content recently
+    const recentMessages = currentSession?.messages?.slice(-5) || [];
+    const isDuplicateContent = recentMessages.some(msg => 
+      msg.text === inputMessage.trim() && 
+      msg.sender === 'user' && 
+      (Date.now() - msg.timestamp.getTime()) < 5000 // Within last 5 seconds
+    );
+    
+    if (isDuplicateContent) {
+      console.log('📤 Duplicate content message prevented:', inputMessage.trim());
+      return;
+    }
+    
     const userMessage: Message = {
       id: messageId,
       text: inputMessage,
@@ -754,12 +838,23 @@ export default function ChatPage() {
       status: 'sending',
       files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     };
+    
+    // Mark message as sent
+    setSentMessageIds(prev => new Set([...prev, messageId]));
+    console.log('📤 Message marked as sent:', messageId, 'Total sent messages:', sentMessageIds.size + 1);
 
     // Add message to persistence system
     addPersistedMessage(userMessage);
     setInputMessage('');
     setUploadedFiles([]);
-    setIsLoadingChat(true);
+    
+    // Set loading state for the current session
+    if (sessionToUse?.session_id) {
+      setSessionLoadingStates(prev => ({
+        ...prev,
+        [sessionToUse.session_id]: true
+      }));
+    }
 
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
       const messageData = {
@@ -781,11 +876,23 @@ export default function ChatPage() {
         // Message status will be updated via WebSocket response
       } catch (error) {
         console.error('Error sending message:', error);
-        setIsLoadingChat(false);
+        // Clear loading state for current session on error
+        if (sessionToUse?.session_id) {
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [sessionToUse.session_id]: false
+          }));
+        }
       }
     } else {
       console.error('WebSocket not connected');
-      setIsLoadingChat(false);
+      // Clear loading state for current session on error
+      if (sessionToUse?.session_id) {
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [sessionToUse.session_id]: false
+        }));
+      }
     }
   };
 
@@ -1248,7 +1355,7 @@ export default function ChatPage() {
                 </Box>
               </Box>
             ))}
-            {isLoadingChat && (
+            {getCurrentSessionLoading() && (
               <Box display="flex" gap={2}>
                 <Avatar sx={{ bgcolor: '#374151', width: 32, height: 32 }}>
                   <BotIcon />
@@ -1342,7 +1449,7 @@ export default function ChatPage() {
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="Ask me about stocks, crypto, portfolio optimization..."
-              disabled={isLoadingChat}
+              disabled={getCurrentSessionLoading()}
               sx={{
                 '& .MuiOutlinedInput-root': {
                   backgroundColor: 'rgba(55, 65, 81, 0.3)',
@@ -1365,7 +1472,7 @@ export default function ChatPage() {
             />
             <IconButton
               onClick={handleSendMessage}
-              disabled={isLoadingChat || !inputMessage.trim()}
+              disabled={getCurrentSessionLoading() || !inputMessage.trim()}
               sx={{
                 color: '#3b82f6',
                 backgroundColor: 'rgba(59, 130, 246, 0.1)',

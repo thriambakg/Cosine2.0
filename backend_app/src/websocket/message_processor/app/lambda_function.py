@@ -226,46 +226,9 @@ def process_message(connection_id, user_id, session_id, message_data):
             if not send_message_to_client(connection_id, welcome_message):
                 logger.warning(f"Failed to send welcome message to connection {connection_id}")
         
-        # Add user message to session
-        timestamp = int(datetime.now().timestamp())
-        user_message = {
-            'id': message_id,
-            'text': message_text,
-            'sender': 'user',
-            'timestamp': timestamp,
-            'message_type': 'text',
-            'files': files if files else None
-        }
-        
-        # Get current session and add user message
-        try:
-            response = chat_sessions_table.get_item(
-                Key={
-                    'user_id': user_id,
-                    'session_id': session_id
-                }
-            )
-            
-            if 'Item' in response:
-                session_item = response['Item']
-                messages = session_item.get('messages', [])
-                messages.append(user_message)
-                
-                # Update session with new message
-                chat_sessions_table.update_item(
-                    Key={
-                        'user_id': user_id,
-                        'session_id': session_id
-                    },
-                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
-                    ExpressionAttributeValues={
-                        ':messages': messages,
-                        ':count': len(messages),
-                        ':timestamp': timestamp
-                    }
-                )
-        except Exception as e:
-            logger.error(f"Error saving user message: {str(e)}")
+        # Note: User message will be added by the chat agent Lambda
+        # No need to add it here to avoid duplicates
+        logger.info(f"User message will be processed by chat agent: {message_id}")
         
         # Send acknowledgment to user
         ack_message = {
@@ -285,46 +248,10 @@ def process_message(connection_id, user_id, session_id, message_data):
         # Call the existing chat agent Lambda
         ai_response = call_chat_agent(user_id, message_text, model, files, session_id)
         
-        # Add AI response to session
+        # Note: AI response is already added by the chat agent Lambda
+        # No need to add it here to avoid duplicates
         ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
-        ai_timestamp = int(datetime.now().timestamp())
-        ai_message = {
-            'id': ai_message_id,
-            'text': ai_response,
-            'sender': 'bot',
-            'timestamp': ai_timestamp,
-            'message_type': 'text'
-        }
-        
-        # Get current session and add AI message
-        try:
-            response = chat_sessions_table.get_item(
-                Key={
-                    'user_id': user_id,
-                    'session_id': session_id
-                }
-            )
-            
-            if 'Item' in response:
-                session_item = response['Item']
-                messages = session_item.get('messages', [])
-                messages.append(ai_message)
-                
-                # Update session with AI message
-                chat_sessions_table.update_item(
-                    Key={
-                        'user_id': user_id,
-                        'session_id': session_id
-                    },
-                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
-                    ExpressionAttributeValues={
-                        ':messages': messages,
-                        ':count': len(messages),
-                        ':timestamp': ai_timestamp
-                    }
-                )
-        except Exception as e:
-            logger.error(f"Error saving AI message: {str(e)}")
+        logger.info(f"AI response already processed by chat agent: {ai_message_id}")
         
         # Send AI response to client (only if connection is still associated with this session)
         connection_info = get_connection_info(connection_id)
@@ -335,6 +262,7 @@ def process_message(connection_id, user_id, session_id, message_data):
                 'type': 'ai_response',
                 'message_id': ai_message_id,
                 'content': ai_response,
+                'session_id': session_id,  # Include session_id for proper routing
                 'timestamp': datetime.now().isoformat()
             }
             

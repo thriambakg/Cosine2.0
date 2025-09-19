@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Analytics as AnalyticsIcon } from '@mui/icons-material';
+import { Analytics as AnalyticsIcon, Add as AddIcon } from '@mui/icons-material';
 import CryptoTile from './CryptoTile';
 import StockTile from './StockTile';
 import PlaceholderTile from './PlaceholderTile';
@@ -704,19 +704,172 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     return (
       <Box
         sx={{
-          p: 4,
+          p: 6,
           textAlign: 'center',
-          background: 'rgba(15, 23, 42, 0.8)',
-          border: '1px solid #374151',
+          background: 'rgba(15, 23, 42, 0.9)',
+          border: '2px dashed #374151',
           borderRadius: '0px',
+          backdropFilter: 'blur(16px)',
+          position: 'relative',
+          overflow: 'hidden'
         }}
       >
-        <Typography variant="h6" color="#9ca3af" sx={{ mb: 2 }}>
-          No tiles added yet
-        </Typography>
-        <Typography variant="body2" color="#6b7280">
-          Click the "Add Tile" button to start building your dashboard
-        </Typography>
+        {/* Background Pattern */}
+        <Box sx={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          opacity: 0.1,
+          backgroundImage: `
+            radial-gradient(circle at 25% 25%, #3b82f6 2px, transparent 2px),
+            radial-gradient(circle at 75% 75%, #8b5cf6 2px, transparent 2px)
+          `,
+          backgroundSize: '60px 60px',
+          backgroundPosition: '0 0, 30px 30px'
+        }} />
+        
+        {/* Content */}
+        <Box sx={{ position: 'relative', zIndex: 10 }}>
+          {/* Icon */}
+          <Box sx={{
+            width: 80,
+            height: 80,
+            background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+            borderRadius: '0px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            mx: 'auto',
+            mb: 3,
+            boxShadow: '0 20px 40px rgba(59, 130, 246, 0.3)'
+          }}>
+            <AddIcon sx={{ fontSize: 40, color: '#ffffff' }} />
+          </Box>
+
+          {/* Title */}
+          <Typography 
+            variant="h4" 
+            sx={{ 
+              color: '#ffffff', 
+              fontWeight: 700, 
+              mb: 2,
+              textTransform: 'uppercase',
+              letterSpacing: '1px'
+            }}
+          >
+            Your Dashboard Awaits
+          </Typography>
+          
+          {/* Description */}
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              color: '#e2e8f0', 
+              mb: 4,
+              maxWidth: '500px',
+              mx: 'auto',
+              lineHeight: 1.6
+            }}
+          >
+            Transform this empty space into your personalized financial command center. 
+            Add tiles to track stocks, crypto, portfolios, and more.
+          </Typography>
+
+          {/* Quick Start Options */}
+          <Box sx={{ 
+            display: 'grid', 
+            gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' },
+            gap: 3,
+            maxWidth: '600px',
+            mx: 'auto',
+            mb: 4
+          }}>
+            {[
+              { 
+                title: 'Crypto Tracker', 
+                desc: 'Monitor Bitcoin, Ethereum & more',
+                color: '#f59e0b',
+                icon: '₿'
+              },
+              { 
+                title: 'Stock Analysis', 
+                desc: 'Track your favorite stocks',
+                color: '#10b981',
+                icon: '📈'
+              },
+              { 
+                title: 'AI Insights', 
+                desc: 'Get intelligent recommendations',
+                color: '#8b5cf6',
+                icon: '🤖'
+              }
+            ].map((option) => (
+              <Box
+                key={option.title}
+                sx={{
+                  p: 3,
+                  backgroundColor: 'rgba(31, 41, 55, 0.8)',
+                  border: '2px solid #374151',
+                  borderRadius: '0px',
+                  transition: 'all 0.3s ease',
+                  cursor: 'pointer',
+                  '&:hover': {
+                    border: `2px solid ${option.color}`,
+                    transform: 'translateY(-4px)',
+                    boxShadow: `0 15px 30px ${option.color}20`
+                  }
+                }}
+              >
+                <Typography 
+                  variant="h3" 
+                  sx={{ 
+                    mb: 1,
+                    fontSize: '2rem'
+                  }}
+                >
+                  {option.icon}
+                </Typography>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    color: '#ffffff', 
+                    fontWeight: 600, 
+                    mb: 1,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}
+                >
+                  {option.title}
+                </Typography>
+                <Typography 
+                  variant="body2" 
+                  sx={{ color: '#9ca3af' }}
+                >
+                  {option.desc}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+
+        </Box>
+
+        {/* CSS Animation */}
+        <style>
+          {`
+            @keyframes pulse {
+              0%, 100% {
+                transform: scale(1);
+                opacity: 1;
+              }
+              50% {
+                transform: scale(1.1);
+                opacity: 0.8;
+              }
+            }
+          `}
+        </style>
       </Box>
     );
   }
