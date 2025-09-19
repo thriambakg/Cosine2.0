@@ -560,9 +560,9 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 'user_id': user_id,
                 'timestamp': int(time.time())
             }
-        
-        return {
-            'statusCode': 200,
+            
+            return {
+                'statusCode': 200,
                 'body': response_body
             }
         
