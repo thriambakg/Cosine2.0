@@ -210,6 +210,7 @@ export default function ChatPage() {
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
+  const [missedResponseNotification, setMissedResponseNotification] = useState<string | null>(null);
   // Connection status variables - used internally for WebSocket logic
   const [_connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const [_connectionError, setConnectionError] = useState<string | null>(null);
@@ -230,13 +231,75 @@ export default function ChatPage() {
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
   
-  // Clear loading state when session is deleted
+  // Clear loading state when session is deleted or changed
   useEffect(() => {
     if (!currentSession && isLoadingChat) {
       console.log('🔴 DELETE: Clearing loading state due to session deletion');
       setIsLoadingChat(false);
     }
   }, [currentSession, isLoadingChat]);
+
+  // Clear loading state when switching to a different session
+  const previousSessionIdRef = useRef<string | null>(null);
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  useEffect(() => {
+    const currentSessionId = currentSession?.session_id;
+    
+    // If we switched to a different session while loading, clear the loading state
+    if (previousSessionIdRef.current && 
+        previousSessionIdRef.current !== currentSessionId && 
+        isLoadingChat) {
+      console.log('🔄 SESSION SWITCH: Clearing loading state due to session change');
+      setIsLoadingChat(false);
+      
+      // Show notification about missed response
+      setMissedResponseNotification('Response will appear when you switch back to the previous session');
+      
+      // Clear notification after 5 seconds
+      setTimeout(() => {
+        setMissedResponseNotification(null);
+      }, 5000);
+      
+      // Clear any pending timeout
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+    }
+    
+    previousSessionIdRef.current = currentSessionId || null;
+  }, [currentSession?.session_id, isLoadingChat]);
+
+  // Safety timeout to clear loading state after 60 seconds
+  useEffect(() => {
+    if (isLoadingChat) {
+      // Clear any existing timeout
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+      
+      // Set new timeout
+      loadingTimeoutRef.current = setTimeout(() => {
+        console.log('⏰ TIMEOUT: Clearing loading state after 60 seconds');
+        setIsLoadingChat(false);
+        loadingTimeoutRef.current = null;
+      }, 60000); // 60 seconds
+    } else {
+      // Clear timeout when loading stops
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+    };
+  }, [isLoadingChat]);
   const editContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1196,6 +1259,22 @@ export default function ChatPage() {
                     AI is thinking...
                   </Typography>
                 </Box>
+              </Box>
+            )}
+            
+            {missedResponseNotification && (
+              <Box 
+                sx={{ 
+                  p: 2, 
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)', 
+                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                  borderRadius: 2,
+                  mb: 2
+                }}
+              >
+                <Typography variant="body2" color="#3b82f6" sx={{ textAlign: 'center' }}>
+                  ℹ️ {missedResponseNotification}
+                </Typography>
               </Box>
             )}
             <div ref={messagesEndRef} />
