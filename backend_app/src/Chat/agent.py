@@ -598,7 +598,7 @@ MODELS = {
         region="us-east-1"
     ),
     'llama3-3-70b': BedrockModel(
-        model_id="meta.llama3-3-70b-instruct-v1:0",
+        model_id="us.meta.llama3-3-70b-instruct-v1:0",
         region="us-east-1"
     ),
     'gpt-oss-120b': BedrockModel(

@@ -49,16 +49,19 @@ For each model, create a new chat session and test:
 
 **Error**: `Invocation of model ID [model] with on-demand throughput isn't supported`
 
-**Solution**: Some models require inference profiles instead of direct model IDs:
+**Solution**: The Strands SDK uses ConverseStream API, which requires inference profiles for Meta Llama:
 ```python
+# Strands SDK uses ConverseStream API (requires inference profiles)
 # Meta Llama models require inference profiles
 # Instead of: "meta.llama3-3-70b-instruct-v1:0"
 # Use: "us.meta.llama3-3-70b-instruct-v1:0"
 
-# Amazon Nova models use direct model IDs
+# Other models use foundation model ARNs
+"anthropic.claude-3-sonnet-20240229-v1:0"  # ✅ Correct
 "amazon.nova-premier-v1:0"  # ✅ Correct
-"us.amazon.nova-premier-v1:0"  # ❌ Wrong format
 ```
+
+**Note**: IAM policy includes both foundation model and inference profile ARNs for Meta Llama to ensure compatibility.
 
 ### Issue 2: AccessDeniedException
 

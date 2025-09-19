@@ -877,8 +877,9 @@ resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
           "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0",
           "arn:aws:bedrock:*::foundation-model/openai.gpt-oss-120b-1:0",
           "arn:aws:bedrock:*::foundation-model/openai.gpt-oss-20b-1:0",
-          # Foundation model for Meta Llama (native AWS format)
-          "arn:aws:bedrock:*::foundation-model/meta.llama3-3-70b-instruct-v1:0"
+          # Meta Llama - both foundation model and inference profile for compatibility
+          "arn:aws:bedrock:*::foundation-model/meta.llama3-3-70b-instruct-v1:0",
+          "arn:aws:bedrock:*:*:inference-profile/us.meta.llama3-3-70b-instruct-v1:0"
         ]
       }
     ]
