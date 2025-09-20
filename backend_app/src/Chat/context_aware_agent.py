@@ -319,23 +319,29 @@ Based on the current webpage and user intent, focus on:
                 user_message = conversation.get('user_message', '').strip()
                 agent_response = conversation.get('agent_response', '').strip()
                 
+                # Debug the data types
+                logger.info(f"🔍 DEBUG: user_message type: {type(user_message)}, value: '{str(user_message)[:50]}...'")
+                logger.info(f"🔍 DEBUG: agent_response type: {type(agent_response)}, value: '{str(agent_response)[:50]}...'")
+                
                 if user_message:
                     # Add user message to agent's message history
+                    # Ensure content is a single string, not a list of characters
                     agent.messages.append({
                         'role': 'user',
-                        'content': user_message
+                        'content': str(user_message)
                     })
-                    logger.info(f"🔍 DEBUG: Added user message to agent history: '{user_message[:100]}...'")
+                    logger.info(f"🔍 DEBUG: Added user message to agent history: '{str(user_message)[:100]}...'")
                 else:
                     logger.info(f"🔍 DEBUG: Skipping empty user message in conversation {i+1}")
                 
                 if agent_response:
                     # Add agent response to agent's message history
+                    # Ensure content is a single string, not a list of characters
                     agent.messages.append({
                         'role': 'assistant', 
-                        'content': agent_response
+                        'content': str(agent_response)
                     })
-                    logger.info(f"🔍 DEBUG: Added agent response to agent history: '{agent_response[:100]}...'")
+                    logger.info(f"🔍 DEBUG: Added agent response to agent history: '{str(agent_response)[:100]}...'")
                 else:
                     logger.info(f"🔍 DEBUG: Skipping empty agent response in conversation {i+1}")
             
