@@ -549,22 +549,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             from agent import create_financial_agent
             agent = create_financial_agent(model)
         
-        # Check if this is a new session and send welcome message
-        if is_new_session and (not user_message or user_message.strip() == '' or user_message.lower() in ['hi', 'hello', 'start', 'begin']):
-            logger.info("🔍 DEBUG: New session detected, sending welcome message")
-            welcome_message = "Hello! I'm Cosine, your AI financial analyst. I can help you with stock analysis, portfolio optimization, market research, and investment insights using real-time data. What would you like to analyze today?"
-            
-            response_body = {
-                'response': welcome_message,
-                'session_id': session_id,
-                'user_id': user_id,
-                'timestamp': int(time.time())
-            }
-            
-            return {
-                'statusCode': 200,
-                'body': response_body
-            }
+        # No automatic welcome message - let the user start the conversation
         
         # Process message with session-aware agent
         logger.info(f"🔍 DEBUG: About to process message with session-aware agent")
