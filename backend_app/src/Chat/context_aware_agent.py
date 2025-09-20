@@ -45,17 +45,25 @@ class ContextAwareAgent:
             session_id = session_context['session_id']
             agent_key = f"{session_id}_{model_name}"  # Include model in cache key
             
+            logger.info(f"🔍 DEBUG: Getting session agent for session {session_id} with model {model_name}")
+            logger.info(f"🔍 DEBUG: Agent key: {agent_key}")
+            logger.info(f"🔍 DEBUG: Current cached agents: {list(self.session_agents.keys())}")
+            
             # Check if we already have a cached agent for this session and model
             if agent_key in self.session_agents:
-                logger.info(f"Using cached agent for session {session_id} with model {model_name}")
+                logger.info(f"🔍 DEBUG: Using cached agent for session {session_id} with model {model_name}")
                 return self.session_agents[agent_key]
             
             # Check if we're switching models for the same session
             existing_agent_keys = [key for key in self.session_agents.keys() if key.startswith(f"{session_id}_")]
+            logger.info(f"🔍 DEBUG: Existing agent keys for session {session_id}: {existing_agent_keys}")
+            
             if existing_agent_keys and not any(key.endswith(f"_{model_name}") for key in existing_agent_keys):
-                logger.info(f"Model switch detected for session {session_id}, clearing old agent cache")
+                logger.info(f"🔍 DEBUG: Model switch detected for session {session_id}, clearing old agent cache")
+                logger.info(f"🔍 DEBUG: Switching from {existing_agent_keys} to {model_name}")
                 # Clear old agents for this session to ensure fresh context
                 for old_key in existing_agent_keys:
+                    logger.info(f"🔍 DEBUG: Clearing old agent: {old_key}")
                     del self.session_agents[old_key]
             
             # Create new session-specific agent with the specified model
@@ -102,14 +110,18 @@ class ContextAwareAgent:
             logger.info(f"Creating session agent with model: {model_name}")
             
             # Create agent with conversation history
+            logger.info(f"🔍 DEBUG: Creating new agent with model {model_name}")
             session_agent = Agent(
                 system_prompt=system_prompt,
                 tools=session_tools,
                 model=selected_model
             )
+            logger.info(f"🔍 DEBUG: Agent created, initial message count: {len(session_agent.messages)}")
             
             # Add conversation history to the agent's message history
+            logger.info(f"🔍 DEBUG: About to inject conversation history into agent")
             self._add_conversation_history_to_agent(session_agent, session_context)
+            logger.info(f"🔍 DEBUG: Conversation history injection completed, final message count: {len(session_agent.messages)}")
             
             # Add session memory if available
             if session_context.get('agent_memory'):
@@ -290,15 +302,20 @@ Based on the current webpage and user intent, focus on:
             session_context: Complete session context with conversation history
         """
         try:
-            context = session_context.get('context', {})
-            conversation_history = context.get('conversation_history', [])
+            logger.info("🔍 DEBUG: Starting conversation history injection")
+            logger.info(f"🔍 DEBUG: session_context keys: {list(session_context.keys())}")
+            
+            # Get conversation history from session context
+            conversation_history = session_context.get('conversation_history', [])
+            logger.info(f"🔍 DEBUG: Found {len(conversation_history)} conversation entries")
             
             if not conversation_history:
-                logger.info("No conversation history to add to agent")
+                logger.info("🔍 DEBUG: No conversation history to add to agent")
                 return
             
-            # Add conversation history to agent's messages
-            for conversation in conversation_history:
+            # Log each conversation entry
+            for i, conversation in enumerate(conversation_history):
+                logger.info(f"🔍 DEBUG: Conversation {i+1}: {conversation}")
                 user_message = conversation.get('user_message', '').strip()
                 agent_response = conversation.get('agent_response', '').strip()
                 
@@ -308,7 +325,9 @@ Based on the current webpage and user intent, focus on:
                         'role': 'user',
                         'content': user_message
                     })
-                    logger.debug(f"Added user message to agent history: {user_message[:50]}...")
+                    logger.info(f"🔍 DEBUG: Added user message to agent history: '{user_message[:100]}...'")
+                else:
+                    logger.info(f"🔍 DEBUG: Skipping empty user message in conversation {i+1}")
                 
                 if agent_response:
                     # Add agent response to agent's message history
@@ -316,12 +335,23 @@ Based on the current webpage and user intent, focus on:
                         'role': 'assistant', 
                         'content': agent_response
                     })
-                    logger.debug(f"Added agent response to agent history: {agent_response[:50]}...")
+                    logger.info(f"🔍 DEBUG: Added agent response to agent history: '{agent_response[:100]}...'")
+                else:
+                    logger.info(f"🔍 DEBUG: Skipping empty agent response in conversation {i+1}")
             
-            logger.info(f"Successfully added {len(conversation_history)} conversation entries to agent history")
+            logger.info(f"🔍 DEBUG: Successfully added {len(conversation_history)} conversation entries to agent history")
+            logger.info(f"🔍 DEBUG: Agent now has {len(agent.messages)} total messages in history")
+            
+            # Log the final agent message history
+            for i, msg in enumerate(agent.messages):
+                role = msg.get('role', 'unknown')
+                content_preview = msg.get('content', '')[:50] + '...' if len(msg.get('content', '')) > 50 else msg.get('content', '')
+                logger.info(f"🔍 DEBUG: Agent message {i+1}: [{role}] {content_preview}")
             
         except Exception as e:
-            logger.error(f"Error adding conversation history to agent: {str(e)}")
+            logger.error(f"🔍 DEBUG: Error adding conversation history to agent: {str(e)}")
+            import traceback
+            logger.error(f"🔍 DEBUG: Error traceback: {traceback.format_exc()}")
             # Don't raise - this is not critical for agent functionality
     
     def _get_session_tools(self, session_context: Dict[str, Any]) -> List:

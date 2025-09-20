@@ -127,6 +127,10 @@ class SessionManager:
             conversation_history = []
             messages = session_item.get('messages', [])
             
+            logger.info(f"🔍 DEBUG: Building conversation history from {len(messages)} messages")
+            for i, message in enumerate(messages):
+                logger.info(f"🔍 DEBUG: Message {i+1}: sender={message.get('sender')}, text='{message.get('text', '')[:100]}...'")
+            
             for message in messages:
                 if message.get('sender') == 'user':
                     conversation_history.append({
@@ -134,16 +138,23 @@ class SessionManager:
                         'user_message': message.get('text', ''),
                         'agent_response': ''
                     })
+                    logger.info(f"🔍 DEBUG: Added user message to conversation history: '{message.get('text', '')[:100]}...'")
                 elif message.get('sender') == 'bot':
                     # Add to the last conversation entry or create new one
                     if conversation_history and conversation_history[-1]['agent_response'] == '':
                         conversation_history[-1]['agent_response'] = message.get('text', '')
+                        logger.info(f"🔍 DEBUG: Paired bot response with last user message: '{message.get('text', '')[:100]}...'")
                     else:
                         conversation_history.append({
                             'timestamp': message['timestamp'],
                             'user_message': '',
                             'agent_response': message.get('text', '')
                         })
+                        logger.info(f"🔍 DEBUG: Added standalone bot response to conversation history: '{message.get('text', '')[:100]}...'")
+            
+            logger.info(f"🔍 DEBUG: Final conversation history has {len(conversation_history)} entries")
+            for i, conv in enumerate(conversation_history):
+                logger.info(f"🔍 DEBUG: Conversation {i+1}: user='{conv['user_message'][:50]}...', bot='{conv['agent_response'][:50]}...'")
             
             # Combine metadata and context
             session_context = {
