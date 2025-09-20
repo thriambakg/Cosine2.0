@@ -992,28 +992,30 @@ def get_chat_history(session_id: str, user_id: str = None) -> str:
                     "model": model
                 })
         
-        # Create a more readable summary for the agent
-        summary = f"Found {len(formatted_history)} previous conversations in this session:\n\n"
+        # Create a simple, clear summary for the agent
+        summary = f"CHAT HISTORY FOR SESSION {session_id}:\n"
+        summary += f"Total conversations: {len(formatted_history)}\n\n"
+        
+        # Look for personal holdings information first
+        holdings_found = []
         for conv in formatted_history:
+            if conv["user_message"] and any(keyword in conv["user_message"].lower() for keyword in ["shares", "have", "own", "holding", "portfolio"]):
+                holdings_found.append(conv["user_message"])
+        
+        if holdings_found:
+            summary += "🎯 USER'S PERSONAL HOLDINGS MENTIONED IN THIS CONVERSATION:\n"
+            for holding in holdings_found:
+                summary += f"• {holding}\n"
+            summary += "\n"
+        
+        # Add all conversations
+        for i, conv in enumerate(formatted_history, 1):
+            summary += f"Conversation {i}:\n"
             if conv["user_message"]:
-                summary += f"User said: \"{conv['user_message']}\"\n"
-                # Highlight personal holdings information
-                if any(keyword in conv["user_message"].lower() for keyword in ["shares", "have", "own", "holding", "portfolio"]):
-                    summary += f"🔍 PERSONAL HOLDINGS INFO: {conv['user_message']}\n"
+                summary += f"  User: {conv['user_message']}\n"
             if conv["agent_response"]:
-                summary += f"Agent replied: \"{conv['agent_response'][:200]}...\"\n"
-            summary += "---\n"
-        
-        # Add explicit holdings summary if found
-        holdings_info = []
-        for conv in formatted_history:
-            if conv["user_message"] and any(keyword in conv["user_message"].lower() for keyword in ["shares", "have", "own", "holding"]):
-                holdings_info.append(conv["user_message"])
-        
-        if holdings_info:
-            summary += f"\n🎯 PERSONAL HOLDINGS SUMMARY:\n"
-            for info in holdings_info:
-                summary += f"- {info}\n"
+                summary += f"  Agent: {conv['agent_response'][:150]}...\n"
+            summary += "\n"
         
         result = {
             "session_id": session_id,
