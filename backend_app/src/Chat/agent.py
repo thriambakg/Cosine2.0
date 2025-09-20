@@ -997,9 +997,23 @@ def get_chat_history(session_id: str, user_id: str = None) -> str:
         for conv in formatted_history:
             if conv["user_message"]:
                 summary += f"User said: \"{conv['user_message']}\"\n"
+                # Highlight personal holdings information
+                if any(keyword in conv["user_message"].lower() for keyword in ["shares", "have", "own", "holding", "portfolio"]):
+                    summary += f"🔍 PERSONAL HOLDINGS INFO: {conv['user_message']}\n"
             if conv["agent_response"]:
                 summary += f"Agent replied: \"{conv['agent_response'][:200]}...\"\n"
             summary += "---\n"
+        
+        # Add explicit holdings summary if found
+        holdings_info = []
+        for conv in formatted_history:
+            if conv["user_message"] and any(keyword in conv["user_message"].lower() for keyword in ["shares", "have", "own", "holding"]):
+                holdings_info.append(conv["user_message"])
+        
+        if holdings_info:
+            summary += f"\n🎯 PERSONAL HOLDINGS SUMMARY:\n"
+            for info in holdings_info:
+                summary += f"- {info}\n"
         
         result = {
             "session_id": session_id,
