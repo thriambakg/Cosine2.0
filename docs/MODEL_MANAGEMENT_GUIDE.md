@@ -296,5 +296,43 @@ As of the last update, the system includes these models:
 
 ---
 
+## Model Switching with Context Preservation
+
+### How It Works
+
+When you switch models during a chat session, the system ensures complete context preservation:
+
+1. **Conversation History Injection**: The new model receives the complete conversation history from the database
+2. **Agent Cache Management**: Old model agents are cleared to prevent stale context
+3. **Message History Transfer**: All previous user messages and AI responses are added to the new agent's message history
+4. **Seamless Transition**: No context loss when switching between models
+
+### Technical Implementation
+
+```python
+# When switching models, the system:
+# 1. Detects model switch for the session
+# 2. Clears old agent cache
+# 3. Creates new agent with conversation history
+# 4. Injects all previous messages into the new agent
+
+def _add_conversation_history_to_agent(self, agent, session_context):
+    """Add conversation history to agent's message history"""
+    conversation_history = session_context.get('context', {}).get('conversation_history', [])
+    
+    for conversation in conversation_history:
+        if user_message := conversation.get('user_message', '').strip():
+            agent.messages.append({'role': 'user', 'content': user_message})
+        if agent_response := conversation.get('agent_response', '').strip():
+            agent.messages.append({'role': 'assistant', 'content': agent_response})
+```
+
+### Benefits
+
+- ✅ **No Context Loss**: Complete conversation history preserved
+- ✅ **Model Flexibility**: Switch between any of the 5 supported models
+- ✅ **Performance**: Cached agents for repeated model use
+- ✅ **Reliability**: Fallback mechanisms for error handling
+
 **Last Updated:** September 19, 2025  
-**Version:** 1.0
+**Version:** 1.1

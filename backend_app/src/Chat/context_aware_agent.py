@@ -50,6 +50,14 @@ class ContextAwareAgent:
                 logger.info(f"Using cached agent for session {session_id} with model {model_name}")
                 return self.session_agents[agent_key]
             
+            # Check if we're switching models for the same session
+            existing_agent_keys = [key for key in self.session_agents.keys() if key.startswith(f"{session_id}_")]
+            if existing_agent_keys and not any(key.endswith(f"_{model_name}") for key in existing_agent_keys):
+                logger.info(f"Model switch detected for session {session_id}, clearing old agent cache")
+                # Clear old agents for this session to ensure fresh context
+                for old_key in existing_agent_keys:
+                    del self.session_agents[old_key]
+            
             # Create new session-specific agent with the specified model
             agent = self._create_session_agent(session_context, model_name)
             
@@ -93,11 +101,15 @@ class ContextAwareAgent:
             selected_model = MODELS[model_name]
             logger.info(f"Creating session agent with model: {model_name}")
             
+            # Create agent with conversation history
             session_agent = Agent(
                 system_prompt=system_prompt,
                 tools=session_tools,
                 model=selected_model
             )
+            
+            # Add conversation history to the agent's message history
+            self._add_conversation_history_to_agent(session_agent, session_context)
             
             # Add session memory if available
             if session_context.get('agent_memory'):
@@ -111,13 +123,13 @@ class ContextAwareAgent:
     
     def _generate_session_prompt(self, session_context: Dict[str, Any]) -> str:
         """
-        Generate a session-aware system prompt
+        Generate a session-aware system prompt with conversation history
         
         Args:
-            session_context: Complete session context
+            session_context: Complete session context including conversation history
             
         Returns:
-            prompt: Session-specific system prompt
+            prompt: Session-specific system prompt with context
         """
         base_prompt = """You are a helpful financial assistant specialized in providing accurate, data-driven financial analysis and recommendations.
 
@@ -269,6 +281,49 @@ Based on the current webpage and user intent, focus on:
         }
         
         return focus_map.get(page_type, 'general financial analysis and market insights')
+    
+    def _add_conversation_history_to_agent(self, agent: Any, session_context: Dict[str, Any]) -> None:
+        """
+        Add conversation history to the agent's message history for context continuity
+        
+        Args:
+            agent: The Strands Agent instance
+            session_context: Complete session context with conversation history
+        """
+        try:
+            context = session_context.get('context', {})
+            conversation_history = context.get('conversation_history', [])
+            
+            if not conversation_history:
+                logger.info("No conversation history to add to agent")
+                return
+            
+            # Add conversation history to agent's messages
+            for conversation in conversation_history:
+                user_message = conversation.get('user_message', '').strip()
+                agent_response = conversation.get('agent_response', '').strip()
+                
+                if user_message:
+                    # Add user message to agent's message history
+                    agent.messages.append({
+                        'role': 'user',
+                        'content': user_message
+                    })
+                    logger.debug(f"Added user message to agent history: {user_message[:50]}...")
+                
+                if agent_response:
+                    # Add agent response to agent's message history
+                    agent.messages.append({
+                        'role': 'assistant', 
+                        'content': agent_response
+                    })
+                    logger.debug(f"Added agent response to agent history: {agent_response[:50]}...")
+            
+            logger.info(f"Successfully added {len(conversation_history)} conversation entries to agent history")
+            
+        except Exception as e:
+            logger.error(f"Error adding conversation history to agent: {str(e)}")
+            # Don't raise - this is not critical for agent functionality
     
     def _get_session_tools(self, session_context: Dict[str, Any]) -> List:
         """
