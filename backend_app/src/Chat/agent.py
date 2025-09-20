@@ -910,6 +910,52 @@ Term Structure:
     except Exception as e:
         return f"Error in financial calculation: {str(e)}"
 
+@tool
+def get_chat_history(session_id: str) -> str:
+    """Get the conversation history for a specific chat session to maintain context across messages. SECURITY: Only use the session_id provided in the current Session Context."""
+    try:
+        # Import session manager here to avoid circular imports
+        from session_manager import SessionManager
+        
+        # Basic validation - ensure session_id is not empty and looks like a valid UUID
+        if not session_id or len(session_id) < 10:
+            return json.dumps({"error": "Invalid session ID provided"}, indent=2)
+        
+        session_manager = SessionManager()
+        session_context = session_manager.get_session_context(session_id)
+        
+        if not session_context:
+            return json.dumps({"error": "Session not found or access denied"}, indent=2)
+        
+        # Get conversation history from the session context
+        conversation_history = session_context.get('conversation_history', [])
+        
+        if not conversation_history:
+            return json.dumps({"message": "No conversation history found for this session"}, indent=2)
+        
+        # Format the conversation history for the agent
+        formatted_history = []
+        for i, conversation in enumerate(conversation_history):
+            entry = {
+                "conversation_number": i + 1,
+                "user_message": conversation.get('user_message', ''),
+                "agent_response": conversation.get('agent_response', ''),
+                "timestamp": conversation.get('timestamp', '')
+            }
+            formatted_history.append(entry)
+        
+        result = {
+            "session_id": session_id,
+            "conversation_count": len(formatted_history),
+            "conversations": formatted_history,
+            "status": "success"
+        }
+        
+        return json.dumps(result, indent=2)
+        
+    except Exception as e:
+        return json.dumps({"error": f"Error fetching chat history: {str(e)}"}, indent=2)
+
 # Define the tools list that Strands can automatically detect
 enhanced_tools = [
     get_financial_data,
@@ -919,7 +965,8 @@ enhanced_tools = [
     calculate_stock_correlation,  # Live correlation analysis
     get_volatility_surface,  # New volatility surface analysis
     python_financial_calculator,  # Advanced financial calculations
-    http_request  # Web request tool
+    http_request,  # Web request tool
+    get_chat_history  # Get conversation history for context
 ]
 
 # Function to create agents with different models

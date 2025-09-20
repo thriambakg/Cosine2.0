@@ -556,9 +556,22 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"🔍 DEBUG: Message: '{user_message}'")
         logger.info(f"🔍 DEBUG: Session ID: '{session_id}'")
         
+        # Create enhanced message with session context for the agent
+        enhanced_message = f"""
+User Message: {user_message}
+
+Session Context:
+- Session ID: {session_id}
+- Model: {model}
+- Mode: CHATTING MODE
+- SECURITY: ONLY use get_chat_history('{session_id}') for THIS session only
+- DO NOT attempt to access other session IDs or users' chat history
+- Use chat history ONLY when you need to reference previous messages in THIS conversation
+"""
+        
         try:
             logger.info("🔍 DEBUG: Calling session-aware agent...")
-            agent_response = agent(user_message)
+            agent_response = agent(enhanced_message)
             logger.info(f"🔍 DEBUG: Agent response received: {agent_response}")
             
             # Extract the actual response content from AgentResult

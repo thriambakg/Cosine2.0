@@ -118,10 +118,8 @@ class ContextAwareAgent:
             )
             logger.info(f"🔍 DEBUG: Agent created, initial message count: {len(session_agent.messages)}")
             
-            # Add conversation history to the agent's message history
-            logger.info(f"🔍 DEBUG: About to inject conversation history into agent")
-            self._add_conversation_history_to_agent(session_agent, session_context)
-            logger.info(f"🔍 DEBUG: Conversation history injection completed, final message count: {len(session_agent.messages)}")
+            # Note: Conversation history will be fetched via tool call when needed
+            logger.info(f"🔍 DEBUG: Agent created with {len(session_agent.messages)} initial messages")
             
             # Add session memory if available
             if session_context.get('agent_memory'):
@@ -165,6 +163,12 @@ class ContextAwareAgent:
 - Technical and fundamental analysis
 - Market research and news analysis
 - Quantitative financial calculations
+- Conversational context awareness (CHATTING MODE only)
+
+🔄 MODES:
+- CHATTING MODE: General conversation with context from previous messages
+- ANALYSIS MODE: Financial analysis and research (focus on current data tools)
+- Other modes will be implemented in future updates
 
 🔧 AVAILABLE TOOLS:
 You have access to powerful financial tools including:
@@ -175,6 +179,7 @@ You have access to powerful financial tools including:
 - calculate_stock_correlation(): Live correlation analysis
 - get_volatility_surface(): Volatility analysis and options data
 - python_financial_calculator(): Advanced financial calculations
+- get_chat_history(session_id): Get conversation history for context continuity (CHATTING MODE ONLY)
 
 📊 RESPONSE GUIDELINES:
 - ALWAYS use tools for financial queries - never provide generic advice
@@ -189,6 +194,13 @@ You have access to powerful financial tools including:
 2. ALWAYS start with get_financial_data(symbol) for stock questions
 3. USE multiple tools per query for comprehensive analysis
 4. SYNTHESIZE real tool data into actionable insights
+
+💬 CHAT HISTORY RULES (CHATTING MODE ONLY):
+- ONLY use get_chat_history() when in CHATTING MODE (not analysis/research mode)
+- ONLY use the session_id provided in the Session Context
+- NEVER attempt to access other users' chat sessions
+- Use chat history ONLY when you need to reference previous messages in the current conversation
+- For financial analysis queries, focus on current data tools, not chat history
 
 🔴 NEVER SAY:
 - "I don't have access to real data"
@@ -293,72 +305,6 @@ Based on the current webpage and user intent, focus on:
         
         return focus_map.get(page_type, 'general financial analysis and market insights')
     
-    def _add_conversation_history_to_agent(self, agent: Any, session_context: Dict[str, Any]) -> None:
-        """
-        Add conversation history to the agent's message history for context continuity
-        
-        Args:
-            agent: The Strands Agent instance
-            session_context: Complete session context with conversation history
-        """
-        try:
-            logger.info("🔍 DEBUG: Starting conversation history injection")
-            logger.info(f"🔍 DEBUG: session_context keys: {list(session_context.keys())}")
-            
-            # Get conversation history from session context
-            conversation_history = session_context.get('conversation_history', [])
-            logger.info(f"🔍 DEBUG: Found {len(conversation_history)} conversation entries")
-            
-            if not conversation_history:
-                logger.info("🔍 DEBUG: No conversation history to add to agent")
-                return
-            
-            # Log each conversation entry
-            for i, conversation in enumerate(conversation_history):
-                logger.info(f"🔍 DEBUG: Conversation {i+1}: {conversation}")
-                user_message = conversation.get('user_message', '').strip()
-                agent_response = conversation.get('agent_response', '').strip()
-                
-                # Debug the data types
-                logger.info(f"🔍 DEBUG: user_message type: {type(user_message)}, value: '{str(user_message)[:50]}...'")
-                logger.info(f"🔍 DEBUG: agent_response type: {type(agent_response)}, value: '{str(agent_response)[:50]}...'")
-                
-                if user_message:
-                    # Add user message to agent's message history
-                    # Ensure content is a single string, not a list of characters
-                    agent.messages.append({
-                        'role': 'user',
-                        'content': str(user_message)
-                    })
-                    logger.info(f"🔍 DEBUG: Added user message to agent history: '{str(user_message)[:100]}...'")
-                else:
-                    logger.info(f"🔍 DEBUG: Skipping empty user message in conversation {i+1}")
-                
-                if agent_response:
-                    # Add agent response to agent's message history
-                    # Ensure content is a single string, not a list of characters
-                    agent.messages.append({
-                        'role': 'assistant', 
-                        'content': str(agent_response)
-                    })
-                    logger.info(f"🔍 DEBUG: Added agent response to agent history: '{str(agent_response)[:100]}...'")
-                else:
-                    logger.info(f"🔍 DEBUG: Skipping empty agent response in conversation {i+1}")
-            
-            logger.info(f"🔍 DEBUG: Successfully added {len(conversation_history)} conversation entries to agent history")
-            logger.info(f"🔍 DEBUG: Agent now has {len(agent.messages)} total messages in history")
-            
-            # Log the final agent message history
-            for i, msg in enumerate(agent.messages):
-                role = msg.get('role', 'unknown')
-                content_preview = msg.get('content', '')[:50] + '...' if len(msg.get('content', '')) > 50 else msg.get('content', '')
-                logger.info(f"🔍 DEBUG: Agent message {i+1}: [{role}] {content_preview}")
-            
-        except Exception as e:
-            logger.error(f"🔍 DEBUG: Error adding conversation history to agent: {str(e)}")
-            import traceback
-            logger.error(f"🔍 DEBUG: Error traceback: {traceback.format_exc()}")
-            # Don't raise - this is not critical for agent functionality
     
     def _get_session_tools(self, session_context: Dict[str, Any]) -> List:
         """
