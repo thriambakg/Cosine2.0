@@ -217,18 +217,7 @@ def create_session(user_id: str, session_data: Dict[str, Any]) -> Dict[str, Any]
         title = session_data.get('title', f'New Chat {datetime.now().strftime("%m/%d %H:%M")}')
         model = session_data.get('model', 'claude-3-sonnet')
         
-        # Create session with welcome message
-        welcome_message = None
-        if session_data.get('create_welcome_message', True):
-            welcome_message = {
-                'id': f'msg_{timestamp}_{uuid.uuid4().hex[:8]}',
-                'text': "Hello! I'm Cosine, your AI financial analyst. How can I help you today?",
-                'sender': 'bot',
-                'timestamp': timestamp + 1,
-                'message_type': 'text'
-            }
-        
-        # Create single session item
+        # Create single session item (no welcome message)
         session_item = {
             'user_id': user_id,
             'session_id': session_id,
@@ -236,8 +225,8 @@ def create_session(user_id: str, session_data: Dict[str, Any]) -> Dict[str, Any]
             'model': model,
             'created_at': timestamp,
             'last_updated': timestamp,
-            'message_count': 1 if welcome_message else 0,
-            'messages': [welcome_message] if welcome_message else [],
+            'message_count': 0,
+            'messages': [],
             'expires_at': int(time.time()) + (30 * 24 * 60 * 60)  # 30 days TTL
         }
         

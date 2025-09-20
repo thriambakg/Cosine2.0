@@ -608,12 +608,6 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 
 🔴 CRITICAL: You have access to LIVE FINANCIAL DATA through yfinance integration. You are NOT limited to sample data.
 
-🚨 WELCOME MESSAGE RULES:
-- Send ONLY ONE welcome message when a user starts a new chat session
-- Welcome message: "Hello! I'm Cosine, your AI financial analyst. I can help you with stock analysis, portfolio optimization, market research, and investment insights using real-time data. What would you like to analyze today?"
-- Do NOT send multiple welcome messages or follow-up messages automatically
-- Only respond to actual user questions, not empty or generic prompts
-
 🚨 SINGLE RESPONSE RULE:
 - Provide ONLY ONE response per user message
 - Do NOT generate multiple responses or follow-up messages
@@ -912,7 +906,7 @@ Term Structure:
 
 @tool
 def get_chat_history(session_id: str, user_id: str = None) -> str:
-    """Get the conversation history for a specific chat session to maintain context across messages. SECURITY: Only use the session_id provided in the current Session Context."""
+    """Get the conversation history for a specific chat session to maintain context across messages. Returns a JSON with previous conversations including user messages and agent responses. Use this to find information the user mentioned in previous messages. SECURITY: Only use the session_id provided in the current Session Context."""
     try:
         logger.info(f"🔍 DEBUG: get_chat_history called with session_id: {session_id}, user_id: {user_id}")
         # Import session manager here to avoid circular imports
@@ -998,13 +992,24 @@ def get_chat_history(session_id: str, user_id: str = None) -> str:
                     "model": model
                 })
         
+        # Create a more readable summary for the agent
+        summary = f"Found {len(formatted_history)} previous conversations in this session:\n\n"
+        for conv in formatted_history:
+            if conv["user_message"]:
+                summary += f"User said: \"{conv['user_message']}\"\n"
+            if conv["agent_response"]:
+                summary += f"Agent replied: \"{conv['agent_response'][:200]}...\"\n"
+            summary += "---\n"
+        
         result = {
             "session_id": session_id,
             "conversation_count": len(formatted_history),
             "conversations": formatted_history,
+            "summary": summary,
             "status": "success"
         }
         
+        logger.info(f"🔍 DEBUG: get_chat_history returning summary: {summary}")
         return json.dumps(result, indent=2)
         
     except Exception as e:

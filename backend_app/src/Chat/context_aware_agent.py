@@ -147,6 +147,7 @@ class ContextAwareAgent:
 🚨 RESPONSE RULES:
 - Only respond to actual user questions and messages
 - Do NOT send automatic welcome messages or follow-up messages
+- Do NOT generate any greeting messages like "Hello! I'm Cosine..."
 - Wait for user input before responding
 
 🚨 SINGLE RESPONSE RULE:
@@ -213,6 +214,8 @@ Agent: [CALLS get_chat_history(session_id, user_id) FIRST to check previous mess
 - "I don't have access to real data"
 - "This is sample data"
 - "I cannot access live market data"
+- "Hello! I'm Cosine, your AI financial analyst"
+- Any greeting or welcome messages
 
 ✅ ALWAYS SAY:
 - "Based on current market data from yfinance..."

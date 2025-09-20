@@ -194,7 +194,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       const response = await api.sessions.createSession(userId, {
         title: title || new Date().toLocaleString(),
         model: model || 'claude-3-sonnet',
-        create_welcome_message: true
+        create_welcome_message: false
       });
       
       const newSession: ChatSession = {
@@ -229,13 +229,8 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
           model: model || 'claude-3-sonnet',
           created_at: now,
           last_updated: now,
-          message_count: 1,
-          messages: [{
-            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            text: "Hello! I'm Cosine, your AI financial analyst. How can I help you today?",
-            sender: 'bot',
-            timestamp: new Date()
-          }]
+          message_count: 0,
+          messages: []
         };
         
         setSessions(prev => [localSession, ...prev]);
