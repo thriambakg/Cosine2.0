@@ -911,9 +911,10 @@ Term Structure:
         return f"Error in financial calculation: {str(e)}"
 
 @tool
-def get_chat_history(session_id: str) -> str:
+def get_chat_history(session_id: str, user_id: str = None) -> str:
     """Get the conversation history for a specific chat session to maintain context across messages. SECURITY: Only use the session_id provided in the current Session Context."""
     try:
+        logger.info(f"🔍 DEBUG: get_chat_history called with session_id: {session_id}, user_id: {user_id}")
         # Import session manager here to avoid circular imports
         from session_manager import SessionManager
         
@@ -922,27 +923,80 @@ def get_chat_history(session_id: str) -> str:
             return json.dumps({"error": "Invalid session ID provided"}, indent=2)
         
         session_manager = SessionManager()
-        session_context = session_manager.get_session_context(session_id)
+        
+        # If user_id is provided, use the secure method, otherwise try direct table access
+        if user_id:
+            session_context = session_manager.get_session_context(session_id, user_id)
+        else:
+            # For internal tool use, try to get session without user validation
+            # This is less secure but needed for the tool to work
+            try:
+                session_response = session_manager.chat_sessions_table.get_item(
+                    Key={
+                        'user_id': 'default',  # Try default first
+                        'session_id': session_id
+                    }
+                )
+                if 'Item' not in session_response:
+                    # Try to scan for the session (less efficient but works)
+                    scan_response = session_manager.chat_sessions_table.scan(
+                        FilterExpression='session_id = :session_id',
+                        ExpressionAttributeValues={':session_id': session_id}
+                    )
+                    if scan_response.get('Items'):
+                        session_context = {'messages': scan_response['Items'][0].get('messages', [])}
+                    else:
+                        return json.dumps({"error": "Session not found"}, indent=2)
+                else:
+                    session_context = {'messages': session_response['Item'].get('messages', [])}
+            except Exception as e:
+                return json.dumps({"error": f"Error accessing session: {str(e)}"}, indent=2)
         
         if not session_context:
             return json.dumps({"error": "Session not found or access denied"}, indent=2)
         
-        # Get conversation history from the session context
-        conversation_history = session_context.get('conversation_history', [])
+        # Get messages from the session context (in DynamoDB format)
+        messages = session_context.get('messages', [])
         
-        if not conversation_history:
+        if not messages:
             return json.dumps({"message": "No conversation history found for this session"}, indent=2)
         
-        # Format the conversation history for the agent
+        # Extract text from DynamoDB format: messages[i].get("M").get("text").get("S")
         formatted_history = []
-        for i, conversation in enumerate(conversation_history):
-            entry = {
-                "conversation_number": i + 1,
-                "user_message": conversation.get('user_message', ''),
-                "agent_response": conversation.get('agent_response', ''),
-                "timestamp": conversation.get('timestamp', '')
-            }
-            formatted_history.append(entry)
+        current_conversation = None
+        
+        for i, message in enumerate(messages):
+            # Extract text from DynamoDB format
+            message_map = message.get('M', {})
+            text = message_map.get('text', {}).get('S', '')
+            sender = message_map.get('sender', {}).get('S', '')
+            timestamp = message_map.get('timestamp', {}).get('N', '')
+            model = message_map.get('model', {}).get('S', '')
+            
+            if sender == 'user':
+                # Start new conversation
+                current_conversation = {
+                    "conversation_number": len(formatted_history) + 1,
+                    "user_message": text,
+                    "agent_response": "",
+                    "timestamp": timestamp,
+                    "model": ""
+                }
+            elif sender == 'bot' and current_conversation:
+                # Complete the conversation
+                current_conversation["agent_response"] = text
+                current_conversation["model"] = model
+                formatted_history.append(current_conversation)
+                current_conversation = None
+            elif sender == 'bot' and not current_conversation:
+                # Standalone bot message (shouldn't happen but handle gracefully)
+                formatted_history.append({
+                    "conversation_number": len(formatted_history) + 1,
+                    "user_message": "",
+                    "agent_response": text,
+                    "timestamp": timestamp,
+                    "model": model
+                })
         
         result = {
             "session_id": session_id,

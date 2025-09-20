@@ -117,6 +117,7 @@ class ContextAwareAgent:
                 model=selected_model
             )
             logger.info(f"🔍 DEBUG: Agent created, initial message count: {len(session_agent.messages)}")
+            logger.info(f"🔍 DEBUG: Agent tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in session_tools]}")
             
             # Note: Conversation history will be fetched via tool call when needed
             logger.info(f"🔍 DEBUG: Agent created with {len(session_agent.messages)} initial messages")
@@ -179,7 +180,7 @@ You have access to powerful financial tools including:
 - calculate_stock_correlation(): Live correlation analysis
 - get_volatility_surface(): Volatility analysis and options data
 - python_financial_calculator(): Advanced financial calculations
-- get_chat_history(session_id): Get conversation history for context continuity (CHATTING MODE ONLY)
+- get_chat_history(session_id, user_id): Get conversation history for context continuity (CHATTING MODE ONLY)
 
 📊 RESPONSE GUIDELINES:
 - ALWAYS use tools for financial queries - never provide generic advice
@@ -191,16 +192,22 @@ You have access to powerful financial tools including:
 
 ⚡ WORKFLOW:
 1. IMMEDIATELY call relevant tools (don't explain what you'll do)
-2. ALWAYS start with get_financial_data(symbol) for stock questions
-3. USE multiple tools per query for comprehensive analysis
-4. SYNTHESIZE real tool data into actionable insights
+2. FOR PERSONAL QUESTIONS: ALWAYS start with get_chat_history(session_id, user_id) to check previous messages
+3. FOR STOCK ANALYSIS: ALWAYS start with get_financial_data(symbol) for stock questions
+4. USE multiple tools per query for comprehensive analysis
+5. SYNTHESIZE real tool data into actionable insights
 
 💬 CHAT HISTORY RULES (CHATTING MODE ONLY):
-- ONLY use get_chat_history() when in CHATTING MODE (not analysis/research mode)
-- ONLY use the session_id provided in the Session Context
+- ALWAYS call get_chat_history() FIRST when user asks about their personal holdings, portfolio, or previous conversations
+- ONLY use the session_id and user_id provided in the Session Context
 - NEVER attempt to access other users' chat sessions
-- Use chat history ONLY when you need to reference previous messages in the current conversation
-- For financial analysis queries, focus on current data tools, not chat history
+- Use chat history when user asks "How many shares do I have?" or "What did I say before?"
+- For general financial analysis queries, focus on current data tools, not chat history
+- IMPORTANT: If user mentions personal holdings in previous messages, ALWAYS check chat history first
+
+EXAMPLE USAGE:
+User: "How many shares of AAPL do I have?"
+Agent: [CALLS get_chat_history(session_id, user_id) FIRST to check previous messages]
 
 🔴 NEVER SAY:
 - "I don't have access to real data"
