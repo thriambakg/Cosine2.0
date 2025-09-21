@@ -140,47 +140,38 @@ class ContextAwareAgent:
         
         Args:
             agent: The Strands agent instance
-            session_context: Complete session context with messages
+            session_context: Complete session context with conversation_history
         """
         try:
-            # Get messages from session context (in DynamoDB format)
-            messages = session_context.get('messages', [])
+            # Get conversation history from session context
+            conversation_history = session_context.get('conversation_history', [])
             
-            if not messages:
-                logger.info("🔍 DEBUG: No messages to inject into agent")
+            if not conversation_history:
+                logger.info("🔍 DEBUG: No conversation history to inject into agent")
                 return
             
-            logger.info(f"🔍 DEBUG: Injecting {len(messages)} messages into agent for model switching")
+            logger.info(f"🔍 DEBUG: Injecting {len(conversation_history)} conversations into agent for model switching")
             
-            # Convert DynamoDB format messages to agent message format
-            for message in messages:
-                # Extract from DynamoDB format: message.get('M').get('text').get('S')
-                message_map = message.get('M', {})
-                text = message_map.get('text', {}).get('S', '')
-                sender = message_map.get('sender', {}).get('S', '')
-                timestamp = message_map.get('timestamp', {}).get('N', '')
-                model = message_map.get('model', {}).get('S', '')
+            # Convert conversation history to agent message format
+            for conv in conversation_history:
+                user_message = conv.get('user_message', '').strip()
+                agent_response = conv.get('agent_response', '').strip()
                 
-                if not text or not sender:
-                    continue
-                
-                # Convert to agent message format
-                if sender == 'user':
-                    agent_message = {
+                # Add user message if present
+                if user_message:
+                    agent.messages.append({
                         'role': 'user',
-                        'content': text
-                    }
-                elif sender == 'bot':
-                    agent_message = {
-                        'role': 'assistant', 
-                        'content': text
-                    }
-                else:
-                    continue
+                        'content': user_message
+                    })
+                    logger.info(f"🔍 DEBUG: Injected user message: {user_message[:50]}...")
                 
-                # Add to agent's messages
-                agent.messages.append(agent_message)
-                logger.info(f"🔍 DEBUG: Injected {sender} message: {text[:50]}...")
+                # Add agent response if present
+                if agent_response:
+                    agent.messages.append({
+                        'role': 'assistant',
+                        'content': agent_response
+                    })
+                    logger.info(f"🔍 DEBUG: Injected agent response: {agent_response[:50]}...")
             
             logger.info(f"🔍 DEBUG: Successfully injected {len(agent.messages)} total messages into agent")
             
