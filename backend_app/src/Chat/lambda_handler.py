@@ -573,6 +573,12 @@ Session Context:
             logger.info("🔍 DEBUG: Calling session-aware agent...")
             agent_response = agent(enhanced_message)
             logger.info(f"🔍 DEBUG: Agent response received: {agent_response}")
+            logger.info(f"🔍 DEBUG: Agent response type: {type(agent_response)}")
+            if hasattr(agent_response, 'message'):
+                logger.info(f"🔍 DEBUG: Agent response message: {agent_response.message}")
+                if hasattr(agent_response.message, 'content'):
+                    logger.info(f"🔍 DEBUG: Agent response content type: {type(agent_response.message.content)}")
+                    logger.info(f"🔍 DEBUG: Agent response content: {agent_response.message.content}")
             
             # Extract the actual response content from AgentResult
             response_content = ""

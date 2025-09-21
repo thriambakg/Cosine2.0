@@ -98,7 +98,7 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
   stock_screener: {
     sizeConstraints: {
       minWidth: 4,
-      maxWidth: 4,
+      maxWidth: 6,
       minHeight: 4,
       maxHeight: 8,
       defaultWidth: 4,

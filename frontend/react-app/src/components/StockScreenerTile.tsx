@@ -435,7 +435,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         },
       }}
       ref={tileRef}
-      onMouseDown={onDragStart}
+      onMouseDown={(e) => {
+        // Only start drag if clicking on the tile background, not on interactive elements
+        const target = e.target as HTMLElement;
+        const isInteractiveElement = target.closest('button, input, select, textarea, [role="button"], [role="checkbox"], [role="radio"], [role="slider"], .MuiTableContainer-root, .MuiTable-root, .MuiTableCell-root, .MuiTableHead-root, .MuiTableBody-root, .MuiTableRow-root, .MuiPagination-root, .MuiPaginationItem-root, .MuiSlider-root, .MuiSlider-track, .MuiSlider-rail, .MuiSlider-thumb, .MuiSlider-valueLabel, .MuiChip-root, .MuiAutocomplete-root, .MuiFormControl-root, .MuiDialog-root, .MuiMenu-root, .MuiTooltip-root');
+        
+        if (!isInteractiveElement && onDragStart) {
+          onDragStart(e);
+        }
+      }}
       onMouseUp={() => {
         if (onResize && tileRef.current) {
           const rect = tileRef.current.getBoundingClientRect();
