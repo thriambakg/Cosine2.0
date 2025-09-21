@@ -119,9 +119,9 @@ class ContextAwareAgent:
             logger.info(f"🔍 DEBUG: Agent created, initial message count: {len(session_agent.messages)}")
             logger.info(f"🔍 DEBUG: Agent tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in session_tools]}")
             
-            # Inject conversation history directly into agent messages for model switching
-            self._inject_conversation_history(session_agent, session_context)
-            logger.info(f"🔍 DEBUG: Agent created with {len(session_agent.messages)} initial messages after history injection")
+            # Inject conversation history into system prompt for model switching
+            system_prompt = self._add_conversation_history_to_prompt(system_prompt, session_context)
+            logger.info(f"🔍 DEBUG: Agent created with conversation history in system prompt")
             
             # Add session memory if available
             if session_context.get('agent_memory'):
@@ -133,51 +133,55 @@ class ContextAwareAgent:
             logger.error(f"Error creating session agent: {str(e)}")
             raise
     
-    def _inject_conversation_history(self, agent, session_context: Dict[str, Any]) -> None:
+    def _add_conversation_history_to_prompt(self, system_prompt: str, session_context: Dict[str, Any]) -> str:
         """
-        Inject conversation history directly into agent messages for model switching.
-        This ensures the new model has full context without relying on tool calls.
+        Add conversation history to the system prompt for model switching.
+        This ensures the new model has full context without relying on tool calls or message injection.
         
         Args:
-            agent: The Strands agent instance
+            system_prompt: The base system prompt
             session_context: Complete session context with conversation_history
+            
+        Returns:
+            Enhanced system prompt with conversation history
         """
         try:
             # Get conversation history from session context
             conversation_history = session_context.get('conversation_history', [])
             
             if not conversation_history:
-                logger.info("🔍 DEBUG: No conversation history to inject into agent")
-                return
+                logger.info("🔍 DEBUG: No conversation history to add to system prompt")
+                return system_prompt
             
-            logger.info(f"🔍 DEBUG: Injecting {len(conversation_history)} conversations into agent for model switching")
+            logger.info(f"🔍 DEBUG: Adding {len(conversation_history)} conversations to system prompt for model switching")
             
-            # Convert conversation history to agent message format
-            for conv in conversation_history:
+            # Build conversation history section
+            history_section = "\n\n📚 CONVERSATION HISTORY FOR CONTEXT:\n"
+            history_section += "The following is the conversation history from this session. Use this information to answer questions about previous statements:\n\n"
+            
+            for i, conv in enumerate(conversation_history, 1):
                 user_message = conv.get('user_message', '').strip()
                 agent_response = conv.get('agent_response', '').strip()
                 
-                # Add user message if present
                 if user_message:
-                    agent.messages.append({
-                        'role': 'user',
-                        'content': user_message
-                    })
-                    logger.info(f"🔍 DEBUG: Injected user message: {user_message[:50]}...")
+                    history_section += f"User Message {i}: \"{user_message}\"\n"
                 
-                # Add agent response if present
                 if agent_response:
-                    agent.messages.append({
-                        'role': 'assistant',
-                        'content': agent_response
-                    })
-                    logger.info(f"🔍 DEBUG: Injected agent response: {agent_response[:50]}...")
+                    history_section += f"Agent Response {i}: \"{agent_response[:200]}...\"\n"
+                
+                history_section += "---\n"
             
-            logger.info(f"🔍 DEBUG: Successfully injected {len(agent.messages)} total messages into agent")
+            history_section += "\n🎯 IMPORTANT: If the user asks about their holdings or previous statements, refer to the conversation history above.\n"
+            history_section += "For example, if the user previously said 'I have 2 shares of AAPL', then they HAVE 2 shares of AAPL.\n"
+            
+            logger.info(f"🔍 DEBUG: Added conversation history to system prompt: {len(history_section)} characters")
+            
+            return system_prompt + history_section
             
         except Exception as e:
-            logger.error(f"🔍 DEBUG: Error injecting conversation history: {str(e)}")
-            # Don't raise - this is not critical, agent can still work without history injection
+            logger.error(f"🔍 DEBUG: Error adding conversation history to prompt: {str(e)}")
+            # Return original prompt if there's an error
+            return system_prompt
     
     def _generate_session_prompt(self, session_context: Dict[str, Any]) -> str:
         """
