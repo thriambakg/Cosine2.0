@@ -352,6 +352,11 @@ module "api_gateway" {
       http_method   = "GET"
       resource_path = "stock-data"
     }
+    stock_screener = {
+      function_arn  = module.stock_screener_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "stock-screener"
+    }
     portfolio = {
       function_arn  = module.portfolio_wrapper_lambda.function_arn
       http_method   = "POST"
@@ -443,7 +448,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "16"
+  deployment_trigger = "18"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -1204,8 +1209,6 @@ module "stock_screener_lambda" {
   environment_variables = {
     ENVIRONMENT = var.environment
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-    # Deployment trigger - increment this when you want to force a redeployment
-    DEPLOYMENT_TRIGGER = "1"
   }
 
   # Attach core and financial layers

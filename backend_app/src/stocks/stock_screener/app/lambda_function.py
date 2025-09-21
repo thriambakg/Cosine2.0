@@ -190,6 +190,7 @@ def screen_stocks_yahoo_finance(criteria: Dict[str, Any]) -> List[str]:
         
         # Apply rate limiting
         rate_limit_check("yahoo_screener")
+        logger.info("Rate limiting check passed")
         
         # Build Yahoo Finance screener URL
         base_url = "https://query1.finance.yahoo.com/v1/finance/screener"
@@ -291,15 +292,11 @@ def get_comprehensive_stock_list(criteria: Dict[str, Any]) -> List[str]:
     Falls back to predefined lists if screening fails.
     """
     try:
-        # Try Yahoo Finance screening first
-        screened_stocks = screen_stocks_yahoo_finance(criteria)
-        
-        if screened_stocks:
-            logger.info(f"Yahoo Finance screening successful: {len(screened_stocks)} stocks")
-            return screened_stocks
+        # For now, skip Yahoo Finance screening to avoid API issues
+        logger.info("Skipping Yahoo Finance screening for debugging, using fallback")
         
         # Fallback: Use industry-based filtering from our predefined lists
-        logger.info("Yahoo Finance screening failed, using industry-based fallback")
+        logger.info("Using industry-based fallback")
         
         if criteria.get('industries') and len(criteria['industries']) > 0:
             # Filter COMMON_STOCKS by industry using yfinance
@@ -376,7 +373,7 @@ def fetch_stock_basic_info(symbol: str, use_alpha_vantage: bool = False) -> Opti
     Returns None if stock doesn't meet basic criteria or fails to fetch.
     """
     try:
-        logger.debug(f"Fetching basic info for {symbol}")
+        logger.info(f"Fetching basic info for {symbol}")
         
         if use_alpha_vantage:
             return fetch_stock_info_alpha_vantage(symbol)
@@ -734,6 +731,27 @@ def lambda_handler(event, context):
     try:
         logger.info(f"=== STOCK SCREENER LAMBDA START ===")
         logger.info(f"Event received: {json.dumps(event, indent=2)}")
+        logger.info(f"Context: {context}")
+        logger.info(f"Environment variables: {dict(os.environ)}")
+        
+        # Test basic imports
+        try:
+            import yfinance as yf
+            logger.info("yfinance import successful")
+        except Exception as import_error:
+            logger.error(f"yfinance import failed: {str(import_error)}")
+            
+        try:
+            import numpy as np
+            logger.info("numpy import successful")
+        except Exception as import_error:
+            logger.error(f"numpy import failed: {str(import_error)}")
+            
+        try:
+            import pandas as pd
+            logger.info("pandas import successful")
+        except Exception as import_error:
+            logger.error(f"pandas import failed: {str(import_error)}")
         
         # Parse the event
         if isinstance(event, str):
@@ -784,7 +802,10 @@ def lambda_handler(event, context):
         # Use comprehensive screening approach with Yahoo Finance + yfinance
         try:
             logger.info("=== Using comprehensive Yahoo Finance + yfinance screening ===")
+            logger.info(f"Criteria: {criteria}")
+            logger.info(f"Max results: {max_results}")
             results = screen_stocks_comprehensive(criteria, max_results)
+            logger.info(f"Screening completed, got {len(results)} results")
             
             if not results:
                 logger.warning("No stocks found matching criteria, generating mock results")
