@@ -25,13 +25,11 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   Pagination,
   Alert,
   CircularProgress,
 } from '@mui/material';
 import {
-  Refresh as RefreshIcon,
   Settings as SettingsIcon,
   Close as CloseIcon,
   PushPin as PinIcon,
@@ -100,15 +98,12 @@ interface StockResult {
 const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   id,
   size = { width: 400, height: 600 },
-  dashboardContext,
   onRemove,
   onUpdate,
   onSettingsChange,
   onResize,
   onDragStart,
-  onResizeStart,
   isDragging = false,
-  isResizing = false,
   isSelected = false,
   onSelectionChange,
   criteria = {

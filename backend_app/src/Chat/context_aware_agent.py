@@ -95,6 +95,9 @@ class ContextAwareAgent:
             # Generate session-aware system prompt
             system_prompt = self._generate_session_prompt(session_context)
             
+            # Inject conversation history into system prompt for model switching
+            enhanced_system_prompt = self._add_conversation_history_to_prompt(system_prompt, session_context)
+            
             # Get session-specific tools
             session_tools = self._get_session_tools(session_context)
             
@@ -109,19 +112,16 @@ class ContextAwareAgent:
             selected_model = MODELS[model_name]
             logger.info(f"Creating session agent with model: {model_name}")
             
-            # Create agent with conversation history
+            # Create agent with enhanced system prompt that includes conversation history
             logger.info(f"🔍 DEBUG: Creating new agent with model {model_name}")
             session_agent = Agent(
-                system_prompt=system_prompt,
+                system_prompt=enhanced_system_prompt,
                 tools=session_tools,
                 model=selected_model
             )
-            logger.info(f"🔍 DEBUG: Agent created, initial message count: {len(session_agent.messages)}")
+            logger.info(f"🔍 DEBUG: Agent created with {len(session_agent.messages)} messages (empty - conversation history is in system prompt)")
             logger.info(f"🔍 DEBUG: Agent tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in session_tools]}")
-            
-            # Inject conversation history into system prompt for model switching
-            system_prompt = self._add_conversation_history_to_prompt(system_prompt, session_context)
-            logger.info(f"🔍 DEBUG: Agent created with conversation history in system prompt")
+            logger.info(f"🔍 DEBUG: Agent created with enhanced system prompt containing conversation history")
             
             # Add session memory if available
             if session_context.get('agent_memory'):
@@ -156,8 +156,11 @@ class ContextAwareAgent:
             logger.info(f"🔍 DEBUG: Adding {len(conversation_history)} conversations to system prompt for model switching")
             
             # Build conversation history section
-            history_section = "\n\n📚 CONVERSATION HISTORY FOR CONTEXT:\n"
-            history_section += "The following is the conversation history from this session. Use this information to answer questions about previous statements:\n\n"
+            history_section = "\n\n" + "="*80 + "\n"
+            history_section += "📚 CONVERSATION HISTORY FOR CONTEXT:\n"
+            history_section += "="*80 + "\n"
+            history_section += "IMPORTANT: The following conversation history contains previous user statements.\n"
+            history_section += "When the user asks a question which could possibly linked to a previous statement, CHECK THIS SECTION FIRST.\n\n"
             
             for i, conv in enumerate(conversation_history, 1):
                 user_message = conv.get('user_message', '').strip()
@@ -171,10 +174,16 @@ class ContextAwareAgent:
                 
                 history_section += "---\n"
             
-            history_section += "\n🎯 IMPORTANT: If the user asks about their holdings or previous statements, refer to the conversation history above.\n"
+            history_section += "\n" + "="*80 + "\n"
+            history_section += "🎯 CRITICAL INSTRUCTIONS:\n"
+            history_section += "="*80 + "\n"
+            history_section += "If the user asks about their holdings or shares, ALWAYS check the conversation history above.\n"
             history_section += "For example, if the user previously said 'I have 2 shares of AAPL', then they HAVE 2 shares of AAPL.\n"
+            history_section += "DO NOT say 'I don't have any record' if the conversation history shows their holdings.\n"
+            history_section += "="*80 + "\n"
             
             logger.info(f"🔍 DEBUG: Added conversation history to system prompt: {len(history_section)} characters")
+            logger.info(f"🔍 DEBUG: History section content: {history_section[:200]}...")
             
             return system_prompt + history_section
             
