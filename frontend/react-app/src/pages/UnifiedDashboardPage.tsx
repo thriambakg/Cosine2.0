@@ -21,6 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Add as AddIcon, 
   Close as CloseIcon,
+  ArrowBack as ArrowBackIcon,
   TrendingUp as TrendingUpIcon,
   AccountBalance as AccountBalanceIcon,
   AutoAwesome as AutoAwesomeIcon,
@@ -61,68 +62,196 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
 );
 
 
+// Tile category definitions
+interface TileCategory {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ReactNode;
+  color: string;
+  subcategories: TileSubcategory[];
+}
+
+interface TileSubcategory {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ReactNode;
+  color: string;
+  tiles: TileTypeDefinition[];
+}
+
 // Tile type definitions for the selection interface
 interface TileTypeDefinition {
   id: string;
   name: string;
   description: string;
-  category: 'crypto' | 'stocks' | 'portfolio' | 'custom' | 'chat';
+  category: string;
+  subcategory: string;
   icon: React.ReactNode;
   color: string;
   isAvailable: boolean;
   placeholder?: boolean; // For tiles not yet implemented
+  previewImage?: string; // URL or path to preview image
 }
 
-const tileTypes: TileTypeDefinition[] = [
+// Hierarchical tile categories
+const tileCategories: TileCategory[] = [
   {
     id: 'crypto',
     name: 'Cryptocurrency',
-    description: 'Track crypto prices, charts, and market data',
-    category: 'crypto',
+    description: 'Track and analyze cryptocurrency markets',
     icon: <TrendingUpIcon />,
     color: '#f59e0b',
-    isAvailable: true,
-    placeholder: false
+    subcategories: [
+      {
+        id: 'basic',
+        name: 'Basic Tiles',
+        description: 'Simple crypto tracking tiles',
+        icon: <TrendingUpIcon />,
+        color: '#f59e0b',
+        tiles: [
+          {
+            id: 'crypto',
+            name: 'Crypto Tracker',
+            description: 'Track crypto prices, charts, and market data',
+            category: 'crypto',
+            subcategory: 'basic',
+            icon: <TrendingUpIcon />,
+            color: '#f59e0b',
+            isAvailable: true,
+            placeholder: false
+          }
+        ]
+      }
+    ]
   },
   {
-    id: 'stock',
+    id: 'stocks',
     name: 'Stock Analysis',
-    description: 'Monitor stock prices, analysis, and alerts',
-    category: 'stocks',
+    description: 'Comprehensive stock market analysis tools',
     icon: <AccountBalanceIcon />,
     color: '#10b981',
-    isAvailable: true,
-    placeholder: false
+    subcategories: [
+      {
+        id: 'basic',
+        name: 'Basic Tiles',
+        description: 'Simple stock tracking tiles',
+        icon: <AccountBalanceIcon />,
+        color: '#10b981',
+        tiles: [
+          {
+            id: 'stock',
+            name: 'Stock Tracker',
+            description: 'Monitor individual stock prices, analysis, and alerts',
+            category: 'stocks',
+            subcategory: 'basic',
+            icon: <AccountBalanceIcon />,
+            color: '#10b981',
+            isAvailable: true,
+            placeholder: false
+          }
+        ]
+      },
+      {
+        id: 'analysis',
+        name: 'Stock Analysis',
+        description: 'Advanced stock screening and analysis tools',
+        icon: <SettingsIcon />,
+        color: '#3b82f6',
+        tiles: [
+          {
+            id: 'stock_screener',
+            name: 'Stock Filter',
+            description: 'Screen stocks based on custom criteria (industry, volatility, price change, market cap)',
+            category: 'stocks',
+            subcategory: 'analysis',
+            icon: <SettingsIcon />,
+            color: '#3b82f6',
+            isAvailable: true,
+            placeholder: false
+          }
+        ]
+      }
+    ]
   },
   {
     id: 'portfolio',
-    name: 'Portfolio Overview',
-    description: 'View portfolio performance and allocation',
-    category: 'portfolio',
+    name: 'Portfolio Management',
+    description: 'Portfolio tracking and management tools',
     icon: <SettingsIcon />,
     color: '#3b82f6',
-    isAvailable: true,
-    placeholder: true
+    subcategories: [
+      {
+        id: 'overview',
+        name: 'Portfolio Overview',
+        description: 'Portfolio tracking and analysis',
+        icon: <SettingsIcon />,
+        color: '#3b82f6',
+        tiles: [
+          {
+            id: 'portfolio',
+            name: 'Portfolio Overview',
+            description: 'View portfolio performance and allocation',
+            category: 'portfolio',
+            subcategory: 'overview',
+            icon: <SettingsIcon />,
+            color: '#3b82f6',
+            isAvailable: true,
+            placeholder: true
+          }
+        ]
+      }
+    ]
   },
   {
     id: 'custom',
-    name: 'Custom Content',
-    description: 'Create custom tiles with your own content',
-    category: 'custom',
+    name: 'Custom & AI',
+    description: 'Custom tiles and AI-generated content',
     icon: <AutoAwesomeIcon />,
     color: '#8b5cf6',
-    isAvailable: true,
-    placeholder: true
-  },
-  {
-    id: 'chat_generated',
-    name: 'AI Generated',
-    description: 'Let AI create tiles based on your needs',
-    category: 'chat',
-    icon: <ChatIcon />,
-    color: '#ef4444',
-    isAvailable: true,
-    placeholder: true
+    subcategories: [
+      {
+        id: 'content',
+        name: 'Custom Content',
+        description: 'Create your own custom tiles',
+        icon: <AutoAwesomeIcon />,
+        color: '#8b5cf6',
+        tiles: [
+          {
+            id: 'custom',
+            name: 'Custom Content',
+            description: 'Create custom tiles with your own content',
+            category: 'custom',
+            subcategory: 'content',
+            icon: <AutoAwesomeIcon />,
+            color: '#8b5cf6',
+            isAvailable: true,
+            placeholder: true
+          }
+        ]
+      },
+      {
+        id: 'ai',
+        name: 'AI Generated',
+        description: 'AI-powered tile generation',
+        icon: <ChatIcon />,
+        color: '#ef4444',
+        tiles: [
+          {
+            id: 'chat_generated',
+            name: 'AI Generated',
+            description: 'Let AI create tiles based on your needs',
+            category: 'custom',
+            subcategory: 'ai',
+            icon: <ChatIcon />,
+            color: '#ef4444',
+            isAvailable: true,
+            placeholder: true
+          }
+        ]
+      }
+    ]
   }
 ];
 
@@ -174,7 +303,9 @@ const UnifiedDashboardPage: React.FC = () => {
   }, [user]);
 
   // Multi-step tile addition state
-  const [addTileStep, setAddTileStep] = useState<'closed' | 'type-selection' | 'configuration'>('closed');
+  const [addTileStep, setAddTileStep] = useState<'closed' | 'category-selection' | 'subcategory-selection' | 'tile-selection' | 'configuration'>('closed');
+  const [selectedCategory, setSelectedCategory] = useState<TileCategory | null>(null);
+  const [selectedSubcategory, setSelectedSubcategory] = useState<TileSubcategory | null>(null);
   const [selectedTileType, setSelectedTileType] = useState<TileTypeDefinition | null>(null);
   const [tileConfig, setTileConfig] = useState<any>({});
 
@@ -551,9 +682,29 @@ const UnifiedDashboardPage: React.FC = () => {
       document.activeElement.blur();
     }
     
-    setAddTileStep('type-selection');
+    setAddTileStep('category-selection');
+    setSelectedCategory(null);
+    setSelectedSubcategory(null);
     setSelectedTileType(null);
     setTileConfig({});
+  };
+
+  // Navigation handlers for hierarchical tile selection
+  const handleCategorySelect = (category: TileCategory) => {
+    setSelectedCategory(category);
+    if (category.subcategories.length === 1) {
+      // If only one subcategory, skip directly to tile selection
+      setSelectedSubcategory(category.subcategories[0]);
+      setAddTileStep('tile-selection');
+    } else {
+      // Multiple subcategories, show subcategory selection
+      setAddTileStep('subcategory-selection');
+    }
+  };
+
+  const handleSubcategorySelect = (subcategory: TileSubcategory) => {
+    setSelectedSubcategory(subcategory);
+    setAddTileStep('tile-selection');
   };
 
   const handleTileTypeSelect = (tileType: TileTypeDefinition) => {
@@ -562,27 +713,84 @@ const UnifiedDashboardPage: React.FC = () => {
       document.activeElement.blur();
     }
     
-    // If crypto tile, use the existing AddCryptoModal
+    setSelectedTileType(tileType);
+    setTileConfig({});
+    
+    // Handle different tile types
     if (tileType.id === 'crypto') {
       setCryptoModalOpen(true);
       setAddTileStep('closed');
-      return;
-    }
-    
-    // If stock tile, use the new AddStockModal
-    if (tileType.id === 'stock') {
+    } else if (tileType.id === 'stock') {
       setStockModalOpen(true);
       setAddTileStep('closed');
-      return;
+    } else if (tileType.id === 'stock_screener') {
+      // Handle stock screener tile creation
+      handleCreateStockScreenerTile();
+    } else if (tileType.placeholder) {
+      // For placeholder tiles, show a message
+      alert(`${tileType.name} tiles are coming soon!`);
+      setAddTileStep('closed');
+    } else {
+      // For other tiles, go to configuration
+      const defaultConfig = getDefaultTileConfig(tileType.id);
+      setTileConfig(defaultConfig);
+      setAddTileStep('configuration');
     }
-    
-    // For other tile types, use the multi-step flow
-    setSelectedTileType(tileType);
-    setAddTileStep('configuration');
-    
-    // Initialize default config based on tile type
-    const defaultConfig = getDefaultTileConfig(tileType.id);
-    setTileConfig(defaultConfig);
+  };
+
+  // Navigation back handlers
+  const handleBackToCategories = () => {
+    setSelectedCategory(null);
+    setSelectedSubcategory(null);
+    setAddTileStep('category-selection');
+  };
+
+  const handleBackToSubcategories = () => {
+    setSelectedSubcategory(null);
+    setAddTileStep('subcategory-selection');
+  };
+
+  const handleBackToTiles = () => {
+    setAddTileStep('tile-selection');
+  };
+
+  // Stock screener tile creation handler
+  const handleCreateStockScreenerTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `stock_screener_${Date.now()}`,
+      type: 'stock_screener',
+      title: 'Stock Screener',
+      displayOptions: {
+        showIndustry: true,
+        showMarketCap: true,
+        showVolatility: true,
+        showPriceChange: true,
+        showResultsTable: true,
+        showCriteriaSummary: true,
+        maxResults: 10,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 400, height: 600 },
+      gridPosition: findNextAvailablePosition({ width: 4, height: 6 }),
+      gridSize: { width: 4, height: 6 },
+      dashboard_id: currentDashboardId,
+      criteria: {
+        industries: [],
+        volatilityRange: [0, 100],
+        priceChangeRange: [-50, 50],
+        marketCapRange: [0, 1000000000000],
+        priceRange: [0, 1000],
+        timeframe: '1d',
+      },
+      results: [],
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
   };
 
   const getDefaultTileConfig = (tileTypeId: string) => {
@@ -802,10 +1010,32 @@ const UnifiedDashboardPage: React.FC = () => {
   };
 
   const handleResizeTile = (id: string, size: { width: number; height: number }) => {
+    console.log('🔧 handleResizeTile called:', { id, size });
     if (!activeTab) return;
     
+    // Find the tile to get its current gridSize
+    const tile = (activeTab.tiles || []).find(t => t.id === id);
+    if (!tile) {
+      console.warn('Tile not found for resize:', id);
+      return;
+    }
+
+    // Convert pixel size back to grid size for consistency
+    const GRID_CELL_SIZE = 80;
+    const GRID_GAP = 16;
+    const gridSize = {
+      width: Math.round((size.width + GRID_GAP) / (GRID_CELL_SIZE + GRID_GAP)),
+      height: Math.round((size.height + GRID_GAP) / (GRID_CELL_SIZE + GRID_GAP))
+    };
+
+    console.log('🔧 Converted to grid size:', gridSize);
+    
     const updatedTiles = (activeTab.tiles || []).map(tile => 
-      tile.id === id ? { ...tile, size } : tile
+      tile.id === id ? { 
+        ...tile, 
+        size, // Keep legacy size for backward compatibility
+        gridSize // Update grid size for new system
+      } : tile
     );
     updateTabTiles(activeTab.id, updatedTiles);
   };
@@ -920,9 +1150,9 @@ const UnifiedDashboardPage: React.FC = () => {
 
         {/* Multi-Step Add Tile Flow */}
         
-        {/* Step 1: Tile Type Selection */}
+        {/* Step 1: Category Selection */}
         <Dialog 
-          open={addTileStep === 'type-selection'} 
+          open={addTileStep === 'category-selection'} 
           onClose={() => setAddTileStep('closed')}
           maxWidth="md"
           fullWidth
@@ -944,10 +1174,168 @@ const UnifiedDashboardPage: React.FC = () => {
           </DialogTitle>
           <DialogContent sx={{ backgroundColor: '#0f172a', p: 3 }}>
             <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
-              Choose the type of tile you want to add to your dashboard
+              Choose a category to browse available tiles
             </Typography>
             <Grid container spacing={2}>
-              {tileTypes.map((tileType) => (
+              {tileCategories.map((category) => (
+                <Grid item xs={12} sm={6} md={4} key={category.id}>
+                  <Card 
+                    sx={{ 
+                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                      border: '2px solid #374151',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        borderColor: category.color,
+                        transform: 'translateY(-2px)',
+                        boxShadow: `0 8px 32px ${category.color}20`
+                      }
+                    }}
+                    onClick={() => handleCategorySelect(category)}
+                  >
+                    <CardActionArea sx={{ p: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                        <Box 
+                          sx={{ 
+                            color: category.color,
+                            mr: 2,
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                        >
+                          {category.icon}
+                        </Box>
+                        <Typography variant="h6" sx={{ color: '#ffffff' }}>
+                          {category.name}
+                        </Typography>
+                      </Box>
+                      <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                        {category.description}
+                      </Typography>
+                    </CardActionArea>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          </DialogContent>
+        </Dialog>
+
+        {/* Step 2: Subcategory Selection */}
+        <Dialog 
+          open={addTileStep === 'subcategory-selection'} 
+          onClose={handleBackToCategories}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle sx={{ 
+            backgroundColor: '#1e293b', 
+            color: '#ffffff',
+            borderBottom: '1px solid #374151'
+          }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <IconButton 
+                  onClick={handleBackToCategories}
+                  sx={{ color: '#9ca3af', mr: 1 }}
+                >
+                  <ArrowBackIcon />
+                </IconButton>
+                <Typography variant="h6">{selectedCategory?.name}</Typography>
+              </Box>
+              <IconButton 
+                onClick={() => setAddTileStep('closed')}
+                sx={{ color: '#9ca3af' }}
+              >
+                <CloseIcon />
+              </IconButton>
+            </Box>
+          </DialogTitle>
+          <DialogContent sx={{ backgroundColor: '#0f172a', p: 3 }}>
+            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
+              Choose a subcategory to see available tiles
+            </Typography>
+            <Grid container spacing={2}>
+              {selectedCategory?.subcategories.map((subcategory) => (
+                <Grid item xs={12} sm={6} md={4} key={subcategory.id}>
+                  <Card 
+                    sx={{ 
+                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                      border: '2px solid #374151',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        borderColor: subcategory.color,
+                        transform: 'translateY(-2px)',
+                        boxShadow: `0 8px 32px ${subcategory.color}20`
+                      }
+                    }}
+                    onClick={() => handleSubcategorySelect(subcategory)}
+                  >
+                    <CardActionArea sx={{ p: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                        <Box 
+                          sx={{ 
+                            color: subcategory.color,
+                            mr: 2,
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                        >
+                          {subcategory.icon}
+                        </Box>
+                        <Typography variant="h6" sx={{ color: '#ffffff' }}>
+                          {subcategory.name}
+                        </Typography>
+                      </Box>
+                      <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                        {subcategory.description}
+                      </Typography>
+                    </CardActionArea>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          </DialogContent>
+        </Dialog>
+
+        {/* Step 3: Tile Selection */}
+        <Dialog 
+          open={addTileStep === 'tile-selection'} 
+          onClose={handleBackToCategories}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle sx={{ 
+            backgroundColor: '#1e293b', 
+            color: '#ffffff',
+            borderBottom: '1px solid #374151'
+          }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <IconButton 
+                  onClick={selectedSubcategory ? handleBackToSubcategories : handleBackToCategories}
+                  sx={{ color: '#9ca3af', mr: 1 }}
+                >
+                  <ArrowBackIcon />
+                </IconButton>
+                <Typography variant="h6">
+                  {selectedCategory?.name} - {selectedSubcategory?.name}
+                </Typography>
+              </Box>
+              <IconButton 
+                onClick={() => setAddTileStep('closed')}
+                sx={{ color: '#9ca3af' }}
+              >
+                <CloseIcon />
+              </IconButton>
+            </Box>
+          </DialogTitle>
+          <DialogContent sx={{ backgroundColor: '#0f172a', p: 3 }}>
+            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
+              Select the tile you want to add to your dashboard
+            </Typography>
+            <Grid container spacing={2}>
+              {selectedSubcategory?.tiles.map((tileType) => (
                 <Grid item xs={12} sm={6} md={4} key={tileType.id}>
                   <Card 
                     sx={{ 
@@ -1001,10 +1389,10 @@ const UnifiedDashboardPage: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Step 2: Tile Configuration */}
+        {/* Step 4: Tile Configuration */}
         <Dialog 
           open={addTileStep === 'configuration'} 
-          onClose={() => setAddTileStep('type-selection')}
+          onClose={handleBackToTiles}
           maxWidth="sm"
           fullWidth
         >
@@ -1014,11 +1402,19 @@ const UnifiedDashboardPage: React.FC = () => {
             borderBottom: '1px solid #374151'
           }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Typography variant="h6">
-                Configure {selectedTileType?.name}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <IconButton 
+                  onClick={handleBackToTiles}
+                  sx={{ color: '#9ca3af', mr: 1 }}
+                >
+                  <ArrowBackIcon />
+                </IconButton>
+                <Typography variant="h6">
+                  Configure {selectedTileType?.name}
+                </Typography>
+              </Box>
               <IconButton 
-                onClick={() => setAddTileStep('type-selection')}
+                onClick={() => setAddTileStep('closed')}
                 sx={{ color: '#9ca3af' }}
               >
                 <CloseIcon />
@@ -1110,7 +1506,7 @@ const UnifiedDashboardPage: React.FC = () => {
           </DialogContent>
           <DialogActions sx={{ backgroundColor: '#0f172a', p: 3, borderTop: '1px solid #374151' }}>
             <Button 
-              onClick={() => setAddTileStep('type-selection')}
+              onClick={handleBackToTiles}
               sx={{ color: '#9ca3af' }}
             >
               Back

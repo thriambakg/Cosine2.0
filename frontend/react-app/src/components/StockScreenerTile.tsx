@@ -68,6 +68,7 @@ interface StockScreenerTileProps {
     showVolatility: boolean;
     showPriceChange: boolean;
     showResultsTable: boolean;
+    showCriteriaSummary: boolean;
     maxResults: number;
   };
   autoRefresh?: boolean;
@@ -125,6 +126,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     showVolatility: true,
     showPriceChange: true,
     showResultsTable: true,
+    showCriteriaSummary: true,
     maxResults: 10,
   },
   autoRefresh = false,
@@ -420,6 +422,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
+        display: 'flex',
+        flexDirection: 'column',
         '&:hover': {
           borderColor: '#3b82f6',
           transform: isDragging ? 'none' : 'translateY(-2px)',
@@ -445,7 +449,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       }}
     >
       {/* Header with controls */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {/* Selection checkbox */}
           {onSelectionChange && (
@@ -538,7 +542,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 
       {/* Loading state */}
       {isLoading && (
-        <Box sx={{ textAlign: 'center', py: 2 }}>
+        <Box sx={{ textAlign: 'center', py: 2, flexShrink: 0 }}>
           <CircularProgress size={24} sx={{ color: '#3b82f6', mb: 1 }} />
           <Typography variant="body2" color="#9ca3af">
             Screening stocks...
@@ -548,77 +552,116 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 
       {/* Error state */}
       {error && (
-        <Alert severity="error" sx={{ mb: 2, backgroundColor: 'rgba(220, 38, 38, 0.1)' }}>
+        <Alert severity="error" sx={{ mb: 1, backgroundColor: 'rgba(220, 38, 38, 0.1)', flexShrink: 0 }}>
           {error}
         </Alert>
       )}
 
-      {/* Criteria Summary */}
-      <Box sx={{ mb: 2, p: 2, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: '4px' }}>
-        <Typography variant="subtitle2" color="#3b82f6" gutterBottom>
-          Current Criteria:
-        </Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-          {localCriteria.industries.length > 0 && (
+      {/* Criteria Summary - only show if enabled */}
+      {localDisplayOptions.showCriteriaSummary && (
+        <Box sx={{ mb: 1, p: 2, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: '4px', flexShrink: 0 }}>
+          <Typography variant="subtitle2" color="#3b82f6" gutterBottom>
+            Current Criteria:
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {localCriteria.industries.length > 0 && (
+              <Chip
+                icon={<BusinessIcon />}
+                label={`Industries: ${localCriteria.industries.join(', ')}`}
+                size="small"
+                variant="outlined"
+              />
+            )}
             <Chip
-              icon={<BusinessIcon />}
-              label={`Industries: ${localCriteria.industries.join(', ')}`}
+              icon={<SpeedIcon />}
+              label={`Volatility: ${formatVolatilityRange(localCriteria.volatilityRange)}`}
               size="small"
               variant="outlined"
             />
-          )}
-          <Chip
-            icon={<SpeedIcon />}
-            label={`Volatility: ${formatVolatilityRange(localCriteria.volatilityRange)}`}
-            size="small"
-            variant="outlined"
-          />
-          <Chip
-            icon={<TrendingUpIcon />}
-            label={`Price Change: ${localCriteria.priceChangeRange[0]}% - ${localCriteria.priceChangeRange[1]}%`}
-            size="small"
-            variant="outlined"
-          />
-          <Chip
-            icon={<MoneyIcon />}
-            label={`Price: ${formatPriceRange(localCriteria.priceRange)}`}
-            size="small"
-            variant="outlined"
-          />
+            <Chip
+              icon={<TrendingUpIcon />}
+              label={`Price Change: ${localCriteria.priceChangeRange[0]}% - ${localCriteria.priceChangeRange[1]}%`}
+              size="small"
+              variant="outlined"
+            />
+            <Chip
+              icon={<MoneyIcon />}
+              label={`Price: ${formatPriceRange(localCriteria.priceRange)}`}
+              size="small"
+              variant="outlined"
+            />
+          </Box>
         </Box>
-      </Box>
+      )}
 
       {/* Results Table */}
       {localDisplayOptions.showResultsTable && stockResults.length > 0 && !isLoading && (
-        <Box sx={{ mb: 2 }}>
-          <TableContainer component={Paper} sx={{ backgroundColor: 'rgba(31, 41, 55, 0.8)' }}>
-            <Table size="small">
+        <Box sx={{ 
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: 'column',
+          minHeight: 0, // Allow flex shrinking
+          mt: 1 // Small top margin to separate from criteria
+        }}>
+          <TableContainer sx={{ 
+            flex: 1,
+            backgroundColor: 'transparent',
+            borderRadius: 0,
+            boxShadow: 'none',
+            border: 'none',
+            '&::-webkit-scrollbar': {
+              width: '6px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(59, 130, 246, 0.5)',
+              borderRadius: '3px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: 'rgba(59, 130, 246, 0.7)',
+            },
+          }}>
+            <Table size="small" sx={{ 
+              '& .MuiTableCell-root': {
+                borderBottom: '1px solid rgba(55, 65, 81, 0.3)',
+                padding: '8px 12px',
+              },
+              '& .MuiTableHead-root .MuiTableCell-root': {
+                borderBottom: '2px solid rgba(59, 130, 246, 0.5)',
+                backgroundColor: 'rgba(15, 23, 42, 0.5)',
+              },
+              '& .MuiTableRow-root:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.05)',
+              },
+            }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Symbol</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Symbol</TableCell>
                   {localDisplayOptions.showIndustry && (
-                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Industry</TableCell>
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Industry</TableCell>
                   )}
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Price</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Price</TableCell>
                   {localDisplayOptions.showPriceChange && (
-                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Change</TableCell>
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Change</TableCell>
                   )}
                   {localDisplayOptions.showMarketCap && (
-                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Market Cap</TableCell>
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Market Cap</TableCell>
                   )}
                   {localDisplayOptions.showVolatility && (
-                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Volatility</TableCell>
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Volatility</TableCell>
                   )}
                 </TableRow>
               </TableHead>
               <TableBody>
                 {currentResults.map((stock) => (
                   <TableRow key={stock.symbol} hover>
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>{stock.symbol}</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>{stock.symbol}</TableCell>
                     {localDisplayOptions.showIndustry && (
-                      <TableCell sx={{ color: '#9ca3af' }}>{stock.industry}</TableCell>
+                      <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{stock.industry}</TableCell>
                     )}
-                    <TableCell sx={{ color: 'white', fontWeight: 600 }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>
                       ${stock.price.toFixed(2)}
                     </TableCell>
                     {localDisplayOptions.showPriceChange && (
@@ -626,16 +669,17 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                         sx={{
                           color: stock.priceChangePercent >= 0 ? '#22c55e' : '#dc2626',
                           fontWeight: 600,
+                          fontSize: '0.875rem',
                         }}
                       >
                         {stock.priceChangePercent >= 0 ? '+' : ''}{stock.priceChangePercent.toFixed(2)}%
                       </TableCell>
                     )}
                     {localDisplayOptions.showMarketCap && (
-                      <TableCell sx={{ color: '#9ca3af' }}>{formatMarketCap(stock.marketCap)}</TableCell>
+                      <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{formatMarketCap(stock.marketCap)}</TableCell>
                     )}
                     {localDisplayOptions.showVolatility && (
-                      <TableCell sx={{ color: '#9ca3af' }}>{stock.volatility.toFixed(1)}%</TableCell>
+                      <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{stock.volatility.toFixed(1)}%</TableCell>
                     )}
                   </TableRow>
                 ))}
@@ -645,7 +689,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1, pt: 1, borderTop: '1px solid rgba(55, 65, 81, 0.3)' }}>
               <Pagination
                 count={totalPages}
                 page={currentPage}
@@ -655,10 +699,14 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                 sx={{
                   '& .MuiPaginationItem-root': {
                     color: '#9ca3af',
+                    fontSize: '0.875rem',
                   },
                   '& .Mui-selected': {
                     backgroundColor: '#3b82f6',
                     color: 'white',
+                  },
+                  '& .MuiPaginationItem-root:hover': {
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
                   },
                 }}
               />
@@ -669,7 +717,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 
       {/* No Results */}
       {!isLoading && stockResults.length === 0 && !error && (
-        <Box sx={{ textAlign: 'center', py: 4 }}>
+        <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
           <Typography variant="body2" color="#9ca3af">
             No stocks match your criteria. Try adjusting your filters.
           </Typography>
@@ -908,6 +956,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                 />
               }
               label="Show Results Table"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={localDisplayOptions.showCriteriaSummary}
+                  onChange={() => handleDisplayOptionsChange('showCriteriaSummary')}
+                />
+              }
+              label="Show Criteria Summary"
             />
           </Box>
         </DialogContent>

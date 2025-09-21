@@ -359,18 +359,20 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       // Check if the new size fits
       if (isAreaAvailable(position, resizeState.previewSize, resizeState.resizeTileId)) {
         console.log('✅ Resize fits, updating tile');
-        // Update the tile with new grid size
-        onUpdateTile(resizeState.resizeTileId, {
-          gridSize: resizeState.previewSize,
-        });
         
-        // Also update legacy size for backward compatibility
+        // Calculate pixel size for legacy compatibility
         const pixelSize = {
           width: resizeState.previewSize.width * GRID_CELL_SIZE + (resizeState.previewSize.width - 1) * GRID_GAP,
           height: resizeState.previewSize.height * GRID_CELL_SIZE + (resizeState.previewSize.height - 1) * GRID_GAP,
         };
-        onResizeTile(resizeState.resizeTileId, pixelSize);
-        console.log('✅ Tile resized successfully to:', resizeState.previewSize);
+        
+        // Update the tile with both grid size and legacy size
+        onUpdateTile(resizeState.resizeTileId, {
+          gridSize: resizeState.previewSize,
+          size: pixelSize, // Legacy size for backward compatibility
+        });
+        
+        console.log('✅ Tile resized successfully to:', { gridSize: resizeState.previewSize, pixelSize });
       } else {
         console.log('❌ Resize would cause overlap, reverting');
       }
@@ -383,7 +385,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       currentSize: null,
       previewSize: null,
     });
-  }, [resizeState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile, onResizeTile]);
+  }, [resizeState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile]);
 
   // Add event listeners for drag and resize
   useEffect(() => {
@@ -577,6 +579,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
     const isTileSelected = selectionState.selectedTiles.has(tile.id);
     
+    // Get tile configuration to check if resizing is supported
+    const tileConfig = getTileConfig(tile.type);
+    const supportsResize = tileConfig.supportsResize;
     
     // Common props for all tiles
     const commonProps = {
@@ -641,6 +646,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         showVolatility: true,
         showPriceChange: true,
         showResultsTable: true,
+        showCriteriaSummary: true,
         maxResults: 10,
       },
       autoRefresh: tile.autoRefresh,
@@ -679,28 +685,30 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           />
         )}
         
-        {/* Resize handle */}
-        <Box
-          sx={{
-            position: 'absolute',
-            bottom: -4,
-            right: -4,
-            width: 12,
-            height: 12,
-            backgroundColor: '#3b82f6',
-            borderRadius: '50%',
-            cursor: 'nw-resize',
-            opacity: isResizing ? 1 : 0.6, // Make it more visible
-            transition: 'opacity 0.2s ease',
-            '&:hover': {
-              opacity: 1,
-            },
-          }}
-          onMouseDown={(e) => {
-            console.log('🖱️ Resize handle clicked for tile:', tile.id);
-            handleResizeStart(tile.id, e);
-          }}
-        />
+        {/* Resize handle - only show if tile supports resizing */}
+        {supportsResize && (
+          <Box
+            sx={{
+              position: 'absolute',
+              bottom: -4,
+              right: -4,
+              width: 12,
+              height: 12,
+              backgroundColor: '#3b82f6',
+              borderRadius: '50%',
+              cursor: 'nw-resize',
+              opacity: isResizing ? 1 : 0.6,
+              transition: 'opacity 0.2s ease',
+              '&:hover': {
+                opacity: 1,
+              },
+            }}
+            onMouseDown={(e) => {
+              console.log('🖱️ Resize handle clicked for tile:', tile.id);
+              handleResizeStart(tile.id, e);
+            }}
+          />
+        )}
       </Box>
     );
   };

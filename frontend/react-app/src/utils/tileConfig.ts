@@ -14,10 +14,10 @@ export interface TileTypeConfig {
 export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
   stock: {
     sizeConstraints: {
-      minWidth: 2,
-      maxWidth: 8,
-      minHeight: 3,
-      maxHeight: 8,
+      minWidth: 3,
+      maxWidth: 6,
+      minHeight: 4,
+      maxHeight: 4,
       defaultWidth: 4,
       defaultHeight: 4,
     },
@@ -31,10 +31,10 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
   },
   crypto: {
     sizeConstraints: {
-      minWidth: 2,
-      maxWidth: 8,
-      minHeight: 3,
-      maxHeight: 8,
+      minWidth: 3,
+      maxWidth: 6,
+      minHeight: 4,
+      maxHeight: 4,
       defaultWidth: 4,
       defaultHeight: 4,
     },
@@ -110,6 +110,7 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
       showVolatility: true,
       showPriceChange: true,
       showResultsTable: true,
+      showCriteriaSummary: true,
       maxResults: 10,
     },
     supportsResize: true,
