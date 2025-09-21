@@ -57,13 +57,15 @@ export interface TileSizeConstraints {
 
 export interface UnifiedTile {
   id: string;
-  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated';
+  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener';
   title: string;
   symbol?: string; // For crypto/stock tiles
   timeframe?: string; // For crypto/stock tiles
   name?: string; // For portfolio tiles
   content?: string; // For custom tiles
   prompt?: string; // For chat_generated tiles
+  criteria?: StockScreenerCriteria; // For stock_screener tiles
+  results?: StockResult[]; // For stock_screener tiles
   displayOptions: {
     [key: string]: any; // Flexible display options for different tile types
   };
@@ -75,6 +77,29 @@ export interface UnifiedTile {
   gridSize?: GridSize; // New grid-based size
   created_at?: string;
   dashboard_id: string;
+}
+
+// Stock Screener specific interfaces
+export interface StockScreenerCriteria {
+  industries: string[];
+  volatilityRange: [number, number];
+  priceChangeRange: [number, number];
+  marketCapRange: [number, number];
+  priceRange: [number, number];
+  timeframe: string;
+}
+
+export interface StockResult {
+  symbol: string;
+  name: string;
+  price: number;
+  priceChange: number;
+  priceChangePercent: number;
+  marketCap: number;
+  volatility: number;
+  industry: string;
+  volume: number;
+  pe: number;
 }
 
 export interface TabManagementState {

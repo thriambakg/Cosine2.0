@@ -3,6 +3,7 @@ import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mu
 import { Analytics as AnalyticsIcon, Add as AddIcon } from '@mui/icons-material';
 import CryptoTile from './CryptoTile';
 import StockTile from './StockTile';
+import StockScreenerTile from './StockScreenerTile';
 import PlaceholderTile from './PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../utils/tileConfig';
@@ -577,10 +578,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const isTileSelected = selectionState.selectedTiles.has(tile.id);
     
     
-    const tileProps = {
+    // Common props for all tiles
+    const commonProps = {
       id: tile.id,
-      symbol: tile.symbol || 'BTC',
-      timeframe: tile.timeframe || '1d',
       size: {
         width: displaySize.width * GRID_CELL_SIZE + (displaySize.width - 1) * GRID_GAP,
         height: displaySize.height * GRID_CELL_SIZE + (displaySize.height - 1) * GRID_GAP,
@@ -598,6 +598,55 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       onSelectionChange: handleTileSelection,
     };
 
+    // Type-specific props
+    const cryptoProps = {
+      ...commonProps,
+      symbol: tile.symbol || 'BTC',
+      timeframe: tile.timeframe || '1d',
+      displayOptions: (tile.displayOptions as any) || {
+        showPrice: true,
+        showPriceMarker: false,
+        show24hChange: true,
+        showAnnualReturn: true,
+        showVolatility: true,
+        showChart: true,
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+    };
+
+    const stockProps = {
+      ...commonProps,
+      symbol: tile.symbol || 'AAPL',
+      timeframe: tile.timeframe || '1d',
+      displayOptions: (tile.displayOptions as any) || {
+        showPrice: true,
+        showPriceMarker: false,
+        show24hChange: true,
+        showAnnualReturn: true,
+        showVolatility: true,
+        showChart: true,
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+    };
+
+    const stockScreenerProps = {
+      ...commonProps,
+      criteria: tile.criteria,
+      results: tile.results,
+      displayOptions: (tile.displayOptions as any) || {
+        showIndustry: true,
+        showMarketCap: true,
+        showVolatility: true,
+        showPriceChange: true,
+        showResultsTable: true,
+        maxResults: 10,
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+    };
+
 
     return (
       <Box
@@ -612,9 +661,11 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         }}
       >
         {tile.type === 'crypto' ? (
-          <CryptoTile key={tile.id} {...tileProps} />
+          <CryptoTile key={tile.id} {...cryptoProps} />
         ) : tile.type === 'stock' ? (
-          <StockTile key={tile.id} {...tileProps} />
+          <StockTile key={tile.id} {...stockProps} />
+        ) : tile.type === 'stock_screener' ? (
+          <StockScreenerTile key={tile.id} {...stockScreenerProps} />
         ) : (
           <PlaceholderTile
             key={tile.id}
@@ -623,7 +674,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             onUpdate={onUpdateTile}
             onSettingsChange={onSettingsChange}
             onResize={onResizeTile}
-            isSelected={tileProps.isSelected}
+            isSelected={commonProps.isSelected}
             onSelectionChange={handleTileSelection}
           />
         )}

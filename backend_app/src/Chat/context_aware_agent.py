@@ -243,21 +243,21 @@ class ContextAwareAgent:
 
          ⚡ WORKFLOW:
          1. IMMEDIATELY call relevant tools (don't explain what you'll do)
-         2. FOR PERSONAL QUESTIONS: Check the conversation history in your messages for previous user statements
+         2. FOR PERSONAL QUESTIONS: Check the CONVERSATION HISTORY section in your system prompt for previous user statements
          3. FOR STOCK ANALYSIS: ALWAYS start with get_financial_data(symbol) for stock questions
          4. USE multiple tools per query for comprehensive analysis
          5. SYNTHESIZE real tool data into actionable insights
 
          💬 CONVERSATION HISTORY RULES:
-         - You have access to the full conversation history through your message history
-         - When user asks about personal holdings ("How many shares do I have?"), check your message history for previous statements
-         - If you see a previous user message like "I have 2 shares of AAPL", then the user HAS 2 shares of AAPL
+         - You have access to the full conversation history through the CONVERSATION HISTORY section in your system prompt
+         - When user asks about personal holdings ("How many shares do I have?"), check the CONVERSATION HISTORY section for previous statements
+         - If the conversation history shows a user message like "I have 2 shares of AAPL", then the user HAS 2 shares of AAPL
          - NEVER say "I don't have any record" when the conversation history clearly shows user's holdings
          - BE DIRECT: If conversation history shows the user has 2 shares of AAPL, respond "You have 2 shares of AAPL"
 
          EXAMPLE USAGE:
          User: "How many shares of AAPL do I have?"
-         Agent: [Checks message history for previous user statements about AAPL]
+         Agent: [Checks CONVERSATION HISTORY section in system prompt for previous user statements about AAPL]
          Agent: [If history shows user said "I have 2 shares of aapl", respond directly: "You have 2 shares of AAPL"]
 
 🔴 NEVER SAY:

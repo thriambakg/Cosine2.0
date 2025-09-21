@@ -95,6 +95,26 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
     supportsResize: true,
     supportsDrag: true,
   },
+  stock_screener: {
+    sizeConstraints: {
+      minWidth: 4,
+      maxWidth: 4,
+      minHeight: 4,
+      maxHeight: 8,
+      defaultWidth: 4,
+      defaultHeight: 6,
+    },
+    defaultDisplayOptions: {
+      showIndustry: true,
+      showMarketCap: true,
+      showVolatility: true,
+      showPriceChange: true,
+      showResultsTable: true,
+      maxResults: 10,
+    },
+    supportsResize: true,
+    supportsDrag: true,
+  },
 };
 
 // Get tile configuration for a specific tile type

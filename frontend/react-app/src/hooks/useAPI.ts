@@ -239,6 +239,11 @@ export function useStockAlerts() {
   return useAPI(api.stockAlerts.createAlert, 0); // No cache for alerts
 }
 
+// Stock Screener Hook
+export function useStockScreener() {
+  return useAPI(api.stockScreener.screenStocks, 5 * 60 * 1000); // 5 minute cache for screener results
+}
+
 // Chat Hook
 export function useChat() {
   return useAPI(api.chat.sendMessage, 0); // No cache for chat
@@ -365,6 +370,7 @@ export const hooks = {
   useCryptoStats,
   useOptionPricing,
   useStockAlerts,
+  useStockScreener,
   useChat,
   useAPIHealth,
   useMultipleAPIs,

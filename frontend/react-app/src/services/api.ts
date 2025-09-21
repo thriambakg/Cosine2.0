@@ -317,6 +317,50 @@ export const stockAlertsAPI = {
 };
 
 // ============================================================================
+// STOCK SCREENER API
+// ============================================================================
+
+export interface StockScreenerRequest {
+  criteria: {
+    industries?: string[];
+    volatilityRange?: [number, number];
+    priceChangeRange?: [number, number];
+    marketCapRange?: [number, number];
+    priceRange?: [number, number];
+    timeframe?: string;
+  };
+  maxResults?: number;
+}
+
+export interface StockScreenerResponse {
+  success: boolean;
+  results: Array<{
+    symbol: string;
+    name: string;
+    price: number;
+    priceChange: number;
+    priceChangePercent: number;
+    marketCap: number;
+    volatility: number;
+    industry: string;
+    volume: number;
+    pe: number;
+  }>;
+  totalResults: number;
+  criteria: StockScreenerRequest['criteria'];
+  timestamp: string;
+}
+
+export const stockScreenerAPI = {
+  screenStocks: async (params: StockScreenerRequest): Promise<StockScreenerResponse> => {
+    return apiRequest<StockScreenerResponse>('/stock-screener', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
+// ============================================================================
 // CHAT API
 // ============================================================================
 
@@ -666,6 +710,7 @@ export const api = {
   cryptoStats: cryptoStatsAPI,
   optionPricing: optionPricingAPI,
   stockAlerts: stockAlertsAPI,
+  stockScreener: stockScreenerAPI,
   chat: chatAPI,
   health: apiHealthAPI,
   dashboard: dashboardAPI,
