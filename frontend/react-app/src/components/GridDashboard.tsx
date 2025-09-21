@@ -5,6 +5,7 @@ import CryptoTile from './CryptoTile';
 import StockTile from './StockTile';
 import StockScreenerTile from './StockScreenerTile';
 import PlaceholderTile from './PlaceholderTile';
+import TileWrapper from './TileWrapper';
 import { UnifiedTile, GridPosition, GridSize } from '../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../utils/tileConfig';
 import TileDataParser from '../utils/TileDataParser';
@@ -579,9 +580,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
     const isTileSelected = selectionState.selectedTiles.has(tile.id);
     
-    // Get tile configuration to check if resizing is supported
-    const tileConfig = getTileConfig(tile.type);
-    const supportsResize = tileConfig.supportsResize;
     
     // Common props for all tiles
     const commonProps = {
@@ -666,49 +664,45 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           transition: isDragging || isResizing ? 'none' : 'all 0.2s ease',
         }}
       >
-        {tile.type === 'crypto' ? (
-          <CryptoTile key={tile.id} {...cryptoProps} />
-        ) : tile.type === 'stock' ? (
-          <StockTile key={tile.id} {...stockProps} />
-        ) : tile.type === 'stock_screener' ? (
-          <StockScreenerTile key={tile.id} {...stockScreenerProps} />
-        ) : (
-          <PlaceholderTile
-            key={tile.id}
-            tile={tile}
-            onRemove={onRemoveTile}
-            onUpdate={onUpdateTile}
-            onSettingsChange={onSettingsChange}
-            onResize={onResizeTile}
-            isSelected={commonProps.isSelected}
-            onSelectionChange={handleTileSelection}
-          />
-        )}
-        
-        {/* Resize handle - only show if tile supports resizing */}
-        {supportsResize && (
-          <Box
-            sx={{
-              position: 'absolute',
-              bottom: -4,
-              right: -4,
-              width: 12,
-              height: 12,
-              backgroundColor: '#3b82f6',
-              borderRadius: '50%',
-              cursor: 'nw-resize',
-              opacity: isResizing ? 1 : 0.6,
-              transition: 'opacity 0.2s ease',
-              '&:hover': {
-                opacity: 1,
-              },
-            }}
-            onMouseDown={(e) => {
-              console.log('🖱️ Resize handle clicked for tile:', tile.id);
-              handleResizeStart(tile.id, e);
-            }}
-          />
-        )}
+        <TileWrapper
+          id={tile.id}
+          type={tile.type}
+          size={{
+            width: displaySize.width * GRID_CELL_SIZE + (displaySize.width - 1) * GRID_GAP,
+            height: displaySize.height * GRID_CELL_SIZE + (displaySize.height - 1) * GRID_GAP,
+          }}
+          gridPosition={displayPosition}
+          gridSize={displaySize}
+          isDragging={isDragging}
+          isResizing={isResizing}
+          isSelected={isTileSelected}
+          onRemove={onRemoveTile}
+          onUpdate={onUpdateTile}
+          onSettingsChange={onSettingsChange}
+          onResize={onResizeTile}
+          onDragStart={(e) => handleDragStart(tile.id, e)}
+          onResizeStart={(id, e) => handleResizeStart(id, e)}
+          onSelectionChange={handleTileSelection}
+        >
+          {tile.type === 'crypto' ? (
+            <CryptoTile key={tile.id} {...cryptoProps} />
+          ) : tile.type === 'stock' ? (
+            <StockTile key={tile.id} {...stockProps} />
+          ) : tile.type === 'stock_screener' ? (
+            <StockScreenerTile key={tile.id} {...stockScreenerProps} />
+          ) : (
+            <PlaceholderTile
+              key={tile.id}
+              tile={tile}
+              onRemove={onRemoveTile}
+              onUpdate={onUpdateTile}
+              onSettingsChange={onSettingsChange}
+              onResize={onResizeTile}
+              isSelected={commonProps.isSelected}
+              onSelectionChange={handleTileSelection}
+            />
+          )}
+        </TileWrapper>
       </Box>
     );
   };

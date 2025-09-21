@@ -268,18 +268,46 @@ Based on the current webpage and user intent, focus on:
 
 """
             
-            # Add recent conversation context
+            # Add recent conversation context with smart selection
             if conversation_history:
-                recent_messages = conversation_history[-5:]  # Last 5 messages
                 conversation_context = "\n💬 RECENT CONVERSATION:\n=====================\n"
                 
-                for msg in recent_messages:
-                    conversation_context += f"User: {msg.get('user_message', '')}\n"
-                    conversation_context += f"Assistant: {msg.get('agent_response', '')[:200]}...\n\n"
+                # Smart context selection: prioritize recent messages but include more if needed
+                total_messages = len(conversation_history)
+                
+                if total_messages <= 5:
+                    # Short conversation: include all messages
+                    recent_messages = conversation_history
+                elif total_messages <= 10:
+                    # Medium conversation: include last 5 messages
+                    recent_messages = conversation_history[-5:]
+                else:
+                    # Long conversation: include last 3 + first few for context
+                    recent_messages = conversation_history[:2] + conversation_history[-3:]
+                
+                for i, msg in enumerate(recent_messages):
+                    user_msg = msg.get('user_message', '').strip()
+                    agent_msg = msg.get('agent_response', '').strip()
+                    
+                    if user_msg:  # Only include if there's a user message
+                        # Use relative numbering for clarity
+                        msg_num = conversation_history.index(msg) + 1
+                        conversation_context += f"Q{msg_num}: {user_msg}\n"
+                        if agent_msg:
+                            # Include more of the response for better context
+                            conversation_context += f"A{msg_num}: {agent_msg[:1000]}{'...' if len(agent_msg) > 1000 else ''}\n\n"
+                
+                # Add context summary for long conversations
+                if total_messages > 10:
+                    conversation_context += f"[Note: This is part of a longer conversation with {total_messages} total exchanges]\n\n"
                 
                 webpage_info += conversation_context
             
             # Add session-specific instructions
+            context_note = ""
+            if len(conversation_history) > 5:
+                context_note = f"- This conversation has {len(conversation_history)} total exchanges - reference earlier context if user asks about previous topics\n"
+            
             webpage_info += f"""
 🎯 SESSION-SPECIFIC INSTRUCTIONS:
 =================================
@@ -288,6 +316,9 @@ Based on the current webpage and user intent, focus on:
 - Maintain conversation continuity within this session
 - Don't mix contexts from other sessions or users
 - Use session-relevant tools: {', '.join(session_variables.get('relevant_tools', []))}
+- IMPORTANT: If user asks follow-up questions about previous responses, reference the conversation history above
+- If user asks about "these stocks" or "which one", check the recent conversation for stock mentions
+{context_note}- If user references earlier parts of conversation not shown above, acknowledge the longer conversation context
 - If user asks about something not related to current context, gently redirect to session focus
 
 """

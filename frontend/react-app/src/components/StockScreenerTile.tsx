@@ -407,23 +407,10 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
-        width: size.width,
-        height: size.height,
-        resize: onDragStart ? 'none' : 'both',
-        minWidth: 350,
-        minHeight: 400,
-        maxWidth: 800,
-        maxHeight: 1000,
-        cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
-        transition: isDragging ? 'none' : 'all 0.3s ease',
-        opacity: isDragging ? 0.8 : 1,
+        width: '100%',
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        '&:hover': {
-          borderColor: '#3b82f6',
-          transform: isDragging ? 'none' : 'translateY(-2px)',
-          boxShadow: isDragging ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
-        },
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -435,21 +422,6 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         },
       }}
       ref={tileRef}
-      onMouseDown={(e) => {
-        // Only start drag if clicking on the tile background, not on interactive elements
-        const target = e.target as HTMLElement;
-        const isInteractiveElement = target.closest('button, input, select, textarea, [role="button"], [role="checkbox"], [role="radio"], [role="slider"], .MuiTableContainer-root, .MuiTable-root, .MuiTableCell-root, .MuiTableHead-root, .MuiTableBody-root, .MuiTableRow-root, .MuiPagination-root, .MuiPaginationItem-root, .MuiSlider-root, .MuiSlider-track, .MuiSlider-rail, .MuiSlider-thumb, .MuiSlider-valueLabel, .MuiChip-root, .MuiAutocomplete-root, .MuiFormControl-root, .MuiDialog-root, .MuiMenu-root, .MuiTooltip-root');
-        
-        if (!isInteractiveElement && onDragStart) {
-          onDragStart(e);
-        }
-      }}
-      onMouseUp={() => {
-        if (onResize && tileRef.current) {
-          const rect = tileRef.current.getBoundingClientRect();
-          onResize(id, { width: rect.width, height: rect.height });
-        }
-      }}
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>

@@ -73,15 +73,11 @@ const StockTile: React.FC<StockTileProps> = ({
   },
   autoRefresh = false,
   isPinned = false,
-  size = { width: 350, height: 400 },
   dashboardContext,
   onRemove,
   onUpdate: _onUpdate,
   onSettingsChange,
-  onResize,
-  onDragStart,
   onResizeStart: _onResizeStart,
-  isDragging = false,
   isResizing: _isResizing = false,
   isSelected = false,
   onSelectionChange,
@@ -289,21 +285,8 @@ const StockTile: React.FC<StockTileProps> = ({
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
-        width: size.width,
-        height: size.height,
-        resize: onDragStart ? 'none' : 'both', // Disable CSS resize when using grid system
-        minWidth: 300,
-        minHeight: 350,
-        maxWidth: 600,
-        maxHeight: 600,
-        cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
-        transition: isDragging ? 'none' : 'all 0.3s ease',
-        opacity: isDragging ? 0.8 : 1,
-        '&:hover': {
-          borderColor: '#10b981',
-          transform: isDragging ? 'none' : 'translateY(-2px)',
-          boxShadow: isDragging ? 'none' : '0 8px 25px rgba(16, 185, 129, 0.15)',
-        },
+        width: '100%',
+        height: '100%',
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -315,13 +298,6 @@ const StockTile: React.FC<StockTileProps> = ({
         },
       }}
       ref={tileRef}
-      onMouseDown={onDragStart}
-      onMouseUp={() => {
-        if (onResize && tileRef.current) {
-          const rect = tileRef.current.getBoundingClientRect();
-          onResize(id, { width: rect.width, height: rect.height });
-        }
-      }}
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>

@@ -72,15 +72,11 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   },
   autoRefresh = false,
   isPinned = false,
-  size = { width: 350, height: 400 },
   dashboardContext,
   onRemove,
   onUpdate: _onUpdate,
   onSettingsChange,
-  onResize,
-  onDragStart,
   onResizeStart: _onResizeStart,
-  isDragging = false,
   isResizing: _isResizing = false,
   isSelected = false,
   onSelectionChange,
@@ -277,21 +273,8 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
-        width: size.width,
-        height: size.height,
-        resize: onDragStart ? 'none' : 'both', // Disable CSS resize when using grid system
-        minWidth: 300,
-        minHeight: 350,
-        maxWidth: 600,
-        maxHeight: 600,
-        cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
-        transition: isDragging ? 'none' : 'all 0.3s ease',
-        opacity: isDragging ? 0.8 : 1,
-        '&:hover': {
-          borderColor: '#f59e0b',
-          transform: isDragging ? 'none' : 'translateY(-2px)',
-          boxShadow: isDragging ? 'none' : '0 8px 25px rgba(245, 158, 11, 0.15)',
-        },
+        width: '100%',
+        height: '100%',
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -303,13 +286,6 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         },
       }}
       ref={tileRef}
-      onMouseDown={onDragStart}
-      onMouseUp={() => {
-        if (onResize && tileRef.current) {
-          const rect = tileRef.current.getBoundingClientRect();
-          onResize(id, { width: rect.width, height: rect.height });
-        }
-      }}
     >
              {/* Header with controls */}
        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
