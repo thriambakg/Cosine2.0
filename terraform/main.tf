@@ -181,7 +181,7 @@ module "api_gateway" {
     }
     # POST method for stock screener
     stock_screener_post = {
-      resource_key            = "stock-screener"
+      resource_key            = "stock_screener"
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
