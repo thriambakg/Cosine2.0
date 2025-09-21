@@ -95,9 +95,8 @@ class ContextAwareAgent:
             # Generate session-aware system prompt
             system_prompt = self._generate_session_prompt(session_context)
             
-            # Temporarily disable conversation history injection to test response parsing
-            # enhanced_system_prompt = self._add_conversation_history_to_prompt(system_prompt, session_context)
-            enhanced_system_prompt = system_prompt
+            # Inject conversation history into system prompt for model switching
+            enhanced_system_prompt = self._add_conversation_history_to_prompt(system_prompt, session_context)
             
             # Get session-specific tools
             session_tools = self._get_session_tools(session_context)

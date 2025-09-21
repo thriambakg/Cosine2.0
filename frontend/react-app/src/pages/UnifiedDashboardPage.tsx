@@ -328,7 +328,8 @@ const UnifiedDashboardPage: React.FC = () => {
 
   // Function to find the next available position for a new tile
   const findNextAvailablePosition = (tileSize: { width: number; height: number } = { width: 4, height: 4 }) => {
-    const GRID_COLUMNS = 12; // Match the GridDashboard constant
+    // Use a reasonable default for grid columns - will be dynamically adjusted by GridDashboard
+    const GRID_COLUMNS = 16; // Increased default to accommodate wider screens
     const MAX_ROWS = 50; // Match the GridDashboard constant for flexibility
     
     // Get all existing tiles for the current tab (not dashboard)
@@ -1074,7 +1075,7 @@ const UnifiedDashboardPage: React.FC = () => {
         getTabsByGroup={getTabsByGroup}
       />
       
-      <Container maxWidth="xl" sx={{ p: 3 }}>
+      <Container maxWidth={false} sx={{ p: 1, px: 2 }}>
         {/* Header */}
         <Box sx={{ mb: 4 }}>
           <Typography 
@@ -1087,7 +1088,7 @@ const UnifiedDashboardPage: React.FC = () => {
               letterSpacing: '1px',
             }}
           >
-            {activeDashboard?.name || 'Dashboard'}
+            {activeTab?.name || 'Dashboard'}
           </Typography>
           <Typography 
             variant="body1" 

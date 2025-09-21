@@ -42,10 +42,16 @@ interface SelectionState {
   contextMenuPosition: { x: number; y: number } | null;
 }
 
-const GRID_COLUMNS = 12; // Total grid columns
 const GRID_CELL_SIZE = 80; // Size of each grid cell in pixels
 const GRID_GAP = 16; // Gap between grid cells
 const MAX_GRID_ROWS = 50; // Maximum grid rows (increased for flexibility)
+
+// Dynamic grid columns based on container width
+const getGridColumns = (containerWidth: number) => {
+  const minColumnWidth = GRID_CELL_SIZE + GRID_GAP;
+  const maxColumns = Math.floor((containerWidth - GRID_GAP) / minColumnWidth);
+  return Math.max(8, Math.min(20, maxColumns)); // Minimum 8, maximum 20 columns
+};
 
 const GridDashboard: React.FC<GridDashboardProps> = ({
   tiles,
@@ -56,6 +62,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   onResizeTile,
   onMoveTile: _onMoveTile,
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(1200); // Default width
   const [dragState, setDragState] = useState<DragState>({
     isDragging: false,
     dragTileId: null,
@@ -77,7 +85,34 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     previewSize: null,
   });
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Calculate dynamic grid columns based on container width
+  const gridColumns = getGridColumns(containerWidth);
+
+  // Resize observer to track container width changes
+  useEffect(() => {
+    const updateContainerWidth = () => {
+      if (containerRef.current) {
+        setContainerWidth(containerRef.current.offsetWidth);
+      }
+    };
+
+    // Initial measurement
+    updateContainerWidth();
+
+    // Create resize observer
+    const resizeObserver = new ResizeObserver(updateContainerWidth);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    // Also listen to window resize as fallback
+    window.addEventListener('resize', updateContainerWidth);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateContainerWidth);
+    };
+  }, []);
 
 
   // Memoize grid props for all tiles to prevent unnecessary recalculations
@@ -130,7 +165,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       // Find first available position
       let foundPosition = false;
       for (let y = 0; y < MAX_GRID_ROWS && !foundPosition; y++) {
-        for (let x = 0; x < GRID_COLUMNS - gridSize.width + 1 && !foundPosition; x++) {
+        for (let x = 0; x < gridColumns - gridSize.width + 1 && !foundPosition; x++) {
           let canPlace = true;
           for (let dx = 0; dx < gridSize.width; dx++) {
             for (let dy = 0; dy < gridSize.height; dy++) {
@@ -171,7 +206,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   const isAreaAvailable = useCallback((position: GridPosition, size: GridSize, excludeTileId?: string): boolean => {
     // Check bounds - allow flexible sizing within reasonable limits
     if (position.x < 0 || position.y < 0 || 
-        position.x + size.width > GRID_COLUMNS || 
+        position.x + size.width > gridColumns || 
         position.y + size.height > MAX_GRID_ROWS) {
       return false;
     }
@@ -231,7 +266,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     if (tile) {
       const { size } = getDefaultGridProps(tile);
       const constrainedPos = {
-        x: Math.max(0, Math.min(gridX, GRID_COLUMNS - size.width)),
+        x: Math.max(0, Math.min(gridX, gridColumns - size.width)),
         y: Math.max(0, gridY),
       };
 
@@ -934,7 +969,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         onContextMenu={handleGridContextMenu}
         sx={{
           display: 'grid',
-          gridTemplateColumns: `repeat(${GRID_COLUMNS}, ${GRID_CELL_SIZE}px)`,
+          gridTemplateColumns: `repeat(${gridColumns}, ${GRID_CELL_SIZE}px)`,
           gridAutoRows: `${GRID_CELL_SIZE}px`,
           gap: `${GRID_GAP}px`,
           minHeight: '600px',
@@ -942,7 +977,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           border: '1px solid #374151',
           borderRadius: '8px',
           overflow: 'hidden',
-          padding: '16px',
+          padding: '8px',
+          width: '100%',
         }}
       >
       {/* Grid background */}
