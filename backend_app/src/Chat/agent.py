@@ -1040,8 +1040,7 @@ enhanced_tools = [
     calculate_stock_correlation,  # Live correlation analysis
     get_volatility_surface,  # New volatility surface analysis
     python_financial_calculator,  # Advanced financial calculations
-    http_request,  # Web request tool
-    get_chat_history  # Get conversation history for context
+    http_request  # Web request tool
 ]
 
 # Function to create agents with different models

@@ -119,8 +119,9 @@ class ContextAwareAgent:
             logger.info(f"🔍 DEBUG: Agent created, initial message count: {len(session_agent.messages)}")
             logger.info(f"🔍 DEBUG: Agent tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in session_tools]}")
             
-            # Note: Conversation history will be fetched via tool call when needed
-            logger.info(f"🔍 DEBUG: Agent created with {len(session_agent.messages)} initial messages")
+            # Inject conversation history directly into agent messages for model switching
+            self._inject_conversation_history(session_agent, session_context)
+            logger.info(f"🔍 DEBUG: Agent created with {len(session_agent.messages)} initial messages after history injection")
             
             # Add session memory if available
             if session_context.get('agent_memory'):
@@ -131,6 +132,61 @@ class ContextAwareAgent:
         except Exception as e:
             logger.error(f"Error creating session agent: {str(e)}")
             raise
+    
+    def _inject_conversation_history(self, agent, session_context: Dict[str, Any]) -> None:
+        """
+        Inject conversation history directly into agent messages for model switching.
+        This ensures the new model has full context without relying on tool calls.
+        
+        Args:
+            agent: The Strands agent instance
+            session_context: Complete session context with messages
+        """
+        try:
+            # Get messages from session context (in DynamoDB format)
+            messages = session_context.get('messages', [])
+            
+            if not messages:
+                logger.info("🔍 DEBUG: No messages to inject into agent")
+                return
+            
+            logger.info(f"🔍 DEBUG: Injecting {len(messages)} messages into agent for model switching")
+            
+            # Convert DynamoDB format messages to agent message format
+            for message in messages:
+                # Extract from DynamoDB format: message.get('M').get('text').get('S')
+                message_map = message.get('M', {})
+                text = message_map.get('text', {}).get('S', '')
+                sender = message_map.get('sender', {}).get('S', '')
+                timestamp = message_map.get('timestamp', {}).get('N', '')
+                model = message_map.get('model', {}).get('S', '')
+                
+                if not text or not sender:
+                    continue
+                
+                # Convert to agent message format
+                if sender == 'user':
+                    agent_message = {
+                        'role': 'user',
+                        'content': text
+                    }
+                elif sender == 'bot':
+                    agent_message = {
+                        'role': 'assistant', 
+                        'content': text
+                    }
+                else:
+                    continue
+                
+                # Add to agent's messages
+                agent.messages.append(agent_message)
+                logger.info(f"🔍 DEBUG: Injected {sender} message: {text[:50]}...")
+            
+            logger.info(f"🔍 DEBUG: Successfully injected {len(agent.messages)} total messages into agent")
+            
+        except Exception as e:
+            logger.error(f"🔍 DEBUG: Error injecting conversation history: {str(e)}")
+            # Don't raise - this is not critical, agent can still work without history injection
     
     def _generate_session_prompt(self, session_context: Dict[str, Any]) -> str:
         """
@@ -172,16 +228,15 @@ class ContextAwareAgent:
 - ANALYSIS MODE: Financial analysis and research (focus on current data tools)
 - Other modes will be implemented in future updates
 
-🔧 AVAILABLE TOOLS:
-You have access to powerful financial tools including:
-- get_financial_data(): Real-time stock/crypto data from yfinance
-- analyze_portfolio(): Portfolio analysis with live correlations
-- get_technical_analysis(): Technical indicators (RSI, MACD, etc.)
-- search_financial_news(): Recent financial news and developments
-- calculate_stock_correlation(): Live correlation analysis
-- get_volatility_surface(): Volatility analysis and options data
-- python_financial_calculator(): Advanced financial calculations
-- get_chat_history(session_id, user_id): Get conversation history for context continuity (CHATTING MODE ONLY)
+         🔧 AVAILABLE TOOLS:
+         You have access to powerful financial tools including:
+         - get_financial_data(): Real-time stock/crypto data from yfinance
+         - analyze_portfolio(): Portfolio analysis with live correlations
+         - get_technical_analysis(): Technical indicators (RSI, MACD, etc.)
+         - search_financial_news(): Recent financial news and developments
+         - calculate_stock_correlation(): Live correlation analysis
+         - get_volatility_surface(): Volatility analysis and options data
+         - python_financial_calculator(): Advanced financial calculations
 
 📊 RESPONSE GUIDELINES:
 - ALWAYS use tools for financial queries - never provide generic advice
@@ -191,32 +246,24 @@ You have access to powerful financial tools including:
 - Use current market data and real-time information
 - Be transparent about data sources and limitations
 
-⚡ WORKFLOW:
-1. IMMEDIATELY call relevant tools (don't explain what you'll do)
-2. FOR PERSONAL QUESTIONS: ALWAYS start with get_chat_history(session_id, user_id) to check previous messages
-3. FOR STOCK ANALYSIS: ALWAYS start with get_financial_data(symbol) for stock questions
-4. USE multiple tools per query for comprehensive analysis
-5. SYNTHESIZE real tool data into actionable insights
+         ⚡ WORKFLOW:
+         1. IMMEDIATELY call relevant tools (don't explain what you'll do)
+         2. FOR PERSONAL QUESTIONS: Check the conversation history in your messages for previous user statements
+         3. FOR STOCK ANALYSIS: ALWAYS start with get_financial_data(symbol) for stock questions
+         4. USE multiple tools per query for comprehensive analysis
+         5. SYNTHESIZE real tool data into actionable insights
 
-         💬 CHAT HISTORY RULES (CHATTING MODE ONLY):
-         - ALWAYS call get_chat_history() FIRST when user asks about their personal holdings, portfolio, or previous conversations
-         - ONLY use the session_id and user_id provided in the Session Context
-         - NEVER attempt to access other users' chat sessions
-         - Use chat history when user asks "How many shares do I have?" or "What did I say before?"
-         - For general financial analysis queries, focus on current data tools, not chat history
-         - IMPORTANT: If user mentions personal holdings in previous messages, ALWAYS check chat history first
-         
-         🔍 INTERPRETING CHAT HISTORY RESPONSE:
-         - If the response shows "🎯 USER'S PERSONAL HOLDINGS MENTIONED IN THIS CONVERSATION:" with holdings listed, USE THAT INFORMATION
-         - If the user previously said "I have X shares of YYY", then they HAVE X shares of YYY
-         - DO NOT say "there is no conversation history" if the tool returns holdings information
-         - BE DIRECT: If chat history shows the user has 2 shares of AAPL, respond "You have 2 shares of AAPL"
+         💬 CONVERSATION HISTORY RULES:
+         - You have access to the full conversation history through your message history
+         - When user asks about personal holdings ("How many shares do I have?"), check your message history for previous statements
+         - If you see a previous user message like "I have 2 shares of AAPL", then the user HAS 2 shares of AAPL
+         - NEVER say "I don't have any record" when the conversation history clearly shows user's holdings
+         - BE DIRECT: If conversation history shows the user has 2 shares of AAPL, respond "You have 2 shares of AAPL"
 
          EXAMPLE USAGE:
          User: "How many shares of AAPL do I have?"
-         Agent: [CALLS get_chat_history(session_id, user_id)]
-         Agent: [If response shows "🎯 USER'S PERSONAL HOLDINGS: • I have 2 shares of aapl"]
-         Agent: [Respond directly: "You have 2 shares of AAPL"]
+         Agent: [Checks message history for previous user statements about AAPL]
+         Agent: [If history shows user said "I have 2 shares of aapl", respond directly: "You have 2 shares of AAPL"]
 
 🔴 NEVER SAY:
 - "I don't have access to real data"
@@ -224,8 +271,8 @@ You have access to powerful financial tools including:
 - "I cannot access live market data"
 - "Hello! I'm Cosine, your AI financial analyst"
 - Any greeting or welcome messages
-- Contradictory statements like "there is no conversation history" followed by "based on your previous message"
-- "I'm sorry, but there is no conversation history" when the tool clearly returns holdings information
+- "I don't have any record of your holdings" when the conversation history clearly shows user's holdings
+- "I'm unable to determine" when you can clearly see the user's holdings in the conversation history
 
 ✅ ALWAYS SAY:
 - "Based on current market data from yfinance..."
