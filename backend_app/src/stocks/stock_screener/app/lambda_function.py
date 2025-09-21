@@ -135,7 +135,7 @@ def rate_limit_check(operation_type="screener"):
         cutoff_time = current_time - 3600
         request_timestamps = {k: v for k, v in request_timestamps.items() if v > cutoff_time}
 
-def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES):
+def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES, json_payload=None):
     """Make Yahoo Finance request with retry logic - same as stock-data lambda"""
     for attempt in range(max_retries):
         try:
@@ -144,7 +144,12 @@ def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES):
             time.sleep(delay)
             
             logger.info(f"Making Yahoo Finance request (attempt {attempt + 1}/{max_retries})")
-            response = requests.get(url, headers=headers, timeout=30)
+            
+            # Use POST with JSON payload if provided, otherwise GET
+            if json_payload:
+                response = requests.post(url, headers=headers, json=json_payload, timeout=30)
+            else:
+                response = requests.get(url, headers=headers, timeout=30)
             
             if response.status_code == 200:
                 return response
@@ -253,10 +258,8 @@ def screen_stocks_yahoo_finance(criteria: Dict[str, Any]) -> List[str]:
         logger.info(f"Making Yahoo Finance screener request with payload: {payload}")
         
         # Make the request with retry logic
-        response = make_yahoo_request_with_retry(
-            f"{base_url}?formatted=true&lang=en-US&region=US&{urlencode(payload)}",
-            headers
-        )
+        # Note: Yahoo Finance screener API expects POST with JSON body, not GET with query params
+        response = make_yahoo_request_with_retry(base_url, headers, json_payload=payload)
         
         if response.status_code != 200:
             logger.error(f"Yahoo Finance screener request failed: {response.status_code}")

@@ -52,13 +52,6 @@ const getGridColumns = (containerWidth: number) => {
   const maxColumns = Math.floor((containerWidth - GRID_GAP) / minColumnWidth);
   const calculatedColumns = Math.max(8, Math.min(20, maxColumns)); // Minimum 8, maximum 20 columns
   
-  console.log('🔢 Grid columns calculation:', {
-    containerWidth,
-    minColumnWidth,
-    maxColumns,
-    calculatedColumns
-  });
-  
   return calculatedColumns;
 };
 
@@ -102,7 +95,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const updateContainerWidth = () => {
       if (containerRef.current) {
         const newWidth = containerRef.current.offsetWidth;
-        console.log('🔄 Container width updated:', { newWidth, oldWidth: containerWidth });
         setContainerWidth(newWidth);
       }
     };
@@ -111,15 +103,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     updateContainerWidth();
 
     // Create resize observer for the container
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        console.log('📏 ResizeObserver triggered:', {
-          target: entry.target,
-          contentRect: entry.contentRect,
-          width: entry.contentRect.width
-        });
-        updateContainerWidth();
-      }
+    const resizeObserver = new ResizeObserver(() => {
+      updateContainerWidth();
     });
     
     if (containerRef.current) {
@@ -128,7 +113,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
     // Listen to window resize events (including dev tools open/close)
     const handleWindowResize = () => {
-      console.log('🪟 Window resize detected');
       // Use requestAnimationFrame to ensure DOM has updated
       requestAnimationFrame(updateContainerWidth);
     };
@@ -144,7 +128,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       if (containerRef.current) {
         const currentWidth = containerRef.current.offsetWidth;
         if (currentWidth !== containerWidth) {
-          console.log('⏰ Periodic check detected width change:', { currentWidth, storedWidth: containerWidth });
           updateContainerWidth();
         }
       }

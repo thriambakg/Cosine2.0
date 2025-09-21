@@ -41,7 +41,7 @@ import {
   AttachMoney as MoneyIcon,
   Speed as SpeedIcon,
 } from '@mui/icons-material';
-// import { useStockScreener } from '../hooks/useAPI'; // Will be used when Lambda is ready
+import { useStockScreener } from '../hooks/useAPI';
 
 interface StockScreenerTileProps {
   id: string;
@@ -284,16 +284,22 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     });
   }, []);
 
-  // Memoize the fetch function to prevent constant re-renders
-  const fetchStockScreenerData = useCallback(async () => {
-    // For now, use mock data. In the future, this will call the Lambda API
-    return new Promise<StockResult[]>((resolve) => {
-      setTimeout(() => {
-        const filteredResults = filterStocks(mockStockData, localCriteria);
-        resolve(filteredResults);
-      }, 1000); // Simulate API delay
-    });
-  }, [localCriteria, filterStocks]);
+  // Use the real stock screener API hook
+  const { data: apiData, loading: apiLoading, error: apiError, execute: executeScreener } = useStockScreener();
+
+  // Handle API loading state
+  useEffect(() => {
+    if (apiLoading !== undefined) {
+      setIsLoading(apiLoading);
+    }
+  }, [apiLoading]);
+
+  // Handle API errors
+  useEffect(() => {
+    if (apiError) {
+      setError(`API Error: ${apiError.message || 'Failed to fetch stock data'}`);
+    }
+  }, [apiError]);
 
   // Run stock screener
   const runScreener = useCallback(async () => {
@@ -301,22 +307,26 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     setError(null);
     
     try {
-      const filteredResults = await fetchStockScreenerData();
-      setStockResults(filteredResults);
+      // Use the API hook to fetch data with criteria
+      const response = await executeScreener(localCriteria);
       
-      // Update tile with results
-      onUpdate(id, {
-        results: filteredResults,
-        criteria: localCriteria,
-        lastUpdated: new Date().toISOString(),
-      });
+      if (response?.results) {
+        setStockResults(response.results);
+        
+        // Update tile with results
+        onUpdate(id, {
+          results: response.results,
+          criteria: localCriteria,
+          lastUpdated: new Date().toISOString(),
+        });
+      }
     } catch (err) {
       setError('Failed to fetch stock data');
       console.error('Stock screener error:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [fetchStockScreenerData, onUpdate, id, localCriteria]);
+  }, [executeScreener, localCriteria, id, onUpdate]);
 
   // Auto-refresh functionality
   useEffect(() => {
