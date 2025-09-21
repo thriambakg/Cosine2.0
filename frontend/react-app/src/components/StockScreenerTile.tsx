@@ -97,13 +97,9 @@ interface StockResult {
 
 const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   id,
-  size = { width: 400, height: 600 },
   onRemove,
   onUpdate,
   onSettingsChange,
-  onResize,
-  onDragStart,
-  isDragging = false,
   isSelected = false,
   onSelectionChange,
   criteria = {

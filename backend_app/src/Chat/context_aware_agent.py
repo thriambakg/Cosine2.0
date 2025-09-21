@@ -159,8 +159,9 @@ class ContextAwareAgent:
             history_section = "\n\n" + "="*80 + "\n"
             history_section += "📚 CONVERSATION HISTORY FOR CONTEXT:\n"
             history_section += "="*80 + "\n"
-            history_section += "IMPORTANT: The following conversation history contains previous user statements.\n"
-            history_section += "When the user asks a question which could possibly linked to a previous statement, CHECK THIS SECTION FIRST.\n\n"
+            history_section += "🚨 CRITICAL: The following conversation history contains previous user statements AND your previous responses.\n"
+            history_section += "When the user asks follow-up questions like 'which one' or 'which has the lowest', CHECK THIS SECTION FIRST.\n"
+            history_section += "ALWAYS reference the specific stocks, numbers, and data from your previous responses in this history.\n\n"
             
             for i, conv in enumerate(conversation_history, 1):
                 user_message = conv.get('user_message', '').strip()
@@ -170,7 +171,9 @@ class ContextAwareAgent:
                     history_section += f"User Message {i}: \"{user_message}\"\n"
                 
                 if agent_response:
-                    history_section += f"Agent Response {i}: \"{agent_response[:200]}...\"\n"
+                    # Include more of the response for better context, especially for stock recommendations
+                    truncated_response = agent_response[:1000] + "..." if len(agent_response) > 1000 else agent_response
+                    history_section += f"Agent Response {i}: \"{truncated_response}\"\n"
                 
                 history_section += "---\n"
             
@@ -179,7 +182,10 @@ class ContextAwareAgent:
             history_section += "="*80 + "\n"
             history_section += "If the user asks about their holdings or shares, ALWAYS check the conversation history above.\n"
             history_section += "For example, if the user previously said 'I have 2 shares of AAPL', then they HAVE 2 shares of AAPL.\n"
-            history_section += "DO NOT say 'I don't have any record' if the conversation history shows their holdings.\n"
+            history_section += "DO NOT say 'I don't have any record' if the conversation history shows their holdings.\n\n"
+            history_section += "If the user asks follow-up questions like 'which one has the lowest market cap' or 'which stock should I pick',\n"
+            history_section += "ALWAYS reference the specific stocks and data from your previous response in the conversation history above.\n"
+            history_section += "DO NOT mention stocks that weren't in your previous response.\n"
             history_section += "="*80 + "\n"
             
             logger.info(f"🔍 DEBUG: Added conversation history to system prompt: {len(history_section)} characters")
