@@ -124,6 +124,9 @@ module "api_gateway" {
     stock_data = {
       path_part = "stock-data"
     }
+    stock_screener = {
+      path_part = "stock-screener"
+    }
     portfolio = {
       path_part = "portfolio"
     }
@@ -174,6 +177,15 @@ module "api_gateway" {
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
       lambda_arn              = module.stock_data_lambda.function_arn
+      request_parameters      = {}
+    }
+    # POST method for stock screener
+    stock_screener_post = {
+      resource_key            = "stock-screener"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.stock_screener_lambda.function_arn
       request_parameters      = {}
     }
     # POST method for portfolio analysis (wrapper)
@@ -431,7 +443,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "15"
+  deployment_trigger = "16"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -1169,6 +1181,42 @@ module "portfolio_wrapper_lambda" {
   # Additional IAM policies for Lambda invocation
   additional_policy_arns = [
     aws_iam_policy.lambda_invoke_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Stock Screener Lambda Function
+module "stock_screener_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-stock-screener-${var.environment}"
+  description   = "Lambda function for stock screening using yfinance and Alpha Vantage"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 300  # 5 minutes for bulk screening operations
+  memory_size   = 1024 # Increased memory for parallel processing
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/stock_screener/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    # Deployment trigger - increment this when you want to force a redeployment
+    DEPLOYMENT_TRIGGER = "1"
+  }
+
+  # Attach core and financial layers
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn
   ]
 
   tags = var.common_tags

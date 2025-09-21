@@ -50,7 +50,16 @@ const MAX_GRID_ROWS = 50; // Maximum grid rows (increased for flexibility)
 const getGridColumns = (containerWidth: number) => {
   const minColumnWidth = GRID_CELL_SIZE + GRID_GAP;
   const maxColumns = Math.floor((containerWidth - GRID_GAP) / minColumnWidth);
-  return Math.max(8, Math.min(20, maxColumns)); // Minimum 8, maximum 20 columns
+  const calculatedColumns = Math.max(8, Math.min(20, maxColumns)); // Minimum 8, maximum 20 columns
+  
+  console.log('🔢 Grid columns calculation:', {
+    containerWidth,
+    minColumnWidth,
+    maxColumns,
+    calculatedColumns
+  });
+  
+  return calculatedColumns;
 };
 
 const GridDashboard: React.FC<GridDashboardProps> = ({
@@ -92,27 +101,62 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   useEffect(() => {
     const updateContainerWidth = () => {
       if (containerRef.current) {
-        setContainerWidth(containerRef.current.offsetWidth);
+        const newWidth = containerRef.current.offsetWidth;
+        console.log('🔄 Container width updated:', { newWidth, oldWidth: containerWidth });
+        setContainerWidth(newWidth);
       }
     };
 
     // Initial measurement
     updateContainerWidth();
 
-    // Create resize observer
-    const resizeObserver = new ResizeObserver(updateContainerWidth);
+    // Create resize observer for the container
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        console.log('📏 ResizeObserver triggered:', {
+          target: entry.target,
+          contentRect: entry.contentRect,
+          width: entry.contentRect.width
+        });
+        updateContainerWidth();
+      }
+    });
+    
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
 
-    // Also listen to window resize as fallback
-    window.addEventListener('resize', updateContainerWidth);
+    // Listen to window resize events (including dev tools open/close)
+    const handleWindowResize = () => {
+      console.log('🪟 Window resize detected');
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(updateContainerWidth);
+    };
+    
+    window.addEventListener('resize', handleWindowResize);
+    
+    // Also observe the document body for additional coverage
+    const bodyObserver = new ResizeObserver(handleWindowResize);
+    bodyObserver.observe(document.body);
+
+    // Add a periodic check as a safety net (every 2 seconds)
+    const periodicCheck = setInterval(() => {
+      if (containerRef.current) {
+        const currentWidth = containerRef.current.offsetWidth;
+        if (currentWidth !== containerWidth) {
+          console.log('⏰ Periodic check detected width change:', { currentWidth, storedWidth: containerWidth });
+          updateContainerWidth();
+        }
+      }
+    }, 2000);
 
     return () => {
       resizeObserver.disconnect();
-      window.removeEventListener('resize', updateContainerWidth);
+      bodyObserver.disconnect();
+      window.removeEventListener('resize', handleWindowResize);
+      clearInterval(periodicCheck);
     };
-  }, []);
+  }, [containerWidth]);
 
 
   // Memoize grid props for all tiles to prevent unnecessary recalculations
