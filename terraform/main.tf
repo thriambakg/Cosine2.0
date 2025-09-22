@@ -565,7 +565,7 @@ resource "aws_iam_policy" "lambda_kms_policy" {
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn,
-          data.terraform_remote_state.base_infra.outputs.kms_module_main_key_arn
+          data.terraform_remote_state.base_infra.outputs.kms_key_arn
         ]
       }
     ]
