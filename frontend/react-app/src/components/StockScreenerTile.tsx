@@ -307,8 +307,14 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     setError(null);
     
     try {
+      // Format the request properly for the API
+      const requestPayload = {
+        criteria: localCriteria,
+        maxResults: localDisplayOptions.maxResults || 20
+      };
+      
       // Use the API hook to fetch data with criteria
-      const response = await executeScreener(localCriteria);
+      const response = await executeScreener(requestPayload);
       
       if (response?.results) {
         setStockResults(response.results);
@@ -326,7 +332,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [executeScreener, localCriteria, id, onUpdate]);
+  }, [executeScreener, localCriteria, localDisplayOptions.maxResults, id, onUpdate]);
 
   // Auto-refresh functionality
   useEffect(() => {
