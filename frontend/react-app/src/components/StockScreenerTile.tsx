@@ -97,6 +97,7 @@ interface StockResult {
 
 const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   id,
+  size,
   onRemove,
   onUpdate,
   onSettingsChange,
@@ -403,8 +404,49 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     return `$${range[0]} - $${range[1]}`;
   };
 
-  // Pagination
-  const resultsPerPage = 5;
+  // Dynamic pagination based on tile height
+  const calculateResultsPerPage = useCallback(() => {
+    if (!tileRef.current) return 5; // Default fallback
+    
+    const tileHeight = tileRef.current.clientHeight;
+    const headerHeight = 60; // Approximate header height
+    const paginationHeight = 40; // Approximate pagination height
+    const tableHeaderHeight = 40; // Table header height
+    const rowHeight = 32; // Approximate row height
+    const padding = 24; // Tile padding (12px * 2)
+    
+    // Calculate available height for table rows
+    const availableHeight = tileHeight - headerHeight - paginationHeight - tableHeaderHeight - padding;
+    const maxRows = Math.floor(availableHeight / rowHeight);
+    
+    // Ensure minimum of 3 rows and maximum of 20 rows
+    return Math.max(3, Math.min(20, maxRows));
+  }, []);
+
+  const [resultsPerPage, setResultsPerPage] = useState(5);
+  
+  // Update results per page when tile size changes
+  useEffect(() => {
+    const newResultsPerPage = calculateResultsPerPage();
+    setResultsPerPage(newResultsPerPage);
+  }, [calculateResultsPerPage, size]);
+
+  // Add ResizeObserver to recalculate when tile is resized
+  useEffect(() => {
+    if (!tileRef.current) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      const newResultsPerPage = calculateResultsPerPage();
+      setResultsPerPage(newResultsPerPage);
+    });
+
+    resizeObserver.observe(tileRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [calculateResultsPerPage]);
+
   const totalPages = Math.ceil(stockResults.length / resultsPerPage);
   const startIndex = (currentPage - 1) * resultsPerPage;
   const endIndex = startIndex + resultsPerPage;
@@ -676,7 +718,17 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1, pt: 1, borderTop: '1px solid rgba(55, 65, 81, 0.3)' }}>
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              mt: 1, 
+              pt: 1, 
+              borderTop: '1px solid rgba(55, 65, 81, 0.3)' 
+            }}>
+              <Typography variant="caption" color="#6b7280" sx={{ fontSize: '0.75rem' }}>
+                Showing {startIndex + 1}-{Math.min(endIndex, stockResults.length)} of {stockResults.length} results
+              </Typography>
               <Pagination
                 count={totalPages}
                 page={currentPage}
