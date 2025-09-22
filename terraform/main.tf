@@ -187,6 +187,7 @@ module "api_gateway" {
       integration_http_method = "POST"
       lambda_arn              = module.stock_screener_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     # POST method for portfolio analysis (wrapper)
     portfolio_post = {
@@ -448,7 +449,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "17"
+  deployment_trigger = "19"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -466,7 +467,8 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
           "secretsmanager:DescribeSecret"
         ]
         Resource = [
-          "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*"
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*",
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-alpha-vantage-api-${var.environment}*"
         ]
       },
       {

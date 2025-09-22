@@ -44,6 +44,7 @@ variable "methods" {
     integration_http_method = string
     lambda_arn              = optional(string)
     request_parameters      = optional(map(bool), {})
+    timeout_milliseconds    = optional(number, 29000) # Default 29 seconds, max for API Gateway
   }))
   default = {}
 }

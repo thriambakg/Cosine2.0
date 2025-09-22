@@ -89,6 +89,7 @@ resource "aws_api_gateway_integration" "this" {
   type                    = each.value.integration_type
   integration_http_method = each.value.integration_http_method
   uri                     = each.value.lambda_arn != null ? "arn:aws:apigateway:${data.aws_region.current.name}:lambda:path/2015-03-31/functions/${each.value.lambda_arn}/invocations" : null
+  timeout_milliseconds    = each.value.timeout_milliseconds
 
   # For MOCK integrations
   request_templates = each.value.integration_type == "MOCK" ? {
