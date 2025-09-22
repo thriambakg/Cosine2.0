@@ -30,6 +30,42 @@ BATCH_SIZE = 50  # Process stocks in batches
 ALPHA_VANTAGE_API_KEY = None
 ALPHA_VANTAGE_SECRET_NAME = "cosine-alpha-vantage-api-production"
 
+def get_alpha_vantage_api_key():
+    """
+    Fetch Alpha Vantage API key from AWS Secrets Manager
+    """
+    global ALPHA_VANTAGE_API_KEY
+    
+    if ALPHA_VANTAGE_API_KEY is not None:
+        return ALPHA_VANTAGE_API_KEY
+    
+    try:
+        # Initialize Secrets Manager client
+        secrets_client = boto3.client('secretsmanager')
+        
+        # Get secret name from environment variable or use default
+        secret_name = os.environ.get('ALPHA_VANTAGE_SECRET_NAME', ALPHA_VANTAGE_SECRET_NAME)
+        
+        logger.info(f"Fetching Alpha Vantage API key from secret: {secret_name}")
+        
+        # Retrieve the secret
+        response = secrets_client.get_secret_value(SecretId=secret_name)
+        secret_data = json.loads(response['SecretString'])
+        
+        # Extract API key
+        ALPHA_VANTAGE_API_KEY = secret_data.get('api_key')
+        
+        if ALPHA_VANTAGE_API_KEY:
+            logger.info("Alpha Vantage API key successfully retrieved")
+            return ALPHA_VANTAGE_API_KEY
+        else:
+            logger.error("Alpha Vantage API key not found in secret")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Failed to fetch Alpha Vantage API key: {str(e)}")
+        return None
+
 # In-memory cache for rate limiting (simple approach for Lambda)
 request_timestamps = {}
 
@@ -369,44 +405,54 @@ def get_stocks_by_industry_fallback(industries: List[str]) -> List[str]:
 
 def fetch_stock_basic_info(symbol: str, use_alpha_vantage: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Fetch basic stock information for screening with retry logic for rate limiting.
+    Fetch basic stock information for screening with retry logic and Alpha Vantage fallback.
     Returns None if stock doesn't meet basic criteria or fails to fetch.
     """
-    max_retries = 3
-    base_delay = 2.0
+    max_retries = 2  # Reduced retries since we have fallback
+    base_delay = 3.0
     
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"Fetching basic info for {symbol} (attempt {attempt + 1}/{max_retries})")
-            
-            if use_alpha_vantage:
-                result = fetch_stock_info_alpha_vantage(symbol)
-            else:
+    # Try yfinance first (unless explicitly requested to use Alpha Vantage)
+    if not use_alpha_vantage:
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Fetching basic info for {symbol} via yfinance (attempt {attempt + 1}/{max_retries})")
                 result = fetch_stock_info_yfinance(symbol)
-            
-            if result:
-                return result
-            else:
-                logger.warning(f"No data returned for {symbol}")
-                return None
                 
-        except Exception as e:
-            error_msg = str(e)
-            logger.warning(f"Attempt {attempt + 1} failed for {symbol}: {error_msg}")
-            
-            # If it's a rate limit error, wait longer
-            if "429" in error_msg or "Too Many Requests" in error_msg:
-                if attempt < max_retries - 1:  # Don't wait on last attempt
-                    wait_time = base_delay * (2 ** attempt) + random.uniform(1.0, 3.0)
-                    logger.info(f"Rate limited for {symbol}, waiting {wait_time:.2f}s before retry")
-                    time.sleep(wait_time)
-                    continue
-            else:
-                # For other errors, don't retry
-                logger.warning(f"Non-rate-limit error for {symbol}: {error_msg}")
-                return None
+                if result:
+                    logger.info(f"✅ yfinance successful for {symbol}")
+                    return result
+                else:
+                    logger.warning(f"No data returned from yfinance for {symbol}")
+                    
+            except Exception as e:
+                error_msg = str(e)
+                logger.warning(f"yfinance attempt {attempt + 1} failed for {symbol}: {error_msg}")
+                
+                # If it's a rate limit error, wait with exponential backoff + jitter
+                if "429" in error_msg or "Too Many Requests" in error_msg:
+                    if attempt < max_retries - 1:  # Don't wait on last attempt
+                        wait_time = base_delay * (2 ** attempt) + random.uniform(2.0, 5.0)
+                        logger.info(f"Rate limited for {symbol}, waiting {wait_time:.2f}s before retry")
+                        time.sleep(wait_time)
+                        continue
+                else:
+                    # For other errors, don't retry yfinance
+                    logger.warning(f"Non-rate-limit error for {symbol}: {error_msg}")
+                    break
     
-    logger.warning(f"All attempts failed for {symbol}")
+    # Fallback to Alpha Vantage if yfinance failed
+    try:
+        logger.info(f"🔄 Falling back to Alpha Vantage for {symbol}")
+        result = fetch_stock_info_alpha_vantage(symbol)
+        if result:
+            logger.info(f"✅ Alpha Vantage successful for {symbol}")
+            return result
+        else:
+            logger.warning(f"No data returned from Alpha Vantage for {symbol}")
+    except Exception as e:
+        logger.warning(f"Alpha Vantage fallback failed for {symbol}: {str(e)}")
+    
+    logger.warning(f"All methods failed for {symbol}")
     return None
 
 def fetch_stock_info_yfinance(symbol: str) -> Optional[Dict[str, Any]]:
@@ -468,8 +514,11 @@ def fetch_stock_info_yfinance(symbol: str) -> Optional[Dict[str, Any]]:
 def fetch_stock_info_alpha_vantage(symbol: str) -> Optional[Dict[str, Any]]:
     """Fetch stock info using Alpha Vantage API"""
     try:
+        logger.info(f"🔑 Using Alpha Vantage API for {symbol}")
+        
         api_key = get_alpha_vantage_api_key()
         if not api_key:
+            logger.error("Alpha Vantage API key not available")
             return None
         
         rate_limit_check(f"alpha_vantage_{symbol}")
@@ -612,9 +661,9 @@ def screen_stocks_comprehensive(criteria: Dict[str, Any], max_results: int = 100
         # Step 2: Get detailed data using smart batching to balance speed vs rate limits
         all_stocks = []
         
-        # Process in small batches with controlled concurrency
-        batch_size = min(3, MAX_WORKERS)  # Process 3 stocks at a time (or MAX_WORKERS if smaller)
-        delay_between_batches = 1.5  # 1.5 second delay between batches
+        # Process in small batches with controlled concurrency and adaptive delays
+        batch_size = min(2, MAX_WORKERS)  # Reduced to 2 stocks per batch to avoid rate limits
+        base_delay_between_batches = 2.5  # Base delay between batches
         
         for i in range(0, len(stock_symbols), batch_size):
             batch = stock_symbols[i:i + batch_size]
@@ -650,9 +699,12 @@ def screen_stocks_comprehensive(criteria: Dict[str, Any], max_results: int = 100
                 logger.info(f"Early termination: collected {len(all_stocks)} stocks")
                 break
             
-            # Delay between batches (except for the last batch)
+            # Adaptive delay between batches with jitter (except for the last batch)
             if i + batch_size < len(stock_symbols):
-                logger.info(f"Waiting {delay_between_batches}s before next batch...")
+                # Add jitter to prevent thundering herd
+                jitter = random.uniform(0.5, 1.5)
+                delay_between_batches = base_delay_between_batches + jitter
+                logger.info(f"Waiting {delay_between_batches:.2f}s before next batch...")
                 time.sleep(delay_between_batches)
         
         logger.info(f"Collected {len(all_stocks)} stocks before filtering")
