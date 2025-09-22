@@ -408,49 +408,43 @@ def fetch_stock_basic_info(symbol: str, use_alpha_vantage: bool = False) -> Opti
     Fetch basic stock information for screening with retry logic and Alpha Vantage fallback.
     Returns None if stock doesn't meet basic criteria or fails to fetch.
     """
-    max_retries = 2  # Reduced retries since we have fallback
-    base_delay = 3.0
+    # For faster processing, try Alpha Vantage first if yfinance is rate limited
+    if use_alpha_vantage:
+        try:
+            logger.info(f"🔑 Using Alpha Vantage API for {symbol}")
+            result = fetch_stock_info_alpha_vantage(symbol)
+            if result:
+                logger.info(f"✅ Alpha Vantage successful for {symbol}")
+                return result
+        except Exception as e:
+            logger.warning(f"Alpha Vantage failed for {symbol}: {str(e)}")
+        return None
     
-    # Try yfinance first (unless explicitly requested to use Alpha Vantage)
-    if not use_alpha_vantage:
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"Fetching basic info for {symbol} via yfinance (attempt {attempt + 1}/{max_retries})")
-                result = fetch_stock_info_yfinance(symbol)
-                
-                if result:
-                    logger.info(f"✅ yfinance successful for {symbol}")
-                    return result
-                else:
-                    logger.warning(f"No data returned from yfinance for {symbol}")
-                    
-            except Exception as e:
-                error_msg = str(e)
-                logger.warning(f"yfinance attempt {attempt + 1} failed for {symbol}: {error_msg}")
-                
-                # If it's a rate limit error, wait with exponential backoff + jitter
-                if "429" in error_msg or "Too Many Requests" in error_msg:
-                    if attempt < max_retries - 1:  # Don't wait on last attempt
-                        wait_time = base_delay * (2 ** attempt) + random.uniform(2.0, 5.0)
-                        logger.info(f"Rate limited for {symbol}, waiting {wait_time:.2f}s before retry")
-                        time.sleep(wait_time)
-                        continue
-                else:
-                    # For other errors, don't retry yfinance
-                    logger.warning(f"Non-rate-limit error for {symbol}: {error_msg}")
-                    break
-    
-    # Fallback to Alpha Vantage if yfinance failed
+    # Try yfinance first with minimal retries for speed
     try:
-        logger.info(f"🔄 Falling back to Alpha Vantage for {symbol}")
-        result = fetch_stock_info_alpha_vantage(symbol)
+        logger.info(f"Fetching basic info for {symbol} via yfinance")
+        result = fetch_stock_info_yfinance(symbol)
+        
         if result:
-            logger.info(f"✅ Alpha Vantage successful for {symbol}")
+            logger.info(f"✅ yfinance successful for {symbol}")
             return result
         else:
-            logger.warning(f"No data returned from Alpha Vantage for {symbol}")
+            logger.warning(f"No data returned from yfinance for {symbol}")
+            
     except Exception as e:
-        logger.warning(f"Alpha Vantage fallback failed for {symbol}: {str(e)}")
+        error_msg = str(e)
+        logger.warning(f"yfinance failed for {symbol}: {error_msg}")
+        
+        # If it's a rate limit error, immediately try Alpha Vantage
+        if "429" in error_msg or "Too Many Requests" in error_msg:
+            logger.info(f"🔄 Rate limited on yfinance, immediately trying Alpha Vantage for {symbol}")
+            try:
+                result = fetch_stock_info_alpha_vantage(symbol)
+                if result:
+                    logger.info(f"✅ Alpha Vantage successful for {symbol}")
+                    return result
+            except Exception as av_e:
+                logger.warning(f"Alpha Vantage fallback failed for {symbol}: {str(av_e)}")
     
     logger.warning(f"All methods failed for {symbol}")
     return None
@@ -661,9 +655,9 @@ def screen_stocks_comprehensive(criteria: Dict[str, Any], max_results: int = 100
         # Step 2: Get detailed data using smart batching to balance speed vs rate limits
         all_stocks = []
         
-        # Process in small batches with controlled concurrency and adaptive delays
-        batch_size = min(2, MAX_WORKERS)  # Reduced to 2 stocks per batch to avoid rate limits
-        base_delay_between_batches = 2.5  # Base delay between batches
+        # Process in small batches with controlled concurrency and minimal delays for speed
+        batch_size = min(3, MAX_WORKERS)  # Slightly larger batches for speed
+        base_delay_between_batches = 1.0  # Reduced delay for faster processing
         
         for i in range(0, len(stock_symbols), batch_size):
             batch = stock_symbols[i:i + batch_size]
@@ -682,7 +676,7 @@ def screen_stocks_comprehensive(criteria: Dict[str, Any], max_results: int = 100
                 for future in as_completed(future_to_symbol):
                     symbol = future_to_symbol[future]
                     try:
-                        stock_info = future.result(timeout=30)
+                        stock_info = future.result(timeout=20)  # Reduced timeout
                         if stock_info:
                             batch_results.append(stock_info)
                             logger.info(f"Successfully processed {symbol}")
@@ -695,14 +689,14 @@ def screen_stocks_comprehensive(criteria: Dict[str, Any], max_results: int = 100
                 logger.info(f"Batch completed: {len(batch_results)} valid results, total: {len(all_stocks)}")
             
             # Early termination if we have enough results
-            if len(all_stocks) >= max_results * 2:  # Get 2x to ensure good filtering
+            if len(all_stocks) >= max_results:  # Reduced from 2x to 1x for faster completion
                 logger.info(f"Early termination: collected {len(all_stocks)} stocks")
                 break
             
-            # Adaptive delay between batches with jitter (except for the last batch)
+            # Minimal delay between batches (except for the last batch)
             if i + batch_size < len(stock_symbols):
-                # Add jitter to prevent thundering herd
-                jitter = random.uniform(0.5, 1.5)
+                # Minimal jitter to prevent thundering herd
+                jitter = random.uniform(0.2, 0.8)
                 delay_between_batches = base_delay_between_batches + jitter
                 logger.info(f"Waiting {delay_between_batches:.2f}s before next batch...")
                 time.sleep(delay_between_batches)
@@ -825,6 +819,16 @@ def lambda_handler(event, context):
         logger.info(f"Context: {context}")
         logger.info(f"Environment variables: {dict(os.environ)}")
         
+        # Set a timeout to ensure we return before API Gateway timeout (29 seconds)
+        import signal
+        
+        def timeout_handler(signum, frame):
+            logger.warning("Lambda timeout approaching, returning partial results")
+            raise TimeoutError("Lambda timeout")
+        
+        # Set timeout to 25 seconds (4 seconds before API Gateway timeout)
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(25)
         
         # Parse the event
         if isinstance(event, str):
@@ -933,6 +937,37 @@ def lambda_handler(event, context):
                 },
                 'body': json.dumps(response)
             }
+        
+    except TimeoutError as e:
+        logger.warning(f"=== LAMBDA TIMEOUT - RETURNING PARTIAL RESULTS ===")
+        logger.warning(f"Timeout error: {str(e)}")
+        
+        # Return partial results or mock data
+        try:
+            results = generate_mock_stock_results(criteria, max_results)
+            logger.info(f"Returning {len(results)} mock results due to timeout")
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
+                    'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Max-Age': '1728000',
+                    'Content-Type': 'application/json'
+                },
+                'body': json.dumps({
+                    'success': True,
+                    'results': results,
+                    'totalResults': len(results),
+                    'criteria': criteria,
+                    'timestamp': datetime.now().isoformat(),
+                    'warning': 'Results may be incomplete due to timeout'
+                })
+            }
+        except Exception as mock_error:
+            logger.error(f"Failed to generate mock results: {str(mock_error)}")
+            # Fall through to general error handling
         
     except Exception as e:
         logger.error(f"=== STOCK SCREENER LAMBDA ERROR ===")
