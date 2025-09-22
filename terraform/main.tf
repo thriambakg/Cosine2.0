@@ -449,7 +449,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "20"
+  deployment_trigger = "21"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -564,7 +564,8 @@ resource "aws_iam_policy" "lambda_kms_policy" {
           "kms:GenerateDataKey"
         ]
         Resource = [
-          data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn
+          data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn,
+          data.terraform_remote_state.base_infra.outputs.kms_module_main_key_arn
         ]
       }
     ]
