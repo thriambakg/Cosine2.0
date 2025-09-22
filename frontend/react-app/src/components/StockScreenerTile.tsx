@@ -303,7 +303,6 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 
   // Run stock screener
   const runScreener = useCallback(async () => {
-    console.log('🚀 Run Screener button clicked!');
     setIsLoading(true);
     setError(null);
     
@@ -314,13 +313,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         maxResults: localDisplayOptions.maxResults || 20
       };
       
-      console.log('📋 Request payload:', requestPayload);
-      console.log('🔧 executeScreener function:', executeScreener);
-      
       // Use the API hook to fetch data with criteria
       const response = await executeScreener(requestPayload);
-      
-      console.log('✅ API Response:', response);
       
       if (response?.results) {
         setStockResults(response.results);
@@ -334,7 +328,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       }
     } catch (err) {
       setError('Failed to fetch stock data');
-      console.error('💥 Stock screener error:', err);
+      console.error('Stock screener error:', err);
     } finally {
       setIsLoading(false);
     }
@@ -503,10 +497,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           <Tooltip title="Run Screener">
             <IconButton
               size="small"
-              onClick={(e) => {
-                console.log('🎯 Run Screener button clicked!', e);
-                runScreener();
-              }}
+              onClick={runScreener}
               disabled={isLoading}
               sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
             >

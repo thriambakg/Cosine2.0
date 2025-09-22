@@ -369,20 +369,45 @@ def get_stocks_by_industry_fallback(industries: List[str]) -> List[str]:
 
 def fetch_stock_basic_info(symbol: str, use_alpha_vantage: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Fetch basic stock information for screening.
+    Fetch basic stock information for screening with retry logic for rate limiting.
     Returns None if stock doesn't meet basic criteria or fails to fetch.
     """
-    try:
-        logger.info(f"Fetching basic info for {symbol}")
-        
-        if use_alpha_vantage:
-            return fetch_stock_info_alpha_vantage(symbol)
-        else:
-            return fetch_stock_info_yfinance(symbol)
+    max_retries = 3
+    base_delay = 2.0
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Fetching basic info for {symbol} (attempt {attempt + 1}/{max_retries})")
             
-    except Exception as e:
-        logger.warning(f"Failed to fetch basic info for {symbol}: {str(e)}")
-        return None
+            if use_alpha_vantage:
+                result = fetch_stock_info_alpha_vantage(symbol)
+            else:
+                result = fetch_stock_info_yfinance(symbol)
+            
+            if result:
+                return result
+            else:
+                logger.warning(f"No data returned for {symbol}")
+                return None
+                
+        except Exception as e:
+            error_msg = str(e)
+            logger.warning(f"Attempt {attempt + 1} failed for {symbol}: {error_msg}")
+            
+            # If it's a rate limit error, wait longer
+            if "429" in error_msg or "Too Many Requests" in error_msg:
+                if attempt < max_retries - 1:  # Don't wait on last attempt
+                    wait_time = base_delay * (2 ** attempt) + random.uniform(1.0, 3.0)
+                    logger.info(f"Rate limited for {symbol}, waiting {wait_time:.2f}s before retry")
+                    time.sleep(wait_time)
+                    continue
+            else:
+                # For other errors, don't retry
+                logger.warning(f"Non-rate-limit error for {symbol}: {error_msg}")
+                return None
+    
+    logger.warning(f"All attempts failed for {symbol}")
+    return None
 
 def fetch_stock_info_yfinance(symbol: str) -> Optional[Dict[str, Any]]:
     """Fetch stock info using yfinance with rate limiting"""
@@ -584,37 +609,38 @@ def screen_stocks_comprehensive(criteria: Dict[str, Any], max_results: int = 100
         
         logger.info(f"Found {len(stock_symbols)} stocks to evaluate")
         
-        # Step 2: Get detailed data for each stock using yfinance
+        # Step 2: Get detailed data for each stock using yfinance with proper rate limiting
         all_stocks = []
         
-        # Use ThreadPoolExecutor for parallel processing with rate limiting
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            # Submit all tasks
-            future_to_symbol = {
-                executor.submit(fetch_stock_basic_info, symbol, False): symbol 
-                for symbol in stock_symbols
-            }
-            
-            # Collect results as they complete
-            completed_count = 0
-            for future in as_completed(future_to_symbol):
-                symbol = future_to_symbol[future]
-                try:
-                    stock_info = future.result()
-                    if stock_info:
-                        all_stocks.append(stock_info)
+        # Use sequential processing to avoid rate limiting issues
+        for i, symbol in enumerate(stock_symbols):
+            try:
+                # Add delay between requests to respect rate limits
+                if i > 0:
+                    delay = random.uniform(0.5, 1.5)  # 0.5-1.5 second delay
+                    time.sleep(delay)
+                
+                logger.info(f"Processing {symbol} ({i+1}/{len(stock_symbols)})")
+                stock_info = fetch_stock_basic_info(symbol, False)
+                
+                if stock_info:
+                    all_stocks.append(stock_info)
+                    logger.info(f"Successfully processed {symbol}: {stock_info.get('symbol', 'Unknown')}")
+                else:
+                    logger.warning(f"No data for {symbol}")
+                
+                # Log progress every 10 stocks
+                if (i + 1) % 10 == 0:
+                    logger.info(f"Completed {i+1}/{len(stock_symbols)} stocks, collected {len(all_stocks)} valid results")
+                
+                # Early termination if we have enough results
+                if len(all_stocks) >= max_results * 2:  # Get 2x to ensure good filtering
+                    logger.info(f"Early termination: collected {len(all_stocks)} stocks")
+                    break
                     
-                    completed_count += 1
-                    if completed_count % 10 == 0:
-                        logger.info(f"Completed {completed_count}/{len(stock_symbols)} stocks")
-                    
-                    # Early termination if we have enough results
-                    if len(all_stocks) >= max_results * 2:  # Get 2x to ensure good filtering
-                        logger.info(f"Early termination: collected {len(all_stocks)} stocks")
-                        break
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to process {symbol}: {str(e)}")
+            except Exception as e:
+                logger.warning(f"Failed to process {symbol}: {str(e)}")
+                continue
         
         logger.info(f"Collected {len(all_stocks)} stocks before filtering")
         
@@ -734,24 +760,6 @@ def lambda_handler(event, context):
         logger.info(f"Context: {context}")
         logger.info(f"Environment variables: {dict(os.environ)}")
         
-        # Test basic imports
-        try:
-            import yfinance as yf
-            logger.info("yfinance import successful")
-        except Exception as import_error:
-            logger.error(f"yfinance import failed: {str(import_error)}")
-            
-        try:
-            import numpy as np
-            logger.info("numpy import successful")
-        except Exception as import_error:
-            logger.error(f"numpy import failed: {str(import_error)}")
-            
-        try:
-            import pandas as pd
-            logger.info("pandas import successful")
-        except Exception as import_error:
-            logger.error(f"pandas import failed: {str(import_error)}")
         
         # Parse the event
         if isinstance(event, str):
