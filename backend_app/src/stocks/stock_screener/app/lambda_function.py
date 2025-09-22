@@ -609,38 +609,51 @@ def screen_stocks_comprehensive(criteria: Dict[str, Any], max_results: int = 100
         
         logger.info(f"Found {len(stock_symbols)} stocks to evaluate")
         
-        # Step 2: Get detailed data for each stock using yfinance with proper rate limiting
+        # Step 2: Get detailed data using smart batching to balance speed vs rate limits
         all_stocks = []
         
-        # Use sequential processing to avoid rate limiting issues
-        for i, symbol in enumerate(stock_symbols):
-            try:
-                # Add delay between requests to respect rate limits
-                if i > 0:
-                    delay = random.uniform(0.5, 1.5)  # 0.5-1.5 second delay
-                    time.sleep(delay)
+        # Process in small batches with controlled concurrency
+        batch_size = min(3, MAX_WORKERS)  # Process 3 stocks at a time (or MAX_WORKERS if smaller)
+        delay_between_batches = 1.5  # 1.5 second delay between batches
+        
+        for i in range(0, len(stock_symbols), batch_size):
+            batch = stock_symbols[i:i + batch_size]
+            logger.info(f"Processing batch {i//batch_size + 1}: {batch}")
+            
+            # Process batch in parallel with limited concurrency
+            with ThreadPoolExecutor(max_workers=batch_size) as executor:
+                # Submit batch tasks
+                future_to_symbol = {
+                    executor.submit(fetch_stock_basic_info, symbol, False): symbol 
+                    for symbol in batch
+                }
                 
-                logger.info(f"Processing {symbol} ({i+1}/{len(stock_symbols)})")
-                stock_info = fetch_stock_basic_info(symbol, False)
+                # Collect batch results
+                batch_results = []
+                for future in as_completed(future_to_symbol):
+                    symbol = future_to_symbol[future]
+                    try:
+                        stock_info = future.result(timeout=30)
+                        if stock_info:
+                            batch_results.append(stock_info)
+                            logger.info(f"Successfully processed {symbol}")
+                        else:
+                            logger.warning(f"No data for {symbol}")
+                    except Exception as e:
+                        logger.warning(f"Failed to process {symbol}: {str(e)}")
                 
-                if stock_info:
-                    all_stocks.append(stock_info)
-                    logger.info(f"Successfully processed {symbol}: {stock_info.get('symbol', 'Unknown')}")
-                else:
-                    logger.warning(f"No data for {symbol}")
-                
-                # Log progress every 10 stocks
-                if (i + 1) % 10 == 0:
-                    logger.info(f"Completed {i+1}/{len(stock_symbols)} stocks, collected {len(all_stocks)} valid results")
-                
-                # Early termination if we have enough results
-                if len(all_stocks) >= max_results * 2:  # Get 2x to ensure good filtering
-                    logger.info(f"Early termination: collected {len(all_stocks)} stocks")
-                    break
-                    
-            except Exception as e:
-                logger.warning(f"Failed to process {symbol}: {str(e)}")
-                continue
+                all_stocks.extend(batch_results)
+                logger.info(f"Batch completed: {len(batch_results)} valid results, total: {len(all_stocks)}")
+            
+            # Early termination if we have enough results
+            if len(all_stocks) >= max_results * 2:  # Get 2x to ensure good filtering
+                logger.info(f"Early termination: collected {len(all_stocks)} stocks")
+                break
+            
+            # Delay between batches (except for the last batch)
+            if i + batch_size < len(stock_symbols):
+                logger.info(f"Waiting {delay_between_batches}s before next batch...")
+                time.sleep(delay_between_batches)
         
         logger.info(f"Collected {len(all_stocks)} stocks before filtering")
         
