@@ -449,7 +449,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "19"
+  deployment_trigger = "20"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -1221,7 +1221,8 @@ module "stock_screener_lambda" {
 
   # Additional IAM policies
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
   ]
 
   tags = var.common_tags
