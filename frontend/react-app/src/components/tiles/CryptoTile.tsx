@@ -27,8 +27,8 @@ import {
   Timeline as TimelineIcon,
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
-import { useCryptoStats } from '../hooks/useAPI';
-import { useTileCache } from '../hooks/useDashboardCache';
+import { useCryptoStats } from '../../hooks/useAPI';
+import { useTileCache } from '../../hooks/useDashboardCache';
 
 interface CryptoTileProps {
   id: string;

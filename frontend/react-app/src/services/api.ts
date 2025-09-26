@@ -361,6 +361,81 @@ export const stockScreenerAPI = {
 };
 
 // ============================================================================
+// NEWS SEARCH API
+// ============================================================================
+
+export interface NewsSearchRequest {
+  query: {
+    keywords?: {
+      type: 'term' | 'expression' | 'group';
+      field?: string;
+      value?: string;
+      operator?: 'AND' | 'OR';
+      children?: any;
+    };
+    sources?: {
+      type: 'term' | 'expression' | 'group';
+      field?: string;
+      value?: string;
+      operator?: 'AND' | 'OR';
+      children?: any;
+    };
+    categories?: {
+      type: 'term' | 'expression' | 'group';
+      field?: string;
+      value?: string;
+      operator?: 'AND' | 'OR';
+      children?: any;
+    };
+    countries?: {
+      type: 'term' | 'expression' | 'group';
+      field?: string;
+      value?: string;
+      operator?: 'AND' | 'OR';
+      children?: any;
+    };
+  };
+  dateRange: '12h' | '24h' | '7d' | '30d' | 'all';
+  limit?: number;
+  offset?: number;
+}
+
+export interface NewsArticle {
+  id: string;
+  title: string;
+  description: string;
+  source_url: string;
+  source_name: string;
+  published_date: string;
+  keywords: string;
+  category: string;
+  sentiment: string;
+  ai_tag: string;
+  image_url?: string;
+  creator: string;
+  country: string;
+  language: string;
+}
+
+export interface NewsSearchResponse {
+  articles: NewsArticle[];
+  total: number;
+  limit: number;
+  offset: number;
+  query: NewsSearchRequest;
+  timestamp: string;
+}
+
+export const newsSearchAPI = {
+  searchNews: async (params: NewsSearchRequest): Promise<NewsSearchResponse> => {
+    return apiRequest<NewsSearchResponse>('/news/search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
+// ============================================================================
 // CHAT API
 // ============================================================================
 
@@ -711,6 +786,7 @@ export const api = {
   optionPricing: optionPricingAPI,
   stockAlerts: stockAlertsAPI,
   stockScreener: stockScreenerAPI,
+  newsSearch: newsSearchAPI,
   chat: chatAPI,
   health: apiHealthAPI,
   dashboard: dashboardAPI,

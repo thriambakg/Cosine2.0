@@ -1,12 +1,12 @@
 import React, { useEffect } from 'react';
 import { Box } from '@mui/material';
 import { useLocation } from 'react-router-dom';
-import { useAppDispatch } from '../store/hooks';
-import { setCurrentPage } from '../store/slices/navigationSlice';
+import { useAppDispatch } from '../../store/hooks';
+import { setCurrentPage } from '../../store/slices/navigationSlice';
 import AppHeader from './AppHeader';
 import AppSidebar from './AppSidebar';
 import FloatingClock from './FloatingClock';
-import { ClockProvider } from '../contexts/ClockContext';
+import { ClockProvider } from '../../contexts/ClockContext';
 
 interface AppLayoutProps {
   children: React.ReactNode;

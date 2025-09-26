@@ -40,6 +40,7 @@ import {
   Image as ImageIcon,
   CalendarToday as CalendarIcon,
 } from '@mui/icons-material';
+import { newsSearchAPI, NewsSearchRequest } from '../../services/api';
 
 interface NewsTileProps {
   id: string;
@@ -185,8 +186,86 @@ const NewsTile: React.FC<NewsTileProps> = ({
     };
   };
 
+  // Helper function to convert frontend expression to backend query format
+  const convertExpressionToQuery = (expression: any[]): any => {
+    if (!expression || expression.length === 0) return null;
+    
+    if (expression.length === 1) {
+      const item = expression[0];
+      if (item.type === 'keyword' || item.type === 'source' || item.type === 'category' || item.type === 'country') {
+        return {
+          type: 'term',
+          field: item.type === 'keyword' ? 'keywords' : 
+                 item.type === 'source' ? 'source_name' :
+                 item.type === 'category' ? 'category' : 'country',
+          value: item.value
+        };
+      } else if (item.type === 'group') {
+        return {
+          type: 'group',
+          children: convertExpressionToQuery(item.value)
+        };
+      }
+    }
+    
+    // Handle multiple items with operators
+    const result: any = {
+      type: 'expression',
+      children: []
+    };
+    
+    let i = 0;
+    while (i < expression.length) {
+      const currentItem = expression[i];
+      if (!currentItem || !currentItem.type) {
+        i++;
+        continue;
+      }
+      
+      if (currentItem.type === 'operator') {
+        // Add operator to the last child
+        if (result.children.length > 0) {
+          result.children[result.children.length - 1].operator = currentItem.value;
+        }
+      } else if (currentItem.type === 'group') {
+        result.children.push({
+          type: 'group',
+          children: convertExpressionToQuery(currentItem.value)
+        });
+      } else {
+        result.children.push({
+          type: 'term',
+          field: currentItem.type === 'keyword' ? 'keywords' : 
+                 currentItem.type === 'source' ? 'source_name' :
+                 currentItem.type === 'category' ? 'category' : 'country',
+          value: currentItem.value
+        });
+      }
+      i++;
+    }
+    
+    return result;
+  };
+
+  // Helper function to build API payload from filters
+  const buildApiPayload = (filters: any): NewsSearchRequest => {
+    const payload: NewsSearchRequest = {
+      query: {
+        keywords: convertExpressionToQuery(filters.keywordExpression || []),
+        sources: convertExpressionToQuery(filters.sourceExpression || []),
+        categories: convertExpressionToQuery(filters.categoryExpression || []),
+        countries: convertExpressionToQuery(filters.countryExpression || [])
+      },
+      dateRange: filters.dateRange || '12h',
+      limit: 50,
+      offset: 0
+    };
+    
+    return payload;
+  };
+
   // Helper function to clean up group after deletion
-  const cleanupGroup = (groupItems: any[]) => {
+  const cleanupGroup = (groupItems: any[]): any[] | any | null => {
     if (groupItems.length === 0) {
       return null; // Remove empty group
     }
@@ -197,7 +276,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
     
     // Clean up adjacent operators
-    const cleanedItems = [];
+    const cleanedItems: any[] = [];
     for (let i = 0; i < groupItems.length; i++) {
       const currentItem = groupItems[i];
       const nextItem = groupItems[i + 1];
@@ -1013,29 +1092,78 @@ const NewsTile: React.FC<NewsTileProps> = ({
     setError(null);
     
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
       // Get current filters at the time of execution
       const currentFilters = localFiltersRef.current;
       
-      // Filter mock data based on criteria
-      const filteredArticles = filterArticles(mockNewsData, currentFilters);
-      setNewsArticles(filteredArticles);
+      // Build API payload from filters
+      const apiPayload = buildApiPayload(currentFilters);
       
-      // Update tile with results
-      onUpdate(id, {
-        articles: filteredArticles,
-        filters: currentFilters,
-        lastUpdated: new Date().toISOString(),
+      // Log the API payload to console for debugging
+      console.log('🔍 News API Call Payload:', {
+        timestamp: new Date().toISOString(),
+        tileId: id,
+        payload: apiPayload
       });
+      
+      // Also log a formatted version for better readability
+      console.log('📋 Formatted API Payload:');
+      console.log(JSON.stringify(apiPayload, null, 2));
+      
+      try {
+        // Make actual API call to news search endpoint
+        const response = await newsSearchAPI.searchNews(apiPayload);
+        
+        // Log successful response
+        console.log('✅ News API Response:', {
+          timestamp: new Date().toISOString(),
+          tileId: id,
+          articleCount: response.articles.length,
+          total: response.total,
+          sampleArticles: response.articles.slice(0, 2).map((article: any) => ({
+            id: article.id,
+            title: article.title,
+            source: article.source_name
+          }))
+        });
+        
+        setNewsArticles(response.articles);
+        
+        // Update tile with results
+        onUpdate(id, {
+          articles: response.articles,
+          filters: currentFilters,
+          lastUpdated: new Date().toISOString(),
+        });
+        
+      } catch (apiError) {
+        console.error('❌ News API Error:', {
+          timestamp: new Date().toISOString(),
+          tileId: id,
+          error: apiError,
+          filters: currentFilters
+        });
+        
+        // Fallback to mock data for development
+        console.log('🔄 Falling back to mock data for development');
+        const filteredArticles = filterArticles(mockNewsData, currentFilters);
+        setNewsArticles(filteredArticles);
+        setError(null); // Clear error since we have fallback data
+        
+        // Update tile with fallback results
+        onUpdate(id, {
+          articles: filteredArticles,
+          filters: currentFilters,
+          lastUpdated: new Date().toISOString(),
+        });
+      }
+      
     } catch (err) {
       setError('Failed to fetch news articles');
       console.error('News search error:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [filterArticles, id, onUpdate]);
+  }, [filterArticles, id, onUpdate, buildApiPayload]);
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -1159,7 +1287,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   useEffect(() => {
     if (!tileRef.current) return;
 
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: ReturnType<typeof setTimeout>;
     const resizeObserver = new ResizeObserver(() => {
       // Debounce the resize calculation to prevent infinite loops
       clearTimeout(timeoutId);

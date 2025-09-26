@@ -41,7 +41,7 @@ import {
   AttachMoney as MoneyIcon,
   Speed as SpeedIcon,
 } from '@mui/icons-material';
-import { useStockScreener } from '../hooks/useAPI';
+import { useStockScreener } from '../../hooks/useAPI';
 
 interface StockScreenerTileProps {
   id: string;

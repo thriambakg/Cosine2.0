@@ -20,9 +20,9 @@ import {
   AccessTime as ClockIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { useAppSelector, useAppDispatch } from '../store/hooks';
-import { toggleSidebar } from '../store/slices/navigationSlice';
-import { useAuth } from '../contexts/AuthContext';
+import { useAppSelector, useAppDispatch } from '../../store/hooks';
+import { toggleSidebar } from '../../store/slices/navigationSlice';
+import { useAuth } from '../../contexts/AuthContext';
 import NotificationCenter from './NotificationCenter';
 
 export default function AppHeader() {

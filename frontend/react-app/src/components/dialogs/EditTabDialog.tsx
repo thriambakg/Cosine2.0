@@ -14,26 +14,26 @@ import {
   Close as CloseIcon,
   Edit as EditIcon
 } from '@mui/icons-material';
-import { DashboardGroup } from '../types/dashboardTypes';
+import { DashboardTab } from '../../types/dashboardTypes';
 
-interface EditGroupDialogProps {
+interface EditTabDialogProps {
   open: boolean;
   onClose: () => void;
-  onEditGroup: (groupId: string, name: string, color: string) => void;
-  group: DashboardGroup | null;
+  onEditTab: (tabId: string, name: string, color?: string) => void;
+  tab: DashboardTab | null;
 }
 
-const EditGroupDialog: React.FC<EditGroupDialogProps> = ({
+const EditTabDialog: React.FC<EditTabDialogProps> = ({
   open,
   onClose,
-  onEditGroup,
-  group
+  onEditTab,
+  tab
 }) => {
-  const [groupName, setGroupName] = useState('');
+  const [tabName, setTabName] = useState('');
   const [selectedColor, setSelectedColor] = useState<string>('');
 
-  // Predefined colors for groups (same as tabs)
-  const groupColors = [
+  // Predefined colors for tabs
+  const tabColors = [
     '#3b82f6', // Blue
     '#ef4444', // Red
     '#10b981', // Green
@@ -48,23 +48,23 @@ const EditGroupDialog: React.FC<EditGroupDialogProps> = ({
     '#a855f7'  // Violet
   ];
 
-  // Update form when group changes
+  // Update form when tab changes
   useEffect(() => {
-    if (group) {
-      setGroupName(group.name);
-      setSelectedColor(group.color);
+    if (tab) {
+      setTabName(tab.name);
+      setSelectedColor(tab.color || '');
     }
-  }, [group]);
+  }, [tab]);
 
   const handleSave = () => {
-    if (group && groupName.trim() && selectedColor) {
-      onEditGroup(group.id, groupName.trim(), selectedColor);
+    if (tab && tabName.trim()) {
+      onEditTab(tab.id, tabName.trim(), selectedColor || undefined);
       handleClose();
     }
   };
 
   const handleClose = () => {
-    setGroupName('');
+    setTabName('');
     setSelectedColor('');
     onClose();
   };
@@ -102,7 +102,7 @@ const EditGroupDialog: React.FC<EditGroupDialogProps> = ({
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <EditIcon sx={{ color: '#3b82f6', mr: 1 }} />
-          Edit Group
+          Edit Tab
         </Box>
         <IconButton
           onClick={handleClose}
@@ -114,17 +114,17 @@ const EditGroupDialog: React.FC<EditGroupDialogProps> = ({
 
       <DialogContent sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {/* Group Name */}
+          {/* Tab Name */}
           <Box>
             <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
-              Group Name
+              Tab Name
             </Typography>
             <TextField
               fullWidth
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
+              value={tabName}
+              onChange={(e) => setTabName(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Enter group name"
+              placeholder="Enter tab name"
               variant="outlined"
               autoFocus
               sx={{
@@ -148,10 +148,10 @@ const EditGroupDialog: React.FC<EditGroupDialogProps> = ({
           {/* Color Selection */}
           <Box>
             <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
-              Choose a color for your group:
+              Choose a color for your tab (optional):
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {groupColors.map((color) => (
+              {tabColors.map((color) => (
                 <Box
                   key={color}
                   sx={{
@@ -167,7 +167,7 @@ const EditGroupDialog: React.FC<EditGroupDialogProps> = ({
                       boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
                     }
                   }}
-                  onClick={() => setSelectedColor(color)}
+                  onClick={() => setSelectedColor(selectedColor === color ? '' : color)}
                 />
               ))}
             </Box>
@@ -196,7 +196,7 @@ const EditGroupDialog: React.FC<EditGroupDialogProps> = ({
         </Button>
         <Button
           onClick={handleSave}
-          disabled={!groupName.trim() || !selectedColor}
+          disabled={!tabName.trim()}
           sx={{
             backgroundColor: '#3b82f6',
             color: '#ffffff',
@@ -217,4 +217,4 @@ const EditGroupDialog: React.FC<EditGroupDialogProps> = ({
   );
 };
 
-export default EditGroupDialog;
+export default EditTabDialog;

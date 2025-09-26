@@ -148,6 +148,9 @@ module "api_gateway" {
     session = {
       path_part = "session"
     }
+    news = {
+      path_part = "news"
+    }
   }
 
   # Methods configuration
@@ -333,6 +336,15 @@ module "api_gateway" {
       lambda_arn              = module.session_management_lambda.function_arn
       request_parameters      = {}
     }
+    # POST method for news search
+    news_post = {
+      resource_key            = "news"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.news_search_lambda.function_arn
+      request_parameters      = {}
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -444,6 +456,11 @@ module "api_gateway" {
       http_method   = "DELETE"
       resource_path = "session"
     }
+    news_post = {
+      function_arn  = module.news_search_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "news"
+    }
   }
 
   tags = var.common_tags
@@ -539,7 +556,9 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
           data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn,
           "${data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn}/index/*",
           data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*"
+          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*",
+          data.terraform_remote_state.base_infra.outputs.news_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.news_table_arn}/index/*"
         ]
       }
     ]
@@ -1393,6 +1412,36 @@ module "session_management_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# News Search Lambda Function
+module "news_search_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-news-search-${var.environment}"
+  description   = "Lambda function for news search with complex query expressions"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  source_dir = "../backend_app/src/news_search/app"
+
+  environment_variables = {
+    NEWS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.news_table_name
+    ENVIRONMENT     = var.environment
+    LOG_LEVEL       = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
   ]
 
   tags = var.common_tags

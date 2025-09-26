@@ -5,20 +5,17 @@ import { useAuth } from './contexts/AuthContext';
 import { Provider } from 'react-redux';
 import { store } from './store/store';
 
-// Import your existing components (we'll copy them over)
-import LandingPageMUI from './components/LandingPageMUI';
-import AppLayout from './components/AppLayout';
+// Import components from organized structure
+import { LandingPageMUI, AppLayout, LoadingPage } from './components';
 import ChatPage from './pages/ChatPage';
+import UnifiedDashboardPage from './pages/UnifiedDashboardPage';
 import Robinhood from './pages/Robinhood';
 import PortfolioRisk from './pages/PortfolioRisk';
 import StockVolatilityPage from './pages/StockVolatilityPage';
 import StockAlertsPage from './pages/StockAlertsPage';
 import OptionPricingPage from './pages/OptionPricingPage';
 import HeatmapPage from './pages/HeatmapPage';
-import DashboardRouter from './components/DashboardRouter';
-
 import AuthCallbackPage from './pages/AuthCallbackPage';
-import LoadingPage from './components/LoadingPage';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -53,7 +50,7 @@ function AppContent() {
       <Route path="/" element={
         user ? (
           <AppLayout>
-            <DashboardRouter />
+            <UnifiedDashboardPage />
           </AppLayout>
         ) : <LandingPageMUI />
       } />

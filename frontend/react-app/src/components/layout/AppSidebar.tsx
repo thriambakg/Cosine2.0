@@ -23,8 +23,8 @@ import {
   SmartToy as BotIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAppSelector, useAppDispatch } from '../store/hooks';
-import { setSidebarOpen, setCurrentPage } from '../store/slices/navigationSlice';
+import { useAppSelector, useAppDispatch } from '../../store/hooks';
+import { setSidebarOpen, setCurrentPage } from '../../store/slices/navigationSlice';
 
 const DRAWER_WIDTH = 280;
 

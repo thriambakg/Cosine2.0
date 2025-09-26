@@ -28,8 +28,8 @@ import {
   TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
-import { useStockData } from '../hooks/useAPI';
-import { useTileCache } from '../hooks/useDashboardCache';
+import { useStockData } from '../../hooks/useAPI';
+import { useTileCache } from '../../hooks/useDashboardCache';
 
 interface StockTileProps {
   id: string;

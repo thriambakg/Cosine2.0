@@ -1,7 +1,7 @@
 import React, { useRef, useState, useCallback } from 'react';
 import { Box } from '@mui/material';
-import { getTileConfig } from '../utils/tileConfig';
-import { GridPosition, GridSize } from '../types/dashboardTypes';
+import { getTileConfig } from '../../utils/tileConfig';
+import { GridPosition, GridSize } from '../../types/dashboardTypes';
 
 interface TileWrapperProps {
   id: string;

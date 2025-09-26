@@ -31,15 +31,10 @@ import {
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
-import GridDashboard from '../components/GridDashboard';
+import { GridDashboard, DashboardTabBar, NewTabDialog, NewGroupDialog } from '../components';
 import { getDefaultTileSize } from '../utils/tileConfig';
 // import { safeLoadDashboard } from '../utils/dashboardMigration';
-import AddCryptoModal from '../components/AddCryptoModal';
 import { dashboardAPI } from '../services/api';
-import AddStockModal from '../components/AddStockModal';
-import DashboardTabBar from '../components/DashboardTabBar';
-import NewTabDialog from '../components/NewTabDialog';
-import NewGroupDialog from '../components/NewGroupDialog';
 
 // Import tab management hook and types
 import { useTabManagement } from '../hooks/useTabManagement';
@@ -340,8 +335,8 @@ const UnifiedDashboardPage: React.FC = () => {
   const [tileConfig, setTileConfig] = useState<any>({});
 
   // Dialog states
-  const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
-  const [stockModalOpen, setStockModalOpen] = useState(false);
+  // const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
+  // const [stockModalOpen, setStockModalOpen] = useState(false);
   const [newTabDialogOpen, setNewTabDialogOpen] = useState(false);
   const [newGroupDialogOpen, setNewGroupDialogOpen] = useState(false);
 
@@ -749,10 +744,10 @@ const UnifiedDashboardPage: React.FC = () => {
     
     // Handle different tile types
     if (tileType.id === 'crypto') {
-      setCryptoModalOpen(true);
+      // setCryptoModalOpen(true);
       setAddTileStep('closed');
     } else if (tileType.id === 'stock') {
-      setStockModalOpen(true);
+      // setStockModalOpen(true);
       setAddTileStep('closed');
     } else if (tileType.id === 'stock_screener') {
       // Handle stock screener tile creation
@@ -974,98 +969,98 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   };
 
-  // Handle crypto tile addition using the existing AddCryptoModal
-  const handleAddCryptoTile = async (cryptoData: any) => {
-    console.log('handleAddCryptoTile called with:', cryptoData);
-    console.log('activeTab:', activeTab);
-    
-    if (!activeTab) {
-      console.warn('No active tab found, cannot add tile');
-      return;
-    }
-    
-    if (!user?.id) {
-      console.warn('No user ID found, cannot add tile');
-      return;
-    }
-    
-    const newTile = {
-      type: 'crypto' as const,
-      symbol: cryptoData.symbol,
-      timeframe: cryptoData.timeframe,
-      title: cryptoData.symbol,
-      displayOptions: cryptoData.displayOptions,
-      autoRefresh: cryptoData.autoRefresh,
-      isPinned: false,
-      gridPosition: findNextAvailablePosition(getDefaultTileSize('crypto')),
-      gridSize: getDefaultTileSize('crypto'),
-    };
+  // TODO: Handle crypto tile addition using the existing AddCryptoModal
+  // const handleAddCryptoTile = async (cryptoData: any) => {
+  //   console.log('handleAddCryptoTile called with:', cryptoData);
+  //   console.log('activeTab:', activeTab);
+  //   
+  //   if (!activeTab) {
+  //     console.warn('No active tab found, cannot add tile');
+  //     return;
+  //   }
+  //   
+  //   if (!user?.id) {
+  //     console.warn('No user ID found, cannot add tile');
+  //     return;
+  //   }
+  //   
+  //   const newTile = {
+  //     type: 'crypto' as const,
+  //     symbol: cryptoData.symbol,
+  //     timeframe: cryptoData.timeframe,
+  //     title: cryptoData.symbol,
+  //     displayOptions: cryptoData.displayOptions,
+  //     autoRefresh: cryptoData.autoRefresh,
+  //     isPinned: false,
+  //     gridPosition: findNextAvailablePosition(getDefaultTileSize('crypto')),
+  //     gridSize: getDefaultTileSize('crypto'),
+  //   };
 
-    try {
-      console.log('Creating tile via API:', newTile);
-      console.log('Tab ID:', activeTab.id);
-      console.log('User ID:', user.id);
-      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      console.log('Tile created successfully:', response);
-      
-      // Add a small delay to ensure the database has been updated
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Reload data from database to get the updated tiles
-      await reloadFromDatabase();
-      console.log('✅ Data reloaded from database after tile creation');
-      
-    } catch (error: any) {
-      console.error('Failed to create tile:', error);
-      console.error('Error details:', error.response?.data);
-      console.error('Request config:', error.config);
-      // TODO: Show error message to user
-    }
-  };
+  //   try {
+  //     console.log('Creating tile via API:', newTile);
+  //     console.log('Tab ID:', activeTab.id);
+  //     console.log('User ID:', user.id);
+  //     const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+  //     console.log('Tile created successfully:', response);
+  //     
+  //     // Add a small delay to ensure the database has been updated
+  //     await new Promise(resolve => setTimeout(resolve, 100));
+  //     
+  //     // Reload data from database to get the updated tiles
+  //     await reloadFromDatabase();
+  //     console.log('✅ Data reloaded from database after tile creation');
+  //     
+  //   } catch (error: any) {
+  //     console.error('Failed to create tile:', error);
+  //     console.error('Error details:', error.response?.data);
+  //     console.error('Request config:', error.config);
+  //     // TODO: Show error message to user
+  //   }
+  // };
 
-  // Handle stock tile addition using the new AddStockModal
-  const handleAddStockTile = async (stockData: any) => {
-    console.log('handleAddStockTile called with:', stockData);
-    console.log('activeTab:', activeTab);
-    
-    if (!activeTab) {
-      console.warn('No active tab found, cannot add tile');
-      return;
-    }
-    
-    if (!user?.id) {
-      console.warn('No user ID found, cannot add tile');
-      return;
-    }
-    
-    const newTile = {
-      type: 'stock' as const,
-      symbol: stockData.symbol,
-      timeframe: stockData.timeframe,
-      title: stockData.symbol,
-      displayOptions: stockData.displayOptions,
-      autoRefresh: stockData.autoRefresh,
-      isPinned: false,
-      gridPosition: findNextAvailablePosition(getDefaultTileSize('stock')),
-      gridSize: getDefaultTileSize('stock'),
-    };
+  // TODO: Handle stock tile addition using the new AddStockModal
+  // const handleAddStockTile = async (stockData: any) => {
+  //   console.log('handleAddStockTile called with:', stockData);
+  //   console.log('activeTab:', activeTab);
+  //   
+  //   if (!activeTab) {
+  //     console.warn('No active tab found, cannot add tile');
+  //     return;
+  //   }
+  //   
+  //   if (!user?.id) {
+  //     console.warn('No user ID found, cannot add tile');
+  //     return;
+  //   }
+  //   
+  //   const newTile = {
+  //     type: 'stock' as const,
+  //     symbol: stockData.symbol,
+  //     timeframe: stockData.timeframe,
+  //     title: stockData.symbol,
+  //     displayOptions: stockData.displayOptions,
+  //     autoRefresh: stockData.autoRefresh,
+  //     isPinned: false,
+  //     gridPosition: findNextAvailablePosition(getDefaultTileSize('stock')),
+  //     gridSize: getDefaultTileSize('stock'),
+  //   };
 
-    try {
-      console.log('Creating tile via API:', newTile);
-      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      console.log('Tile created successfully:', response);
-      
-      // Reload data from database to get the updated tiles
-      await reloadFromDatabase();
-      console.log('✅ Data reloaded from database after tile creation');
-      
-    } catch (error) {
-      console.error('Failed to create tile:', error);
-      // TODO: Show error message to user
-    }
-  };
+  //   try {
+  //     console.log('Creating tile via API:', newTile);
+  //     const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+  //     console.log('Tile created successfully:', response);
+  //     
+  //     // Reload data from database to get the updated tiles
+  //     await reloadFromDatabase();
+  //     console.log('✅ Data reloaded from database after tile creation');
+  //     
+  //   } catch (error) {
+  //     console.error('Failed to create tile:', error);
+  //     // TODO: Show error message to user
+  //   }
+  // };
 
-  const getExistingSymbols = () => tiles.map(tile => tile.symbol).filter((symbol): symbol is string => Boolean(symbol));
+  // const getExistingSymbols = () => tiles.map(tile => tile.symbol).filter((symbol): symbol is string => Boolean(symbol));
 
   const handleRemoveTile = (id: string) => {
     if (activeTab) {
@@ -1622,15 +1617,14 @@ const UnifiedDashboardPage: React.FC = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Add Crypto Modal (existing component) */}
-        <AddCryptoModal
+        {/* TODO: AddCryptoModal and AddStockModal components need to be created */}
+        {/* <AddCryptoModal
           open={cryptoModalOpen}
           onClose={() => setCryptoModalOpen(false)}
           onAdd={handleAddCryptoTile}
           existingSymbols={getExistingSymbols()}
         />
 
-        {/* Add Stock Modal (new component) */}
         <AddStockModal
           open={stockModalOpen}
           onClose={() => setStockModalOpen(false)}

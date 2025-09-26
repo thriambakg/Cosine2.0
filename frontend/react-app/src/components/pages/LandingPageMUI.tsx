@@ -22,7 +22,7 @@ import {
   TrendingDown,
 } from '@mui/icons-material';
 
-import { AuthModal } from './auth';
+import { AuthModal } from '../auth';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LandingPageMUI() {

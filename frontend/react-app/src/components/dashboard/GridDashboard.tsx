@@ -1,16 +1,16 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
 import { Analytics as AnalyticsIcon, Add as AddIcon } from '@mui/icons-material';
-import CryptoTile from './CryptoTile';
-import StockTile from './StockTile';
-import StockScreenerTile from './StockScreenerTile';
-import NewsTile from './NewsTile';
-import PlaceholderTile from './PlaceholderTile';
-import TileWrapper from './TileWrapper';
-import { UnifiedTile, GridPosition, GridSize } from '../types/dashboardTypes';
-import { getTileConfig, validateTileSize } from '../utils/tileConfig';
-import TileDataParser from '../utils/TileDataParser';
-import { stockDataAPI, cryptoStatsAPI } from '../services/api';
+import CryptoTile from '../tiles/CryptoTile';
+import StockTile from '../tiles/StockTile';
+import StockScreenerTile from '../tiles/StockScreenerTile';
+import NewsTile from '../tiles/NewsTile';
+import PlaceholderTile from '../tiles/PlaceholderTile';
+import TileWrapper from '../tiles/TileWrapper';
+import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
+import { getTileConfig, validateTileSize } from '../../utils/tileConfig';
+import TileDataParser from '../../utils/TileDataParser';
+import { stockDataAPI, cryptoStatsAPI } from '../../services/api';
 
 interface GridDashboardProps {
   tiles: UnifiedTile[];
@@ -759,8 +759,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           onUpdate={onUpdateTile}
           onSettingsChange={onSettingsChange}
           onResize={onResizeTile}
-          onDragStart={(e) => handleDragStart(tile.id, e)}
-          onResizeStart={(id, e) => handleResizeStart(id, e)}
+          onDragStart={(e: any) => handleDragStart(tile.id, e)}
+          onResizeStart={(id: any, e: any) => handleResizeStart(id, e)}
           onSelectionChange={handleTileSelection}
         >
           {tile.type === 'crypto' ? (
