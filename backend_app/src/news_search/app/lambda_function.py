@@ -14,6 +14,19 @@ table = dynamodb.Table(news_table_name)
 def lambda_handler(event, context):
     logger.info(f"Received event: {json.dumps(event)}")
 
+    # Handle CORS preflight requests
+    if event.get('httpMethod') == 'OPTIONS':
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST,OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+            },
+            'body': json.dumps({'message': 'CORS preflight'})
+        }
+
     try:
         # Parse request body
         body = json.loads(event['body'])
