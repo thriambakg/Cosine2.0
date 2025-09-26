@@ -15,7 +15,7 @@ export const API_CONFIG = {
     CRYPTO: '/crypto',
     OPTIONS: '/options',
     ALERTS: '/alerts',
-    NEWS_SEARCH: '/news/search',
+    NEWS_SEARCH: '/news',
     HEALTH: '/health',
   },
   

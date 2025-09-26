@@ -428,7 +428,7 @@ export interface NewsSearchResponse {
 
 export const newsSearchAPI = {
   searchNews: async (params: NewsSearchRequest): Promise<NewsSearchResponse> => {
-    return apiRequest<NewsSearchResponse>('/news/search', {
+    return apiRequest<NewsSearchResponse>('/news', {
       method: 'POST',
       body: JSON.stringify(params),
     });
