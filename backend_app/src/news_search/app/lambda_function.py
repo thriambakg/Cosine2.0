@@ -83,7 +83,6 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     """
     params = {
         'Limit': limit,
-        'ScanIndexForward': False,  # Newest first
         'FilterExpression': '',
         'ExpressionAttributeValues': {},
         'ExpressionAttributeNames': {}
@@ -102,26 +101,58 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     else:  # 'all' or invalid
         start_date = datetime.min  # No date filtering
 
-    if date_range != 'all':
-        params['FilterExpression'] += '#pd BETWEEN :start_date AND :end_date'
-        params['ExpressionAttributeNames']['#pd'] = 'published_date'
-        params['ExpressionAttributeValues'][':start_date'] = start_date.isoformat(timespec='seconds') + 'Z'
-        params['ExpressionAttributeValues'][':end_date'] = end_date.isoformat(timespec='seconds') + 'Z'
-
-    # Example: Prioritize GSI for source if a simple source term is present
+    # Try to use appropriate GSI for simple queries
+    # Priority: Source > Category > Keywords > AI Tag
+    
+    # 1. Check for simple source query (GSI5)
     source_query = query_filters.get('sources')
     if source_query and source_query.get('type') == 'term':
         params['IndexName'] = 'GSI5'  # Source-based GSI
         params['KeyConditionExpression'] = 'GSI5PK = :gsi5pk'
         params['ExpressionAttributeValues'][':gsi5pk'] = f"SOURCE#{source_query['value']}"
+        params['ScanIndexForward'] = False  # Newest first
         logger.info(f"Using GSI5 for source: {source_query['value']}")
-        return params  # Return early for simple GSI query
+        return params
+    
+    # 2. Check for simple category query (GSI1)
+    category_query = query_filters.get('categories')
+    if category_query and category_query.get('type') == 'term':
+        params['IndexName'] = 'GSI1'  # Category-based GSI
+        params['KeyConditionExpression'] = 'GSI1PK = :gsi1pk'
+        params['ExpressionAttributeValues'][':gsi1pk'] = f"CATEGORY#{category_query['value']}"
+        params['ScanIndexForward'] = False  # Newest first
+        logger.info(f"Using GSI1 for category: {category_query['value']}")
+        return params
+    
+    # 3. Check for simple keyword query (GSI4)
+    keyword_query = query_filters.get('keywords')
+    if keyword_query and keyword_query.get('type') == 'term':
+        params['IndexName'] = 'GSI4'  # Keywords-based GSI
+        params['KeyConditionExpression'] = 'GSI4PK = :gsi4pk'
+        params['ExpressionAttributeValues'][':gsi4pk'] = f"KEYWORD#{keyword_query['value']}"
+        params['ScanIndexForward'] = False  # Newest first
+        logger.info(f"Using GSI4 for keyword: {keyword_query['value']}")
+        return params
+    
+    # 4. Check for simple AI tag query (GSI3)
+    ai_tag_query = query_filters.get('ai_tag')
+    if ai_tag_query and ai_tag_query.get('type') == 'term':
+        params['IndexName'] = 'GSI3'  # AI Tag-based GSI
+        params['KeyConditionExpression'] = 'GSI3PK = :gsi3pk'
+        params['ExpressionAttributeValues'][':gsi3pk'] = f"AITAG#{ai_tag_query['value']}"
+        params['ScanIndexForward'] = False  # Newest first
+        logger.info(f"Using GSI3 for AI tag: {ai_tag_query['value']}")
+        return params
 
-    # Fallback to main table scan or more complex GSI queries
-    # For complex keyword/category/country expressions, a full scan with client-side filtering
-    # or multiple GSI queries combined might be necessary.
-    logger.info("Falling back to main table scan or complex filtering.")
-    params['TableName'] = news_table_name  # Ensure table name is set for scan
+    # Fallback to main table scan for complex queries or no specific filters
+    # Add date filtering to scan if specified
+    if date_range != 'all':
+        params['FilterExpression'] += '#pd BETWEEN :start_date AND :end_date'
+        params['ExpressionAttributeNames']['#pd'] = 'published_date'
+        params['ExpressionAttributeValues'][':start_date'] = start_date.isoformat(timespec='seconds') + 'Z'
+        params['ExpressionAttributeValues'][':end_date'] = end_date.isoformat(timespec='seconds') + 'Z'
+    
+    logger.info("Falling back to main table scan for complex filtering.")
     return params
 
 def execute_dynamodb_query(params):
