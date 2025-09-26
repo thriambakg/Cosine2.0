@@ -290,7 +290,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   */
 
   // Use the real stock screener API hook
-  const { loading: apiLoading, error: apiError, execute: executeScreener } = useStockScreener();
+  const stockScreenerHook = useStockScreener();
+  const { loading: apiLoading, error: apiError, execute: executeScreener } = stockScreenerHook;
 
   // Handle API loading state
   useEffect(() => {
@@ -302,7 +303,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   // Handle API errors
   useEffect(() => {
     if (apiError) {
-      const errorMessage = typeof apiError === 'string' ? apiError : apiError.message || 'Failed to fetch stock data';
+      const errorMessage = typeof apiError === 'string' ? apiError : (apiError as any)?.message || 'Failed to fetch stock data';
       setError(`API Error: ${errorMessage}`);
     }
   }, [apiError]);
