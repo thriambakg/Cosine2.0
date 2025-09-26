@@ -290,7 +290,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   */
 
   // Use the real stock screener API hook
-  const { data: /* apiData */, loading: apiLoading, error: apiError, execute: executeScreener } = useStockScreener();
+  const { loading: apiLoading, error: apiError, execute: executeScreener } = useStockScreener();
 
   // Handle API loading state
   useEffect(() => {
