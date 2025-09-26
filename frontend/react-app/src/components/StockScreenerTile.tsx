@@ -153,7 +153,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     'Communication Services',
   ];
 
-  // Mock stock data for demonstration
+  // Mock stock data for demonstration (currently unused)
+  /*
   const mockStockData: StockResult[] = [
     {
       symbol: 'AAPL',
@@ -252,8 +253,10 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       pe: 65.2,
     },
   ];
+  */
 
-  // Filter stocks based on criteria
+  // Filter stocks based on criteria (currently unused)
+  /*
   const filterStocks = useCallback((stocks: StockResult[], criteria: StockScreenerCriteria): StockResult[] => {
     return stocks.filter(stock => {
       // Industry filter
@@ -284,9 +287,10 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       return true;
     });
   }, []);
+  */
 
   // Use the real stock screener API hook
-  const { data: apiData, loading: apiLoading, error: apiError, execute: executeScreener } = useStockScreener();
+  const { data: /* apiData */, loading: apiLoading, error: apiError, execute: executeScreener } = useStockScreener();
 
   // Handle API loading state
   useEffect(() => {
@@ -298,7 +302,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   // Handle API errors
   useEffect(() => {
     if (apiError) {
-      setError(`API Error: ${apiError.message || 'Failed to fetch stock data'}`);
+      const errorMessage = typeof apiError === 'string' ? apiError : apiError.message || 'Failed to fetch stock data';
+      setError(`API Error: ${errorMessage}`);
     }
   }, [apiError]);
 
