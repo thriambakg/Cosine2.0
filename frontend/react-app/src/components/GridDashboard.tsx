@@ -4,6 +4,7 @@ import { Analytics as AnalyticsIcon, Add as AddIcon } from '@mui/icons-material'
 import CryptoTile from './CryptoTile';
 import StockTile from './StockTile';
 import StockScreenerTile from './StockScreenerTile';
+import NewsTile from './NewsTile';
 import PlaceholderTile from './PlaceholderTile';
 import TileWrapper from './TileWrapper';
 import { UnifiedTile, GridPosition, GridSize } from '../types/dashboardTypes';
@@ -713,6 +714,22 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       isPinned: tile.isPinned,
     };
 
+    const newsProps = {
+      ...commonProps,
+      filters: tile.filters,
+      articles: tile.articles,
+      displayOptions: (tile.displayOptions as any) || {
+        showImages: true,
+        showSource: true,
+        showDate: true,
+        showKeywords: false,
+        maxResults: 20,
+        compactView: false,
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+    };
+
 
     return (
       <Box
@@ -752,6 +769,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             <StockTile key={tile.id} {...stockProps} />
           ) : tile.type === 'stock_screener' ? (
             <StockScreenerTile key={tile.id} {...stockScreenerProps} />
+          ) : tile.type === 'news' ? (
+            <NewsTile key={tile.id} {...newsProps} />
           ) : (
             <PlaceholderTile
               key={tile.id}

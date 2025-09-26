@@ -26,7 +26,8 @@ import {
   AccountBalance as AccountBalanceIcon,
   AutoAwesome as AutoAwesomeIcon,
   Chat as ChatIcon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Article as ArticleIcon
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
@@ -248,6 +249,35 @@ const tileCategories: TileCategory[] = [
             color: '#ef4444',
             isAvailable: true,
             placeholder: true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'news',
+    name: 'Financial News',
+    description: 'Stay updated with the latest financial news and market insights',
+    icon: <ArticleIcon />,
+    color: '#dc2626',
+    subcategories: [
+      {
+        id: 'financial',
+        name: 'Financial News',
+        description: 'Browse and filter financial news articles',
+        icon: <ArticleIcon />,
+        color: '#dc2626',
+        tiles: [
+          {
+            id: 'news',
+            name: 'Financial News',
+            description: 'Browse and filter financial news articles with keyword search and source filtering',
+            category: 'news',
+            subcategory: 'financial',
+            icon: <ArticleIcon />,
+            color: '#dc2626',
+            isAvailable: true,
+            placeholder: false
           }
         ]
       }
@@ -727,6 +757,9 @@ const UnifiedDashboardPage: React.FC = () => {
     } else if (tileType.id === 'stock_screener') {
       // Handle stock screener tile creation
       handleCreateStockScreenerTile();
+    } else if (tileType.id === 'news') {
+      // Handle news tile creation
+      handleCreateNewsTile();
     } else if (tileType.placeholder) {
       // For placeholder tiles, show a message
       alert(`${tileType.name} tiles are coming soon!`);
@@ -787,6 +820,67 @@ const UnifiedDashboardPage: React.FC = () => {
         timeframe: '1d',
       },
       results: [],
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
+  };
+
+  // News tile creation handler
+  const handleCreateNewsTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `news_${Date.now()}`,
+      type: 'news',
+      title: 'Financial News',
+      displayOptions: {
+        showImages: true,
+        showSource: true,
+        showDate: true,
+        showKeywords: false,
+        maxResults: 20,
+        compactView: false,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 400, height: 600 },
+      gridPosition: findNextAvailablePosition({ width: 4, height: 6 }),
+      gridSize: { width: 4, height: 6 },
+      dashboard_id: currentDashboardId,
+          filters: {
+            keywords: [],
+            keywordExpression: [
+              { type: 'keyword', value: 'Tesla' },
+              { type: 'operator', value: 'AND' },
+              { type: 'keyword', value: 'earnings' }
+            ],
+            sourceExpression: [
+              { type: 'source', value: 'Reuters' },
+              { type: 'operator', value: 'OR' },
+              { type: 'source', value: 'Bloomberg' }
+            ],
+            categoryExpression: [
+              { type: 'category', value: 'business' },
+              { type: 'operator', value: 'AND' },
+              { type: 'category', value: 'technology' }
+            ],
+            countryExpression: [
+              { type: 'country', value: 'us' },
+              { type: 'operator', value: 'OR' },
+              { type: 'country', value: 'uk' }
+            ],
+            dateRange: '12h',
+            sources: [],
+            categories: [],
+            countries: [],
+            keywordOperator: 'OR',
+            categoryOperator: 'OR',
+            sourceOperator: 'OR',
+            countryOperator: 'OR',
+          },
+      articles: [],
     };
 
     const updatedTiles = [...(activeTab.tiles || []), newTile];

@@ -116,6 +116,26 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
     supportsResize: true,
     supportsDrag: true,
   },
+  news: {
+    sizeConstraints: {
+      minWidth: 4,
+      maxWidth: 6,
+      minHeight: 4,
+      maxHeight: 8,
+      defaultWidth: 4,
+      defaultHeight: 6,
+    },
+    defaultDisplayOptions: {
+      showImages: true,
+      showSource: true,
+      showDate: true,
+      showKeywords: false,
+      maxResults: 20,
+      compactView: false,
+    },
+    supportsResize: true,
+    supportsDrag: true,
+  },
 };
 
 // Get tile configuration for a specific tile type

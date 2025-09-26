@@ -57,7 +57,7 @@ export interface TileSizeConstraints {
 
 export interface UnifiedTile {
   id: string;
-  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener';
+  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news';
   title: string;
   symbol?: string; // For crypto/stock tiles
   timeframe?: string; // For crypto/stock tiles
@@ -66,6 +66,8 @@ export interface UnifiedTile {
   prompt?: string; // For chat_generated tiles
   criteria?: StockScreenerCriteria; // For stock_screener tiles
   results?: StockResult[]; // For stock_screener tiles
+  filters?: NewsFilters; // For news tiles
+  articles?: NewsArticle[]; // For news tiles
   displayOptions: {
     [key: string]: any; // Flexible display options for different tile types
   };
@@ -100,6 +102,41 @@ export interface StockResult {
   industry: string;
   volume: number;
   pe: number;
+}
+
+// News specific interfaces
+export interface NewsFilters {
+  keywords: string[];
+  keywordExpression: Array<{ type: 'keyword' | 'operator' | 'group', value: string | any[] }>; // Expression-based keywords
+  sourceExpression: Array<{ type: 'source' | 'operator' | 'group', value: string | any[] }>; // Expression-based sources
+  categoryExpression: Array<{ type: 'category' | 'operator' | 'group', value: string | any[] }>; // Expression-based categories
+  countryExpression: Array<{ type: 'country' | 'operator' | 'group', value: string | any[] }>; // Expression-based countries
+  dateRange: string;
+  // Legacy arrays for backward compatibility
+  sources: string[];
+  categories: string[];
+  countries: string[];
+  // Query operators (legacy)
+  keywordOperator: 'AND' | 'OR';
+  categoryOperator: 'AND' | 'OR';
+  sourceOperator: 'AND' | 'OR';
+  countryOperator: 'AND' | 'OR';
+}
+
+export interface NewsArticle {
+  id: string;
+  title: string;
+  description: string;
+  source_url: string;
+  source_name: string;
+  published_date: string;
+  keywords: string;
+  category: string;
+  image_url?: string;
+  sentiment?: string;
+  ai_tag?: string;
+  country?: string;
+  language?: string;
 }
 
 export interface TabManagementState {
