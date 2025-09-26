@@ -153,6 +153,37 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [selectedCountryGroupIndex, setSelectedCountryGroupIndex] = useState<number | null>(null);
   const tileRef = useRef<HTMLDivElement>(null);
+  const localFiltersRef = useRef(localFilters);
+  const initialLoadDone = useRef(false);
+
+  // Update ref when localFilters changes
+  useEffect(() => {
+    localFiltersRef.current = localFilters;
+  }, [localFilters]);
+
+  // Helper function to clean up trailing operators from expressions
+  const cleanupTrailingOperators = (expression: any[]) => {
+    if (!expression || expression.length === 0) return expression;
+    
+    // Remove trailing operators
+    let cleaned = [...expression];
+    while (cleaned.length > 0 && cleaned[cleaned.length - 1]?.type === 'operator') {
+      cleaned.pop();
+    }
+    
+    return cleaned;
+  };
+
+  // Helper function to clean up all filter expressions
+  const cleanupAllExpressions = (filters: any) => {
+    return {
+      ...filters,
+      keywordExpression: cleanupTrailingOperators(filters.keywordExpression || []),
+      sourceExpression: cleanupTrailingOperators(filters.sourceExpression || []),
+      categoryExpression: cleanupTrailingOperators(filters.categoryExpression || []),
+      countryExpression: cleanupTrailingOperators(filters.countryExpression || []),
+    };
+  };
 
   // Helper function to clean up group after deletion
   const cleanupGroup = (groupItems: any[]) => {
@@ -985,14 +1016,17 @@ const NewsTile: React.FC<NewsTileProps> = ({
       // Simulate API call delay
       await new Promise(resolve => setTimeout(resolve, 1000));
       
+      // Get current filters at the time of execution
+      const currentFilters = localFiltersRef.current;
+      
       // Filter mock data based on criteria
-      const filteredArticles = filterArticles(mockNewsData, localFilters);
+      const filteredArticles = filterArticles(mockNewsData, currentFilters);
       setNewsArticles(filteredArticles);
       
       // Update tile with results
       onUpdate(id, {
         articles: filteredArticles,
-        filters: localFilters,
+        filters: currentFilters,
         lastUpdated: new Date().toISOString(),
       });
     } catch (err) {
@@ -1001,7 +1035,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [filterArticles, localFilters, id, onUpdate]);
+  }, [filterArticles, id, onUpdate]);
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -1016,10 +1050,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
 
   // Initial load
   useEffect(() => {
-    if (newsArticles.length === 0) {
+    if (!initialLoadDone.current && newsArticles.length === 0) {
+      initialLoadDone.current = true;
       runNewsSearch();
     }
-  }, [runNewsSearch, newsArticles.length]);
+  }, []); // Empty dependency array - only run once on mount
 
   const handleSettingsOpen = (event: React.MouseEvent<HTMLElement>) => {
     setSettingsAnchor(event.currentTarget);
@@ -1120,18 +1155,24 @@ const NewsTile: React.FC<NewsTileProps> = ({
     setResultsPerPage(newResultsPerPage);
   }, [calculateResultsPerPage, size]);
 
-  // Add ResizeObserver to recalculate when tile is resized
+  // Add ResizeObserver to recalculate when tile is resized (with debounce)
   useEffect(() => {
     if (!tileRef.current) return;
 
+    let timeoutId: NodeJS.Timeout;
     const resizeObserver = new ResizeObserver(() => {
-      const newResultsPerPage = calculateResultsPerPage();
-      setResultsPerPage(newResultsPerPage);
+      // Debounce the resize calculation to prevent infinite loops
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        const newResultsPerPage = calculateResultsPerPage();
+        setResultsPerPage(newResultsPerPage);
+      }, 100); // 100ms debounce
     });
 
     resizeObserver.observe(tileRef.current);
 
     return () => {
+      clearTimeout(timeoutId);
       resizeObserver.disconnect();
     };
   }, [calculateResultsPerPage]);
@@ -2020,12 +2061,15 @@ const NewsTile: React.FC<NewsTileProps> = ({
         <DialogActions>
           <Button onClick={() => {
             setFiltersDialogOpen(false);
-            // Reset to original filters if cancelled
-            setLocalFilters(filters);
+            // Clean up trailing operators before resetting
+            const cleanedFilters = cleanupAllExpressions(localFilters);
+            setLocalFilters(cleanedFilters);
           }}>Cancel</Button>
           <Button onClick={() => { 
-            // Apply the local filters to the tile
-            handleFiltersChange(localFilters);
+            // Clean up trailing operators before applying
+            const cleanedFilters = cleanupAllExpressions(localFilters);
+            // Apply the cleaned filters to the tile
+            handleFiltersChange(cleanedFilters);
             setFiltersDialogOpen(false); 
             runNewsSearch(); 
           }} variant="contained">
