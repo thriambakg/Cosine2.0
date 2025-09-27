@@ -83,10 +83,11 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     """
     params = {
         'Limit': limit,
-        'FilterExpression': '',
-        'ExpressionAttributeValues': {},
-        'ExpressionAttributeNames': {}
+        'ExpressionAttributeValues': {}
     }
+    
+    # Only add ExpressionAttributeNames if we have attribute names to define
+    expression_attribute_names = {}
 
     # Determine date range for filtering
     end_date = datetime.utcnow()
@@ -106,7 +107,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     
     # 1. Check for simple source query (GSI5)
     source_query = query_filters.get('sources')
-    if source_query and source_query.get('type') == 'term':
+    if source_query and source_query.get('type') == 'term' and source_query.get('value'):
         params['IndexName'] = 'GSI5'  # Source-based GSI
         params['KeyConditionExpression'] = 'GSI5PK = :gsi5pk'
         params['ExpressionAttributeValues'][':gsi5pk'] = f"SOURCE#{source_query['value']}"
@@ -116,7 +117,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     
     # 2. Check for simple category query (GSI1)
     category_query = query_filters.get('categories')
-    if category_query and category_query.get('type') == 'term':
+    if category_query and category_query.get('type') == 'term' and category_query.get('value'):
         params['IndexName'] = 'GSI1'  # Category-based GSI
         params['KeyConditionExpression'] = 'GSI1PK = :gsi1pk'
         params['ExpressionAttributeValues'][':gsi1pk'] = f"CATEGORY#{category_query['value']}"
@@ -126,7 +127,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     
     # 3. Check for simple keyword query (GSI4)
     keyword_query = query_filters.get('keywords')
-    if keyword_query and keyword_query.get('type') == 'term':
+    if keyword_query and keyword_query.get('type') == 'term' and keyword_query.get('value'):
         params['IndexName'] = 'GSI4'  # Keywords-based GSI
         params['KeyConditionExpression'] = 'GSI4PK = :gsi4pk'
         params['ExpressionAttributeValues'][':gsi4pk'] = f"KEYWORD#{keyword_query['value']}"
@@ -136,7 +137,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     
     # 4. Check for simple AI tag query (GSI3)
     ai_tag_query = query_filters.get('ai_tag')
-    if ai_tag_query and ai_tag_query.get('type') == 'term':
+    if ai_tag_query and ai_tag_query.get('type') == 'term' and ai_tag_query.get('value'):
         params['IndexName'] = 'GSI3'  # AI Tag-based GSI
         params['KeyConditionExpression'] = 'GSI3PK = :gsi3pk'
         params['ExpressionAttributeValues'][':gsi3pk'] = f"AITAG#{ai_tag_query['value']}"
@@ -146,11 +147,18 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
 
     # Fallback to main table scan for complex queries or no specific filters
     # Add date filtering to scan if specified
+    filter_expressions = []
     if date_range != 'all':
-        params['FilterExpression'] += '#pd BETWEEN :start_date AND :end_date'
-        params['ExpressionAttributeNames']['#pd'] = 'published_date'
+        filter_expressions.append('#pd BETWEEN :start_date AND :end_date')
+        expression_attribute_names['#pd'] = 'published_date'
         params['ExpressionAttributeValues'][':start_date'] = start_date.isoformat(timespec='seconds') + 'Z'
         params['ExpressionAttributeValues'][':end_date'] = end_date.isoformat(timespec='seconds') + 'Z'
+    
+    # Only add FilterExpression and ExpressionAttributeNames if we have filters
+    if filter_expressions:
+        params['FilterExpression'] = ' AND '.join(filter_expressions)
+        if expression_attribute_names:
+            params['ExpressionAttributeNames'] = expression_attribute_names
     
     logger.info("Falling back to main table scan for complex filtering.")
     return params
