@@ -135,18 +135,11 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         print("🔄 Complex category expression detected - falling back to scan with client-side filtering")
         # Will be handled by client-side filtering
     
-    # 3. Check for simple keyword query (GSI4)
+    # 3. Check for keyword queries (always use scan with FilterExpression)
     keyword_query = query_filters.get('keywords')
-    if keyword_query and keyword_query.get('type') == 'term' and keyword_query.get('value'):
-        params['IndexName'] = 'GSI4'  # Keywords-based GSI
-        params['KeyConditionExpression'] = 'GSI4PK = :gsi4pk'
-        params['ExpressionAttributeValues'][':gsi4pk'] = f"KEYWORD#{keyword_query['value']}"
-        params['ScanIndexForward'] = False  # Newest first
-        print(f"🎯 Using GSI4 for keyword: {keyword_query['value']}")
-        return params
-    elif keyword_query and keyword_query.get('type') == 'expression':
-        print("🔄 Complex keyword expression detected - falling back to scan with client-side filtering")
-        # Will be handled by client-side filtering
+    if keyword_query:
+        print("🔄 Keyword query detected - using table scan with FilterExpression for comprehensive keyword matching")
+        # Will be handled by client-side filtering after scan
     
     # 4. Check for simple AI tag query (GSI3)
     ai_tag_query = query_filters.get('ai_tag')
@@ -306,8 +299,16 @@ def filter_by_term(articles, term, field_name):
         else:
             field_value = str(field_value).lower()
         
-        if value in field_value:
-            filtered.append(article)
+        # For keywords field, check if the term appears as a whole keyword (comma-separated)
+        if field_name == 'keywords':
+            # Split by comma and check if any keyword matches exactly or contains the search term
+            keywords_list = [kw.strip() for kw in field_value.split(',')]
+            if any(value in kw for kw in keywords_list):
+                filtered.append(article)
+        else:
+            # For other fields, use substring matching
+            if value in field_value:
+                filtered.append(article)
     
     return filtered
 
