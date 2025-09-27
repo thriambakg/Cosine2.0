@@ -37,10 +37,14 @@ def lambda_handler(event, context):
 
         # Build DynamoDB query parameters
         query_params = build_dynamodb_query_params(query_filters, date_range, limit)
+        print(f"🔧 Built query params: {json.dumps(query_params, default=str)}")
 
         # Execute DynamoDB query
+        print(f"📊 Executing DynamoDB query on table: {news_table_name}")
         response = execute_dynamodb_query(query_params)
+        print(f"📥 DynamoDB response: {json.dumps(response, default=str)}")
         articles = response.get('Items', [])
+        print(f"📰 Retrieved {len(articles)} articles from DynamoDB")
 
         # Apply client-side filtering for complex keyword/country expressions if needed
         filtered_articles = apply_client_side_filters(articles, query_filters)
@@ -112,7 +116,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         params['KeyConditionExpression'] = 'GSI5PK = :gsi5pk'
         params['ExpressionAttributeValues'][':gsi5pk'] = f"SOURCE#{source_query['value']}"
         params['ScanIndexForward'] = False  # Newest first
-        logger.info(f"Using GSI5 for source: {source_query['value']}")
+        print(f"🎯 Using GSI5 for source: {source_query['value']}")
         return params
     
     # 2. Check for simple category query (GSI1)
@@ -122,7 +126,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         params['KeyConditionExpression'] = 'GSI1PK = :gsi1pk'
         params['ExpressionAttributeValues'][':gsi1pk'] = f"CATEGORY#{category_query['value']}"
         params['ScanIndexForward'] = False  # Newest first
-        logger.info(f"Using GSI1 for category: {category_query['value']}")
+        print(f"🎯 Using GSI1 for category: {category_query['value']}")
         return params
     
     # 3. Check for simple keyword query (GSI4)
@@ -132,7 +136,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         params['KeyConditionExpression'] = 'GSI4PK = :gsi4pk'
         params['ExpressionAttributeValues'][':gsi4pk'] = f"KEYWORD#{keyword_query['value']}"
         params['ScanIndexForward'] = False  # Newest first
-        logger.info(f"Using GSI4 for keyword: {keyword_query['value']}")
+        print(f"🎯 Using GSI4 for keyword: {keyword_query['value']}")
         return params
     
     # 4. Check for simple AI tag query (GSI3)
@@ -142,7 +146,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         params['KeyConditionExpression'] = 'GSI3PK = :gsi3pk'
         params['ExpressionAttributeValues'][':gsi3pk'] = f"AITAG#{ai_tag_query['value']}"
         params['ScanIndexForward'] = False  # Newest first
-        logger.info(f"Using GSI3 for AI tag: {ai_tag_query['value']}")
+        print(f"🎯 Using GSI3 for AI tag: {ai_tag_query['value']}")
         return params
 
     # Fallback to main table scan for complex queries or no specific filters
@@ -160,24 +164,35 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         if expression_attribute_names:
             params['ExpressionAttributeNames'] = expression_attribute_names
     
-    logger.info("Falling back to main table scan for complex filtering.")
+    print("🔄 Falling back to main table scan for complex filtering.")
     return params
 
 def execute_dynamodb_query(params):
     """Execute DynamoDB query or scan based on parameters."""
-    if 'KeyConditionExpression' in params:
-        # It's a query operation
-        return table.query(**params)
-    else:
-        # It's a scan operation (less efficient, used for complex filters or no GSI match)
-        return table.scan(**params)
+    try:
+        if 'KeyConditionExpression' in params:
+            # It's a query operation
+            print(f"🔍 Executing DynamoDB query with params: {json.dumps(params, default=str)}")
+            result = table.query(**params)
+            print(f"✅ Query completed successfully. Items count: {len(result.get('Items', []))}")
+            return result
+        else:
+            # It's a scan operation (less efficient, used for complex filters or no GSI match)
+            print(f"🔍 Executing DynamoDB scan with params: {json.dumps(params, default=str)}")
+            result = table.scan(**params)
+            print(f"✅ Scan completed successfully. Items count: {len(result.get('Items', []))}")
+            return result
+    except Exception as e:
+        print(f"❌ DynamoDB operation failed: {str(e)}")
+        print(f"❌ Parameters that caused the error: {json.dumps(params, default=str)}")
+        raise
 
 def apply_client_side_filters(articles, query_filters):
     """
     Apply filters that couldn't be handled by DynamoDB's query/scan.
     This is a placeholder for complex AND/OR/group logic.
     """
-    logger.info("Applying client-side filters (placeholder).")
+    print("🔧 Applying client-side filters (placeholder).")
     # TODO: Implement complex filtering logic based on query_filters structure
     return articles
 
