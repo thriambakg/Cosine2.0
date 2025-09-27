@@ -118,6 +118,9 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         params['ScanIndexForward'] = False  # Newest first
         print(f"🎯 Using GSI5 for source: {source_query['value']}")
         return params
+    elif source_query and source_query.get('type') == 'expression':
+        print("🔄 Complex source expression detected - falling back to scan with client-side filtering")
+        # Will be handled by client-side filtering
     
     # 2. Check for simple category query (GSI1)
     category_query = query_filters.get('categories')
@@ -128,6 +131,9 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         params['ScanIndexForward'] = False  # Newest first
         print(f"🎯 Using GSI1 for category: {category_query['value']}")
         return params
+    elif category_query and category_query.get('type') == 'expression':
+        print("🔄 Complex category expression detected - falling back to scan with client-side filtering")
+        # Will be handled by client-side filtering
     
     # 3. Check for simple keyword query (GSI4)
     keyword_query = query_filters.get('keywords')
@@ -138,6 +144,9 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         params['ScanIndexForward'] = False  # Newest first
         print(f"🎯 Using GSI4 for keyword: {keyword_query['value']}")
         return params
+    elif keyword_query and keyword_query.get('type') == 'expression':
+        print("🔄 Complex keyword expression detected - falling back to scan with client-side filtering")
+        # Will be handled by client-side filtering
     
     # 4. Check for simple AI tag query (GSI3)
     ai_tag_query = query_filters.get('ai_tag')
@@ -190,11 +199,117 @@ def execute_dynamodb_query(params):
 def apply_client_side_filters(articles, query_filters):
     """
     Apply filters that couldn't be handled by DynamoDB's query/scan.
-    This is a placeholder for complex AND/OR/group logic.
+    Handles complex AND/OR/group logic for keywords, sources, categories, and countries.
     """
-    print("🔧 Applying client-side filters (placeholder).")
-    # TODO: Implement complex filtering logic based on query_filters structure
+    print("🔧 Applying client-side filters.")
+    
+    if not articles:
+        return articles
+    
+    # Handle complex keyword expressions
+    keyword_query = query_filters.get('keywords')
+    if keyword_query and keyword_query.get('type') == 'expression':
+        print(f"🔍 Processing complex keyword expression: {json.dumps(keyword_query)}")
+        articles = filter_by_expression(articles, keyword_query, 'keywords')
+    
+    # Handle complex source expressions
+    source_query = query_filters.get('sources')
+    if source_query and source_query.get('type') == 'expression':
+        print(f"🔍 Processing complex source expression: {json.dumps(source_query)}")
+        articles = filter_by_expression(articles, source_query, 'source_name')
+    
+    # Handle complex category expressions
+    category_query = query_filters.get('categories')
+    if category_query and category_query.get('type') == 'expression':
+        print(f"🔍 Processing complex category expression: {json.dumps(category_query)}")
+        articles = filter_by_expression(articles, category_query, 'category')
+    
+    # Handle complex country expressions
+    country_query = query_filters.get('countries')
+    if country_query and country_query.get('type') == 'expression':
+        print(f"🔍 Processing complex country expression: {json.dumps(country_query)}")
+        articles = filter_by_expression(articles, country_query, 'country')
+    
+    print(f"✅ Client-side filtering complete. {len(articles)} articles remaining.")
     return articles
+
+def filter_by_expression(articles, expression, field_name):
+    """
+    Filter articles based on a complex expression (AND/OR/group logic).
+    """
+    if not expression or not expression.get('children'):
+        return articles
+    
+    def evaluate_expression(items, expr):
+        """Recursively evaluate expression tree."""
+        if not expr or not expr.get('children'):
+            return items
+        
+        children = expr.get('children', [])
+        if len(children) == 0:
+            return items
+        elif len(children) == 1:
+            return filter_by_term(items, children[0], field_name)
+        
+        # Handle multiple children with operators
+        result_items = set()
+        current_items = items
+        
+        for i, child in enumerate(children):
+            if child.get('type') == 'term':
+                filtered = filter_by_term(current_items, child, field_name)
+                if i == 0:
+                    # First item - start with these results
+                    result_items = set(filtered)
+                else:
+                    # Apply operator to previous results
+                    prev_operator = children[i-1].get('operator', 'AND')
+                    if prev_operator == 'OR':
+                        result_items.update(filtered)
+                    else:  # AND
+                        result_items = result_items.intersection(set(filtered))
+                current_items = list(result_items)
+            elif child.get('type') == 'group':
+                group_filtered = filter_by_expression(items, child)
+                if i == 0:
+                    result_items = set(group_filtered)
+                else:
+                    prev_operator = children[i-1].get('operator', 'AND')
+                    if prev_operator == 'OR':
+                        result_items.update(group_filtered)
+                    else:  # AND
+                        result_items = result_items.intersection(set(group_filtered))
+                current_items = list(result_items)
+        
+        return list(result_items)
+    
+    return evaluate_expression(articles, expression)
+
+def filter_by_term(articles, term, field_name):
+    """
+    Filter articles by a single term.
+    """
+    if not term or term.get('type') != 'term':
+        return articles
+    
+    value = term.get('value', '').lower()
+    if not value:
+        return articles
+    
+    filtered = []
+    for article in articles:
+        field_value = article.get(field_name, '')
+        if isinstance(field_value, str):
+            field_value = field_value.lower()
+        elif isinstance(field_value, list):
+            field_value = ' '.join(str(item).lower() for item in field_value)
+        else:
+            field_value = str(field_value).lower()
+        
+        if value in field_value:
+            filtered.append(article)
+    
+    return filtered
 
 def format_articles_for_frontend(articles):
     """Convert DynamoDB items to frontend-friendly format."""

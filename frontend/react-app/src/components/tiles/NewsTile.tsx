@@ -1271,11 +1271,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
     const articleHeight = localDisplayOptions.compactView ? 60 : 120; // Compact vs full view
     const maxArticles = Math.floor(availableHeight / articleHeight);
     
-    // Ensure minimum of 3 articles and maximum of 20 articles
-    return Math.max(3, Math.min(20, maxArticles));
+    // Ensure minimum of 10 articles and maximum of 20 articles
+    return Math.max(10, Math.min(20, maxArticles));
   }, [localDisplayOptions.compactView]);
 
-  const [resultsPerPage, setResultsPerPage] = useState(5);
+  const [resultsPerPage, setResultsPerPage] = useState(10);
   
   // Update results per page when tile size changes
   useEffect(() => {
@@ -1309,6 +1309,14 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const startIndex = (currentPage - 1) * resultsPerPage;
   const endIndex = startIndex + resultsPerPage;
   const currentArticles = newsArticles.slice(startIndex, endIndex);
+
+  // Scroll to top when page changes
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (listRef.current) {
+      listRef.current.scrollTop = 0;
+    }
+  }, [currentPage]);
 
   return (
     <Box
@@ -1479,23 +1487,28 @@ const NewsTile: React.FC<NewsTileProps> = ({
           minHeight: 0,
           mt: 1
         }}>
-          <List sx={{ 
-            flex: 1,
-            backgroundColor: 'transparent',
-            '&::-webkit-scrollbar': {
-              width: '6px',
-            },
-            '&::-webkit-scrollbar-track': {
-              backgroundColor: 'rgba(55, 65, 81, 0.3)',
-            },
-            '&::-webkit-scrollbar-thumb': {
-              backgroundColor: 'rgba(59, 130, 246, 0.5)',
-              borderRadius: '3px',
-            },
-            '&::-webkit-scrollbar-thumb:hover': {
-              backgroundColor: 'rgba(59, 130, 246, 0.7)',
-            },
-          }}>
+          <List 
+            ref={listRef}
+            sx={{ 
+              flex: 1,
+              backgroundColor: 'transparent',
+              maxHeight: 'calc(100% - 60px)', // Leave space for pagination
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              '&::-webkit-scrollbar': {
+                width: '6px',
+              },
+              '&::-webkit-scrollbar-track': {
+                backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                borderRadius: '3px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.7)',
+              },
+            }}>
             {currentArticles.map((article) => (
               <ListItem
                 key={article.id}
@@ -1510,6 +1523,9 @@ const NewsTile: React.FC<NewsTileProps> = ({
                     ? '#22c55e' 
                     : 'rgba(55, 65, 81, 0.3)',
                   cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  minHeight: 60,
                   '&:hover': {
                     backgroundColor: selectedArticles.includes(article.id)
                       ? 'rgba(34, 197, 94, 0.15)'
@@ -1518,7 +1534,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 }}
                 onClick={() => handleArticleClick(article)}
               >
-                <ListItemAvatar>
+                {/* Left side: Checkbox and content */}
+                <Box sx={{ display: 'flex', alignItems: 'center', flex: 1, mr: 2 }}>
                   <Checkbox
                     checked={selectedArticles.includes(article.id)}
                     onChange={(e) => {
@@ -1532,40 +1549,24 @@ const NewsTile: React.FC<NewsTileProps> = ({
                     }}
                     size="small"
                   />
-                  {localDisplayOptions.showImages && article.image_url ? (
-                    <Avatar
-                      src={article.image_url}
-                      variant="rounded"
-                      sx={{ 
-                        width: 60, 
-                        height: 40,
-                        borderRadius: '4px',
-                        objectFit: 'cover'
+                  <Box sx={{ flex: 1 }}>
+                    <Typography
+                      variant="subtitle2"
+                      color="white"
+                      sx={{
+                        fontWeight: 600,
+                        fontSize: localDisplayOptions.compactView ? '0.875rem' : '1rem',
+                        lineHeight: 1.3,
+                        mb: 0.5,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
                       }}
                     >
-                      <ImageIcon />
-                    </Avatar>
-                  ) : (
-                    <Avatar sx={{ width: 60, height: 40, backgroundColor: 'rgba(59, 130, 246, 0.2)' }}>
-                      <ArticleIcon />
-                    </Avatar>
-                  )}
-                </ListItemAvatar>
-                <ListItemText
-                  primary={
-                    <Box>
-                      <Typography
-                        variant="subtitle2"
-                        color="white"
-                        sx={{
-                          fontWeight: 600,
-                          fontSize: localDisplayOptions.compactView ? '0.875rem' : '1rem',
-                          lineHeight: 1.3,
-                          mb: 0.5,
-                        }}
-                      >
-                        {article.title}
-                      </Typography>
+                      {article.title}
+                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
                       {localDisplayOptions.showSource && (
                         <Typography
                           variant="caption"
@@ -1575,68 +1576,87 @@ const NewsTile: React.FC<NewsTileProps> = ({
                           {article.source_name}
                         </Typography>
                       )}
-                    </Box>
-                  }
-                  secondary={
-                    <Box sx={{ mt: 0.5 }}>
-                      {!localDisplayOptions.compactView && (
-                        <Typography
-                          variant="body2"
-                          color="#9ca3af"
-                          sx={{
-                            fontSize: '0.875rem',
-                            lineHeight: 1.4,
-                            mb: 1,
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                          }}
-                        >
-                          {article.description}
-                        </Typography>
+                      {localDisplayOptions.showDate && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <CalendarIcon sx={{ fontSize: 12, color: '#6b7280' }} />
+                          <Typography variant="caption" color="#6b7280">
+                            {formatDate(article.published_date)}
+                          </Typography>
+                        </Box>
                       )}
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                        {localDisplayOptions.showDate && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <CalendarIcon sx={{ fontSize: 12, color: '#6b7280' }} />
-                            <Typography variant="caption" color="#6b7280">
-                              {formatDate(article.published_date)}
-                            </Typography>
-                          </Box>
-                        )}
-                        {localDisplayOptions.showKeywords && article.keywords && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Chip
-                              label={article.keywords.split(',')[0]}
-                              size="small"
-                              sx={{
-                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                color: '#3b82f6',
-                                fontSize: '0.7rem',
-                                height: '18px',
-                              }}
-                            />
-                          </Box>
-                        )}
-                        <IconButton
+                      {localDisplayOptions.showKeywords && article.keywords && (
+                        <Chip
+                          label={article.keywords.split(',')[0]}
                           size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleArticleClick(article);
+                          sx={{
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            color: '#3b82f6',
+                            fontSize: '0.7rem',
+                            height: '18px',
                           }}
-                          sx={{ 
-                            color: '#6b7280',
-                            '&:hover': { color: '#3b82f6' },
-                            p: 0.5
-                          }}
-                        >
-                          <OpenInNewIcon sx={{ fontSize: 14 }} />
-                        </IconButton>
-                      </Box>
+                        />
+                      )}
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleArticleClick(article);
+                        }}
+                        sx={{ 
+                          color: '#6b7280',
+                          '&:hover': { color: '#3b82f6' },
+                          p: 0.5,
+                          ml: 'auto'
+                        }}
+                      >
+                        <OpenInNewIcon sx={{ fontSize: 14 }} />
+                      </IconButton>
                     </Box>
-                  }
-                />
+                  </Box>
+                </Box>
+
+                {/* Right side: Centered image */}
+                {localDisplayOptions.showImages && article.image_url ? (
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    width: 80,
+                    height: 50,
+                    flexShrink: 0
+                  }}>
+                    <Avatar
+                      src={article.image_url}
+                      variant="rounded"
+                      sx={{ 
+                        width: 80, 
+                        height: 50,
+                        borderRadius: '6px',
+                        objectFit: 'cover'
+                      }}
+                    >
+                      <ImageIcon />
+                    </Avatar>
+                  </Box>
+                ) : localDisplayOptions.showImages ? (
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    width: 80,
+                    height: 50,
+                    flexShrink: 0
+                  }}>
+                    <Avatar sx={{ 
+                      width: 80, 
+                      height: 50, 
+                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                      borderRadius: '6px'
+                    }}>
+                      <ArticleIcon />
+                    </Avatar>
+                  </Box>
+                ) : null}
               </ListItem>
             ))}
           </List>
