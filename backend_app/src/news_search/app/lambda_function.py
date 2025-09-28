@@ -39,11 +39,16 @@ def lambda_handler(event, context):
         query_params = build_dynamodb_query_params(query_filters, date_range, limit)
         print(f"🔧 Built query params: {json.dumps(query_params, default=str)}")
 
-        # Execute DynamoDB query
-        print(f"📊 Executing DynamoDB query on table: {news_table_name}")
-        response = execute_dynamodb_query(query_params)
-        print(f"📥 DynamoDB response: {json.dumps(response, default=str)}")
-        articles = response.get('Items', [])
+        # Handle OR keyword queries with multiple GSI calls
+        if query_params.get('_or_keywords'):
+            articles = handle_or_keyword_query(query_params, query_filters, date_range, limit)
+        else:
+            # Execute single DynamoDB query
+            print(f"📊 Executing DynamoDB query on table: {news_table_name}")
+            response = execute_dynamodb_query(query_params)
+            print(f"📥 DynamoDB response: {json.dumps(response, default=str)}")
+            articles = response.get('Items', [])
+        
         print(f"📰 Retrieved {len(articles)} articles from DynamoDB")
 
         # Apply client-side filtering for complex keyword/country expressions if needed
@@ -96,9 +101,9 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     # Determine date range for filtering
     end_date = datetime.utcnow()
     if date_range == '12h':
-        start_date = end_date - timedelta(hours=12)
+        start_date = end_date - timedelta(hours=24)  # Use 24h to be more inclusive
     elif date_range == '24h':
-        start_date = end_date - timedelta(hours=24)
+        start_date = end_date - timedelta(hours=48)  # Use 48h to be more inclusive
     elif date_range == '7d':
         start_date = end_date - timedelta(days=7)
     elif date_range == '30d':
@@ -151,6 +156,21 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
                 return params
             else:
                 print("🔄 Empty keyword value - falling back to scan")
+        elif keyword_query.get('type') == 'expression':
+            # Handle OR expressions by making multiple GSI queries
+            children = keyword_query.get('children', [])
+            or_terms = []
+            
+            for child in children:
+                if child.get('type') == 'term' and child.get('value'):
+                    or_terms.append(child.get('value', '').lower())
+            
+            if or_terms:
+                print(f"🎯 OR keyword search using multiple GSI4 queries: {or_terms}")
+                # Return special marker for OR query handling
+                params['_or_keywords'] = or_terms
+                params['IndexName'] = 'GSI4'
+                return params
         else:
             print("🔄 Complex keyword expression - using table scan with client-side filtering")
             # Will be handled by client-side filtering after scan
@@ -202,6 +222,45 @@ def execute_dynamodb_query(params):
         print(f"❌ DynamoDB operation failed: {str(e)}")
         print(f"❌ Parameters that caused the error: {json.dumps(params, default=str)}")
         raise
+
+def handle_or_keyword_query(params, query_filters, date_range, limit):
+    """Handle OR keyword queries by making multiple GSI4 queries and combining results."""
+    or_keywords = params.pop('_or_keywords')  # Remove the special marker
+    all_articles = []
+    seen_article_ids = set()
+    
+    print(f"🔄 Handling OR keyword query for: {or_keywords}")
+    
+    for keyword in or_keywords:
+        # Create query params for this keyword
+        keyword_params = {
+            'IndexName': 'GSI4',
+            'KeyConditionExpression': 'GSI4PK = :keyword',
+            'ExpressionAttributeValues': {':keyword': f"KEYWORD#{keyword}"},
+            'ScanIndexForward': False,
+            'Limit': limit
+        }
+        
+        print(f"🔍 Querying for keyword: {keyword}")
+        
+        try:
+            response = execute_dynamodb_query(keyword_params)
+            keyword_articles = response.get('Items', [])
+            print(f"📰 Found {len(keyword_articles)} articles for keyword '{keyword}'")
+            
+            # Add unique articles to results
+            for article in keyword_articles:
+                article_id = article.get('main_article_id') or article.get('SK')
+                if article_id not in seen_article_ids:
+                    all_articles.append(article)
+                    seen_article_ids.add(article_id)
+                    
+        except Exception as e:
+            print(f"❌ Error querying keyword '{keyword}': {str(e)}")
+            continue
+    
+    print(f"✅ OR query complete. Total unique articles: {len(all_articles)}")
+    return all_articles
 
 def apply_client_side_filters(articles, query_filters):
     """
