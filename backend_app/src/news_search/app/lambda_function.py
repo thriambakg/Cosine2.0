@@ -135,11 +135,25 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
         print("🔄 Complex category expression detected - falling back to scan with client-side filtering")
         # Will be handled by client-side filtering
     
-    # 3. Check for keyword queries (always use scan with FilterExpression)
+    # 3. Check for keyword queries (use optimized GSI4 approach)
     keyword_query = query_filters.get('keywords')
     if keyword_query:
-        print("🔄 Keyword query detected - using table scan with FilterExpression for comprehensive keyword matching")
-        # Will be handled by client-side filtering after scan
+        # Check if this is a simple keyword search (single term)
+        if keyword_query.get('type') == 'term':
+            keyword_value = keyword_query.get('value', '').lower()
+            if keyword_value:
+                print(f"🎯 Simple keyword search using GSI4: {keyword_value}")
+                # Use GSI4 for direct keyword lookup (much faster than scan)
+                params['IndexName'] = 'GSI4'
+                params['KeyConditionExpression'] = 'GSI4PK = :keyword'
+                params['ExpressionAttributeValues'][':keyword'] = f"KEYWORD#{keyword_value}"
+                params['ScanIndexForward'] = False  # Most recent first
+                return params
+            else:
+                print("🔄 Empty keyword value - falling back to scan")
+        else:
+            print("🔄 Complex keyword expression - using table scan with client-side filtering")
+            # Will be handled by client-side filtering after scan
     
     # 4. Check for simple AI tag query (GSI3)
     ai_tag_query = query_filters.get('ai_tag')
