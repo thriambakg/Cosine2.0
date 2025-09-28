@@ -39,8 +39,10 @@ def lambda_handler(event, context):
         query_params = build_dynamodb_query_params(query_filters, date_range, limit)
         print(f"🔧 Built query params: {json.dumps(query_params, default=str)}")
 
-        # Handle OR keyword queries with multiple GSI calls
-        if query_params.get('_or_keywords'):
+        # Check if we need comprehensive complex filtering
+        if is_comprehensive_complex_query(query_filters):
+            articles = handle_comprehensive_complex_query(query_filters, date_range, limit)
+        elif query_params.get('_or_keywords'):
             articles = handle_or_keyword_query(query_params, query_filters, date_range, limit)
         else:
             # Execute single DynamoDB query
@@ -51,7 +53,7 @@ def lambda_handler(event, context):
         
         print(f"📰 Retrieved {len(articles)} articles from DynamoDB")
 
-        # Apply client-side filtering for complex keyword/country expressions if needed
+        # Apply client-side filtering for complex expressions if needed
         filtered_articles = apply_client_side_filters(articles, query_filters)
 
         return {
@@ -223,6 +225,56 @@ def execute_dynamodb_query(params):
         print(f"❌ Parameters that caused the error: {json.dumps(params, default=str)}")
         raise
 
+def is_comprehensive_complex_query(query_filters):
+    """Check if this is a comprehensive complex query that needs special handling."""
+    
+    # Check for cross-field complex expressions
+    complex_fields = []
+    for field in ['keywords', 'sources', 'categories', 'countries']:
+        field_query = query_filters.get(field)
+        if field_query and field_query.get('type') == 'expression':
+            complex_fields.append(field)
+    
+    # If multiple fields have complex expressions, we need comprehensive handling
+    if len(complex_fields) > 1:
+        print(f"🎯 Detected comprehensive complex query with multiple complex fields: {complex_fields}")
+        return True
+    
+    # Check for mixed field AND/OR logic (would be in a root expression)
+    root_expression = query_filters.get('expression')
+    if root_expression and root_expression.get('type') == 'expression':
+        print(f"🎯 Detected root-level expression with mixed field logic")
+        return True
+    
+    return False
+
+def handle_comprehensive_complex_query(query_filters, date_range, limit):
+    """Handle comprehensive complex queries with cross-field logic."""
+    print(f"🔄 Handling comprehensive complex query")
+    
+    # For now, use a broad table scan and apply comprehensive client-side filtering
+    # This could be optimized further with query planning in the future
+    params = {
+        'TableName': news_table_name,
+        'Limit': limit * 3,  # Get more items since we'll filter heavily
+        'FilterExpression': 'attribute_exists(#pk)',
+        'ExpressionAttributeNames': {
+            '#pk': 'PK'
+        }
+    }
+    
+    print(f"📊 Executing comprehensive table scan")
+    response = execute_dynamodb_query(params)
+    articles = response.get('Items', [])
+    
+    print(f"📰 Retrieved {len(articles)} articles for comprehensive filtering")
+    
+    # Apply comprehensive client-side filtering
+    filtered_articles = apply_comprehensive_filters(articles, query_filters)
+    
+    # Limit results to requested amount
+    return filtered_articles[:limit]
+
 def handle_or_keyword_query(params, query_filters, date_range, limit):
     """Handle OR keyword queries by making multiple GSI4 queries and combining results."""
     or_keywords = params.pop('_or_keywords')  # Remove the special marker
@@ -250,8 +302,9 @@ def handle_or_keyword_query(params, query_filters, date_range, limit):
             
             # Add unique articles to results
             for article in keyword_articles:
-                article_id = article.get('main_article_id') or article.get('SK')
-                if article_id not in seen_article_ids:
+                # Use main_article_id or SK as unique identifier
+                article_id = article.get('main_article_id') or article.get('SK', '')
+                if article_id and article_id not in seen_article_ids:
                     all_articles.append(article)
                     seen_article_ids.add(article_id)
                     
@@ -318,38 +371,166 @@ def filter_by_expression(articles, expression, field_name):
             return filter_by_term(items, children[0], field_name)
         
         # Handle multiple children with operators
-        result_items = set()
-        current_items = items
+        result_articles = []
+        result_article_ids = set()
         
         for i, child in enumerate(children):
             if child.get('type') == 'term':
-                filtered = filter_by_term(current_items, child, field_name)
+                filtered = filter_by_term(items, child, field_name)
                 if i == 0:
                     # First item - start with these results
-                    result_items = set(filtered)
+                    result_articles = filtered
+                    result_article_ids = {get_article_id(article) for article in filtered}
                 else:
                     # Apply operator to previous results
                     prev_operator = children[i-1].get('operator', 'AND')
+                    filtered_ids = {get_article_id(article) for article in filtered}
+                    
                     if prev_operator == 'OR':
-                        result_items.update(filtered)
+                        # Add new articles that aren't already in results
+                        for article in filtered:
+                            article_id = get_article_id(article)
+                            if article_id not in result_article_ids:
+                                result_articles.append(article)
+                                result_article_ids.add(article_id)
                     else:  # AND
-                        result_items = result_items.intersection(set(filtered))
-                current_items = list(result_items)
+                        # Keep only articles that are in both result and filtered
+                        result_articles = [article for article in result_articles 
+                                         if get_article_id(article) in filtered_ids]
+                        result_article_ids = result_article_ids.intersection(filtered_ids)
+                        
             elif child.get('type') == 'group':
-                group_filtered = filter_by_expression(items, child)
+                group_filtered = filter_by_expression(items, child, field_name)
                 if i == 0:
-                    result_items = set(group_filtered)
+                    result_articles = group_filtered
+                    result_article_ids = {get_article_id(article) for article in group_filtered}
                 else:
                     prev_operator = children[i-1].get('operator', 'AND')
+                    filtered_ids = {get_article_id(article) for article in group_filtered}
+                    
                     if prev_operator == 'OR':
-                        result_items.update(group_filtered)
+                        # Add new articles that aren't already in results
+                        for article in group_filtered:
+                            article_id = get_article_id(article)
+                            if article_id not in result_article_ids:
+                                result_articles.append(article)
+                                result_article_ids.add(article_id)
                     else:  # AND
-                        result_items = result_items.intersection(set(group_filtered))
-                current_items = list(result_items)
+                        # Keep only articles that are in both result and filtered
+                        result_articles = [article for article in result_articles 
+                                         if get_article_id(article) in filtered_ids]
+                        result_article_ids = result_article_ids.intersection(filtered_ids)
         
-        return list(result_items)
+        return result_articles
     
     return evaluate_expression(articles, expression)
+
+def apply_comprehensive_filters(articles, query_filters):
+    """Apply comprehensive filtering for cross-field complex queries."""
+    print(f"🔧 Applying comprehensive filters")
+    
+    if not articles:
+        return articles
+    
+    # Handle root-level mixed field expressions
+    root_expression = query_filters.get('expression')
+    if root_expression and root_expression.get('type') == 'expression':
+        print(f"🎯 Processing root-level mixed field expression")
+        return filter_by_mixed_field_expression(articles, root_expression)
+    
+    # Handle multiple complex field expressions
+    current_articles = articles
+    
+    for field in ['keywords', 'sources', 'categories', 'countries']:
+        field_query = query_filters.get(field)
+        if field_query and field_query.get('type') == 'expression':
+            print(f"🔍 Processing complex {field} expression")
+            current_articles = filter_by_expression(current_articles, field_query, get_field_name(field))
+    
+    print(f"✅ Comprehensive filtering complete. {len(current_articles)} articles remaining.")
+    return current_articles
+
+def filter_by_mixed_field_expression(articles, expression):
+    """Filter articles based on mixed field expressions (cross-field AND/OR logic)."""
+    if not expression or not expression.get('children'):
+        return articles
+    
+    def evaluate_mixed_expression(items, expr):
+        """Recursively evaluate mixed field expression tree."""
+        if not expr or not expr.get('children'):
+            return items
+        
+        children = expr.get('children', [])
+        if len(children) == 0:
+            return items
+        elif len(children) == 1:
+            return evaluate_mixed_term(items, children[0])
+        
+        # Handle multiple children with operators
+        result_articles = []
+        result_article_ids = set()
+        
+        for i, child in enumerate(children):
+            if child.get('type') == 'term':
+                filtered = evaluate_mixed_term(items, child)
+            elif child.get('type') == 'expression':
+                filtered = evaluate_mixed_expression(items, child)
+            else:
+                continue
+            
+            if i == 0:
+                # First item - start with these results
+                result_articles = filtered
+                result_article_ids = {get_article_id(article) for article in filtered}
+            else:
+                # Apply operator to previous results
+                prev_operator = children[i-1].get('operator', 'AND')
+                filtered_ids = {get_article_id(article) for article in filtered}
+                
+                if prev_operator == 'OR':
+                    # Add new articles that aren't already in results
+                    for article in filtered:
+                        article_id = get_article_id(article)
+                        if article_id not in result_article_ids:
+                            result_articles.append(article)
+                            result_article_ids.add(article_id)
+                else:  # AND
+                    # Keep only articles that are in both result and filtered
+                    result_articles = [article for article in result_articles 
+                                     if get_article_id(article) in filtered_ids]
+                    result_article_ids = result_article_ids.intersection(filtered_ids)
+        
+        return result_articles
+    
+    return evaluate_mixed_expression(articles, expression)
+
+def evaluate_mixed_term(articles, term):
+    """Evaluate a mixed field term (e.g., keywords: "tesla", sources: "Reuters")."""
+    if not term or term.get('type') != 'term':
+        return articles
+    
+    field = term.get('field', '')
+    value = term.get('value', '').lower()
+    
+    if not field or not value:
+        return articles
+    
+    field_name = get_field_name(field)
+    return filter_by_term(articles, term, field_name)
+
+def get_field_name(field_key):
+    """Map frontend field keys to DynamoDB field names."""
+    field_mapping = {
+        'keywords': 'keywords',
+        'sources': 'source_name', 
+        'categories': 'category',
+        'countries': 'country'
+    }
+    return field_mapping.get(field_key, field_key)
+
+def get_article_id(article):
+    """Get a unique identifier for an article."""
+    return article.get('main_article_id') or article.get('SK', '') or article.get('article_id', '')
 
 def filter_by_term(articles, term, field_name):
     """
