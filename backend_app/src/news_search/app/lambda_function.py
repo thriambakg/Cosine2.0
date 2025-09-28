@@ -228,7 +228,13 @@ def execute_dynamodb_query(params):
 def is_comprehensive_complex_query(query_filters):
     """Check if this is a comprehensive complex query that needs special handling."""
     
-    # Check for cross-field complex expressions
+    # Check for root-level mixed field expressions
+    root_expression = query_filters.get('expression')
+    if root_expression and root_expression.get('type') == 'expression':
+        print(f"🎯 Detected root-level expression with mixed field logic")
+        return True
+    
+    # Check for cross-field complex expressions (multiple fields with expressions)
     complex_fields = []
     for field in ['keywords', 'sources', 'categories', 'countries']:
         field_query = query_filters.get(field)
@@ -240,11 +246,12 @@ def is_comprehensive_complex_query(query_filters):
         print(f"🎯 Detected comprehensive complex query with multiple complex fields: {complex_fields}")
         return True
     
-    # Check for mixed field AND/OR logic (would be in a root expression)
-    root_expression = query_filters.get('expression')
-    if root_expression and root_expression.get('type') == 'expression':
-        print(f"🎯 Detected root-level expression with mixed field logic")
-        return True
+    # Check for any field with complex expressions that can't be handled by GSI
+    for field in ['sources', 'categories', 'countries']:  # keywords can use GSI4
+        field_query = query_filters.get(field)
+        if field_query and field_query.get('type') == 'expression':
+            print(f"🎯 Detected complex {field} expression requiring comprehensive handling")
+            return True
     
     return False
 
@@ -319,38 +326,59 @@ def apply_client_side_filters(articles, query_filters):
     """
     Apply filters that couldn't be handled by DynamoDB's query/scan.
     Handles complex AND/OR/group logic for keywords, sources, categories, and countries.
+    Cross-field filters are combined with AND logic (e.g., keyword AND source).
+    Empty fields are treated as wildcards (*).
     """
     print("🔧 Applying client-side filters.")
     
     if not articles:
         return articles
     
-    # Handle complex keyword expressions
+    # Apply each field filter with AND logic between fields
+    current_articles = articles
+    
+    # Handle keywords filter
     keyword_query = query_filters.get('keywords')
-    if keyword_query and keyword_query.get('type') == 'expression':
-        print(f"🔍 Processing complex keyword expression: {json.dumps(keyword_query)}")
-        articles = filter_by_expression(articles, keyword_query, 'keywords')
+    if keyword_query:
+        if keyword_query.get('type') == 'expression':
+            print(f"🔍 Processing keyword expression: {json.dumps(keyword_query)}")
+            current_articles = filter_by_expression(current_articles, keyword_query, 'keywords')
+        elif keyword_query.get('type') == 'term':
+            print(f"🔍 Processing keyword term: {keyword_query.get('value')}")
+            current_articles = filter_by_term(current_articles, keyword_query, 'keywords')
     
-    # Handle complex source expressions
+    # Handle sources filter (AND with previous results)
     source_query = query_filters.get('sources')
-    if source_query and source_query.get('type') == 'expression':
-        print(f"🔍 Processing complex source expression: {json.dumps(source_query)}")
-        articles = filter_by_expression(articles, source_query, 'source_name')
+    if source_query:
+        if source_query.get('type') == 'expression':
+            print(f"🔍 Processing source expression: {json.dumps(source_query)}")
+            current_articles = filter_by_expression(current_articles, source_query, 'source_name')
+        elif source_query.get('type') == 'term':
+            print(f"🔍 Processing source term: {source_query.get('value')}")
+            current_articles = filter_by_term(current_articles, source_query, 'source_name')
     
-    # Handle complex category expressions
+    # Handle categories filter (AND with previous results)
     category_query = query_filters.get('categories')
-    if category_query and category_query.get('type') == 'expression':
-        print(f"🔍 Processing complex category expression: {json.dumps(category_query)}")
-        articles = filter_by_expression(articles, category_query, 'category')
+    if category_query:
+        if category_query.get('type') == 'expression':
+            print(f"🔍 Processing category expression: {json.dumps(category_query)}")
+            current_articles = filter_by_expression(current_articles, category_query, 'category')
+        elif category_query.get('type') == 'term':
+            print(f"🔍 Processing category term: {category_query.get('value')}")
+            current_articles = filter_by_term(current_articles, category_query, 'category')
     
-    # Handle complex country expressions
+    # Handle countries filter (AND with previous results)
     country_query = query_filters.get('countries')
-    if country_query and country_query.get('type') == 'expression':
-        print(f"🔍 Processing complex country expression: {json.dumps(country_query)}")
-        articles = filter_by_expression(articles, country_query, 'country')
+    if country_query:
+        if country_query.get('type') == 'expression':
+            print(f"🔍 Processing country expression: {json.dumps(country_query)}")
+            current_articles = filter_by_expression(current_articles, country_query, 'country')
+        elif country_query.get('type') == 'term':
+            print(f"🔍 Processing country term: {country_query.get('value')}")
+            current_articles = filter_by_term(current_articles, country_query, 'country')
     
-    print(f"✅ Client-side filtering complete. {len(articles)} articles remaining.")
-    return articles
+    print(f"✅ Client-side filtering complete. {len(current_articles)} articles remaining.")
+    return current_articles
 
 def filter_by_expression(articles, expression, field_name):
     """
@@ -426,7 +454,7 @@ def filter_by_expression(articles, expression, field_name):
     return evaluate_expression(articles, expression)
 
 def apply_comprehensive_filters(articles, query_filters):
-    """Apply comprehensive filtering for cross-field complex queries."""
+    """Apply comprehensive filtering for cross-field complex queries with proper AND logic."""
     print(f"🔧 Applying comprehensive filters")
     
     if not articles:
@@ -438,14 +466,26 @@ def apply_comprehensive_filters(articles, query_filters):
         print(f"🎯 Processing root-level mixed field expression")
         return filter_by_mixed_field_expression(articles, root_expression)
     
-    # Handle multiple complex field expressions
+    # Handle multiple field expressions with AND logic between fields
     current_articles = articles
     
-    for field in ['keywords', 'sources', 'categories', 'countries']:
+    # Process each field filter with AND logic (same as client-side filtering)
+    field_mappings = {
+        'keywords': 'keywords',
+        'sources': 'source_name', 
+        'categories': 'category',
+        'countries': 'country'
+    }
+    
+    for field, field_name in field_mappings.items():
         field_query = query_filters.get(field)
-        if field_query and field_query.get('type') == 'expression':
-            print(f"🔍 Processing complex {field} expression")
-            current_articles = filter_by_expression(current_articles, field_query, get_field_name(field))
+        if field_query:
+            if field_query.get('type') == 'expression':
+                print(f"🔍 Processing complex {field} expression")
+                current_articles = filter_by_expression(current_articles, field_query, field_name)
+            elif field_query.get('type') == 'term':
+                print(f"🔍 Processing {field} term: {field_query.get('value')}")
+                current_articles = filter_by_term(current_articles, field_query, field_name)
     
     print(f"✅ Comprehensive filtering complete. {len(current_articles)} articles remaining.")
     return current_articles
