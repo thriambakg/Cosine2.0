@@ -1,0 +1,196 @@
+[
+  {
+    "name": "Keyword AND Source (Both Specified)",
+    "payload": {
+      "query": {
+        "keywords": {
+          "type": "term",
+          "field": "keywords",
+          "value": "tesla"
+        },
+        "sources": {
+          "type": "term",
+          "field": "sources",
+          "value": "Reuters"
+        },
+        "categories": null,
+        "countries": null
+      },
+      "dateRange": "24h",
+      "limit": 50,
+      "offset": 0
+    },
+    "expected_behavior": "Find articles that contain 'tesla' AND are from 'Reuters' source"
+  },
+  {
+    "name": "Keyword AND * (Empty Source)",
+    "payload": {
+      "query": {
+        "keywords": {
+          "type": "term",
+          "field": "keywords",
+          "value": "tesla"
+        },
+        "sources": null,
+        "categories": null,
+        "countries": null
+      },
+      "dateRange": "24h",
+      "limit": 50,
+      "offset": 0
+    },
+    "expected_behavior": "Find articles that contain 'tesla' (source doesn't matter - treated as *)"
+  },
+  {
+    "name": "* AND Source (Empty Keyword)",
+    "payload": {
+      "query": {
+        "keywords": null,
+        "sources": {
+          "type": "term",
+          "field": "sources",
+          "value": "Reuters"
+        },
+        "categories": null,
+        "countries": null
+      },
+      "dateRange": "24h",
+      "limit": 50,
+      "offset": 0
+    },
+    "expected_behavior": "Find articles from 'Reuters' source (keyword doesn't matter - treated as *)"
+  },
+  {
+    "name": "Complex Keyword AND Simple Source",
+    "payload": {
+      "query": {
+        "keywords": {
+          "type": "expression",
+          "children": [
+            {
+              "type": "term",
+              "field": "keywords",
+              "value": "tesla",
+              "operator": "OR"
+            },
+            {
+              "type": "term",
+              "field": "keywords",
+              "value": "apple"
+            }
+          ]
+        },
+        "sources": {
+          "type": "term",
+          "field": "sources",
+          "value": "Reuters"
+        },
+        "categories": null,
+        "countries": null
+      },
+      "dateRange": "24h",
+      "limit": 50,
+      "offset": 0
+    },
+    "expected_behavior": "Find articles that contain ('tesla' OR 'apple') AND are from 'Reuters' source"
+  },
+  {
+    "name": "Keyword AND Category AND *",
+    "payload": {
+      "query": {
+        "keywords": {
+          "type": "term",
+          "field": "keywords",
+          "value": "earnings"
+        },
+        "sources": null,
+        "categories": {
+          "type": "term",
+          "field": "categories",
+          "value": "technology"
+        },
+        "countries": null
+      },
+      "dateRange": "24h",
+      "limit": 50,
+      "offset": 0
+    },
+    "expected_behavior": "Find articles that contain 'earnings' AND are in 'technology' category (source doesn't matter)"
+  },
+  {
+    "name": "All Fields Specified",
+    "payload": {
+      "query": {
+        "keywords": {
+          "type": "term",
+          "field": "keywords",
+          "value": "tesla"
+        },
+        "sources": {
+          "type": "term",
+          "field": "sources",
+          "value": "Reuters"
+        },
+        "categories": {
+          "type": "term",
+          "field": "categories",
+          "value": "technology"
+        },
+        "countries": {
+          "type": "term",
+          "field": "countries",
+          "value": "US"
+        }
+      },
+      "dateRange": "24h",
+      "limit": 50,
+      "offset": 0
+    },
+    "expected_behavior": "Find articles that contain 'tesla' AND are from 'Reuters' AND are in 'technology' category AND are from 'US'"
+  },
+  {
+    "name": "Complex Keyword AND Complex Source",
+    "payload": {
+      "query": {
+        "keywords": {
+          "type": "expression",
+          "children": [
+            {
+              "type": "term",
+              "field": "keywords",
+              "value": "tesla",
+              "operator": "OR"
+            },
+            {
+              "type": "term",
+              "field": "keywords",
+              "value": "apple"
+            }
+          ]
+        },
+        "sources": {
+          "type": "expression",
+          "children": [
+            {
+              "type": "term",
+              "field": "sources",
+              "value": "Reuters",
+              "operator": "OR"
+            },
+            {
+              "type": "term",
+              "field": "sources",
+              "value": "Bloomberg"
+            }
+          ]
+        },
+        "categories": null,
+        "countries": null
+      },
+      "dateRange": "24h",
+      "limit": 50,
+      "offset": 0
+    },
+    "expected_behavior": "Find articles that contain ('tesla' OR 'apple') AND are from ('Reuters' OR 'Bloomberg')"
+  }
+]

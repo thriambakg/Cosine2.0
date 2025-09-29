@@ -104,6 +104,41 @@ export interface StockResult {
   pe: number;
 }
 
+// News specific interfaces
+export interface NewsFilters {
+  keywords: string[];
+  keywordExpression: Array<{ type: 'keyword' | 'operator' | 'group', value: string | any[] }>; // Expression-based keywords
+  sourceExpression: Array<{ type: 'source' | 'operator' | 'group', value: string | any[] }>; // Expression-based sources
+  categoryExpression: Array<{ type: 'category' | 'operator' | 'group', value: string | any[] }>; // Expression-based categories
+  countryExpression: Array<{ type: 'country' | 'operator' | 'group', value: string | any[] }>; // Expression-based countries
+  dateRange: string;
+  // Legacy arrays for backward compatibility
+  sources: string[];
+  categories: string[];
+  countries: string[];
+  // Query operators (legacy)
+  keywordOperator: 'AND' | 'OR';
+  categoryOperator: 'AND' | 'OR';
+  sourceOperator: 'AND' | 'OR';
+  countryOperator: 'AND' | 'OR';
+}
+
+export interface NewsArticle {
+  id: string;
+  title: string;
+  description: string;
+  source_url: string;
+  source_name: string;
+  published_date: string;
+  keywords: string;
+  category: string;
+  image_url?: string;
+  sentiment?: string;
+  ai_tag?: string;
+  country?: string;
+  language?: string;
+}
+
 export interface TabManagementState {
   tabs: DashboardTab[];
   tabGroups: DashboardGroup[];

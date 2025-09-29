@@ -41,7 +41,7 @@ import {
   AttachMoney as MoneyIcon,
   Speed as SpeedIcon,
 } from '@mui/icons-material';
-// import { useStockScreener } from '../hooks/useAPI'; // Will be used when Lambda is ready
+import { useStockScreener } from '../../hooks/useAPI';
 
 interface StockScreenerTileProps {
   id: string;
@@ -97,13 +97,10 @@ interface StockResult {
 
 const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   id,
-  size = { width: 400, height: 600 },
+  size,
   onRemove,
   onUpdate,
   onSettingsChange,
-  onResize,
-  onDragStart,
-  isDragging = false,
   isSelected = false,
   onSelectionChange,
   criteria = {
@@ -156,7 +153,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     'Communication Services',
   ];
 
-  // Mock stock data for demonstration
+  // Mock stock data for demonstration (currently unused)
+  /*
   const mockStockData: StockResult[] = [
     {
       symbol: 'AAPL',
@@ -255,8 +253,10 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       pe: 65.2,
     },
   ];
+  */
 
-  // Filter stocks based on criteria
+  // Filter stocks based on criteria (currently unused)
+  /*
   const filterStocks = useCallback((stocks: StockResult[], criteria: StockScreenerCriteria): StockResult[] => {
     return stocks.filter(stock => {
       // Industry filter
@@ -287,17 +287,26 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       return true;
     });
   }, []);
+  */
 
-  // Memoize the fetch function to prevent constant re-renders
-  const fetchStockScreenerData = useCallback(async () => {
-    // For now, use mock data. In the future, this will call the Lambda API
-    return new Promise<StockResult[]>((resolve) => {
-      setTimeout(() => {
-        const filteredResults = filterStocks(mockStockData, localCriteria);
-        resolve(filteredResults);
-      }, 1000); // Simulate API delay
-    });
-  }, [localCriteria, filterStocks]);
+  // Use the real stock screener API hook
+  const stockScreenerHook = useStockScreener();
+  const { loading: apiLoading, error: apiError, execute: executeScreener } = stockScreenerHook;
+
+  // Handle API loading state
+  useEffect(() => {
+    if (apiLoading !== undefined) {
+      setIsLoading(apiLoading);
+    }
+  }, [apiLoading]);
+
+  // Handle API errors
+  useEffect(() => {
+    if (apiError) {
+      const errorMessage = typeof apiError === 'string' ? apiError : (apiError as any)?.message || 'Failed to fetch stock data';
+      setError(`API Error: ${errorMessage}`);
+    }
+  }, [apiError]);
 
   // Run stock screener
   const runScreener = useCallback(async () => {
@@ -305,22 +314,32 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     setError(null);
     
     try {
-      const filteredResults = await fetchStockScreenerData();
-      setStockResults(filteredResults);
-      
-      // Update tile with results
-      onUpdate(id, {
-        results: filteredResults,
+      // Format the request properly for the API
+      const requestPayload = {
         criteria: localCriteria,
-        lastUpdated: new Date().toISOString(),
-      });
+        maxResults: localDisplayOptions.maxResults || 20
+      };
+      
+      // Use the API hook to fetch data with criteria
+      const response = await executeScreener(requestPayload);
+      
+      if (response?.results) {
+        setStockResults(response.results);
+        
+        // Update tile with results
+        onUpdate(id, {
+          results: response.results,
+          criteria: localCriteria,
+          lastUpdated: new Date().toISOString(),
+        });
+      }
     } catch (err) {
       setError('Failed to fetch stock data');
       console.error('Stock screener error:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [fetchStockScreenerData, onUpdate, id, localCriteria]);
+  }, [executeScreener, localCriteria, localDisplayOptions.maxResults, id, onUpdate]);
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -391,8 +410,49 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     return `$${range[0]} - $${range[1]}`;
   };
 
-  // Pagination
-  const resultsPerPage = 5;
+  // Dynamic pagination based on tile height
+  const calculateResultsPerPage = useCallback(() => {
+    if (!tileRef.current) return 5; // Default fallback
+    
+    const tileHeight = tileRef.current.clientHeight;
+    const headerHeight = 60; // Approximate header height
+    const paginationHeight = 40; // Approximate pagination height
+    const tableHeaderHeight = 40; // Table header height
+    const rowHeight = 32; // Approximate row height
+    const padding = 24; // Tile padding (12px * 2)
+    
+    // Calculate available height for table rows
+    const availableHeight = tileHeight - headerHeight - paginationHeight - tableHeaderHeight - padding;
+    const maxRows = Math.floor(availableHeight / rowHeight);
+    
+    // Ensure minimum of 3 rows and maximum of 20 rows
+    return Math.max(3, Math.min(20, maxRows));
+  }, []);
+
+  const [resultsPerPage, setResultsPerPage] = useState(5);
+  
+  // Update results per page when tile size changes
+  useEffect(() => {
+    const newResultsPerPage = calculateResultsPerPage();
+    setResultsPerPage(newResultsPerPage);
+  }, [calculateResultsPerPage, size]);
+
+  // Add ResizeObserver to recalculate when tile is resized
+  useEffect(() => {
+    if (!tileRef.current) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      const newResultsPerPage = calculateResultsPerPage();
+      setResultsPerPage(newResultsPerPage);
+    });
+
+    resizeObserver.observe(tileRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [calculateResultsPerPage]);
+
   const totalPages = Math.ceil(stockResults.length / resultsPerPage);
   const startIndex = (currentPage - 1) * resultsPerPage;
   const endIndex = startIndex + resultsPerPage;
@@ -409,17 +469,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         overflow: 'hidden',
         width: '100%',
         height: '100%',
+<<<<<<< HEAD:frontend/react-app/src/components/tiles/StockScreenerTile.tsx
         resize: onDragStart ? 'none' : 'both',
         cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
+=======
+>>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd:frontend/react-app/src/components/StockScreenerTile.tsx
         display: 'flex',
         flexDirection: 'column',
-        '&:hover': {
-          borderColor: '#3b82f6',
-          transform: isDragging ? 'none' : 'translateY(-2px)',
-          boxShadow: isDragging ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
-        },
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -431,13 +489,6 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         },
       }}
       ref={tileRef}
-      onMouseDown={onDragStart}
-      onMouseUp={() => {
-        if (onResize && tileRef.current) {
-          const rect = tileRef.current.getBoundingClientRect();
-          onResize(id, { width: rect.width, height: rect.height });
-        }
-      }}
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
@@ -680,7 +731,17 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1, pt: 1, borderTop: '1px solid rgba(55, 65, 81, 0.3)' }}>
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              mt: 1, 
+              pt: 1, 
+              borderTop: '1px solid rgba(55, 65, 81, 0.3)' 
+            }}>
+              <Typography variant="caption" color="#6b7280" sx={{ fontSize: '0.75rem' }}>
+                Showing {startIndex + 1}-{Math.min(endIndex, stockResults.length)} of {stockResults.length} results
+              </Typography>
               <Pagination
                 count={totalPages}
                 page={currentPage}

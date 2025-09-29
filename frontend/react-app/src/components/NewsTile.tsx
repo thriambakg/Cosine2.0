@@ -20,11 +20,8 @@ import {
   Autocomplete,
   List,
   ListItem,
-<<<<<<< HEAD
-=======
   ListItemText,
   ListItemAvatar,
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
   Avatar,
   Pagination,
   Alert,
@@ -43,7 +40,7 @@ import {
   Image as ImageIcon,
   CalendarToday as CalendarIcon,
 } from '@mui/icons-material';
-import { newsSearchAPI, NewsSearchRequest } from '../../services/api';
+import { newsSearchAPI, NewsSearchRequest } from '../services/api';
 
 interface NewsTileProps {
   id: string;
@@ -106,16 +103,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
   id,
   size,
   onRemove,
-<<<<<<< HEAD
-  onUpdate: _onUpdate,
-  onSettingsChange,
-  onResize,
-  onDragStart,
-  isDragging = false,
-=======
   onUpdate,
   onSettingsChange,
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
   isSelected = false,
   onSelectionChange,
   filters = {
@@ -276,7 +265,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   };
 
   // Helper function to clean up group after deletion
-  const cleanupGroup = (groupItems: any[]): any[] | any | null => {
+  const cleanupGroup = (groupItems: any[]) => {
     if (groupItems.length === 0) {
       return null; // Remove empty group
     }
@@ -287,7 +276,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
     
     // Clean up adjacent operators
-    const cleanedItems: any[] = [];
+    const cleanedItems = [];
     for (let i = 0; i < groupItems.length; i++) {
       const currentItem = groupItems[i];
       const nextItem = groupItems[i + 1];
@@ -1139,17 +1128,12 @@ const NewsTile: React.FC<NewsTileProps> = ({
         
         setNewsArticles(response.articles);
         
-<<<<<<< HEAD
-        // Note: Not calling onUpdate to avoid triggering dashboard persistence issues
-        // The tile state is managed internally and doesn't need to update the dashboard
-=======
         // Update tile with results
         onUpdate(id, {
           articles: response.articles,
           filters: currentFilters,
           lastUpdated: new Date().toISOString(),
         });
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
         
       } catch (apiError) {
         console.error('❌ News API Error:', {
@@ -1165,17 +1149,12 @@ const NewsTile: React.FC<NewsTileProps> = ({
         setNewsArticles(filteredArticles);
         setError(null); // Clear error since we have fallback data
         
-<<<<<<< HEAD
-        // Note: Not calling onUpdate to avoid triggering dashboard persistence issues
-        // The tile state is managed internally and doesn't need to update the dashboard
-=======
         // Update tile with fallback results
         onUpdate(id, {
           articles: filteredArticles,
           filters: currentFilters,
           lastUpdated: new Date().toISOString(),
         });
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
       }
       
     } catch (err) {
@@ -1184,11 +1163,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     } finally {
       setIsLoading(false);
     }
-<<<<<<< HEAD
-  }, [filterArticles, id, buildApiPayload]);
-=======
   }, [filterArticles, id, onUpdate, buildApiPayload]);
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -1296,11 +1271,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
     const articleHeight = localDisplayOptions.compactView ? 60 : 120; // Compact vs full view
     const maxArticles = Math.floor(availableHeight / articleHeight);
     
-    // Ensure minimum of 10 articles and maximum of 20 articles
-    return Math.max(10, Math.min(20, maxArticles));
+    // Ensure minimum of 3 articles and maximum of 20 articles
+    return Math.max(3, Math.min(20, maxArticles));
   }, [localDisplayOptions.compactView]);
 
-  const [resultsPerPage, setResultsPerPage] = useState(10);
+  const [resultsPerPage, setResultsPerPage] = useState(5);
   
   // Update results per page when tile size changes
   useEffect(() => {
@@ -1312,7 +1287,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   useEffect(() => {
     if (!tileRef.current) return;
 
-    let timeoutId: ReturnType<typeof setTimeout>;
+    let timeoutId: NodeJS.Timeout;
     const resizeObserver = new ResizeObserver(() => {
       // Debounce the resize calculation to prevent infinite loops
       clearTimeout(timeoutId);
@@ -1335,14 +1310,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const endIndex = startIndex + resultsPerPage;
   const currentArticles = newsArticles.slice(startIndex, endIndex);
 
-  // Scroll to top when page changes
-  const listRef = useRef<HTMLUListElement>(null);
-  useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = 0;
-    }
-  }, [currentPage]);
-
   return (
     <Box
       sx={{
@@ -1356,17 +1323,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-<<<<<<< HEAD
-        cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
-        transition: isDragging ? 'none' : 'all 0.3s ease',
-        opacity: isDragging ? 0.8 : 1,
-        '&:hover': {
-          borderColor: '#3b82f6',
-          transform: isDragging ? 'none' : 'translateY(-2px)',
-          boxShadow: isDragging ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
-        },
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -1378,16 +1334,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
         },
       }}
       ref={tileRef}
-<<<<<<< HEAD
-      onMouseDown={onDragStart}
-      onMouseUp={() => {
-        if (onResize && tileRef.current) {
-          const rect = tileRef.current.getBoundingClientRect();
-          onResize(id, { width: rect.width, height: rect.height });
-        }
-      }}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
@@ -1467,10 +1413,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
               <IconButton
                 size="small"
                 onClick={handlePerformAnalysis}
-<<<<<<< HEAD
-                onMouseDown={(e) => e.stopPropagation()}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
                 sx={{ color: '#9ca3af', '&:hover': { color: '#22c55e' } }}
               >
                 <AnalyticsIcon sx={{ fontSize: 18 }} />
@@ -1483,10 +1425,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
               size="small"
               onClick={runNewsSearch}
               disabled={isLoading}
-<<<<<<< HEAD
-              onMouseDown={(e) => e.stopPropagation()}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
               sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
             >
               <SearchIcon sx={{ fontSize: 18 }} />
@@ -1497,10 +1435,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
             <IconButton
               size="small"
               onClick={handleSettingsOpen}
-<<<<<<< HEAD
-              onMouseDown={(e) => e.stopPropagation()}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
               sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
             >
               <SettingsIcon sx={{ fontSize: 18 }} />
@@ -1511,10 +1445,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
             <IconButton
               size="small"
               onClick={handleRemove}
-<<<<<<< HEAD
-              onMouseDown={(e) => e.stopPropagation()}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
               sx={{ color: '#9ca3af', '&:hover': { color: '#dc2626' } }}
             >
               <CloseIcon sx={{ fontSize: 18 }} />
@@ -1549,28 +1479,23 @@ const NewsTile: React.FC<NewsTileProps> = ({
           minHeight: 0,
           mt: 1
         }}>
-          <List 
-            ref={listRef}
-            sx={{ 
-              flex: 1,
-              backgroundColor: 'transparent',
-              maxHeight: 'calc(100% - 60px)', // Leave space for pagination
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              '&::-webkit-scrollbar': {
-                width: '6px',
-              },
-              '&::-webkit-scrollbar-track': {
-                backgroundColor: 'rgba(55, 65, 81, 0.3)',
-              },
-              '&::-webkit-scrollbar-thumb': {
-                backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                borderRadius: '3px',
-              },
-              '&::-webkit-scrollbar-thumb:hover': {
-                backgroundColor: 'rgba(59, 130, 246, 0.7)',
-              },
-            }}>
+          <List sx={{ 
+            flex: 1,
+            backgroundColor: 'transparent',
+            '&::-webkit-scrollbar': {
+              width: '6px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(59, 130, 246, 0.5)',
+              borderRadius: '3px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: 'rgba(59, 130, 246, 0.7)',
+            },
+          }}>
             {currentArticles.map((article) => (
               <ListItem
                 key={article.id}
@@ -1585,9 +1510,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
                     ? '#22c55e' 
                     : 'rgba(55, 65, 81, 0.3)',
                   cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  minHeight: 60,
                   '&:hover': {
                     backgroundColor: selectedArticles.includes(article.id)
                       ? 'rgba(34, 197, 94, 0.15)'
@@ -1596,8 +1518,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 }}
                 onClick={() => handleArticleClick(article)}
               >
-                {/* Left side: Checkbox and content */}
-                <Box sx={{ display: 'flex', alignItems: 'center', flex: 1, mr: 2 }}>
+                <ListItemAvatar>
                   <Checkbox
                     checked={selectedArticles.includes(article.id)}
                     onChange={(e) => {
@@ -1611,24 +1532,40 @@ const NewsTile: React.FC<NewsTileProps> = ({
                     }}
                     size="small"
                   />
-                  <Box sx={{ flex: 1 }}>
-                    <Typography
-                      variant="subtitle2"
-                      color="white"
-                      sx={{
-                        fontWeight: 600,
-                        fontSize: localDisplayOptions.compactView ? '0.875rem' : '1rem',
-                        lineHeight: 1.3,
-                        mb: 0.5,
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
+                  {localDisplayOptions.showImages && article.image_url ? (
+                    <Avatar
+                      src={article.image_url}
+                      variant="rounded"
+                      sx={{ 
+                        width: 60, 
+                        height: 40,
+                        borderRadius: '4px',
+                        objectFit: 'cover'
                       }}
                     >
-                      {article.title}
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
+                      <ImageIcon />
+                    </Avatar>
+                  ) : (
+                    <Avatar sx={{ width: 60, height: 40, backgroundColor: 'rgba(59, 130, 246, 0.2)' }}>
+                      <ArticleIcon />
+                    </Avatar>
+                  )}
+                </ListItemAvatar>
+                <ListItemText
+                  primary={
+                    <Box>
+                      <Typography
+                        variant="subtitle2"
+                        color="white"
+                        sx={{
+                          fontWeight: 600,
+                          fontSize: localDisplayOptions.compactView ? '0.875rem' : '1rem',
+                          lineHeight: 1.3,
+                          mb: 0.5,
+                        }}
+                      >
+                        {article.title}
+                      </Typography>
                       {localDisplayOptions.showSource && (
                         <Typography
                           variant="caption"
@@ -1638,87 +1575,68 @@ const NewsTile: React.FC<NewsTileProps> = ({
                           {article.source_name}
                         </Typography>
                       )}
-                      {localDisplayOptions.showDate && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <CalendarIcon sx={{ fontSize: 12, color: '#6b7280' }} />
-                          <Typography variant="caption" color="#6b7280">
-                            {formatDate(article.published_date)}
-                          </Typography>
-                        </Box>
-                      )}
-                      {localDisplayOptions.showKeywords && article.keywords && (
-                        <Chip
-                          label={article.keywords.split(',')[0]}
-                          size="small"
-                          sx={{
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            color: '#3b82f6',
-                            fontSize: '0.7rem',
-                            height: '18px',
-                          }}
-                        />
-                      )}
-                      <IconButton
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleArticleClick(article);
-                        }}
-                        sx={{ 
-                          color: '#6b7280',
-                          '&:hover': { color: '#3b82f6' },
-                          p: 0.5,
-                          ml: 'auto'
-                        }}
-                      >
-                        <OpenInNewIcon sx={{ fontSize: 14 }} />
-                      </IconButton>
                     </Box>
-                  </Box>
-                </Box>
-
-                {/* Right side: Centered image */}
-                {localDisplayOptions.showImages && article.image_url ? (
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    width: 80,
-                    height: 50,
-                    flexShrink: 0
-                  }}>
-                    <Avatar
-                      src={article.image_url}
-                      variant="rounded"
-                      sx={{ 
-                        width: 80, 
-                        height: 50,
-                        borderRadius: '6px',
-                        objectFit: 'cover'
-                      }}
-                    >
-                      <ImageIcon />
-                    </Avatar>
-                  </Box>
-                ) : localDisplayOptions.showImages ? (
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    width: 80,
-                    height: 50,
-                    flexShrink: 0
-                  }}>
-                    <Avatar sx={{ 
-                      width: 80, 
-                      height: 50, 
-                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                      borderRadius: '6px'
-                    }}>
-                      <ArticleIcon />
-                    </Avatar>
-                  </Box>
-                ) : null}
+                  }
+                  secondary={
+                    <Box sx={{ mt: 0.5 }}>
+                      {!localDisplayOptions.compactView && (
+                        <Typography
+                          variant="body2"
+                          color="#9ca3af"
+                          sx={{
+                            fontSize: '0.875rem',
+                            lineHeight: 1.4,
+                            mb: 1,
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {article.description}
+                        </Typography>
+                      )}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        {localDisplayOptions.showDate && (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <CalendarIcon sx={{ fontSize: 12, color: '#6b7280' }} />
+                            <Typography variant="caption" color="#6b7280">
+                              {formatDate(article.published_date)}
+                            </Typography>
+                          </Box>
+                        )}
+                        {localDisplayOptions.showKeywords && article.keywords && (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Chip
+                              label={article.keywords.split(',')[0]}
+                              size="small"
+                              sx={{
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                color: '#3b82f6',
+                                fontSize: '0.7rem',
+                                height: '18px',
+                              }}
+                            />
+                          </Box>
+                        )}
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleArticleClick(article);
+                          }}
+                          sx={{ 
+                            color: '#6b7280',
+                            '&:hover': { color: '#3b82f6' },
+                            p: 0.5
+                          }}
+                        >
+                          <OpenInNewIcon sx={{ fontSize: 14 }} />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  }
+                />
               </ListItem>
             ))}
           </List>
@@ -2401,8 +2319,4 @@ const NewsTileMemo = memo(NewsTile, (prevProps, nextProps) => {
   return true; // Don't re-render
 });
 
-<<<<<<< HEAD
 export default NewsTileMemo;
-=======
-export default NewsTileMemo;
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd

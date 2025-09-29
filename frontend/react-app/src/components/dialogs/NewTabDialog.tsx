@@ -21,7 +21,7 @@ import {
   Add as AddIcon,
   Folder as FolderIcon
 } from '@mui/icons-material';
-import { DashboardGroup } from '../types/dashboardTypes';
+import { DashboardGroup } from '../../types/dashboardTypes';
 
 interface NewTabDialogProps {
   open: boolean;

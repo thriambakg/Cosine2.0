@@ -19,7 +19,7 @@ import {
   Refresh as RefreshIcon,
   Info as InfoIcon,
 } from '@mui/icons-material';
-import { cacheUtils } from '../hooks/useDashboardCache';
+import { cacheUtils } from '../../hooks/useDashboardCache';
 
 interface CacheManagerProps {
   open: boolean;

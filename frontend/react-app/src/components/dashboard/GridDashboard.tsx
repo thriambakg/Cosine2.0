@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
 import { Analytics as AnalyticsIcon, Add as AddIcon } from '@mui/icons-material';
+<<<<<<< HEAD:frontend/react-app/src/components/GridDashboard.tsx
 import CryptoTile from './tiles/CryptoTile';
 import StockTile from './tiles/StockTile';
 import StockScreenerTile from './tiles/StockScreenerTile';
@@ -10,6 +11,18 @@ import { UnifiedTile, GridPosition, GridSize } from '../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from './tiles/tileConfig';
 import TileDataParser from './tiles/TileDataParser';
 import { stockDataAPI, cryptoStatsAPI } from '../services/api';
+=======
+import CryptoTile from '../tiles/CryptoTile';
+import StockTile from '../tiles/StockTile';
+import StockScreenerTile from '../tiles/StockScreenerTile';
+import NewsTile from '../tiles/NewsTile';
+import PlaceholderTile from '../tiles/PlaceholderTile';
+import TileWrapper from '../tiles/TileWrapper';
+import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
+import { getTileConfig, validateTileSize } from '../../utils/tileConfig';
+import TileDataParser from '../../utils/TileDataParser';
+import { stockDataAPI, cryptoStatsAPI } from '../../services/api';
+>>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd:frontend/react-app/src/components/dashboard/GridDashboard.tsx
 
 interface GridDashboardProps {
   tiles: UnifiedTile[];
@@ -49,6 +62,15 @@ const GRID_PADDING = 16; // Padding on each side of the grid
 const MIN_GRID_COLUMNS = 10; // Minimum number of columns
 const MAX_GRID_COLUMNS = 30; // Maximum number of columns for ultra-wide screens
 
+// Dynamic grid columns based on container width
+const getGridColumns = (containerWidth: number) => {
+  const minColumnWidth = GRID_CELL_SIZE + GRID_GAP;
+  const maxColumns = Math.floor((containerWidth - GRID_GAP) / minColumnWidth);
+  const calculatedColumns = Math.max(8, Math.min(20, maxColumns)); // Minimum 8, maximum 20 columns
+  
+  return calculatedColumns;
+};
+
 const GridDashboard: React.FC<GridDashboardProps> = ({
   tiles,
   dashboardContext,
@@ -58,6 +80,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   onResizeTile,
   onMoveTile: _onMoveTile,
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(1200); // Default width
   const [dragState, setDragState] = useState<DragState>({
     isDragging: false,
     dragTileId: null,
@@ -83,7 +107,59 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     previewSize: null,
   });
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Calculate dynamic grid columns based on container width
+  const gridColumns = getGridColumns(containerWidth);
+
+  // Resize observer to track container width changes
+  useEffect(() => {
+    const updateContainerWidth = () => {
+      if (containerRef.current) {
+        const newWidth = containerRef.current.offsetWidth;
+        setContainerWidth(newWidth);
+      }
+    };
+
+    // Initial measurement
+    updateContainerWidth();
+
+    // Create resize observer for the container
+    const resizeObserver = new ResizeObserver(() => {
+      updateContainerWidth();
+    });
+    
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    // Listen to window resize events (including dev tools open/close)
+    const handleWindowResize = () => {
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(updateContainerWidth);
+    };
+    
+    window.addEventListener('resize', handleWindowResize);
+    
+    // Also observe the document body for additional coverage
+    const bodyObserver = new ResizeObserver(handleWindowResize);
+    bodyObserver.observe(document.body);
+
+    // Add a periodic check as a safety net (every 2 seconds)
+    const periodicCheck = setInterval(() => {
+      if (containerRef.current) {
+        const currentWidth = containerRef.current.offsetWidth;
+        if (currentWidth !== containerWidth) {
+          updateContainerWidth();
+        }
+      }
+    }, 2000);
+
+    return () => {
+      resizeObserver.disconnect();
+      bodyObserver.disconnect();
+      window.removeEventListener('resize', handleWindowResize);
+      clearInterval(periodicCheck);
+    };
+  }, [containerWidth]);
 
   // Calculate responsive grid columns based on container width
   const calculateGridColumns = useCallback((width: number) => {
@@ -636,9 +712,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
     const isTileSelected = selectionState.selectedTiles.has(tile.id);
     
-    // Get tile configuration to check if resizing is supported
-    const tileConfig = getTileConfig(tile.type);
-    const supportsResize = tileConfig.supportsResize;
     
     // Common props for all tiles
     const commonProps = {
@@ -739,6 +812,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           transition: isDragging || isResizing ? 'none' : 'all 0.2s ease',
         }}
       >
+<<<<<<< HEAD:frontend/react-app/src/components/GridDashboard.tsx
         {tile.type === 'crypto' ? (
           <CryptoTile key={tile.id} {...cryptoProps} />
         ) : tile.type === 'stock' ? (
@@ -784,6 +858,49 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             }}
           />
         )}
+=======
+        <TileWrapper
+          id={tile.id}
+          type={tile.type}
+          size={{
+            width: displaySize.width * GRID_CELL_SIZE + (displaySize.width - 1) * GRID_GAP,
+            height: displaySize.height * GRID_CELL_SIZE + (displaySize.height - 1) * GRID_GAP,
+          }}
+          gridPosition={displayPosition}
+          gridSize={displaySize}
+          isDragging={isDragging}
+          isResizing={isResizing}
+          isSelected={isTileSelected}
+          onRemove={onRemoveTile}
+          onUpdate={onUpdateTile}
+          onSettingsChange={onSettingsChange}
+          onResize={onResizeTile}
+          onDragStart={(e: any) => handleDragStart(tile.id, e)}
+          onResizeStart={(id: any, e: any) => handleResizeStart(id, e)}
+          onSelectionChange={handleTileSelection}
+        >
+          {tile.type === 'crypto' ? (
+            <CryptoTile key={tile.id} {...cryptoProps} />
+          ) : tile.type === 'stock' ? (
+            <StockTile key={tile.id} {...stockProps} />
+          ) : tile.type === 'stock_screener' ? (
+            <StockScreenerTile key={tile.id} {...stockScreenerProps} />
+          ) : tile.type === 'news' ? (
+            <NewsTile key={tile.id} {...newsProps} />
+          ) : (
+            <PlaceholderTile
+              key={tile.id}
+              tile={tile}
+              onRemove={onRemoveTile}
+              onUpdate={onUpdateTile}
+              onSettingsChange={onSettingsChange}
+              onResize={onResizeTile}
+              isSelected={commonProps.isSelected}
+              onSelectionChange={handleTileSelection}
+            />
+          )}
+        </TileWrapper>
+>>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd:frontend/react-app/src/components/dashboard/GridDashboard.tsx
       </Box>
     );
   };
@@ -1015,17 +1132,27 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         onContextMenu={handleGridContextMenu}
         sx={{
           display: 'grid',
+<<<<<<< HEAD:frontend/react-app/src/components/GridDashboard.tsx
           gridTemplateColumns: `repeat(${gridColumns}, ${cellSize}px)`,
           gridAutoRows: `${cellSize}px`,
+=======
+          gridTemplateColumns: `repeat(${gridColumns}, ${GRID_CELL_SIZE}px)`,
+          gridAutoRows: `${GRID_CELL_SIZE}px`,
+>>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd:frontend/react-app/src/components/dashboard/GridDashboard.tsx
           gap: `${GRID_GAP}px`,
           minHeight: '600px',
           background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%)',
           border: '1px solid #374151',
           borderRadius: '8px',
           overflow: 'hidden',
+<<<<<<< HEAD:frontend/react-app/src/components/GridDashboard.tsx
           padding: `${GRID_PADDING}px`,
           width: '100%',
           maxWidth: 'none', // Remove any max-width constraints
+=======
+          padding: '8px',
+          width: '100%',
+>>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd:frontend/react-app/src/components/dashboard/GridDashboard.tsx
         }}
       >
       {/* Grid background */}

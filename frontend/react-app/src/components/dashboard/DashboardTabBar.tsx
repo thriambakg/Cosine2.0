@@ -24,9 +24,9 @@ import {
   FolderOpen as FolderOpenIcon,
   DragIndicator as DragIcon
 } from '@mui/icons-material';
-import { DashboardTab, DashboardGroup } from '../types/dashboardTypes';
-import EditTabDialog from './EditTabDialog';
-import EditGroupDialog from './EditGroupDialog';
+import { DashboardTab, DashboardGroup } from '../../types/dashboardTypes';
+import EditTabDialog from '../dialogs/EditTabDialog';
+// import EditGroupDialog from '../dialogs/EditGroupDialog'; // TODO: Create this component
 
 interface DashboardTabBarProps {
   tabs: DashboardTab[];
@@ -63,7 +63,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
   onTabPin,
   onTabUnpin,
   onGroupCreate,
-  onGroupEdit,
+  // onGroupEdit,
   onGroupDissolve,
   onTabReorder,
   onGroupReorder,
@@ -78,8 +78,8 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingTab, setEditingTab] = useState<DashboardTab | null>(null);
-  const [editGroupDialogOpen, setEditGroupDialogOpen] = useState(false);
-  const [editingGroup, setEditingGroup] = useState<DashboardGroup | null>(null);
+  // const [editGroupDialogOpen, setEditGroupDialogOpen] = useState(false);
+  // const [editingGroup, setEditingGroup] = useState<DashboardGroup | null>(null);
   const [groupSubmenu, setGroupSubmenu] = useState<{
     mouseX: number;
     mouseY: number;
@@ -147,22 +147,22 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
     setEditingTab(null);
   };
 
-  const handleEditGroup = (group: DashboardGroup) => {
-    setEditingGroup(group);
-    setEditGroupDialogOpen(true);
-    handleCloseContextMenu();
-  };
+  // const handleEditGroup = (group: DashboardGroup) => {
+  //   setEditingGroup(group);
+  //   setEditGroupDialogOpen(true);
+  //   handleCloseContextMenu();
+  // };
 
-  const handleEditGroupSubmit = (groupId: string, name: string, color: string) => {
-    onGroupEdit(groupId, name, color);
-    setEditGroupDialogOpen(false);
-    setEditingGroup(null);
-  };
+  // const handleEditGroupSubmit = (groupId: string, name: string, color: string) => {
+  //   onGroupEdit(groupId, name, color);
+  //   setEditGroupDialogOpen(false);
+  //   setEditingGroup(null);
+  // };
 
-  const handleCloseEditGroupDialog = () => {
-    setEditGroupDialogOpen(false);
-    setEditingGroup(null);
-  };
+  // const handleCloseEditGroupDialog = () => {
+  //   setEditGroupDialogOpen(false);
+  //   setEditingGroup(null);
+  // };
 
   const handleToggleGroupExpand = (groupId: string) => {
     setExpandedGroups(prev => ({
@@ -1136,12 +1136,12 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
       >
         {groupContextMenu?.group && (
           <>
-            <MenuItem onClick={() => handleEditGroup(groupContextMenu.group!)}>
+            {/* <MenuItem onClick={() => handleEditGroup(groupContextMenu.group!)}>
               <ListItemIcon>
                 <EditIcon sx={{ color: '#9ca3af' }} />
               </ListItemIcon>
               <ListItemText>Edit Group</ListItemText>
-            </MenuItem>
+            </MenuItem> */}
 
             <MenuItem onClick={() => {
               handleToggleGroupExpand(groupContextMenu.group!.id);
@@ -1191,12 +1191,12 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
       />
 
       {/* Edit Group Dialog */}
-      <EditGroupDialog
+      {/* <EditGroupDialog
         open={editGroupDialogOpen}
         onClose={handleCloseEditGroupDialog}
         onEditGroup={handleEditGroupSubmit}
         group={editingGroup}
-      />
+      /> */}
     </Box>
   );
 };

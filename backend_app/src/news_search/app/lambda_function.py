@@ -626,4 +626,8 @@ def format_articles_for_frontend(articles):
             'country': article.get('country'),
             'language': article.get('language'),
         })
+<<<<<<< HEAD
     return formatted
+=======
+    return formatted
+>>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd

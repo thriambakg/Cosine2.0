@@ -15,6 +15,7 @@ export const API_CONFIG = {
     CRYPTO: '/crypto',
     OPTIONS: '/options',
     ALERTS: '/alerts',
+    NEWS_SEARCH: '/news',
     HEALTH: '/health',
   },
   
@@ -30,6 +31,7 @@ export const API_CONFIG = {
     DEFAULT_TTL: 5 * 60 * 1000, // 5 minutes
     STOCK_VOLATILITY_TTL: 10 * 60 * 1000, // 10 minutes
     CRYPTO_STATS_TTL: 2 * 60 * 1000, // 2 minutes
+    NEWS_SEARCH_TTL: 2 * 60 * 1000, // 2 minutes
     PORTFOLIO_TTL: 0, // No cache
     OPTION_PRICING_TTL: 0, // No cache
     ALERTS_TTL: 0, // No cache
@@ -70,6 +72,7 @@ export const logApiConfig = () => {
   console.log('API Gateway URL:', API_CONFIG.BASE_URL);
   console.log('Is Configured:', isApiConfigured());
   console.log('Stock Volatility Endpoint:', getApiUrl(API_CONFIG.ENDPOINTS.STOCK_VOLATILITY));
+  console.log('News Search Endpoint:', getApiUrl(API_CONFIG.ENDPOINTS.NEWS_SEARCH));
   
   // Also log environment configuration
   logEnvironmentConfig();
