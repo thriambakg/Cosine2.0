@@ -124,6 +124,9 @@ module "api_gateway" {
     stock_data = {
       path_part = "stock-data"
     }
+    stock_screener = {
+      path_part = "stock-screener"
+    }
     portfolio = {
       path_part = "portfolio"
     }
@@ -144,6 +147,9 @@ module "api_gateway" {
     }
     session = {
       path_part = "session"
+    }
+    news = {
+      path_part = "news"
     }
   }
 
@@ -175,6 +181,16 @@ module "api_gateway" {
       integration_http_method = "POST"
       lambda_arn              = module.stock_data_lambda.function_arn
       request_parameters      = {}
+    }
+    # POST method for stock screener
+    stock_screener_post = {
+      resource_key            = "stock_screener"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.stock_screener_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     # POST method for portfolio analysis (wrapper)
     portfolio_post = {
@@ -320,6 +336,15 @@ module "api_gateway" {
       lambda_arn              = module.session_management_lambda.function_arn
       request_parameters      = {}
     }
+    # POST method for news search
+    news_post = {
+      resource_key            = "news"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.news_search_lambda.function_arn
+      request_parameters      = {}
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -339,6 +364,11 @@ module "api_gateway" {
       function_arn  = module.stock_data_lambda.function_arn
       http_method   = "GET"
       resource_path = "stock-data"
+    }
+    stock_screener = {
+      function_arn  = module.stock_screener_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "stock-screener"
     }
     portfolio = {
       function_arn  = module.portfolio_wrapper_lambda.function_arn
@@ -426,12 +456,17 @@ module "api_gateway" {
       http_method   = "DELETE"
       resource_path = "session"
     }
+    news_post = {
+      function_arn  = module.news_search_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "news"
+    }
   }
 
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "15"
+  deployment_trigger = "35"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -449,7 +484,8 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
           "secretsmanager:DescribeSecret"
         ]
         Resource = [
-          "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*"
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*",
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-alpha-vantage-api-${var.environment}*"
         ]
       },
       {
@@ -520,7 +556,9 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
           data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn,
           "${data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn}/index/*",
           data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*"
+          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*",
+          data.terraform_remote_state.base_infra.outputs.news_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.news_table_arn}/index/*"
         ]
       }
     ]
@@ -545,7 +583,8 @@ resource "aws_iam_policy" "lambda_kms_policy" {
           "kms:GenerateDataKey"
         ]
         Resource = [
-          data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn
+          data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn,
+          data.terraform_remote_state.base_infra.outputs.kms_key_arn
         ]
       }
     ]
@@ -1174,6 +1213,41 @@ module "portfolio_wrapper_lambda" {
   tags = var.common_tags
 }
 
+# Stock Screener Lambda Function
+module "stock_screener_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-stock-screener-${var.environment}"
+  description   = "Lambda function for stock screening using yfinance and Alpha Vantage"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 300  # 5 minutes for bulk screening operations
+  memory_size   = 1024 # Increased memory for parallel processing
+
+  # Source directory
+  source_dir = "../backend_app/src/stocks/stock_screener/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Attach core and financial layers
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
 # Stock Data Lambda Function
 module "stock_data_lambda" {
   source = "./modules/lambda"
@@ -1338,6 +1412,36 @@ module "session_management_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# News Search Lambda Function
+module "news_search_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-news-search-${var.environment}"
+  description   = "Lambda function for news search with complex query expressions"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  source_dir = "../backend_app/src/news_search/app"
+
+  environment_variables = {
+    NEWS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.news_table_name
+    ENVIRONMENT     = var.environment
+    LOG_LEVEL       = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
   ]
 
   tags = var.common_tags

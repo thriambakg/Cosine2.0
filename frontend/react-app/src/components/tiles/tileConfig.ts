@@ -1,7 +1,7 @@
 // Tile Configuration Utility
 // Defines size constraints and default properties for each tile type
 
-import { TileSizeConstraints } from '../types/dashboardTypes';
+import { TileSizeConstraints } from '../../types/dashboardTypes';
 
 export interface TileTypeConfig {
   sizeConstraints: TileSizeConstraints;
@@ -98,7 +98,7 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
   stock_screener: {
     sizeConstraints: {
       minWidth: 4,
-      maxWidth: 4,
+      maxWidth: 6,
       minHeight: 4,
       maxHeight: 8,
       defaultWidth: 4,
@@ -112,6 +112,26 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
       showResultsTable: true,
       showCriteriaSummary: true,
       maxResults: 10,
+    },
+    supportsResize: true,
+    supportsDrag: true,
+  },
+  news: {
+    sizeConstraints: {
+      minWidth: 4,
+      maxWidth: 6,
+      minHeight: 4,
+      maxHeight: 8,
+      defaultWidth: 4,
+      defaultHeight: 6,
+    },
+    defaultDisplayOptions: {
+      showImages: true,
+      showSource: true,
+      showDate: true,
+      showKeywords: false,
+      maxResults: 20,
+      compactView: false,
     },
     supportsResize: true,
     supportsDrag: true,

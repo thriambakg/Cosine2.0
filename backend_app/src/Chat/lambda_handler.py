@@ -565,15 +565,20 @@ Session Context:
 - User ID: {user_id}
 - Model: {model}
 - Mode: CHATTING MODE
-- SECURITY: ONLY use get_chat_history('{session_id}', '{user_id}') for THIS session only
-- DO NOT attempt to access other session IDs or users' chat history
-- Use chat history ONLY when you need to reference previous messages in THIS conversation
+- SECURITY: You have access to the full conversation history through the CONVERSATION HISTORY section in your system prompt
+- Use the conversation history in your system prompt to reference previous messages in THIS conversation
 """
         
         try:
             logger.info("🔍 DEBUG: Calling session-aware agent...")
             agent_response = agent(enhanced_message)
             logger.info(f"🔍 DEBUG: Agent response received: {agent_response}")
+            logger.info(f"🔍 DEBUG: Agent response type: {type(agent_response)}")
+            if hasattr(agent_response, 'message'):
+                logger.info(f"🔍 DEBUG: Agent response message: {agent_response.message}")
+                if hasattr(agent_response.message, 'content'):
+                    logger.info(f"🔍 DEBUG: Agent response content type: {type(agent_response.message.content)}")
+                    logger.info(f"🔍 DEBUG: Agent response content: {agent_response.message.content}")
             
             # Extract the actual response content from AgentResult
             response_content = ""

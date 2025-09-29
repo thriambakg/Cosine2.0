@@ -12,7 +12,7 @@ import {
   ListItemText,
   Checkbox
 } from '@mui/material';
-import { getDefaultTileSize } from '../utils/tileConfig';
+import { getDefaultTileSize } from './tileConfig';
 import {
   MoreVert as MoreVertIcon,
   Settings as SettingsIcon,

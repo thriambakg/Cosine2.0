@@ -1,8 +1,8 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
-import CryptoTile from './CryptoTile';
-import StockTile from './StockTile';
-import PlaceholderTile from './PlaceholderTile';
+import CryptoTile from './tiles/CryptoTile';
+import StockTile from './tiles/StockTile';
+import PlaceholderTile from './tiles/PlaceholderTile';
 import { UnifiedTile } from '../types/dashboardTypes';
 
 interface DashboardGridProps {

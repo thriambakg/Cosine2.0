@@ -27,8 +27,8 @@ import {
   Timeline as TimelineIcon,
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
-import { useCryptoStats } from '../hooks/useAPI';
-import { useTileCache } from '../hooks/useDashboardCache';
+import { useCryptoStats } from '../../hooks/useAPI';
+import { useTileCache } from '../../hooks/useDashboardCache';
 
 interface CryptoTileProps {
   id: string;
@@ -277,13 +277,9 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
-        width: size.width,
-        height: size.height,
+        width: '100%',
+        height: '100%',
         resize: onDragStart ? 'none' : 'both', // Disable CSS resize when using grid system
-        minWidth: 300,
-        minHeight: 350,
-        maxWidth: 600,
-        maxHeight: 600,
         cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,

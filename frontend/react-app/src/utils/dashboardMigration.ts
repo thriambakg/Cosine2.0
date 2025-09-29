@@ -2,7 +2,7 @@
 // Ensures backward compatibility and safe migrations for production deployments
 
 import { Dashboard } from '../types/dashboardTypes';
-import { getDefaultTileSize, getTileConfig } from './tileConfig';
+import { getDefaultTileSize, getTileConfig } from '../components/tiles/tileConfig';
 
 // Version tracking for dashboard configurations
 export interface DashboardVersion {

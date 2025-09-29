@@ -1,13 +1,14 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
 import { Analytics as AnalyticsIcon, Add as AddIcon } from '@mui/icons-material';
-import CryptoTile from './CryptoTile';
-import StockTile from './StockTile';
-import StockScreenerTile from './StockScreenerTile';
-import PlaceholderTile from './PlaceholderTile';
+import CryptoTile from './tiles/CryptoTile';
+import StockTile from './tiles/StockTile';
+import StockScreenerTile from './tiles/StockScreenerTile';
+import NewsTile from './tiles/NewsTile';
+import PlaceholderTile from './tiles/PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../types/dashboardTypes';
-import { getTileConfig, validateTileSize } from '../utils/tileConfig';
-import TileDataParser from '../utils/TileDataParser';
+import { getTileConfig, validateTileSize } from './tiles/tileConfig';
+import TileDataParser from './tiles/TileDataParser';
 import { stockDataAPI, cryptoStatsAPI } from '../services/api';
 
 interface GridDashboardProps {
@@ -41,10 +42,12 @@ interface SelectionState {
   contextMenuPosition: { x: number; y: number } | null;
 }
 
-const GRID_COLUMNS = 12; // Total grid columns
 const GRID_CELL_SIZE = 80; // Size of each grid cell in pixels
 const GRID_GAP = 16; // Gap between grid cells
 const MAX_GRID_ROWS = 50; // Maximum grid rows (increased for flexibility)
+const GRID_PADDING = 16; // Padding on each side of the grid
+const MIN_GRID_COLUMNS = 10; // Minimum number of columns
+const MAX_GRID_COLUMNS = 30; // Maximum number of columns for ultra-wide screens
 
 const GridDashboard: React.FC<GridDashboardProps> = ({
   tiles,
@@ -68,6 +71,10 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     contextMenuPosition: null,
   });
 
+  // State for responsive grid dimensions
+  const [gridColumns, setGridColumns] = useState(12);
+  const [cellSize, setCellSize] = useState(GRID_CELL_SIZE);
+
   const [resizeState, setResizeState] = useState<ResizeState>({
     isResizing: false,
     resizeTileId: null,
@@ -78,6 +85,56 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Calculate responsive grid columns based on container width
+  const calculateGridColumns = useCallback((width: number) => {
+    // Account for padding on both sides
+    const availableWidth = width - (GRID_PADDING * 2);
+    // Calculate how many columns fit, but use a more generous calculation
+    // to ensure we fill the available space better
+    const columns = Math.floor(availableWidth / (GRID_CELL_SIZE + GRID_GAP));
+    // Constrain between min and max
+    return Math.max(MIN_GRID_COLUMNS, Math.min(MAX_GRID_COLUMNS, columns));
+  }, []);
+
+  // Calculate actual cell size to fill the container width
+  const calculateCellSize = useCallback((width: number, columns: number) => {
+    const availableWidth = width - (GRID_PADDING * 2);
+    const totalGapWidth = (columns - 1) * GRID_GAP;
+    const cellSize = (availableWidth - totalGapWidth) / columns;
+    return Math.max(60, Math.min(120, cellSize)); // Constrain between 60px and 120px
+  }, []);
+
+  // Handle window resize and calculate grid columns
+  useEffect(() => {
+    const updateGridDimensions = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const newWidth = rect.width;
+        const newColumns = calculateGridColumns(newWidth);
+        const newCellSize = calculateCellSize(newWidth, newColumns);
+        
+        setGridColumns(newColumns);
+        setCellSize(newCellSize);
+        
+        console.log('📐 Grid dimensions updated:', {
+          width: newWidth,
+          columns: newColumns,
+          cellSize: newCellSize,
+          gap: GRID_GAP,
+          padding: GRID_PADDING
+        });
+      }
+    };
+
+    // Initial calculation
+    updateGridDimensions();
+
+    // Add resize listener
+    window.addEventListener('resize', updateGridDimensions);
+    
+    // Cleanup
+    return () => window.removeEventListener('resize', updateGridDimensions);
+  }, [calculateGridColumns, calculateCellSize]);
 
   // Memoize grid props for all tiles to prevent unnecessary recalculations
   const tileGridProps = useMemo(() => {
@@ -108,8 +165,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       
       if (tile.size) {
         const pixelBasedSize = {
-          width: Math.max(1, Math.round(tile.size.width / (GRID_CELL_SIZE + GRID_GAP))),
-          height: Math.max(1, Math.round(tile.size.height / (GRID_CELL_SIZE + GRID_GAP))),
+          width: Math.max(1, Math.round(tile.size.width / (cellSize + GRID_GAP))),
+          height: Math.max(1, Math.round(tile.size.height / (cellSize + GRID_GAP))),
         };
         
         // Validate against tile-specific constraints
@@ -129,7 +186,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       // Find first available position
       let foundPosition = false;
       for (let y = 0; y < MAX_GRID_ROWS && !foundPosition; y++) {
-        for (let x = 0; x < GRID_COLUMNS - gridSize.width + 1 && !foundPosition; x++) {
+        for (let x = 0; x < gridColumns - gridSize.width + 1 && !foundPosition; x++) {
           let canPlace = true;
           for (let dx = 0; dx < gridSize.width; dx++) {
             for (let dy = 0; dy < gridSize.height; dy++) {
@@ -153,7 +210,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     });
 
     return propsMap;
-  }, [tiles]);
+  }, [tiles, gridColumns, cellSize]);
 
   // Get default grid position and size for a tile
   const getDefaultGridProps = useCallback((tile: UnifiedTile): { position: GridPosition; size: GridSize } => {
@@ -170,7 +227,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   const isAreaAvailable = useCallback((position: GridPosition, size: GridSize, excludeTileId?: string): boolean => {
     // Check bounds - allow flexible sizing within reasonable limits
     if (position.x < 0 || position.y < 0 || 
-        position.x + size.width > GRID_COLUMNS || 
+        position.x + size.width > gridColumns || 
         position.y + size.height > MAX_GRID_ROWS) {
       return false;
     }
@@ -191,7 +248,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     }
 
     return true;
-  }, [tiles, getDefaultGridProps]);
+  }, [tiles, getDefaultGridProps, gridColumns]);
 
   // Handle drag start
   const handleDragStart = useCallback((tileId: string, event: React.MouseEvent) => {
@@ -223,14 +280,14 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const relativeY = event.clientY - rect.top;
 
     // Convert to grid coordinates
-    const gridX = Math.round(relativeX / (GRID_CELL_SIZE + GRID_GAP));
-    const gridY = Math.round(relativeY / (GRID_CELL_SIZE + GRID_GAP));
+    const gridX = Math.round(relativeX / (cellSize + GRID_GAP));
+    const gridY = Math.round(relativeY / (cellSize + GRID_GAP));
     
     const tile = tiles.find(t => t.id === dragState.dragTileId);
     if (tile) {
       const { size } = getDefaultGridProps(tile);
       const constrainedPos = {
-        x: Math.max(0, Math.min(gridX, GRID_COLUMNS - size.width)),
+        x: Math.max(0, Math.min(gridX, gridColumns - size.width)),
         y: Math.max(0, gridY),
       };
 
@@ -243,7 +300,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         }));
       }
     }
-  }, [dragState, tiles, getDefaultGridProps]);
+  }, [dragState, tiles, getDefaultGridProps, gridColumns, cellSize]);
 
   // Handle drag end
   const handleDragEnd = useCallback(() => {
@@ -268,8 +325,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           gridPosition: dragState.currentPosition,
           // Also update legacy position for backward compatibility
           position: {
-            x: dragState.currentPosition.x * (GRID_CELL_SIZE + GRID_GAP),
-            y: dragState.currentPosition.y * (GRID_CELL_SIZE + GRID_GAP),
+            x: dragState.currentPosition.x * (cellSize + GRID_GAP),
+            y: dragState.currentPosition.y * (cellSize + GRID_GAP),
           }
         });
         console.log('✅ Tile moved successfully to:', dragState.currentPosition);
@@ -284,7 +341,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       dragStart: { x: 0, y: 0 },
       currentPosition: null,
     });
-  }, [dragState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile]);
+  }, [dragState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile, gridColumns, cellSize]);
 
   // Handle resize start
   const handleResizeStart = useCallback((tileId: string, event: React.MouseEvent) => {
@@ -318,8 +375,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const deltaY = event.clientY - resizeState.resizeStart.y;
 
     // Convert delta to grid units
-    const gridDeltaX = Math.round(deltaX / (GRID_CELL_SIZE + GRID_GAP));
-    const gridDeltaY = Math.round(deltaY / (GRID_CELL_SIZE + GRID_GAP));
+    const gridDeltaX = Math.round(deltaX / (cellSize + GRID_GAP));
+    const gridDeltaY = Math.round(deltaY / (cellSize + GRID_GAP));
 
     // Get tile-specific size constraints
     const currentTile = tiles.find(tile => tile.id === resizeState.resizeTileId);
@@ -339,7 +396,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...prev,
       previewSize: newSize,
     }));
-  }, [resizeState]);
+  }, [resizeState, cellSize]);
 
   // Handle resize end
   const handleResizeEnd = useCallback(() => {
@@ -362,8 +419,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         
         // Calculate pixel size for legacy compatibility
         const pixelSize = {
-          width: resizeState.previewSize.width * GRID_CELL_SIZE + (resizeState.previewSize.width - 1) * GRID_GAP,
-          height: resizeState.previewSize.height * GRID_CELL_SIZE + (resizeState.previewSize.height - 1) * GRID_GAP,
+          width: resizeState.previewSize.width * cellSize + (resizeState.previewSize.width - 1) * GRID_GAP,
+          height: resizeState.previewSize.height * cellSize + (resizeState.previewSize.height - 1) * GRID_GAP,
         };
         
         // Update the tile with both grid size and legacy size
@@ -385,7 +442,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       currentSize: null,
       previewSize: null,
     });
-  }, [resizeState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile]);
+  }, [resizeState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile, cellSize]);
 
   // Add event listeners for drag and resize
   useEffect(() => {
@@ -653,6 +710,22 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       isPinned: tile.isPinned,
     };
 
+    const newsProps = {
+      ...commonProps,
+      filters: tile.filters,
+      articles: tile.articles,
+      displayOptions: (tile.displayOptions as any) || {
+        showImages: true,
+        showSource: true,
+        showDate: true,
+        showKeywords: false,
+        maxResults: 20,
+        compactView: false,
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+    };
+
 
     return (
       <Box
@@ -672,6 +745,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           <StockTile key={tile.id} {...stockProps} />
         ) : tile.type === 'stock_screener' ? (
           <StockScreenerTile key={tile.id} {...stockScreenerProps} />
+        ) : tile.type === 'news' ? (
+          <NewsTile key={tile.id} {...newsProps} />
         ) : (
           <PlaceholderTile
             key={tile.id}
@@ -940,30 +1015,32 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         onContextMenu={handleGridContextMenu}
         sx={{
           display: 'grid',
-          gridTemplateColumns: `repeat(${GRID_COLUMNS}, ${GRID_CELL_SIZE}px)`,
-          gridAutoRows: `${GRID_CELL_SIZE}px`,
+          gridTemplateColumns: `repeat(${gridColumns}, ${cellSize}px)`,
+          gridAutoRows: `${cellSize}px`,
           gap: `${GRID_GAP}px`,
           minHeight: '600px',
           background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%)',
           border: '1px solid #374151',
           borderRadius: '8px',
           overflow: 'hidden',
-          padding: '16px',
+          padding: `${GRID_PADDING}px`,
+          width: '100%',
+          maxWidth: 'none', // Remove any max-width constraints
         }}
       >
       {/* Grid background */}
       <Box
         sx={{
           position: 'absolute',
-          top: 16,
-          left: 16,
-          right: 16,
-          bottom: 16,
+          top: GRID_PADDING,
+          left: GRID_PADDING,
+          right: GRID_PADDING,
+          bottom: GRID_PADDING,
           backgroundImage: `
             linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
             linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)
           `,
-          backgroundSize: `${GRID_CELL_SIZE + GRID_GAP}px ${GRID_CELL_SIZE + GRID_GAP}px`,
+          backgroundSize: `${cellSize + GRID_GAP}px ${cellSize + GRID_GAP}px`,
           opacity: 0.3,
           pointerEvents: 'none',
         }}

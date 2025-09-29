@@ -26,16 +26,17 @@ import {
   AccountBalance as AccountBalanceIcon,
   AutoAwesome as AutoAwesomeIcon,
   Chat as ChatIcon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Article as ArticleIcon
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
 import GridDashboard from '../components/GridDashboard';
-import { getDefaultTileSize } from '../utils/tileConfig';
+import { getDefaultTileSize } from '../components/tiles/tileConfig';
 // import { safeLoadDashboard } from '../utils/dashboardMigration';
-import AddCryptoModal from '../components/AddCryptoModal';
+import AddCryptoModal from '../components/tiles/AddCryptoModal';
 import { dashboardAPI } from '../services/api';
-import AddStockModal from '../components/AddStockModal';
+import AddStockModal from '../components/tiles/AddStockModal';
 import DashboardTabBar from '../components/DashboardTabBar';
 import NewTabDialog from '../components/NewTabDialog';
 import NewGroupDialog from '../components/NewGroupDialog';
@@ -199,6 +200,35 @@ const tileCategories: TileCategory[] = [
             color: '#3b82f6',
             isAvailable: true,
             placeholder: true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'news',
+    name: 'News & Information',
+    description: 'Financial news and market information',
+    icon: <ArticleIcon />,
+    color: '#3b82f6',
+    subcategories: [
+      {
+        id: 'financial',
+        name: 'Financial News',
+        description: 'Financial news and market updates',
+        icon: <ArticleIcon />,
+        color: '#3b82f6',
+        tiles: [
+          {
+            id: 'news',
+            name: 'News Tile',
+            description: 'Track financial news with advanced filtering and search',
+            category: 'news',
+            subcategory: 'financial',
+            icon: <ArticleIcon />,
+            color: '#3b82f6',
+            isAvailable: true,
+            placeholder: false
           }
         ]
       }
@@ -726,6 +756,9 @@ const UnifiedDashboardPage: React.FC = () => {
     } else if (tileType.id === 'stock_screener') {
       // Handle stock screener tile creation
       handleCreateStockScreenerTile();
+    } else if (tileType.id === 'news') {
+      // Handle news tile creation
+      handleCreateNewsTile();
     } else if (tileType.placeholder) {
       // For placeholder tiles, show a message
       alert(`${tileType.name} tiles are coming soon!`);
@@ -786,6 +819,50 @@ const UnifiedDashboardPage: React.FC = () => {
         timeframe: '1d',
       },
       results: [],
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
+  };
+
+  // News tile creation handler
+  const handleCreateNewsTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `news_${Date.now()}`,
+      type: 'news',
+      title: 'Financial News',
+      displayOptions: {
+        showImages: true,
+        showSource: true,
+        showDate: true,
+        showKeywords: false,
+        maxResults: 20,
+        compactView: false,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 400, height: 600 },
+      gridPosition: findNextAvailablePosition({ width: 4, height: 6 }),
+      gridSize: { width: 4, height: 6 },
+      dashboard_id: currentDashboardId,
+      filters: {
+        keywords: [],
+        sources: [],
+        categories: [],
+        dateRange: '12h',
+        countries: [],
+        categoryOperator: 'OR',
+        sourceOperator: 'OR',
+        countryOperator: 'OR',
+        keywordExpression: [],
+        sourceExpression: [],
+        categoryExpression: [],
+        countryExpression: [],
+      },
+      articles: [],
     };
 
     const updatedTiles = [...(activeTab.tiles || []), newTile];
@@ -1074,7 +1151,7 @@ const UnifiedDashboardPage: React.FC = () => {
         getTabsByGroup={getTabsByGroup}
       />
       
-      <Container maxWidth="xl" sx={{ p: 3 }}>
+      <Container maxWidth={false} sx={{ p: 2, px: 4 }}>
         {/* Header */}
         <Box sx={{ mb: 4 }}>
           <Typography 

@@ -159,8 +159,9 @@ class ContextAwareAgent:
             history_section = "\n\n" + "="*80 + "\n"
             history_section += "📚 CONVERSATION HISTORY FOR CONTEXT:\n"
             history_section += "="*80 + "\n"
-            history_section += "IMPORTANT: The following conversation history contains previous user statements.\n"
-            history_section += "When the user asks a question which could possibly linked to a previous statement, CHECK THIS SECTION FIRST.\n\n"
+            history_section += "🚨 CRITICAL: The following conversation history contains previous user statements AND your previous responses.\n"
+            history_section += "When the user asks follow-up questions like 'which one' or 'which has the lowest', CHECK THIS SECTION FIRST.\n"
+            history_section += "ALWAYS reference the specific stocks, numbers, and data from your previous responses in this history.\n\n"
             
             for i, conv in enumerate(conversation_history, 1):
                 user_message = conv.get('user_message', '').strip()
@@ -170,7 +171,9 @@ class ContextAwareAgent:
                     history_section += f"User Message {i}: \"{user_message}\"\n"
                 
                 if agent_response:
-                    history_section += f"Agent Response {i}: \"{agent_response[:200]}...\"\n"
+                    # Include more of the response for better context, especially for stock recommendations
+                    truncated_response = agent_response[:1000] + "..." if len(agent_response) > 1000 else agent_response
+                    history_section += f"Agent Response {i}: \"{truncated_response}\"\n"
                 
                 history_section += "---\n"
             
@@ -179,7 +182,10 @@ class ContextAwareAgent:
             history_section += "="*80 + "\n"
             history_section += "If the user asks about their holdings or shares, ALWAYS check the conversation history above.\n"
             history_section += "For example, if the user previously said 'I have 2 shares of AAPL', then they HAVE 2 shares of AAPL.\n"
-            history_section += "DO NOT say 'I don't have any record' if the conversation history shows their holdings.\n"
+            history_section += "DO NOT say 'I don't have any record' if the conversation history shows their holdings.\n\n"
+            history_section += "If the user asks follow-up questions like 'which one has the lowest market cap' or 'which stock should I pick',\n"
+            history_section += "ALWAYS reference the specific stocks and data from your previous response in the conversation history above.\n"
+            history_section += "DO NOT mention stocks that weren't in your previous response.\n"
             history_section += "="*80 + "\n"
             
             logger.info(f"🔍 DEBUG: Added conversation history to system prompt: {len(history_section)} characters")
@@ -202,87 +208,23 @@ class ContextAwareAgent:
         Returns:
             prompt: Session-specific system prompt with context
         """
-        base_prompt = """You are a helpful financial assistant specialized in providing accurate, data-driven financial analysis and recommendations.
+        base_prompt = """You are a financial assistant providing data-driven analysis.
 
-🚨 RESPONSE RULES:
-- Only respond to actual user questions and messages
-- Do NOT send automatic welcome messages or follow-up messages
-- Do NOT generate any greeting messages like "Hello! I'm Cosine..."
-- Wait for user input before responding
+🚨 RULES:
+- Provide ONLY ONE complete response per user message
+- Use tools for financial queries - start with get_financial_data() for stocks
+- ALWAYS provide complete responses - never leave responses empty
+- Never return empty responses after calling tools
 
-🚨 SINGLE RESPONSE RULE:
-- Provide ONLY ONE response per user message
-- Do NOT generate multiple responses or follow-up messages
-- Do NOT send additional messages after your initial response
-- Complete your analysis in a single, comprehensive response
-- Do NOT generate multiple separate messages or responses
-- Do NOT provide follow-up analysis unless specifically asked
-- End your response after providing the requested analysis
+🔧 TOOLS: get_financial_data, analyze_portfolio, get_technical_analysis, search_financial_news, calculate_stock_correlation, get_volatility_surface, python_financial_calculator
 
-🎯 CORE CAPABILITIES:
-- Real-time stock and cryptocurrency analysis
-- Portfolio optimization and risk assessment
-- Technical and fundamental analysis
-- Market research and news analysis
-- Quantitative financial calculations
-- Conversational context awareness (CHATTING MODE only)
+⚡ WORKFLOW:
+1. Call relevant tools immediately
+2. Synthesize tool data into actionable insights
+3. Provide complete final response
 
-🔄 MODES:
-- CHATTING MODE: General conversation with context from previous messages
-- ANALYSIS MODE: Financial analysis and research (focus on current data tools)
-- Other modes will be implemented in future updates
-
-         🔧 AVAILABLE TOOLS:
-         You have access to powerful financial tools including:
-         - get_financial_data(): Real-time stock/crypto data from yfinance
-         - analyze_portfolio(): Portfolio analysis with live correlations
-         - get_technical_analysis(): Technical indicators (RSI, MACD, etc.)
-         - search_financial_news(): Recent financial news and developments
-         - calculate_stock_correlation(): Live correlation analysis
-         - get_volatility_surface(): Volatility analysis and options data
-         - python_financial_calculator(): Advanced financial calculations
-
-📊 RESPONSE GUIDELINES:
-- ALWAYS use tools for financial queries - never provide generic advice
-- Start with get_financial_data() for any stock/crypto question
-- Provide specific, actionable recommendations with confidence levels
-- Include risk assessments and alternative scenarios
-- Use current market data and real-time information
-- Be transparent about data sources and limitations
-
-         ⚡ WORKFLOW:
-         1. IMMEDIATELY call relevant tools (don't explain what you'll do)
-         2. FOR PERSONAL QUESTIONS: Check the CONVERSATION HISTORY section in your system prompt for previous user statements
-         3. FOR STOCK ANALYSIS: ALWAYS start with get_financial_data(symbol) for stock questions
-         4. USE multiple tools per query for comprehensive analysis
-         5. SYNTHESIZE real tool data into actionable insights
-
-         💬 CONVERSATION HISTORY RULES:
-         - You have access to the full conversation history through the CONVERSATION HISTORY section in your system prompt
-         - When user asks about personal holdings ("How many shares do I have?"), check the CONVERSATION HISTORY section for previous statements
-         - If the conversation history shows a user message like "I have 2 shares of AAPL", then the user HAS 2 shares of AAPL
-         - NEVER say "I don't have any record" when the conversation history clearly shows user's holdings
-         - BE DIRECT: If conversation history shows the user has 2 shares of AAPL, respond "You have 2 shares of AAPL"
-
-         EXAMPLE USAGE:
-         User: "How many shares of AAPL do I have?"
-         Agent: [Checks CONVERSATION HISTORY section in system prompt for previous user statements about AAPL]
-         Agent: [If history shows user said "I have 2 shares of aapl", respond directly: "You have 2 shares of AAPL"]
-
-🔴 NEVER SAY:
-- "I don't have access to real data"
-- "This is sample data"
-- "I cannot access live market data"
-- "Hello! I'm Cosine, your AI financial analyst"
-- Any greeting or welcome messages
-- "I don't have any record of your holdings" when the conversation history clearly shows user's holdings
-- "I'm unable to determine" when you can clearly see the user's holdings in the conversation history
-
-✅ ALWAYS SAY:
-- "Based on current market data from yfinance..."
-- "Using live financial data..."
-- "Current real-time analysis shows..."
-- "Live correlation data indicates..."
+✅ ALWAYS: Use real market data, provide specific recommendations
+🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete
 
 """
         
@@ -331,18 +273,46 @@ Based on the current webpage and user intent, focus on:
 
 """
             
-            # Add recent conversation context
+            # Add recent conversation context with smart selection
             if conversation_history:
-                recent_messages = conversation_history[-5:]  # Last 5 messages
                 conversation_context = "\n💬 RECENT CONVERSATION:\n=====================\n"
                 
-                for msg in recent_messages:
-                    conversation_context += f"User: {msg.get('user_message', '')}\n"
-                    conversation_context += f"Assistant: {msg.get('agent_response', '')[:200]}...\n\n"
+                # Smart context selection: prioritize recent messages but include more if needed
+                total_messages = len(conversation_history)
+                
+                if total_messages <= 5:
+                    # Short conversation: include all messages
+                    recent_messages = conversation_history
+                elif total_messages <= 10:
+                    # Medium conversation: include last 5 messages
+                    recent_messages = conversation_history[-5:]
+                else:
+                    # Long conversation: include last 3 + first few for context
+                    recent_messages = conversation_history[:2] + conversation_history[-3:]
+                
+                for i, msg in enumerate(recent_messages):
+                    user_msg = msg.get('user_message', '').strip()
+                    agent_msg = msg.get('agent_response', '').strip()
+                    
+                    if user_msg:  # Only include if there's a user message
+                        # Use relative numbering for clarity
+                        msg_num = conversation_history.index(msg) + 1
+                        conversation_context += f"Q{msg_num}: {user_msg}\n"
+                        if agent_msg:
+                            # Include more of the response for better context
+                            conversation_context += f"A{msg_num}: {agent_msg[:1000]}{'...' if len(agent_msg) > 1000 else ''}\n\n"
+                
+                # Add context summary for long conversations
+                if total_messages > 10:
+                    conversation_context += f"[Note: This is part of a longer conversation with {total_messages} total exchanges]\n\n"
                 
                 webpage_info += conversation_context
             
             # Add session-specific instructions
+            context_note = ""
+            if len(conversation_history) > 5:
+                context_note = f"- This conversation has {len(conversation_history)} total exchanges - reference earlier context if user asks about previous topics\n"
+            
             webpage_info += f"""
 🎯 SESSION-SPECIFIC INSTRUCTIONS:
 =================================
@@ -351,6 +321,9 @@ Based on the current webpage and user intent, focus on:
 - Maintain conversation continuity within this session
 - Don't mix contexts from other sessions or users
 - Use session-relevant tools: {', '.join(session_variables.get('relevant_tools', []))}
+- IMPORTANT: If user asks follow-up questions about previous responses, reference the conversation history above
+- If user asks about "these stocks" or "which one", check the recent conversation for stock mentions
+{context_note}- If user references earlier parts of conversation not shown above, acknowledge the longer conversation context
 - If user asks about something not related to current context, gently redirect to session focus
 
 """
