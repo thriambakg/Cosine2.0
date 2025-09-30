@@ -96,8 +96,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     For complex AND/OR logic, uses scan with client-side filtering.
     """
     params = {
-        'Limit': limit,
-        'ExpressionAttributeValues': {}
+        'Limit': limit
     }
     
     # Only add ExpressionAttributeNames if we have attribute names to define
@@ -124,7 +123,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     if source_query and source_query.get('type') == 'term' and source_query.get('value'):
         params['IndexName'] = 'GSI5'  # Source-based GSI
         params['KeyConditionExpression'] = 'GSI5PK = :gsi5pk'
-        params['ExpressionAttributeValues'][':gsi5pk'] = f"SOURCE#{source_query['value']}"
+        params['ExpressionAttributeValues'] = {':gsi5pk': f"SOURCE#{source_query['value']}"}
         params['ScanIndexForward'] = False  # Newest first
         print(f"🎯 Using GSI5 for source: {source_query['value']}")
         return params
@@ -137,7 +136,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     if category_query and category_query.get('type') == 'term' and category_query.get('value'):
         params['IndexName'] = 'GSI1'  # Category-based GSI
         params['KeyConditionExpression'] = 'GSI1PK = :gsi1pk'
-        params['ExpressionAttributeValues'][':gsi1pk'] = f"CATEGORY#{category_query['value']}"
+        params['ExpressionAttributeValues'] = {':gsi1pk': f"CATEGORY#{category_query['value']}"}
         params['ScanIndexForward'] = False  # Newest first
         print(f"🎯 Using GSI1 for category: {category_query['value']}")
         return params
@@ -156,7 +155,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
                 # Use GSI4 for direct keyword lookup (much faster than scan)
                 params['IndexName'] = 'GSI4'
                 params['KeyConditionExpression'] = 'GSI4PK = :keyword'
-                params['ExpressionAttributeValues'][':keyword'] = f"KEYWORD#{keyword_value}"
+                params['ExpressionAttributeValues'] = {':keyword': f"KEYWORD#{keyword_value}"}
                 params['ScanIndexForward'] = False  # Most recent first
                 return params
             else:
@@ -185,7 +184,7 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     if ai_tag_query and ai_tag_query.get('type') == 'term' and ai_tag_query.get('value'):
         params['IndexName'] = 'GSI3'  # AI Tag-based GSI
         params['KeyConditionExpression'] = 'GSI3PK = :gsi3pk'
-        params['ExpressionAttributeValues'][':gsi3pk'] = f"AITAG#{ai_tag_query['value']}"
+        params['ExpressionAttributeValues'] = {':gsi3pk': f"AITAG#{ai_tag_query['value']}"}
         params['ScanIndexForward'] = False  # Newest first
         print(f"🎯 Using GSI3 for AI tag: {ai_tag_query['value']}")
         return params
@@ -196,8 +195,10 @@ def build_dynamodb_query_params(query_filters, date_range, limit):
     if date_range != 'all':
         filter_expressions.append('#pd BETWEEN :start_date AND :end_date')
         expression_attribute_names['#pd'] = 'published_date'
-        params['ExpressionAttributeValues'][':start_date'] = start_date.isoformat(timespec='seconds') + 'Z'
-        params['ExpressionAttributeValues'][':end_date'] = end_date.isoformat(timespec='seconds') + 'Z'
+        params['ExpressionAttributeValues'] = {
+            ':start_date': start_date.isoformat(timespec='seconds') + 'Z',
+            ':end_date': end_date.isoformat(timespec='seconds') + 'Z'
+        }
     
     # Only add FilterExpression and ExpressionAttributeNames if we have filters
     if filter_expressions:
@@ -265,7 +266,6 @@ def handle_comprehensive_complex_query(query_filters, date_range, limit):
     # For now, use a broad table scan and apply comprehensive client-side filtering
     # This could be optimized further with query planning in the future
     params = {
-        'TableName': news_table_name,
         'Limit': limit * 3,  # Get more items since we'll filter heavily
         'FilterExpression': 'attribute_exists(#pk)',
         'ExpressionAttributeNames': {
