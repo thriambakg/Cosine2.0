@@ -12,11 +12,7 @@ import {
   ListItemText,
   Checkbox
 } from '@mui/material';
-<<<<<<< HEAD:frontend/react-app/src/components/tiles/PlaceholderTile.tsx
 import { getDefaultTileSize } from './tileConfig';
-=======
-import { getDefaultTileSize } from '../../utils/tileConfig';
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd:frontend/react-app/src/components/PlaceholderTile.tsx
 import {
   MoreVert as MoreVertIcon,
   Settings as SettingsIcon,

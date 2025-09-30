@@ -21,8 +21,9 @@ def lambda_handler(event, context):
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+                'Access-Control-Allow-Methods': 'POST,OPTIONS,GET,DELETE,PUT',
+                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
+                'Access-Control-Allow-Credentials': 'true'
             },
             'body': json.dumps({'message': 'CORS preflight'})
         }
@@ -61,8 +62,9 @@ def lambda_handler(event, context):
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+                'Access-Control-Allow-Methods': 'POST,OPTIONS,GET,DELETE,PUT',
+                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
+                'Access-Control-Allow-Credentials': 'true'
             },
             'body': json.dumps({
                 'articles': format_articles_for_frontend(filtered_articles),
@@ -80,8 +82,9 @@ def lambda_handler(event, context):
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+                'Access-Control-Allow-Methods': 'POST,OPTIONS,GET,DELETE,PUT',
+                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
+                'Access-Control-Allow-Credentials': 'true'
             },
             'body': json.dumps({'message': 'Failed to search news articles', 'error': str(e)})
         }
@@ -626,8 +629,4 @@ def format_articles_for_frontend(articles):
             'country': article.get('country'),
             'language': article.get('language'),
         })
-<<<<<<< HEAD
     return formatted
-=======
-    return formatted
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd

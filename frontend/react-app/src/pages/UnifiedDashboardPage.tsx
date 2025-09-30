@@ -31,22 +31,15 @@ import {
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
-<<<<<<< HEAD
-import GridDashboard from '../components/GridDashboard';
+import GridDashboard from '../components/dashboard/GridDashboard';
 import { getDefaultTileSize } from '../components/tiles/tileConfig';
 // import { safeLoadDashboard } from '../utils/dashboardMigration';
 import AddCryptoModal from '../components/tiles/AddCryptoModal';
-import { dashboardAPI } from '../services/api';
 import AddStockModal from '../components/tiles/AddStockModal';
-import DashboardTabBar from '../components/DashboardTabBar';
-import NewTabDialog from '../components/NewTabDialog';
-import NewGroupDialog from '../components/NewGroupDialog';
-=======
-import { GridDashboard, DashboardTabBar, NewTabDialog, NewGroupDialog } from '../components';
-import { getDefaultTileSize } from '../utils/tileConfig';
-// import { safeLoadDashboard } from '../utils/dashboardMigration';
 import { dashboardAPI } from '../services/api';
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
+import DashboardTabBar from '../components/dashboard/DashboardTabBar';
+import NewTabDialog from '../components/dialogs/NewTabDialog';
+import NewGroupDialog from '../components/dialogs/NewGroupDialog';
 
 // Import tab management hook and types
 import { useTabManagement } from '../hooks/useTabManagement';
@@ -213,35 +206,6 @@ const tileCategories: TileCategory[] = [
     ]
   },
   {
-    id: 'news',
-    name: 'News & Information',
-    description: 'Financial news and market information',
-    icon: <ArticleIcon />,
-    color: '#3b82f6',
-    subcategories: [
-      {
-        id: 'financial',
-        name: 'Financial News',
-        description: 'Financial news and market updates',
-        icon: <ArticleIcon />,
-        color: '#3b82f6',
-        tiles: [
-          {
-            id: 'news',
-            name: 'News Tile',
-            description: 'Track financial news with advanced filtering and search',
-            category: 'news',
-            subcategory: 'financial',
-            icon: <ArticleIcon />,
-            color: '#3b82f6',
-            isAvailable: true,
-            placeholder: false
-          }
-        ]
-      }
-    ]
-  },
-  {
     id: 'custom',
     name: 'Custom & AI',
     description: 'Custom tiles and AI-generated content',
@@ -376,8 +340,8 @@ const UnifiedDashboardPage: React.FC = () => {
   const [tileConfig, setTileConfig] = useState<any>({});
 
   // Dialog states
-  // const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
-  // const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
   const [newTabDialogOpen, setNewTabDialogOpen] = useState(false);
   const [newGroupDialogOpen, setNewGroupDialogOpen] = useState(false);
 
@@ -785,10 +749,10 @@ const UnifiedDashboardPage: React.FC = () => {
     
     // Handle different tile types
     if (tileType.id === 'crypto') {
-      // setCryptoModalOpen(true);
+      setCryptoModalOpen(true);
       setAddTileStep('closed');
     } else if (tileType.id === 'stock') {
-      // setStockModalOpen(true);
+      setStockModalOpen(true);
       setAddTileStep('closed');
     } else if (tileType.id === 'stock_screener') {
       // Handle stock screener tile creation
@@ -885,13 +849,13 @@ const UnifiedDashboardPage: React.FC = () => {
       gridPosition: findNextAvailablePosition({ width: 4, height: 6 }),
       gridSize: { width: 4, height: 6 },
       dashboard_id: currentDashboardId,
-<<<<<<< HEAD
       filters: {
         keywords: [],
         sources: [],
         categories: [],
         dateRange: '12h',
         countries: [],
+        keywordOperator: 'OR',
         categoryOperator: 'OR',
         sourceOperator: 'OR',
         countryOperator: 'OR',
@@ -900,39 +864,6 @@ const UnifiedDashboardPage: React.FC = () => {
         categoryExpression: [],
         countryExpression: [],
       },
-=======
-          filters: {
-            keywords: [],
-            keywordExpression: [
-              { type: 'keyword', value: 'Tesla' },
-              { type: 'operator', value: 'AND' },
-              { type: 'keyword', value: 'earnings' }
-            ],
-            sourceExpression: [
-              { type: 'source', value: 'Reuters' },
-              { type: 'operator', value: 'OR' },
-              { type: 'source', value: 'Bloomberg' }
-            ],
-            categoryExpression: [
-              { type: 'category', value: 'business' },
-              { type: 'operator', value: 'AND' },
-              { type: 'category', value: 'technology' }
-            ],
-            countryExpression: [
-              { type: 'country', value: 'us' },
-              { type: 'operator', value: 'OR' },
-              { type: 'country', value: 'uk' }
-            ],
-            dateRange: '12h',
-            sources: [],
-            categories: [],
-            countries: [],
-            keywordOperator: 'OR',
-            categoryOperator: 'OR',
-            sourceOperator: 'OR',
-            countryOperator: 'OR',
-          },
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
       articles: [],
     };
 
@@ -1028,95 +959,94 @@ const UnifiedDashboardPage: React.FC = () => {
   };
 
   // TODO: Handle crypto tile addition using the existing AddCryptoModal
-  // const handleAddCryptoTile = async (cryptoData: any) => {
-  //   console.log('handleAddCryptoTile called with:', cryptoData);
-  //   console.log('activeTab:', activeTab);
-  //   
-  //   if (!activeTab) {
-  //     console.warn('No active tab found, cannot add tile');
-  //     return;
-  //   }
-  //   
-  //   if (!user?.id) {
-  //     console.warn('No user ID found, cannot add tile');
-  //     return;
-  //   }
-  //   
-  //   const newTile = {
-  //     type: 'crypto' as const,
-  //     symbol: cryptoData.symbol,
-  //     timeframe: cryptoData.timeframe,
-  //     title: cryptoData.symbol,
-  //     displayOptions: cryptoData.displayOptions,
-  //     autoRefresh: cryptoData.autoRefresh,
-  //     isPinned: false,
-  //     gridPosition: findNextAvailablePosition(getDefaultTileSize('crypto')),
-  //     gridSize: getDefaultTileSize('crypto'),
-  //   };
+  const handleAddCryptoTile = async (cryptoData: any) => {
+    console.log('handleAddCryptoTile called with:', cryptoData);
+    console.log('activeTab:', activeTab);
+    
+    if (!activeTab) {
+      console.warn('No active tab found, cannot add tile');
+      return;
+    }
+    
+    if (!user?.id) {
+      console.warn('No user ID found, cannot add tile');
+      return;
+    }
+    
+    const newTile = {
+      type: 'crypto' as const,
+      symbol: cryptoData.symbol,
+      timeframe: cryptoData.timeframe,
+      title: cryptoData.symbol,
+      displayOptions: cryptoData.displayOptions,
+      autoRefresh: cryptoData.autoRefresh,
+      isPinned: false,
+      gridPosition: findNextAvailablePosition(getDefaultTileSize('crypto')),
+      gridSize: getDefaultTileSize('crypto'),
+    };
 
-  //   try {
-  //     console.log('Creating tile via API:', newTile);
-  //     console.log('Tab ID:', activeTab.id);
-  //     console.log('User ID:', user.id);
-  //     const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-  //     console.log('Tile created successfully:', response);
-  //     
-  //     // Add a small delay to ensure the database has been updated
-  //     await new Promise(resolve => setTimeout(resolve, 100));
-  //     
-  //     // Reload data from database to get the updated tiles
-  //     await reloadFromDatabase();
-  //     console.log('✅ Data reloaded from database after tile creation');
-  //     
-  //   } catch (error: any) {
-  //     console.error('Failed to create tile:', error);
-  //     console.error('Error details:', error.response?.data);
-  //     console.error('Request config:', error.config);
-  //     // TODO: Show error message to user
-  //   }
-  // };
+    try {
+      console.log('Creating tile via API:', newTile);
+      console.log('Tab ID:', activeTab.id);
+      console.log('User ID:', user.id);
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      console.log('Tile created successfully:', response);
+      
+      // Add a small delay to ensure the database has been updated
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Reload data from database to get the updated tiles
+      await reloadFromDatabase();
+      console.log('✅ Data reloaded from database after tile creation');
+      
+    } catch (error: any) {
+      console.error('Failed to create tile:', error);
+      console.error('Error details:', error.response?.data);
+      console.error('Request config:', error.config);
+      // TODO: Show error message to user
+    }
+  };
 
-  // TODO: Handle stock tile addition using the new AddStockModal
-  // const handleAddStockTile = async (stockData: any) => {
-  //   console.log('handleAddStockTile called with:', stockData);
-  //   console.log('activeTab:', activeTab);
-  //   
-  //   if (!activeTab) {
-  //     console.warn('No active tab found, cannot add tile');
-  //     return;
-  //   }
-  //   
-  //   if (!user?.id) {
-  //     console.warn('No user ID found, cannot add tile');
-  //     return;
-  //   }
-  //   
-  //   const newTile = {
-  //     type: 'stock' as const,
-  //     symbol: stockData.symbol,
-  //     timeframe: stockData.timeframe,
-  //     title: stockData.symbol,
-  //     displayOptions: stockData.displayOptions,
-  //     autoRefresh: stockData.autoRefresh,
-  //     isPinned: false,
-  //     gridPosition: findNextAvailablePosition(getDefaultTileSize('stock')),
-  //     gridSize: getDefaultTileSize('stock'),
-  //   };
+  const handleAddStockTile = async (stockData: any) => {
+    console.log('handleAddStockTile called with:', stockData);
+    console.log('activeTab:', activeTab);
+    
+    if (!activeTab) {
+      console.warn('No active tab found, cannot add tile');
+      return;
+    }
+    
+    if (!user?.id) {
+      console.warn('No user ID found, cannot add tile');
+      return;
+    }
+    
+    const newTile = {
+      type: 'stock' as const,
+      symbol: stockData.symbol,
+      timeframe: stockData.timeframe,
+      title: stockData.symbol,
+      displayOptions: stockData.displayOptions,
+      autoRefresh: stockData.autoRefresh,
+      isPinned: false,
+      gridPosition: findNextAvailablePosition(getDefaultTileSize('stock')),
+      gridSize: getDefaultTileSize('stock'),
+    };
 
-  //   try {
-  //     console.log('Creating tile via API:', newTile);
-  //     const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-  //     console.log('Tile created successfully:', response);
-  //     
-  //     // Reload data from database to get the updated tiles
-  //     await reloadFromDatabase();
-  //     console.log('✅ Data reloaded from database after tile creation');
-  //     
-  //   } catch (error) {
-  //     console.error('Failed to create tile:', error);
-  //     // TODO: Show error message to user
-  //   }
-  // };
+    try {
+      console.log('Creating tile via API:', newTile);
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      console.log('Tile created successfully:', response);
+      
+      // Reload data from database to get the updated tiles
+      await reloadFromDatabase();
+      console.log('✅ Data reloaded from database after tile creation');
+      
+    } catch (error) {
+      console.error('Failed to create tile:', error);
+      // TODO: Show error message to user
+    }
+  };
 
   // const getExistingSymbols = () => tiles.map(tile => tile.symbol).filter((symbol): symbol is string => Boolean(symbol));
 
@@ -1222,11 +1152,7 @@ const UnifiedDashboardPage: React.FC = () => {
         getTabsByGroup={getTabsByGroup}
       />
       
-<<<<<<< HEAD
       <Container maxWidth={false} sx={{ p: 2, px: 4 }}>
-=======
-      <Container maxWidth={false} sx={{ p: 1, px: 2 }}>
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
         {/* Header */}
         <Box sx={{ mb: 4 }}>
           <Typography 
@@ -1707,6 +1633,22 @@ const UnifiedDashboardPage: React.FC = () => {
           open={newGroupDialogOpen}
           onClose={() => setNewGroupDialogOpen(false)}
           onCreateGroup={handleCreateNewGroup}
+        />
+
+        {/* Add Crypto Modal */}
+        <AddCryptoModal
+          open={cryptoModalOpen}
+          onClose={() => setCryptoModalOpen(false)}
+          onAdd={handleAddCryptoTile}
+          existingSymbols={tiles.map(tile => tile.symbol).filter((symbol): symbol is string => Boolean(symbol))}
+        />
+
+        {/* Add Stock Modal */}
+        <AddStockModal
+          open={stockModalOpen}
+          onClose={() => setStockModalOpen(false)}
+          onAdd={handleAddStockTile}
+          existingSymbols={tiles.map(tile => tile.symbol).filter((symbol): symbol is string => Boolean(symbol))}
         />
 
         {/* Floating Add Button */}

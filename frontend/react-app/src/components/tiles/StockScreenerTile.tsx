@@ -101,6 +101,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   onRemove,
   onUpdate,
   onSettingsChange,
+  onDragStart,
+  isDragging = false,
   isSelected = false,
   onSelectionChange,
   criteria = {
@@ -469,13 +471,10 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         overflow: 'hidden',
         width: '100%',
         height: '100%',
-<<<<<<< HEAD:frontend/react-app/src/components/tiles/StockScreenerTile.tsx
         resize: onDragStart ? 'none' : 'both',
         cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd:frontend/react-app/src/components/StockScreenerTile.tsx
         display: 'flex',
         flexDirection: 'column',
         '&::before': {
@@ -489,6 +488,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         },
       }}
       ref={tileRef}
+      onMouseDown={onDragStart}
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>

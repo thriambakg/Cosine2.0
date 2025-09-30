@@ -77,7 +77,9 @@ const StockTile: React.FC<StockTileProps> = ({
   onRemove,
   onUpdate: _onUpdate,
   onSettingsChange,
+  onDragStart,
   onResizeStart: _onResizeStart,
+  isDragging = false,
   isResizing: _isResizing = false,
   isSelected = false,
   onSelectionChange,
@@ -287,7 +289,6 @@ const StockTile: React.FC<StockTileProps> = ({
         overflow: 'hidden',
         width: '100%',
         height: '100%',
-<<<<<<< HEAD:frontend/react-app/src/components/tiles/StockTile.tsx
         resize: onDragStart ? 'none' : 'both', // Disable CSS resize when using grid system
         cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
         transition: isDragging ? 'none' : 'all 0.3s ease',
@@ -297,8 +298,6 @@ const StockTile: React.FC<StockTileProps> = ({
           transform: isDragging ? 'none' : 'translateY(-2px)',
           boxShadow: isDragging ? 'none' : '0 8px 25px rgba(16, 185, 129, 0.15)',
         },
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd:frontend/react-app/src/components/StockTile.tsx
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -310,6 +309,7 @@ const StockTile: React.FC<StockTileProps> = ({
         },
       }}
       ref={tileRef}
+      onMouseDown={onDragStart}
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>

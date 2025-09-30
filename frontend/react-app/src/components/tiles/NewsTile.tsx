@@ -20,11 +20,6 @@ import {
   Autocomplete,
   List,
   ListItem,
-<<<<<<< HEAD
-=======
-  ListItemText,
-  ListItemAvatar,
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
   Avatar,
   Pagination,
   Alert,
@@ -52,7 +47,6 @@ interface NewsTileProps {
   onRemove: (id: string) => void;
   onUpdate: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;
-  onResize?: (id: string, size: { width: number; height: number }) => void;
   onDragStart?: (event: React.MouseEvent) => void;
   onResizeStart?: (event: React.MouseEvent) => void;
   isDragging?: boolean;
@@ -106,16 +100,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
   id,
   size,
   onRemove,
-<<<<<<< HEAD
   onUpdate: _onUpdate,
   onSettingsChange,
-  onResize,
   onDragStart,
   isDragging = false,
-=======
-  onUpdate,
-  onSettingsChange,
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
   isSelected = false,
   onSelectionChange,
   filters = {
@@ -1139,17 +1127,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
         
         setNewsArticles(response.articles);
         
-<<<<<<< HEAD
         // Note: Not calling onUpdate to avoid triggering dashboard persistence issues
         // The tile state is managed internally and doesn't need to update the dashboard
-=======
-        // Update tile with results
-        onUpdate(id, {
-          articles: response.articles,
-          filters: currentFilters,
-          lastUpdated: new Date().toISOString(),
-        });
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
         
       } catch (apiError) {
         console.error('❌ News API Error:', {
@@ -1165,17 +1144,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
         setNewsArticles(filteredArticles);
         setError(null); // Clear error since we have fallback data
         
-<<<<<<< HEAD
         // Note: Not calling onUpdate to avoid triggering dashboard persistence issues
         // The tile state is managed internally and doesn't need to update the dashboard
-=======
-        // Update tile with fallback results
-        onUpdate(id, {
-          articles: filteredArticles,
-          filters: currentFilters,
-          lastUpdated: new Date().toISOString(),
-        });
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
       }
       
     } catch (err) {
@@ -1184,11 +1154,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     } finally {
       setIsLoading(false);
     }
-<<<<<<< HEAD
   }, [filterArticles, id, buildApiPayload]);
-=======
-  }, [filterArticles, id, onUpdate, buildApiPayload]);
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -1217,10 +1183,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
     setSettingsAnchor(null);
   };
 
-  const handleFiltersChange = (newFilters: NewsFilters) => {
-    setLocalFilters(newFilters);
-    onSettingsChange(id, { filters: newFilters });
-  };
 
   const handleDisplayOptionsChange = (option: keyof typeof displayOptions) => {
     const newOptions = {
@@ -1228,15 +1190,24 @@ const NewsTile: React.FC<NewsTileProps> = ({
       [option]: !localDisplayOptions[option],
     };
     setLocalDisplayOptions(newOptions);
-    onSettingsChange(id, { displayOptions: newOptions });
+    // Debounce the settings change to prevent frequent updates
+    setTimeout(() => {
+      onSettingsChange(id, { displayOptions: newOptions });
+    }, 100);
   };
 
   const handleAutoRefreshToggle = () => {
-    onSettingsChange(id, { autoRefresh: !autoRefresh });
+    // Debounce the settings change to prevent frequent updates
+    setTimeout(() => {
+      onSettingsChange(id, { autoRefresh: !autoRefresh });
+    }, 100);
   };
 
   const handlePinToggle = () => {
-    onSettingsChange(id, { isPinned: !isPinned });
+    // Debounce the settings change to prevent frequent updates
+    setTimeout(() => {
+      onSettingsChange(id, { isPinned: !isPinned });
+    }, 100);
   };
 
   const handleRemove = () => {
@@ -1356,7 +1327,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-<<<<<<< HEAD
         cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
@@ -1365,8 +1335,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
           transform: isDragging ? 'none' : 'translateY(-2px)',
           boxShadow: isDragging ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
         },
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -1378,16 +1346,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         },
       }}
       ref={tileRef}
-<<<<<<< HEAD
       onMouseDown={onDragStart}
-      onMouseUp={() => {
-        if (onResize && tileRef.current) {
-          const rect = tileRef.current.getBoundingClientRect();
-          onResize(id, { width: rect.width, height: rect.height });
-        }
-      }}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
@@ -1467,10 +1426,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
               <IconButton
                 size="small"
                 onClick={handlePerformAnalysis}
-<<<<<<< HEAD
                 onMouseDown={(e) => e.stopPropagation()}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
                 sx={{ color: '#9ca3af', '&:hover': { color: '#22c55e' } }}
               >
                 <AnalyticsIcon sx={{ fontSize: 18 }} />
@@ -1483,10 +1439,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
               size="small"
               onClick={runNewsSearch}
               disabled={isLoading}
-<<<<<<< HEAD
               onMouseDown={(e) => e.stopPropagation()}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
               sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
             >
               <SearchIcon sx={{ fontSize: 18 }} />
@@ -1497,10 +1450,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
             <IconButton
               size="small"
               onClick={handleSettingsOpen}
-<<<<<<< HEAD
               onMouseDown={(e) => e.stopPropagation()}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
               sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
             >
               <SettingsIcon sx={{ fontSize: 18 }} />
@@ -1511,10 +1461,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
             <IconButton
               size="small"
               onClick={handleRemove}
-<<<<<<< HEAD
               onMouseDown={(e) => e.stopPropagation()}
-=======
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
               sx={{ color: '#9ca3af', '&:hover': { color: '#dc2626' } }}
             >
               <CloseIcon sx={{ fontSize: 18 }} />
@@ -2278,10 +2225,14 @@ const NewsTile: React.FC<NewsTileProps> = ({
           <Button onClick={() => { 
             // Clean up trailing operators before applying
             const cleanedFilters = cleanupAllExpressions(localFilters);
-            // Apply the cleaned filters to the tile
-            handleFiltersChange(cleanedFilters);
+            // Update local state without triggering onSettingsChange immediately
+            setLocalFilters(cleanedFilters);
             setFiltersDialogOpen(false); 
-            runNewsSearch(); 
+            runNewsSearch();
+            // Update settings after search to avoid race condition
+            setTimeout(() => {
+              onSettingsChange(id, { filters: cleanedFilters });
+            }, 200);
           }} variant="contained">
             Apply & Search
           </Button>
@@ -2358,51 +2309,21 @@ const NewsTile: React.FC<NewsTileProps> = ({
   );
 };
 
-// Custom comparison function for memo
+// Simplified memo comparison - only check essential props
 const NewsTileMemo = memo(NewsTile, (prevProps, nextProps) => {
   // Always re-render if key props change
-  if (prevProps.id !== nextProps.id ||
-      prevProps.dashboardContext !== nextProps.dashboardContext) {
+  if (prevProps.id !== nextProps.id) {
     return false; // Re-render
   }
   
-  // Check if display options changed
-  const prevDisplay = prevProps.displayOptions;
-  const nextDisplay = nextProps.displayOptions;
-  if (prevDisplay && nextDisplay) {
-    if (prevDisplay.showImages !== nextDisplay.showImages ||
-        prevDisplay.showSource !== nextDisplay.showSource ||
-        prevDisplay.showDate !== nextDisplay.showDate ||
-        prevDisplay.showKeywords !== nextDisplay.showKeywords ||
-        prevDisplay.compactView !== nextDisplay.compactView ||
-        prevDisplay.maxResults !== nextDisplay.maxResults) {
-      return false; // Re-render
-    }
-  }
-  
-  // Check if other important props changed
-  if (prevProps.autoRefresh !== nextProps.autoRefresh ||
-      prevProps.isPinned !== nextProps.isPinned ||
-      prevProps.isDragging !== nextProps.isDragging ||
+  // Check if essential props changed
+  if (prevProps.isDragging !== nextProps.isDragging ||
       prevProps.isResizing !== nextProps.isResizing ||
       prevProps.isSelected !== nextProps.isSelected) {
     return false; // Re-render
   }
   
-  // If size changed significantly, re-render
-  if (prevProps.size && nextProps.size) {
-    const sizeThreshold = 10; // 10px threshold
-    if (Math.abs(prevProps.size.width - nextProps.size.width) > sizeThreshold ||
-        Math.abs(prevProps.size.height - nextProps.size.height) > sizeThreshold) {
-      return false; // Re-render
-    }
-  }
-  
-  return true; // Don't re-render
+  return true; // Don't re-render for other changes
 });
 
-<<<<<<< HEAD
 export default NewsTileMemo;
-=======
-export default NewsTileMemo;
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd

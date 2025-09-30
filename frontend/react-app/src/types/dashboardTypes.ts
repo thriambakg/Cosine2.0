@@ -167,23 +167,6 @@ export interface NewTabOptions {
   isPinned?: boolean;
 }
 
-// News tile specific interfaces
-export interface NewsFilters {
-  keywords: string[];
-  sources: string[];
-  categories: string[];
-  dateRange: string;
-  countries: string[];
-  // Query operators
-  categoryOperator: 'AND' | 'OR';
-  sourceOperator: 'AND' | 'OR';
-  countryOperator: 'AND' | 'OR';
-  // Expression-based filters for complex queries
-  keywordExpression?: any[];
-  sourceExpression?: any[];
-  categoryExpression?: any[];
-  countryExpression?: any[];
-}
 
 export interface NewsArticle {
   id: string;
