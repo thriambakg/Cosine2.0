@@ -128,7 +128,7 @@ def lambda_handler(event, context):
             'headers': headers,
             'body': json.dumps({'message': 'CORS preflight successful'})
         }
-    
+
     try:
         # Parse request body
         body = json.loads(event.get('body', '{}'))
@@ -138,7 +138,7 @@ def lambda_handler(event, context):
         date_range = body.get('dateRange', '12h')
         limit = body.get('limit', 50)
         offset = body.get('offset', 0)
-        
+
         # Extract search terms from filters
         search_terms = extract_search_terms(query_filters)
         
@@ -162,7 +162,7 @@ def lambda_handler(event, context):
         serializable_articles = convert_decimals(paginated_articles)
         
         logger.info(f"Returning {len(serializable_articles)} articles out of {total_count} total")
-        
+
         return {
             'statusCode': 200,
             'headers': headers,
@@ -272,66 +272,68 @@ def perform_title_based_search(search_terms, query_filters, date_range, limit):
 
 def search_by_title(search_term, date_filter):
     """
-    Search articles by title using GSI5 scan.
-    We store lowercase title in GSI5SK, so we search against that for case-insensitive matching.
+    Search articles by title using GSI5 query with client-side filtering.
+    GSI5PK = 'TITLE_SEARCH' for all articles, so we query by that and filter.
     """
     
     try:
         # Convert search term to lowercase for case-insensitive search
         search_term_lower = search_term.lower()
         
-        # Build filter expression - search in description and title fields
-        # We can't use contains() on GSI5SK (it's a key), so we search the title attribute
-        filter_parts = []
-        expression_values = {}
-        expression_names = {}
-        
-        # Add date filter if provided
-        if date_filter:
-            filter_parts.append('published_date >= :start_date')
-            expression_values[':start_date'] = date_filter
-        
-        # Build scan params
-        scan_params = {
+        # Query GSI5 using the partition key (GSI5PK = 'TITLE_SEARCH')
+        # This is much more efficient than a scan
+        query_params = {
             'IndexName': 'GSI5',
-            'Limit': 200  # Fetch more items to filter client-side
+            'KeyConditionExpression': 'GSI5PK = :pk',
+            'ExpressionAttributeValues': {
+                ':pk': 'TITLE_SEARCH'
+            },
+            'Limit': 200  # Fetch items to filter client-side
         }
         
-        if filter_parts:
-            scan_params['FilterExpression'] = ' AND '.join(filter_parts)
-            scan_params['ExpressionAttributeValues'] = expression_values
+        # Add date filter if provided (as FilterExpression, not KeyCondition)
+        if date_filter:
+            query_params['FilterExpression'] = 'published_date >= :start_date'
+            query_params['ExpressionAttributeValues'][':start_date'] = date_filter
         
-        if expression_names:
-            scan_params['ExpressionAttributeNames'] = expression_names
+        logger.info(f"Querying GSI5 for term: {search_term} (date_filter: {date_filter})")
+        logger.info(f"Query params: {query_params}")
         
-        logger.info(f"Scanning GSI5 for term: {search_term}")
-        
-        # Fetch all articles and filter client-side for case-insensitive contains
+        # Fetch all articles from GSI5 and filter client-side
         all_articles = []
-        response = table.scan(**scan_params)
+        response = table.query(**query_params)
         all_articles.extend(response.get('Items', []))
         
-        # Handle pagination - fetch up to 500 articles
-        while 'LastEvaluatedKey' in response and len(all_articles) < 500:
-            scan_params['ExclusiveStartKey'] = response['LastEvaluatedKey']
-            response = table.scan(**scan_params)
+        logger.info(f"First query returned {len(response.get('Items', []))} items, Count: {response.get('Count', 0)}")
+        
+        # Handle pagination - fetch up to 1000 articles
+        page_count = 1
+        while 'LastEvaluatedKey' in response and len(all_articles) < 1000:
+            query_params['ExclusiveStartKey'] = response['LastEvaluatedKey']
+            response = table.query(**query_params)
             all_articles.extend(response.get('Items', []))
+            page_count += 1
+            logger.info(f"Page {page_count}: fetched {len(response.get('Items', []))} more items")
+        
+        logger.info(f"Total queried: {len(all_articles)} articles from GSI5")
         
         # Filter client-side for case-insensitive title matching
         matching_articles = []
         for article in all_articles:
             title = article.get('title', '').lower()
             description = article.get('description', '').lower()
+            gsi5sk = article.get('GSI5SK', '').lower()
             
-            # Check if search term is in title or description
-            if search_term_lower in title or search_term_lower in description:
+            # Check if search term is in title, description, or GSI5SK
+            if search_term_lower in title or search_term_lower in description or search_term_lower in gsi5sk:
                 matching_articles.append(article)
+                logger.debug(f"Match found in: {article.get('title', 'No title')[:50]}...")
         
-        logger.info(f"Found {len(matching_articles)} articles for term '{search_term}' (scanned {len(all_articles)} total)")
+        logger.info(f"Found {len(matching_articles)} articles for term '{search_term}' (queried {len(all_articles)} total)")
         return matching_articles
         
     except Exception as e:
-        logger.error(f"Error searching by title for '{search_term}': {e}")
+        logger.error(f"Error searching by title for '{search_term}': {e}", exc_info=True)
         return []
 
 def scan_all_articles(date_filter, limit):
@@ -355,7 +357,7 @@ def scan_all_articles(date_filter, limit):
         
         logger.info(f"Scanned {len(articles)} articles")
         return articles
-        
+    
     except Exception as e:
         logger.error(f"Error scanning articles: {e}")
         return []
