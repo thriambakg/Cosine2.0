@@ -371,12 +371,16 @@ def apply_additional_filters(articles, query_filters):
     
     filtered = articles
     
-    # Apply source filter
+    # Apply source filter - freeform text search (case-insensitive contains)
     sources_query = query_filters.get('sources')
     if sources_query:
         source_terms = extract_terms_from_query(sources_query)
         if source_terms:
-            filtered = [a for a in filtered if a.get('source_name', '') in source_terms]
+            # Filter articles where ANY source term is contained in source_name (case-insensitive)
+            filtered = [
+                a for a in filtered 
+                if any(term.lower() in (a.get('source_name') or '').lower() for term in source_terms)
+            ]
     
     # Apply category filter
     categories_query = query_filters.get('categories')

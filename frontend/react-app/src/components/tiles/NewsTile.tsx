@@ -783,20 +783,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
     },
   ];
 
-  // Source options for autocomplete
-  const sourceOptions = [
-    'Fast Company',
-    'Financial Times',
-    'Reuters',
-    'Bloomberg',
-    'TechCrunch',
-    'Wall Street Journal',
-    'CNBC',
-    'MarketWatch',
-    'Yahoo Finance',
-    'Forbes',
-  ];
-
   // Category options
   const categoryOptions = [
     'business',
@@ -1782,10 +1768,9 @@ const NewsTile: React.FC<NewsTileProps> = ({
               
               {/* Add Keywords Input */}
               <Autocomplete
-                multiple
                 freeSolo
                 options={[]}
-                value={[]}
+                value={keywordInputValue}
                 inputValue={keywordInputValue}
                 onInputChange={(_, newInputValue) => {
                   setKeywordInputValue(newInputValue);
@@ -1802,8 +1787,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
                       // Check if we need an operator before adding a new keyword
                       if (newExpression.length > 0) {
                         const lastItem = newExpression[newExpression.length - 1];
-                        if (lastItem.type === 'keyword') {
-                          // Show error or prevent adding - keywords need operators between them
+                        if (lastItem.type === 'keyword' || lastItem.type === 'group') {
                           alert('Please add an AND or OR operator before adding another keyword');
                           return;
                         }
@@ -1823,9 +1807,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    label="Add keywords (press Enter)"
-                    variant="outlined"
                     placeholder="Type keyword and press Enter"
+                    variant="outlined"
                     sx={{ '& .MuiOutlinedInput-root': { color: 'white' } }}
                     onMouseDown={(e) => e.stopPropagation()}
                     onMouseUp={(e) => e.stopPropagation()}
@@ -2160,10 +2143,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
               setSelectedSources,
               selectedSourceGroupIndex,
               setSelectedSourceGroupIndex,
-              sourceOptions,
+              [],  // No predefined options - freeform text
               'Sources',
-              'Select source from dropdown',
-              true // Use dropdown mode
+              'Type source name (e.g., Bloomberg, Reuters) and press Enter',
+              false // Freeform text input mode
             )}
 
             {/* Category Selection with Expression Logic */}
