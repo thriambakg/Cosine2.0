@@ -431,6 +431,8 @@ def convert_decimals(obj):
     elif isinstance(obj, Decimal):
         if obj % 1 == 0:
             return int(obj)
+        else:
+            return float(obj)
     else:
-        return float(obj)
+        return obj
 
