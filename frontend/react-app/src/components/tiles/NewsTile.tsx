@@ -396,16 +396,38 @@ const NewsTile: React.FC<NewsTileProps> = ({
         {/* Expression Display */}
         <Box sx={{ 
           mt: 2, 
-          display: 'flex', 
-          flexWrap: 'wrap', 
-          gap: 1, 
-          alignItems: 'center',
           minHeight: 60, 
           p: 2, 
           border: '1px solid #374151', 
           borderRadius: 1, 
-          backgroundColor: '#1f2937'
+          backgroundColor: '#1f2937',
+          position: 'relative'
         }}>
+          {/* Clear button */}
+          {currentExpression.length > 0 && (
+            <IconButton
+              size="small"
+              onClick={() => {
+                setLocalFilters(prev => ({
+                  ...prev,
+                  [expressionKey]: []
+                }));
+                setSelectedItems([]);
+                setSelectedGroupIndex(null);
+              }}
+              sx={{
+                position: 'absolute',
+                top: 8,
+                right: 8,
+                color: '#9ca3af',
+                '&:hover': { color: '#ef4444' }
+              }}
+            >
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          )}
+          
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
           {currentExpression.map((item: any, index: number) => (
             <React.Fragment key={index}>
               {item.type === filterType ? (
@@ -694,6 +716,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
               </Button>
             </Box>
           )}
+          </Box>
         </Box>
       </FormControl>
     );
@@ -1823,8 +1846,33 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 border: '1px solid #374151', 
                 borderRadius: 1, 
                 backgroundColor: '#1f2937',
-                mt: 2
+                mt: 2,
+                position: 'relative'
               }}>
+                {/* Clear button */}
+                {((localFilters as any).keywordExpression || []).length > 0 && (
+                  <IconButton
+                    size="small"
+                    onClick={() => {
+                      setLocalFilters(prev => ({
+                        ...prev,
+                        keywordExpression: []
+                      }));
+                      setSelectedKeywords([]);
+                      setSelectedGroupIndex(null);
+                    }}
+                    sx={{
+                      position: 'absolute',
+                      top: 8,
+                      right: 8,
+                      color: '#9ca3af',
+                      '&:hover': { color: '#ef4444' }
+                    }}
+                  >
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                )}
+                
                 <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
                   {((localFilters as any).keywordExpression || []).map((item: any, index: number) => (
                     <React.Fragment key={index}>
