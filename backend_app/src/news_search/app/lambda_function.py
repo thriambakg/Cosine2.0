@@ -125,7 +125,7 @@ def perform_deterministic_token_search(query_filters, date_range, limit):
         else:
             start_date = datetime.min
         
-        scan_params['FilterExpression'] = '#pk = :pk AND #pd BETWEEN :start_date AND :end_date'
+        scan_params['FilterExpression'] = 'attribute_exists(#pk) AND #pd BETWEEN :start_date AND :end_date'
         scan_params['ExpressionAttributeValues'] = {
             ':start_date': start_date.isoformat(timespec='seconds') + 'Z',
             ':end_date': end_date.isoformat(timespec='seconds') + 'Z'
@@ -259,7 +259,7 @@ def perform_broad_scan(date_range, limit):
         else:
             start_date = datetime.min
         
-        scan_params['FilterExpression'] = '#pk = :pk AND #pd BETWEEN :start_date AND :end_date'
+        scan_params['FilterExpression'] = 'attribute_exists(#pk) AND #pd BETWEEN :start_date AND :end_date'
         scan_params['ExpressionAttributeValues'] = {
             ':start_date': start_date.isoformat(timespec='seconds') + 'Z',
             ':end_date': end_date.isoformat(timespec='seconds') + 'Z'
