@@ -271,58 +271,64 @@ def perform_title_based_search(search_terms, query_filters, date_range, limit):
     return filtered_articles[:limit * 2]  # Return extra for pagination
 
 def search_by_title(search_term, date_filter):
-    """Search articles by title using GSI5 with contains filter"""
+    """
+    Search articles by title using GSI5 scan.
+    We store lowercase title in GSI5SK, so we search against that for case-insensitive matching.
+    """
     
     try:
         # Convert search term to lowercase for case-insensitive search
         search_term_lower = search_term.lower()
         
-        # Build filter expression
+        # Build filter expression - search in description and title fields
+        # We can't use contains() on GSI5SK (it's a key), so we search the title attribute
         filter_parts = []
-        expression_values = {
-            ':search_term': search_term_lower
-        }
-        expression_names = {
-            '#title': 'GSI5SK'
-        }
-        
-        # Title contains search term
-        filter_parts.append('contains(#title, :search_term)')
+        expression_values = {}
+        expression_names = {}
         
         # Add date filter if provided
         if date_filter:
             filter_parts.append('published_date >= :start_date')
             expression_values[':start_date'] = date_filter
         
-        filter_expression = ' AND '.join(filter_parts)
-        
-        # Query GSI5
-        query_params = {
+        # Build scan params
+        scan_params = {
             'IndexName': 'GSI5',
-            'KeyConditionExpression': 'GSI5PK = :pk',
-            'FilterExpression': filter_expression,
-            'ExpressionAttributeValues': {
-                ':pk': 'TITLE_SEARCH',
-                **expression_values
-            },
-            'ExpressionAttributeNames': expression_names,
-            'Limit': 100  # Limit per query
+            'Limit': 200  # Fetch more items to filter client-side
         }
         
-        logger.info(f"Querying GSI5 for term: {search_term}")
+        if filter_parts:
+            scan_params['FilterExpression'] = ' AND '.join(filter_parts)
+            scan_params['ExpressionAttributeValues'] = expression_values
         
-        articles = []
-        response = table.query(**query_params)
-        articles.extend(response.get('Items', []))
+        if expression_names:
+            scan_params['ExpressionAttributeNames'] = expression_names
         
-        # Handle pagination
-        while 'LastEvaluatedKey' in response and len(articles) < 100:
-            query_params['ExclusiveStartKey'] = response['LastEvaluatedKey']
-            response = table.query(**query_params)
-            articles.extend(response.get('Items', []))
+        logger.info(f"Scanning GSI5 for term: {search_term}")
         
-        logger.info(f"Found {len(articles)} articles for term '{search_term}'")
-        return articles
+        # Fetch all articles and filter client-side for case-insensitive contains
+        all_articles = []
+        response = table.scan(**scan_params)
+        all_articles.extend(response.get('Items', []))
+        
+        # Handle pagination - fetch up to 500 articles
+        while 'LastEvaluatedKey' in response and len(all_articles) < 500:
+            scan_params['ExclusiveStartKey'] = response['LastEvaluatedKey']
+            response = table.scan(**scan_params)
+            all_articles.extend(response.get('Items', []))
+        
+        # Filter client-side for case-insensitive title matching
+        matching_articles = []
+        for article in all_articles:
+            title = article.get('title', '').lower()
+            description = article.get('description', '').lower()
+            
+            # Check if search term is in title or description
+            if search_term_lower in title or search_term_lower in description:
+                matching_articles.append(article)
+        
+        logger.info(f"Found {len(matching_articles)} articles for term '{search_term}' (scanned {len(all_articles)} total)")
+        return matching_articles
         
     except Exception as e:
         logger.error(f"Error searching by title for '{search_term}': {e}")
