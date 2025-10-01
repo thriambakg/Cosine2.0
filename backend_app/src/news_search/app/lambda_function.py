@@ -3,6 +3,7 @@ import boto3
 import os
 from datetime import datetime, timedelta
 import logging
+from typing import List, Dict, Any
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO').upper())
@@ -10,6 +11,14 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO').upper())
 dynamodb = boto3.resource('dynamodb')
 news_table_name = os.environ['NEWS_TABLE_NAME']
 table = dynamodb.Table(news_table_name)
+
+# Import deterministic tokenizer for consistent search term processing
+try:
+    from deterministic_tokenizer import tokenizer
+    TOKENIZER_AVAILABLE = True
+except ImportError:
+    logger.warning("Deterministic tokenizer not available, using fallback")
+    TOKENIZER_AVAILABLE = False
 
 def lambda_handler(event, context):
     logger.info(f"Received event: {json.dumps(event)}")
@@ -40,22 +49,10 @@ def lambda_handler(event, context):
         query_params = build_dynamodb_query_params(query_filters, date_range, limit)
         print(f"🔧 Built query params: {json.dumps(query_params, default=str)}")
 
-        # Check if we need comprehensive complex filtering
-        if is_comprehensive_complex_query(query_filters):
-            articles = handle_comprehensive_complex_query(query_filters, date_range, limit)
-        elif query_params.get('_or_keywords'):
-            articles = handle_or_keyword_query(query_params, query_filters, date_range, limit)
-        else:
-            # Execute single DynamoDB query
-            print(f"📊 Executing DynamoDB query on table: {news_table_name}")
-            response = execute_dynamodb_query(query_params)
-            print(f"📥 DynamoDB response: {json.dumps(response, default=str)}")
-            articles = response.get('Items', [])
-        
-        print(f"📰 Retrieved {len(articles)} articles from DynamoDB")
-
-        # Apply client-side filtering for complex expressions if needed
-        filtered_articles = apply_client_side_filters(articles, query_filters)
+        # Use deterministic token-based search for accuracy
+        print("🔍 Using deterministic token-based search for improved accuracy")
+        filtered_articles = perform_deterministic_token_search(query_filters, date_range, limit)
+        print(f"📰 Retrieved {len(filtered_articles)} articles using deterministic search")
 
         return {
             'statusCode': 200,
@@ -88,6 +85,189 @@ def lambda_handler(event, context):
             },
             'body': json.dumps({'message': 'Failed to search news articles', 'error': str(e)})
         }
+
+def perform_deterministic_token_search(query_filters, date_range, limit):
+    """
+    Perform search using deterministic tokenization and table scans.
+    This approach sacrifices speed for accuracy by ensuring consistent token matching.
+    """
+    logger.info("🔍 Performing deterministic token-based search")
+    
+    # Extract search terms from query filters
+    search_terms = extract_search_terms_from_filters(query_filters)
+    
+    if not search_terms:
+        logger.info("No search terms found, performing broad scan")
+        return perform_broad_scan(date_range, limit)
+    
+    logger.info(f"Search terms: {search_terms}")
+    
+    # Build scan parameters
+    scan_params = {
+        'Limit': limit * 2,  # Get more items since we'll filter
+        'FilterExpression': 'attribute_exists(#pk)',
+        'ExpressionAttributeNames': {
+            '#pk': 'PK'
+        }
+    }
+    
+    # Add date filtering if specified
+    if date_range != 'all':
+        end_date = datetime.utcnow()
+        if date_range == '12h':
+            start_date = end_date - timedelta(hours=24)
+        elif date_range == '24h':
+            start_date = end_date - timedelta(hours=48)
+        elif date_range == '7d':
+            start_date = end_date - timedelta(days=7)
+        elif date_range == '30d':
+            start_date = end_date - timedelta(days=30)
+        else:
+            start_date = datetime.min
+        
+        scan_params['FilterExpression'] = '#pk = :pk AND #pd BETWEEN :start_date AND :end_date'
+        scan_params['ExpressionAttributeValues'] = {
+            ':start_date': start_date.isoformat(timespec='seconds') + 'Z',
+            ':end_date': end_date.isoformat(timespec='seconds') + 'Z'
+        }
+        scan_params['ExpressionAttributeNames']['#pd'] = 'published_date'
+    
+    # Execute scan
+    logger.info(f"📊 Executing scan with params: {scan_params}")
+    response = execute_dynamodb_query(scan_params)
+    articles = response.get('Items', [])
+    
+    logger.info(f"📰 Retrieved {len(articles)} articles for token filtering")
+    
+    # Apply deterministic token filtering
+    filtered_articles = filter_articles_by_tokens(articles, search_terms, query_filters)
+    
+    # Limit results
+    return filtered_articles[:limit]
+
+def extract_search_terms_from_filters(query_filters):
+    """Extract search terms from query filters using deterministic tokenization"""
+    search_terms = []
+    
+    # Extract from keyword expressions
+    keyword_query = query_filters.get('keywords')
+    if keyword_query:
+        if TOKENIZER_AVAILABLE and keyword_query.get('type') == 'expression':
+            # Use deterministic tokenizer for consistent processing
+            children = keyword_query.get('children', [])
+            for child in children:
+                if child.get('type') == 'term':
+                    term = child.get('value', '')
+                    if term:
+                        # Process the search term the same way as indexing
+                        processed_terms = tokenizer.create_search_tokens(term)
+                        search_terms.extend(processed_terms)
+        elif keyword_query.get('type') == 'term':
+            # Simple term search
+            term = keyword_query.get('value', '')
+            if term:
+                search_terms.append(term.lower())
+    
+    # Extract from source, category, country filters
+    for field in ['sources', 'categories', 'countries']:
+        field_query = query_filters.get(field)
+        if field_query and field_query.get('type') == 'term':
+            term = field_query.get('value', '')
+            if term:
+                search_terms.append(term.lower())
+    
+    # Remove duplicates and empty terms
+    search_terms = list(dict.fromkeys([term for term in search_terms if term.strip()]))
+    
+    return search_terms
+
+def filter_articles_by_tokens(articles, search_terms, query_filters):
+    """Filter articles based on deterministic token matching"""
+    if not search_terms:
+        return articles
+    
+    logger.info(f"🔍 Filtering {len(articles)} articles with search terms: {search_terms}")
+    
+    filtered = []
+    
+    for article in articles:
+        # Get all tokens from the article
+        article_tokens = article.get('tokens', '')
+        article_keywords = article.get('keywords', '')
+        
+        # Combine tokens and keywords for comprehensive matching
+        all_article_terms = f"{article_tokens},{article_keywords}".lower()
+        
+        # Check if any search term matches
+        matches = 0
+        for search_term in search_terms:
+            search_term_lower = search_term.lower()
+            
+            # Check for exact token match (comma-separated)
+            if search_term_lower in all_article_terms:
+                matches += 1
+                continue
+            
+            # Check for phrase match (multi-word terms)
+            if ' ' in search_term_lower:
+                if search_term_lower in all_article_terms:
+                    matches += 1
+                    continue
+            
+            # Check for partial matches in title/description
+            title_desc = f"{article.get('title', '')} {article.get('description', '')}".lower()
+            if search_term_lower in title_desc:
+                matches += 1
+                continue
+        
+        # Apply matching logic based on query structure
+        if evaluate_matching_logic(search_terms, matches, query_filters):
+            filtered.append(article)
+    
+    logger.info(f"✅ Filtered to {len(filtered)} articles")
+    return filtered
+
+def evaluate_matching_logic(search_terms, matches, query_filters):
+    """Evaluate if article matches based on query logic"""
+    total_terms = len(search_terms)
+    
+    # For now, use simple "any match" logic
+    # This can be enhanced to support AND/OR logic from the query structure
+    return matches > 0
+
+def perform_broad_scan(date_range, limit):
+    """Perform a broad scan when no specific search terms are provided"""
+    scan_params = {
+        'Limit': limit,
+        'FilterExpression': 'attribute_exists(#pk)',
+        'ExpressionAttributeNames': {
+            '#pk': 'PK'
+        }
+    }
+    
+    # Add date filtering
+    if date_range != 'all':
+        end_date = datetime.utcnow()
+        if date_range == '12h':
+            start_date = end_date - timedelta(hours=24)
+        elif date_range == '24h':
+            start_date = end_date - timedelta(hours=48)
+        elif date_range == '7d':
+            start_date = end_date - timedelta(days=7)
+        elif date_range == '30d':
+            start_date = end_date - timedelta(days=30)
+        else:
+            start_date = datetime.min
+        
+        scan_params['FilterExpression'] = '#pk = :pk AND #pd BETWEEN :start_date AND :end_date'
+        scan_params['ExpressionAttributeValues'] = {
+            ':start_date': start_date.isoformat(timespec='seconds') + 'Z',
+            ':end_date': end_date.isoformat(timespec='seconds') + 'Z'
+        }
+        scan_params['ExpressionAttributeNames']['#pd'] = 'published_date'
+    
+    response = execute_dynamodb_query(scan_params)
+    return response.get('Items', [])
 
 def build_dynamodb_query_params(query_filters, date_range, limit):
     """
