@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timedelta
 import logging
 from typing import List, Dict, Any
+from decimal import Decimal
+import csv
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO').upper())
@@ -12,801 +14,412 @@ dynamodb = boto3.resource('dynamodb')
 news_table_name = os.environ['NEWS_TABLE_NAME']
 table = dynamodb.Table(news_table_name)
 
-# Import deterministic tokenizer for consistent search term processing
-try:
-    from deterministic_tokenizer import tokenizer
-    TOKENIZER_AVAILABLE = True
-except ImportError:
-    logger.warning("Deterministic tokenizer not available, using fallback")
-    TOKENIZER_AVAILABLE = False
+# Global cache for stock symbol mappings
+_stock_symbol_cache = None
+
+def load_stock_symbol_mappings():
+    """Load stock symbol mappings from CSV files"""
+    global _stock_symbol_cache
+    
+    if _stock_symbol_cache is not None:
+        return _stock_symbol_cache
+    
+    logger.info("Loading stock symbol mappings from CSV files")
+    _stock_symbol_cache = {}
+    
+    try:
+        # Load NASDAQ listings
+        nasdaq_file = os.path.join(os.path.dirname(__file__), 'nasdaq-listed.csv')
+        if os.path.exists(nasdaq_file):
+            with open(nasdaq_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    symbol = row.get('Symbol', '').strip().upper()
+                    company_name = row.get('Security Name', '').strip()
+                    if symbol and company_name:
+                        _stock_symbol_cache[symbol] = company_name
+        
+        # Load NYSE listings
+        nyse_file = os.path.join(os.path.dirname(__file__), 'nyse-listed.csv')
+        if os.path.exists(nyse_file):
+            with open(nyse_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    symbol = row.get('ACT Symbol', '').strip().upper()
+                    company_name = row.get('Company Name', '').strip()
+                    if symbol and company_name:
+                        # NYSE takes precedence if symbol exists in both
+                        _stock_symbol_cache[symbol] = company_name
+        
+        logger.info(f"Loaded {len(_stock_symbol_cache)} stock symbol mappings")
+        
+    except Exception as e:
+        logger.error(f"Error loading stock symbol mappings: {e}")
+        _stock_symbol_cache = {}
+    
+    return _stock_symbol_cache
+
+def get_company_name_for_symbol(symbol):
+    """Get company name for a stock symbol"""
+    if not symbol or not isinstance(symbol, str):
+        return None
+    
+    symbol = symbol.strip().upper()
+    mappings = load_stock_symbol_mappings()
+    return mappings.get(symbol)
+
+def expand_stock_symbols(search_terms):
+    """Expand stock symbols to include company names"""
+    if not search_terms:
+        return search_terms
+    
+    expanded_terms = []
+    
+    for term in search_terms:
+        # Always include the original term
+        expanded_terms.append(term.lower())
+        
+        # Check if term is a stock symbol (all caps, 1-5 letters)
+        if term.isupper() and len(term) <= 5:
+            company_name = get_company_name_for_symbol(term)
+            if company_name:
+                logger.info(f"Expanding stock symbol '{term}' to company name '{company_name}'")
+                
+                # Add the full company name
+                expanded_terms.append(company_name.lower())
+                
+                # Extract meaningful words from company name (filter out common words)
+                common_words = {'inc', 'corp', 'corporation', 'company', 'co', 'ltd', 'limited', 
+                               'plc', 'llc', 'the', 'group', 'holdings', 'international'}
+                words = company_name.lower().split()
+                for word in words:
+                    clean_word = word.strip('.,')
+                    if clean_word and clean_word not in common_words and len(clean_word) > 2:
+                        expanded_terms.append(clean_word)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_terms = []
+    for term in expanded_terms:
+        if term not in seen:
+            seen.add(term)
+            unique_terms.append(term)
+    
+    return unique_terms
 
 def lambda_handler(event, context):
-    logger.info(f"Received event: {json.dumps(event)}")
-
-    # Handle CORS preflight requests
+    """
+    Handle news search requests using title-based search with GSI5
+    """
+    
+    # CORS headers for API Gateway
+    headers = {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
+        'Access-Control-Allow-Methods': 'POST,OPTIONS,GET,DELETE,PUT',
+        'Access-Control-Allow-Credentials': 'true'
+    }
+    
+    # Handle OPTIONS preflight request
     if event.get('httpMethod') == 'OPTIONS':
         return {
             'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS,GET,DELETE,PUT',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
-                'Access-Control-Allow-Credentials': 'true'
-            },
-            'body': json.dumps({'message': 'CORS preflight'})
+            'headers': headers,
+            'body': json.dumps({'message': 'CORS preflight successful'})
         }
-
+    
     try:
         # Parse request body
-        body = json.loads(event['body'])
+        body = json.loads(event.get('body', '{}'))
+        logger.info(f"Received search request: {json.dumps(body)}")
+        
         query_filters = body.get('query', {})
         date_range = body.get('dateRange', '12h')
         limit = body.get('limit', 50)
         offset = body.get('offset', 0)
-
-        # Build DynamoDB query parameters
-        query_params = build_dynamodb_query_params(query_filters, date_range, limit)
-        print(f"🔧 Built query params: {json.dumps(query_params, default=str)}")
-
-        # Use deterministic token-based search for accuracy
-        print("🔍 Using deterministic token-based search for improved accuracy")
-        filtered_articles = perform_deterministic_token_search(query_filters, date_range, limit)
-        print(f"📰 Retrieved {len(filtered_articles)} articles using deterministic search")
-
+        
+        # Extract search terms from filters
+        search_terms = extract_search_terms(query_filters)
+        
+        # Expand stock symbols to company names
+        expanded_terms = expand_stock_symbols(search_terms)
+        logger.info(f"Expanded search terms: {expanded_terms}")
+        
+        # Perform title-based search
+        articles = perform_title_based_search(
+            search_terms=expanded_terms,
+            query_filters=query_filters,
+            date_range=date_range,
+            limit=limit
+        )
+        
+        # Apply offset and limit for pagination
+        total_count = len(articles)
+        paginated_articles = articles[offset:offset + limit]
+        
+        # Convert Decimal types for JSON serialization
+        serializable_articles = convert_decimals(paginated_articles)
+        
+        logger.info(f"Returning {len(serializable_articles)} articles out of {total_count} total")
+        
         return {
             'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS,GET,DELETE,PUT',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
-                'Access-Control-Allow-Credentials': 'true'
-            },
+            'headers': headers,
             'body': json.dumps({
-                'articles': format_articles_for_frontend(filtered_articles),
-                'total': len(filtered_articles),
+                'articles': serializable_articles,
+                'total': total_count,
                 'limit': limit,
-                'offset': offset,
-                'query': query_filters,
-                'timestamp': datetime.utcnow().isoformat() + 'Z'
+                'offset': offset
             })
         }
+        
     except Exception as e:
-        logger.error(f"Error processing news search request: {str(e)}")
+        logger.error(f"Error processing search request: {str(e)}", exc_info=True)
         return {
             'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS,GET,DELETE,PUT',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
-                'Access-Control-Allow-Credentials': 'true'
-            },
-            'body': json.dumps({'message': 'Failed to search news articles', 'error': str(e)})
+            'headers': headers,
+            'body': json.dumps({
+                'error': 'Internal server error',
+                'message': str(e)
+            })
         }
 
-def perform_deterministic_token_search(query_filters, date_range, limit):
-    """
-    Perform search using deterministic tokenization and table scans.
-    This approach sacrifices speed for accuracy by ensuring consistent token matching.
-    """
-    logger.info("🔍 Performing deterministic token-based search")
-    
-    # Extract search terms from query filters
-    search_terms = extract_search_terms_from_filters(query_filters)
-    
-    if not search_terms:
-        logger.info("No search terms found, performing broad scan")
-        return perform_broad_scan(date_range, limit)
-    
-    logger.info(f"Search terms: {search_terms}")
-    
-    # Build scan parameters
-    scan_params = {
-        'Limit': limit * 2,  # Get more items since we'll filter
-        'FilterExpression': 'attribute_exists(#pk)',
-        'ExpressionAttributeNames': {
-            '#pk': 'PK'
-        }
-    }
-    
-    # Add date filtering if specified
-    if date_range != 'all':
-        end_date = datetime.utcnow()
-        if date_range == '12h':
-            start_date = end_date - timedelta(hours=24)
-        elif date_range == '24h':
-            start_date = end_date - timedelta(hours=48)
-        elif date_range == '7d':
-            start_date = end_date - timedelta(days=7)
-        elif date_range == '30d':
-            start_date = end_date - timedelta(days=30)
-        else:
-            start_date = datetime.min
-        
-        scan_params['FilterExpression'] = 'attribute_exists(#pk) AND #pd BETWEEN :start_date AND :end_date'
-        scan_params['ExpressionAttributeValues'] = {
-            ':start_date': start_date.isoformat(timespec='seconds') + 'Z',
-            ':end_date': end_date.isoformat(timespec='seconds') + 'Z'
-        }
-        scan_params['ExpressionAttributeNames']['#pd'] = 'published_date'
-    
-    # Execute scan
-    logger.info(f"📊 Executing scan with params: {scan_params}")
-    response = execute_dynamodb_query(scan_params)
-    articles = response.get('Items', [])
-    
-    logger.info(f"📰 Retrieved {len(articles)} articles for token filtering")
-    
-    # Apply deterministic token filtering
-    filtered_articles = filter_articles_by_tokens(articles, search_terms, query_filters)
-    
-    # Limit results
-    return filtered_articles[:limit]
-
-def extract_search_terms_from_filters(query_filters):
-    """Extract search terms from query filters using deterministic tokenization"""
+def extract_search_terms(query_filters):
+    """Extract all search terms from query filters"""
     search_terms = []
     
-    # Extract from keyword expressions
-    keyword_query = query_filters.get('keywords')
-    if keyword_query:
-        if TOKENIZER_AVAILABLE and keyword_query.get('type') == 'expression':
-            # Use deterministic tokenizer for consistent processing
-            children = keyword_query.get('children', [])
-            for child in children:
-                if child.get('type') == 'term':
-                    term = child.get('value', '')
-                    if term:
-                        # Process the search term the same way as indexing
-                        processed_terms = tokenizer.create_search_tokens(term)
-                        search_terms.extend(processed_terms)
-        elif keyword_query.get('type') == 'term':
-            # Simple term search
-            term = keyword_query.get('value', '')
-            if term:
-                search_terms.append(term.lower())
+    if not query_filters:
+        return search_terms
     
-    # Extract from source, category, country filters
-    for field in ['sources', 'categories', 'countries']:
-        field_query = query_filters.get(field)
-        if field_query and field_query.get('type') == 'term':
-            term = field_query.get('value', '')
-            if term:
-                search_terms.append(term.lower())
-    
-    # Remove duplicates and empty terms
-    search_terms = list(dict.fromkeys([term for term in search_terms if term.strip()]))
+    # Extract keywords
+    keywords_query = query_filters.get('keywords')
+    if keywords_query:
+        terms = extract_terms_from_query(keywords_query)
+        search_terms.extend(terms)
     
     return search_terms
 
-def filter_articles_by_tokens(articles, search_terms, query_filters):
-    """Filter articles based on deterministic token matching"""
-    if not search_terms:
-        return articles
+def extract_terms_from_query(query_node):
+    """Recursively extract terms from query tree"""
+    if not query_node:
+        return []
     
-    logger.info(f"🔍 Filtering {len(articles)} articles with search terms: {search_terms}")
+    node_type = query_node.get('type')
     
-    filtered = []
+    if node_type == 'term':
+        value = query_node.get('value', '').strip()
+        return [value] if value else []
     
-    for article in articles:
-        # Get all tokens from the article
-        article_tokens = article.get('tokens', '')
-        article_keywords = article.get('keywords', '')
-        
-        # Combine tokens and keywords for comprehensive matching
-        all_article_terms = f"{article_tokens},{article_keywords}".lower()
-        
-        # Check if any search term matches
-        matches = 0
-        for search_term in search_terms:
-            search_term_lower = search_term.lower()
-            
-            # Check for exact token match (comma-separated)
-            if search_term_lower in all_article_terms:
-                matches += 1
-                continue
-            
-            # Check for phrase match (multi-word terms)
-            if ' ' in search_term_lower:
-                if search_term_lower in all_article_terms:
-                    matches += 1
-                    continue
-            
-            # Check for partial matches in title/description
-            title_desc = f"{article.get('title', '')} {article.get('description', '')}".lower()
-            if search_term_lower in title_desc:
-                matches += 1
-                continue
-        
-        # Apply matching logic based on query structure
-        if evaluate_matching_logic(search_terms, matches, query_filters):
-            filtered.append(article)
-    
-    logger.info(f"✅ Filtered to {len(filtered)} articles")
-    return filtered
-
-def evaluate_matching_logic(search_terms, matches, query_filters):
-    """Evaluate if article matches based on query logic"""
-    total_terms = len(search_terms)
-    
-    # For now, use simple "any match" logic
-    # This can be enhanced to support AND/OR logic from the query structure
-    return matches > 0
-
-def perform_broad_scan(date_range, limit):
-    """Perform a broad scan when no specific search terms are provided"""
-    scan_params = {
-        'Limit': limit,
-        'FilterExpression': 'attribute_exists(#pk)',
-        'ExpressionAttributeNames': {
-            '#pk': 'PK'
-        }
-    }
-    
-    # Add date filtering
-    if date_range != 'all':
-        end_date = datetime.utcnow()
-        if date_range == '12h':
-            start_date = end_date - timedelta(hours=24)
-        elif date_range == '24h':
-            start_date = end_date - timedelta(hours=48)
-        elif date_range == '7d':
-            start_date = end_date - timedelta(days=7)
-        elif date_range == '30d':
-            start_date = end_date - timedelta(days=30)
-        else:
-            start_date = datetime.min
-        
-        scan_params['FilterExpression'] = 'attribute_exists(#pk) AND #pd BETWEEN :start_date AND :end_date'
-        scan_params['ExpressionAttributeValues'] = {
-            ':start_date': start_date.isoformat(timespec='seconds') + 'Z',
-            ':end_date': end_date.isoformat(timespec='seconds') + 'Z'
-        }
-        scan_params['ExpressionAttributeNames']['#pd'] = 'published_date'
-    
-    response = execute_dynamodb_query(scan_params)
-    return response.get('Items', [])
-
-def build_dynamodb_query_params(query_filters, date_range, limit):
-    """
-    Build DynamoDB query parameters based on frontend query structure.
-    Prioritizes GSI usage where possible (source, category, keyword).
-    For complex AND/OR logic, uses scan with client-side filtering.
-    """
-    params = {
-        'Limit': limit
-    }
-    
-    # Only add ExpressionAttributeNames if we have attribute names to define
-    expression_attribute_names = {}
-
-    # Determine date range for filtering
-    end_date = datetime.utcnow()
-    if date_range == '12h':
-        start_date = end_date - timedelta(hours=24)  # Use 24h to be more inclusive
-    elif date_range == '24h':
-        start_date = end_date - timedelta(hours=48)  # Use 48h to be more inclusive
-    elif date_range == '7d':
-        start_date = end_date - timedelta(days=7)
-    elif date_range == '30d':
-        start_date = end_date - timedelta(days=30)
-    else:  # 'all' or invalid
-        start_date = datetime.min  # No date filtering
-
-    # Try to use appropriate GSI for simple queries
-    # Priority: Source > Category > Keywords > AI Tag
-    
-    # 1. Check for simple source query (GSI5)
-    source_query = query_filters.get('sources')
-    if source_query and source_query.get('type') == 'term' and source_query.get('value'):
-        params['IndexName'] = 'GSI5'  # Source-based GSI
-        params['KeyConditionExpression'] = 'GSI5PK = :gsi5pk'
-        params['ExpressionAttributeValues'] = {':gsi5pk': f"SOURCE#{source_query['value']}"}
-        params['ScanIndexForward'] = False  # Newest first
-        print(f"🎯 Using GSI5 for source: {source_query['value']}")
-        return params
-    elif source_query and source_query.get('type') == 'expression':
-        print("🔄 Complex source expression detected - falling back to scan with client-side filtering")
-        # Will be handled by client-side filtering
-    
-    # 2. Check for simple category query (GSI1)
-    category_query = query_filters.get('categories')
-    if category_query and category_query.get('type') == 'term' and category_query.get('value'):
-        params['IndexName'] = 'GSI1'  # Category-based GSI
-        params['KeyConditionExpression'] = 'GSI1PK = :gsi1pk'
-        params['ExpressionAttributeValues'] = {':gsi1pk': f"CATEGORY#{category_query['value']}"}
-        params['ScanIndexForward'] = False  # Newest first
-        print(f"🎯 Using GSI1 for category: {category_query['value']}")
-        return params
-    elif category_query and category_query.get('type') == 'expression':
-        print("🔄 Complex category expression detected - falling back to scan with client-side filtering")
-        # Will be handled by client-side filtering
-    
-    # 3. Check for keyword queries (use optimized GSI4 approach)
-    keyword_query = query_filters.get('keywords')
-    if keyword_query:
-        # Check if this is a simple keyword search (single term)
-        if keyword_query.get('type') == 'term':
-            keyword_value = keyword_query.get('value', '').lower()
-            if keyword_value:
-                print(f"🎯 Simple keyword search using GSI4: {keyword_value}")
-                # Use GSI4 for direct keyword lookup (much faster than scan)
-                params['IndexName'] = 'GSI4'
-                params['KeyConditionExpression'] = 'GSI4PK = :keyword'
-                params['ExpressionAttributeValues'] = {':keyword': f"KEYWORD#{keyword_value}"}
-                params['ScanIndexForward'] = False  # Most recent first
-                return params
-            else:
-                print("🔄 Empty keyword value - falling back to scan")
-        elif keyword_query.get('type') == 'expression':
-            # Handle OR expressions by making multiple GSI queries
-            children = keyword_query.get('children', [])
-            or_terms = []
-            
+    elif node_type == 'group':
+        children = query_node.get('children')
+        if isinstance(children, list):
+            terms = []
             for child in children:
-                if child.get('type') == 'term' and child.get('value'):
-                    or_terms.append(child.get('value', '').lower())
-            
-            if or_terms:
-                print(f"🎯 OR keyword search using multiple GSI4 queries: {or_terms}")
-                # Return special marker for OR query handling
-                params['_or_keywords'] = or_terms
-                params['IndexName'] = 'GSI4'
-                return params
-        else:
-            print("🔄 Complex keyword expression - using table scan with client-side filtering")
-            # Will be handled by client-side filtering after scan
+                terms.extend(extract_terms_from_query(child))
+            return terms
+        elif isinstance(children, dict):
+            return extract_terms_from_query(children)
+        return []
     
-    # 4. Check for simple AI tag query (GSI3)
-    ai_tag_query = query_filters.get('ai_tag')
-    if ai_tag_query and ai_tag_query.get('type') == 'term' and ai_tag_query.get('value'):
-        params['IndexName'] = 'GSI3'  # AI Tag-based GSI
-        params['KeyConditionExpression'] = 'GSI3PK = :gsi3pk'
-        params['ExpressionAttributeValues'] = {':gsi3pk': f"AITAG#{ai_tag_query['value']}"}
-        params['ScanIndexForward'] = False  # Newest first
-        print(f"🎯 Using GSI3 for AI tag: {ai_tag_query['value']}")
-        return params
+    elif node_type == 'expression':
+        children = query_node.get('children', [])
+        terms = []
+        for child in children:
+            terms.extend(extract_terms_from_query(child))
+        return terms
+    
+    return []
 
-    # Fallback to main table scan for complex queries or no specific filters
-    # Add date filtering to scan if specified
-    filter_expressions = []
-    if date_range != 'all':
-        filter_expressions.append('#pd BETWEEN :start_date AND :end_date')
-        expression_attribute_names['#pd'] = 'published_date'
-        params['ExpressionAttributeValues'] = {
-            ':start_date': start_date.isoformat(timespec='seconds') + 'Z',
-            ':end_date': end_date.isoformat(timespec='seconds') + 'Z'
-        }
+def perform_title_based_search(search_terms, query_filters, date_range, limit):
+    """
+    Perform title-based search using GSI5 with contains() filter
+    """
     
-    # Only add FilterExpression and ExpressionAttributeNames if we have filters
-    if filter_expressions:
-        params['FilterExpression'] = ' AND '.join(filter_expressions)
-        if expression_attribute_names:
-            params['ExpressionAttributeNames'] = expression_attribute_names
+    # Calculate date range
+    date_filter = calculate_date_filter(date_range)
     
-    print("🔄 Falling back to main table scan for complex filtering.")
-    return params
-
-def execute_dynamodb_query(params):
-    """Execute DynamoDB query or scan based on parameters."""
-    try:
-        if 'KeyConditionExpression' in params:
-            # It's a query operation
-            print(f"🔍 Executing DynamoDB query with params: {json.dumps(params, default=str)}")
-            result = table.query(**params)
-            print(f"✅ Query completed successfully. Items count: {len(result.get('Items', []))}")
-            return result
-        else:
-            # It's a scan operation (less efficient, used for complex filters or no GSI match)
-            print(f"🔍 Executing DynamoDB scan with params: {json.dumps(params, default=str)}")
-            result = table.scan(**params)
-            print(f"✅ Scan completed successfully. Items count: {len(result.get('Items', []))}")
-            return result
-    except Exception as e:
-        print(f"❌ DynamoDB operation failed: {str(e)}")
-        print(f"❌ Parameters that caused the error: {json.dumps(params, default=str)}")
-        raise
-
-def is_comprehensive_complex_query(query_filters):
-    """Check if this is a comprehensive complex query that needs special handling."""
-    
-    # Check for root-level mixed field expressions
-    root_expression = query_filters.get('expression')
-    if root_expression and root_expression.get('type') == 'expression':
-        print(f"🎯 Detected root-level expression with mixed field logic")
-        return True
-    
-    # Check for cross-field complex expressions (multiple fields with expressions)
-    complex_fields = []
-    for field in ['keywords', 'sources', 'categories', 'countries']:
-        field_query = query_filters.get(field)
-        if field_query and field_query.get('type') == 'expression':
-            complex_fields.append(field)
-    
-    # If multiple fields have complex expressions, we need comprehensive handling
-    if len(complex_fields) > 1:
-        print(f"🎯 Detected comprehensive complex query with multiple complex fields: {complex_fields}")
-        return True
-    
-    # Check for any field with complex expressions that can't be handled by GSI
-    for field in ['sources', 'categories', 'countries']:  # keywords can use GSI4
-        field_query = query_filters.get(field)
-        if field_query and field_query.get('type') == 'expression':
-            print(f"🎯 Detected complex {field} expression requiring comprehensive handling")
-            return True
-    
-    return False
-
-def handle_comprehensive_complex_query(query_filters, date_range, limit):
-    """Handle comprehensive complex queries with cross-field logic."""
-    print(f"🔄 Handling comprehensive complex query")
-    
-    # For now, use a broad table scan and apply comprehensive client-side filtering
-    # This could be optimized further with query planning in the future
-    params = {
-        'Limit': limit * 3,  # Get more items since we'll filter heavily
-        'FilterExpression': 'attribute_exists(#pk)',
-        'ExpressionAttributeNames': {
-            '#pk': 'PK'
-        }
-    }
-    
-    print(f"📊 Executing comprehensive table scan")
-    response = execute_dynamodb_query(params)
-    articles = response.get('Items', [])
-    
-    print(f"📰 Retrieved {len(articles)} articles for comprehensive filtering")
-    
-    # Apply comprehensive client-side filtering
-    filtered_articles = apply_comprehensive_filters(articles, query_filters)
-    
-    # Limit results to requested amount
-    return filtered_articles[:limit]
-
-def handle_or_keyword_query(params, query_filters, date_range, limit):
-    """Handle OR keyword queries by making multiple GSI4 queries and combining results."""
-    or_keywords = params.pop('_or_keywords')  # Remove the special marker
     all_articles = []
-    seen_article_ids = set()
     
-    print(f"🔄 Handling OR keyword query for: {or_keywords}")
+    if not search_terms:
+        # No keyword filters - scan all recent articles
+        logger.info("No search terms provided, fetching all recent articles")
+        all_articles = scan_all_articles(date_filter, limit)
+    else:
+        # Search for each term in titles using GSI5
+        logger.info(f"Searching for terms in titles: {search_terms}")
+        
+        # Use a set to track unique article IDs
+        seen_ids = set()
+        
+        for term in search_terms:
+            articles = search_by_title(term, date_filter)
+            
+            # Add unique articles
+            for article in articles:
+                article_id = article.get('SK')
+                if article_id not in seen_ids:
+                    seen_ids.add(article_id)
+                    all_articles.append(article)
     
-    for keyword in or_keywords:
-        # Create query params for this keyword
-        keyword_params = {
-            'IndexName': 'GSI4',
-            'KeyConditionExpression': 'GSI4PK = :keyword',
-            'ExpressionAttributeValues': {':keyword': f"KEYWORD#{keyword}"},
-            'ScanIndexForward': False,
+    # Apply additional filters (source, category, country)
+    filtered_articles = apply_additional_filters(all_articles, query_filters)
+    
+    # Sort by published date (newest first)
+    filtered_articles.sort(key=lambda x: x.get('published_date', ''), reverse=True)
+    
+    return filtered_articles[:limit * 2]  # Return extra for pagination
+
+def search_by_title(search_term, date_filter):
+    """Search articles by title using GSI5 with contains filter"""
+    
+    try:
+        # Convert search term to lowercase for case-insensitive search
+        search_term_lower = search_term.lower()
+        
+        # Build filter expression
+        filter_parts = []
+        expression_values = {
+            ':search_term': search_term_lower
+        }
+        expression_names = {
+            '#title': 'GSI5SK'
+        }
+        
+        # Title contains search term
+        filter_parts.append('contains(#title, :search_term)')
+        
+        # Add date filter if provided
+        if date_filter:
+            filter_parts.append('published_date >= :start_date')
+            expression_values[':start_date'] = date_filter
+        
+        filter_expression = ' AND '.join(filter_parts)
+        
+        # Query GSI5
+        query_params = {
+            'IndexName': 'GSI5',
+            'KeyConditionExpression': 'GSI5PK = :pk',
+            'FilterExpression': filter_expression,
+            'ExpressionAttributeValues': {
+                ':pk': 'TITLE_SEARCH',
+                **expression_values
+            },
+            'ExpressionAttributeNames': expression_names,
+            'Limit': 100  # Limit per query
+        }
+        
+        logger.info(f"Querying GSI5 for term: {search_term}")
+        
+        articles = []
+        response = table.query(**query_params)
+        articles.extend(response.get('Items', []))
+        
+        # Handle pagination
+        while 'LastEvaluatedKey' in response and len(articles) < 100:
+            query_params['ExclusiveStartKey'] = response['LastEvaluatedKey']
+            response = table.query(**query_params)
+            articles.extend(response.get('Items', []))
+        
+        logger.info(f"Found {len(articles)} articles for term '{search_term}'")
+        return articles
+        
+    except Exception as e:
+        logger.error(f"Error searching by title for '{search_term}': {e}")
+        return []
+
+def scan_all_articles(date_filter, limit):
+    """Scan all articles with date filter"""
+    
+    try:
+        scan_params = {
             'Limit': limit
         }
         
-        print(f"🔍 Querying for keyword: {keyword}")
-        
-        try:
-            response = execute_dynamodb_query(keyword_params)
-            keyword_articles = response.get('Items', [])
-            print(f"📰 Found {len(keyword_articles)} articles for keyword '{keyword}'")
-            
-            # Add unique articles to results
-            for article in keyword_articles:
-                # Use main_article_id or SK as unique identifier
-                article_id = article.get('main_article_id') or article.get('SK', '')
-                if article_id and article_id not in seen_article_ids:
-                    all_articles.append(article)
-                    seen_article_ids.add(article_id)
-                    
-        except Exception as e:
-            print(f"❌ Error querying keyword '{keyword}': {str(e)}")
-            continue
-    
-    print(f"✅ OR query complete. Total unique articles: {len(all_articles)}")
-    return all_articles
-
-def apply_client_side_filters(articles, query_filters):
-    """
-    Apply filters that couldn't be handled by DynamoDB's query/scan.
-    Handles complex AND/OR/group logic for keywords, sources, categories, and countries.
-    Cross-field filters are combined with AND logic (e.g., keyword AND source).
-    Empty fields are treated as wildcards (*).
-    """
-    print("🔧 Applying client-side filters.")
-    
-    if not articles:
-        return articles
-    
-    # Apply each field filter with AND logic between fields
-    current_articles = articles
-    
-    # Handle keywords filter
-    keyword_query = query_filters.get('keywords')
-    if keyword_query:
-        if keyword_query.get('type') == 'expression':
-            print(f"🔍 Processing keyword expression: {json.dumps(keyword_query)}")
-            current_articles = filter_by_expression(current_articles, keyword_query, 'keywords')
-        elif keyword_query.get('type') == 'term':
-            print(f"🔍 Processing keyword term: {keyword_query.get('value')}")
-            current_articles = filter_by_term(current_articles, keyword_query, 'keywords')
-    
-    # Handle sources filter (AND with previous results)
-    source_query = query_filters.get('sources')
-    if source_query:
-        if source_query.get('type') == 'expression':
-            print(f"🔍 Processing source expression: {json.dumps(source_query)}")
-            current_articles = filter_by_expression(current_articles, source_query, 'source_name')
-        elif source_query.get('type') == 'term':
-            print(f"🔍 Processing source term: {source_query.get('value')}")
-            current_articles = filter_by_term(current_articles, source_query, 'source_name')
-    
-    # Handle categories filter (AND with previous results)
-    category_query = query_filters.get('categories')
-    if category_query:
-        if category_query.get('type') == 'expression':
-            print(f"🔍 Processing category expression: {json.dumps(category_query)}")
-            current_articles = filter_by_expression(current_articles, category_query, 'category')
-        elif category_query.get('type') == 'term':
-            print(f"🔍 Processing category term: {category_query.get('value')}")
-            current_articles = filter_by_term(current_articles, category_query, 'category')
-    
-    # Handle countries filter (AND with previous results)
-    country_query = query_filters.get('countries')
-    if country_query:
-        if country_query.get('type') == 'expression':
-            print(f"🔍 Processing country expression: {json.dumps(country_query)}")
-            current_articles = filter_by_expression(current_articles, country_query, 'country')
-        elif country_query.get('type') == 'term':
-            print(f"🔍 Processing country term: {country_query.get('value')}")
-            current_articles = filter_by_term(current_articles, country_query, 'country')
-    
-    print(f"✅ Client-side filtering complete. {len(current_articles)} articles remaining.")
-    return current_articles
-
-def filter_by_expression(articles, expression, field_name):
-    """
-    Filter articles based on a complex expression (AND/OR/group logic).
-    """
-    if not expression or not expression.get('children'):
-        return articles
-    
-    def evaluate_expression(items, expr):
-        """Recursively evaluate expression tree."""
-        if not expr or not expr.get('children'):
-            return items
-        
-        children = expr.get('children', [])
-        if len(children) == 0:
-            return items
-        elif len(children) == 1:
-            return filter_by_term(items, children[0], field_name)
-        
-        # Handle multiple children with operators
-        result_articles = []
-        result_article_ids = set()
-        
-        for i, child in enumerate(children):
-            if child.get('type') == 'term':
-                filtered = filter_by_term(items, child, field_name)
-                if i == 0:
-                    # First item - start with these results
-                    result_articles = filtered
-                    result_article_ids = {get_article_id(article) for article in filtered}
-                else:
-                    # Apply operator to previous results
-                    prev_operator = children[i-1].get('operator', 'AND')
-                    filtered_ids = {get_article_id(article) for article in filtered}
-                    
-                    if prev_operator == 'OR':
-                        # Add new articles that aren't already in results
-                        for article in filtered:
-                            article_id = get_article_id(article)
-                            if article_id not in result_article_ids:
-                                result_articles.append(article)
-                                result_article_ids.add(article_id)
-                    else:  # AND
-                        # Keep only articles that are in both result and filtered
-                        result_articles = [article for article in result_articles 
-                                         if get_article_id(article) in filtered_ids]
-                        result_article_ids = result_article_ids.intersection(filtered_ids)
-                        
-            elif child.get('type') == 'group':
-                group_filtered = filter_by_expression(items, child, field_name)
-                if i == 0:
-                    result_articles = group_filtered
-                    result_article_ids = {get_article_id(article) for article in group_filtered}
-                else:
-                    prev_operator = children[i-1].get('operator', 'AND')
-                    filtered_ids = {get_article_id(article) for article in group_filtered}
-                    
-                    if prev_operator == 'OR':
-                        # Add new articles that aren't already in results
-                        for article in group_filtered:
-                            article_id = get_article_id(article)
-                            if article_id not in result_article_ids:
-                                result_articles.append(article)
-                                result_article_ids.add(article_id)
-                    else:  # AND
-                        # Keep only articles that are in both result and filtered
-                        result_articles = [article for article in result_articles 
-                                         if get_article_id(article) in filtered_ids]
-                        result_article_ids = result_article_ids.intersection(filtered_ids)
-        
-        return result_articles
-    
-    return evaluate_expression(articles, expression)
-
-def apply_comprehensive_filters(articles, query_filters):
-    """Apply comprehensive filtering for cross-field complex queries with proper AND logic."""
-    print(f"🔧 Applying comprehensive filters")
-    
-    if not articles:
-        return articles
-    
-    # Handle root-level mixed field expressions
-    root_expression = query_filters.get('expression')
-    if root_expression and root_expression.get('type') == 'expression':
-        print(f"🎯 Processing root-level mixed field expression")
-        return filter_by_mixed_field_expression(articles, root_expression)
-    
-    # Handle multiple field expressions with AND logic between fields
-    current_articles = articles
-    
-    # Process each field filter with AND logic (same as client-side filtering)
-    field_mappings = {
-        'keywords': 'keywords',
-        'sources': 'source_name', 
-        'categories': 'category',
-        'countries': 'country'
-    }
-    
-    for field, field_name in field_mappings.items():
-        field_query = query_filters.get(field)
-        if field_query:
-            if field_query.get('type') == 'expression':
-                print(f"🔍 Processing complex {field} expression")
-                current_articles = filter_by_expression(current_articles, field_query, field_name)
-            elif field_query.get('type') == 'term':
-                print(f"🔍 Processing {field} term: {field_query.get('value')}")
-                current_articles = filter_by_term(current_articles, field_query, field_name)
-    
-    print(f"✅ Comprehensive filtering complete. {len(current_articles)} articles remaining.")
-    return current_articles
-
-def filter_by_mixed_field_expression(articles, expression):
-    """Filter articles based on mixed field expressions (cross-field AND/OR logic)."""
-    if not expression or not expression.get('children'):
-        return articles
-    
-    def evaluate_mixed_expression(items, expr):
-        """Recursively evaluate mixed field expression tree."""
-        if not expr or not expr.get('children'):
-            return items
-        
-        children = expr.get('children', [])
-        if len(children) == 0:
-            return items
-        elif len(children) == 1:
-            return evaluate_mixed_term(items, children[0])
-        
-        # Handle multiple children with operators
-        result_articles = []
-        result_article_ids = set()
-        
-        for i, child in enumerate(children):
-            if child.get('type') == 'term':
-                filtered = evaluate_mixed_term(items, child)
-            elif child.get('type') == 'expression':
-                filtered = evaluate_mixed_expression(items, child)
-            else:
-                continue
-            
-            if i == 0:
-                # First item - start with these results
-                result_articles = filtered
-                result_article_ids = {get_article_id(article) for article in filtered}
-            else:
-                # Apply operator to previous results
-                prev_operator = children[i-1].get('operator', 'AND')
-                filtered_ids = {get_article_id(article) for article in filtered}
-                
-                if prev_operator == 'OR':
-                    # Add new articles that aren't already in results
-                    for article in filtered:
-                        article_id = get_article_id(article)
-                        if article_id not in result_article_ids:
-                            result_articles.append(article)
-                            result_article_ids.add(article_id)
-                else:  # AND
-                    # Keep only articles that are in both result and filtered
-                    result_articles = [article for article in result_articles 
-                                     if get_article_id(article) in filtered_ids]
-                    result_article_ids = result_article_ids.intersection(filtered_ids)
-        
-        return result_articles
-    
-    return evaluate_mixed_expression(articles, expression)
-
-def evaluate_mixed_term(articles, term):
-    """Evaluate a mixed field term (e.g., keywords: "tesla", sources: "Reuters")."""
-    if not term or term.get('type') != 'term':
-        return articles
-    
-    field = term.get('field', '')
-    value = term.get('value', '').lower()
-    
-    if not field or not value:
-        return articles
-    
-    field_name = get_field_name(field)
-    return filter_by_term(articles, term, field_name)
-
-def get_field_name(field_key):
-    """Map frontend field keys to DynamoDB field names."""
-    field_mapping = {
-        'keywords': 'keywords',
-        'sources': 'source_name', 
-        'categories': 'category',
-        'countries': 'country'
-    }
-    return field_mapping.get(field_key, field_key)
-
-def get_article_id(article):
-    """Get a unique identifier for an article."""
-    return article.get('main_article_id') or article.get('SK', '') or article.get('article_id', '')
-
-def filter_by_term(articles, term, field_name):
-    """
-    Filter articles by a single term.
-    """
-    if not term or term.get('type') != 'term':
-        return articles
-    
-    value = term.get('value', '').lower()
-    if not value:
-        return articles
-    
-    filtered = []
-    for article in articles:
-        field_value = article.get(field_name, '')
-        if isinstance(field_value, str):
-            field_value = field_value.lower()
-        elif isinstance(field_value, list):
-            field_value = ' '.join(str(item).lower() for item in field_value)
+        if date_filter:
+            scan_params['FilterExpression'] = 'published_date >= :start_date AND attribute_exists(PK)'
+            scan_params['ExpressionAttributeValues'] = {
+                ':start_date': date_filter
+            }
         else:
-            field_value = str(field_value).lower()
+            scan_params['FilterExpression'] = 'attribute_exists(PK)'
         
-        # For keywords field, check if the term appears as a whole keyword (comma-separated)
-        if field_name == 'keywords':
-            # Split by comma and check if any keyword matches exactly or contains the search term
-            keywords_list = [kw.strip() for kw in field_value.split(',')]
-            if any(value in kw for kw in keywords_list):
-                filtered.append(article)
-        else:
-            # For other fields, use substring matching
-            if value in field_value:
-                filtered.append(article)
+        response = table.scan(**scan_params)
+        articles = response.get('Items', [])
+        
+        logger.info(f"Scanned {len(articles)} articles")
+        return articles
+        
+    except Exception as e:
+        logger.error(f"Error scanning articles: {e}")
+        return []
+
+def apply_additional_filters(articles, query_filters):
+    """Apply source, category, and country filters"""
+    
+    if not query_filters:
+        return articles
+    
+    filtered = articles
+    
+    # Apply source filter
+    sources_query = query_filters.get('sources')
+    if sources_query:
+        source_terms = extract_terms_from_query(sources_query)
+        if source_terms:
+            filtered = [a for a in filtered if a.get('source_name', '') in source_terms]
+    
+    # Apply category filter
+    categories_query = query_filters.get('categories')
+    if categories_query:
+        category_terms = extract_terms_from_query(categories_query)
+        if category_terms:
+            filtered = [a for a in filtered if any(cat in a.get('category', '') for cat in category_terms)]
+    
+    # Apply country filter
+    countries_query = query_filters.get('countries')
+    if countries_query:
+        country_terms = extract_terms_from_query(countries_query)
+        if country_terms:
+            filtered = [a for a in filtered if any(country in a.get('country', '') for country in country_terms)]
     
     return filtered
 
-def format_articles_for_frontend(articles):
-    """Convert DynamoDB items to frontend-friendly format."""
-    formatted = []
-    for article in articles:
-        formatted.append({
-            'id': article.get('SK'),  # SK is article_id
-            'title': article.get('title'),
-            'description': article.get('description'),
-            'source_url': article.get('source_url'),
-            'source_name': article.get('source_name'),
-            'published_date': article.get('published_date'),
-            'keywords': article.get('keywords'),
-            'category': article.get('category'),
-            'sentiment': article.get('sentiment'),
-            'ai_tag': article.get('ai_tag'),
-            'image_url': article.get('image_url'),
-            'creator': article.get('creator'),
-            'country': article.get('country'),
-            'language': article.get('language'),
-        })
-    return formatted
+def calculate_date_filter(date_range):
+    """Calculate date filter based on date range string"""
+    
+    if not date_range or date_range == 'all':
+        return None
+    
+    now = datetime.utcnow()
+    
+    if date_range == '1h':
+        start_date = now - timedelta(hours=1)
+    elif date_range == '12h':
+        start_date = now - timedelta(hours=12)
+    elif date_range == '24h':
+        start_date = now - timedelta(days=1)
+    elif date_range == '7d':
+        start_date = now - timedelta(days=7)
+    elif date_range == '30d':
+        start_date = now - timedelta(days=30)
+    else:
+        return None
+    
+    return start_date.isoformat() + 'Z'
+
+def convert_decimals(obj):
+    """Convert DynamoDB Decimal types to int/float for JSON serialization"""
+    
+    if isinstance(obj, list):
+        return [convert_decimals(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_decimals(value) for key, value in obj.items()}
+    elif isinstance(obj, Decimal):
+        if obj % 1 == 0:
+            return int(obj)
+        else:
+            return float(obj)
+    else:
+        return obj
+
