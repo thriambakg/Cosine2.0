@@ -1131,21 +1131,20 @@ const NewsTile: React.FC<NewsTileProps> = ({
           articleCount: response.articles.length,
           total: response.total,
           sampleArticles: response.articles.slice(0, 2).map((article: any) => ({
-            id: article.id,
-            SK: article.SK,
+            url: article.source_url,
             title: article.title,
             source: article.source_name
           }))
         });
         
-        // Log all article IDs to check for uniqueness
-        const articleIds = response.articles.map((a: any) => a.id);
-        const uniqueIds = new Set(articleIds);
-        console.log('📊 Article ID Analysis:', {
-          totalArticles: articleIds.length,
-          uniqueIds: uniqueIds.size,
-          hasDuplicates: articleIds.length !== uniqueIds.size,
-          sampleIds: articleIds.slice(0, 5)
+        // Log article URL uniqueness (using source_url as ID)
+        const articleUrls = response.articles.map((a: any) => a.source_url);
+        const uniqueUrls = new Set(articleUrls);
+        console.log('📊 Article URL Analysis:', {
+          totalArticles: articleUrls.length,
+          uniqueUrls: uniqueUrls.size,
+          hasDuplicates: articleUrls.length !== uniqueUrls.size,
+          sampleUrls: articleUrls.slice(0, 3)
         });
         
         setNewsArticles(response.articles);
@@ -1240,20 +1239,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
   };
 
   const handleArticleSelect = (articleId: string) => {
-    console.log('📌 Article selection:', {
-      articleId,
-      currentSelected: selectedArticles,
-      action: selectedArticles.includes(articleId) ? 'deselect' : 'select'
-    });
-    
-    setSelectedArticles(prev => {
-      const newSelection = prev.includes(articleId) 
+    setSelectedArticles(prev => 
+      prev.includes(articleId) 
         ? prev.filter(id => id !== articleId)
-        : [...prev, articleId];
-      
-      console.log('📌 New selection state:', newSelection);
-      return newSelection;
-    });
+        : [...prev, articleId]
+    );
   };
 
   const handleArticleClick = (article: NewsArticle) => {
@@ -1550,18 +1540,9 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 backgroundColor: 'rgba(59, 130, 246, 0.7)',
               },
             }}>
-            {currentArticles.map((article, index) => {
+            {currentArticles.map((article) => {
               // Use source_url as the unique ID for each article
               const articleId = article.source_url;
-              
-              // Debug: Log first article to check structure
-              if (index === 0) {
-                console.log('🔍 First article structure:', {
-                  articleId,
-                  source_url: article.source_url,
-                  title: article.title
-                });
-              }
               
               return (
               <ListItem

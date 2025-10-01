@@ -154,11 +154,6 @@ def lambda_handler(event, context):
         total_count = len(articles)
         paginated_articles = articles[offset:offset + limit]
         
-        # Add 'id' field to each article using SK (which contains the article_id)
-        for article in paginated_articles:
-            if 'SK' in article and 'id' not in article:
-                article['id'] = article['SK']
-        
         # Convert Decimal types for JSON serialization
         serializable_articles = convert_decimals(paginated_articles)
         
@@ -248,7 +243,7 @@ def perform_title_based_search(search_terms, query_filters, date_range, limit):
         # No keyword filters - scan all recent articles
         print("No search terms provided, fetching all recent articles")
         all_articles = scan_all_articles(date_filter, limit)
-        else:
+    else:
         # Search for each term in titles using GSI5
         print(f"Searching for terms in titles: {search_terms}")
         
@@ -336,7 +331,7 @@ def search_by_title(search_term, date_filter):
         print(f"Found {len(matching_articles)} articles for term '{search_term}' (queried {len(all_articles)} total)")
         return matching_articles
                     
-        except Exception as e:
+    except Exception as e:
         print(f"ERROR searching by title for '{search_term}': {e}")
         import traceback
         traceback.print_exc()
@@ -421,7 +416,7 @@ def calculate_date_filter(date_range):
         start_date = now - timedelta(days=7)
     elif date_range == '30d':
         start_date = now - timedelta(days=30)
-            else:
+    else:
         return None
     
     return start_date.isoformat() + 'Z'
@@ -436,8 +431,6 @@ def convert_decimals(obj):
     elif isinstance(obj, Decimal):
         if obj % 1 == 0:
             return int(obj)
-        else:
-            return float(obj)
-        else:
-        return obj
+    else:
+        return float(obj)
 
