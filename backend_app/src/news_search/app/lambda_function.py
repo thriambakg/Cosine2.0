@@ -2,13 +2,9 @@ import json
 import boto3
 import os
 from datetime import datetime, timedelta
-import logging
 from typing import List, Dict, Any
 from decimal import Decimal
 import csv
-
-logger = logging.getLogger()
-logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO').upper())
 
 dynamodb = boto3.resource('dynamodb')
 news_table_name = os.environ['NEWS_TABLE_NAME']
@@ -24,7 +20,7 @@ def load_stock_symbol_mappings():
     if _stock_symbol_cache is not None:
         return _stock_symbol_cache
     
-    logger.info("Loading stock symbol mappings from CSV files")
+    print("Loading stock symbol mappings from CSV files")
     _stock_symbol_cache = {}
     
     try:
@@ -51,10 +47,10 @@ def load_stock_symbol_mappings():
                         # NYSE takes precedence if symbol exists in both
                         _stock_symbol_cache[symbol] = company_name
         
-        logger.info(f"Loaded {len(_stock_symbol_cache)} stock symbol mappings")
+        print(f"Loaded {len(_stock_symbol_cache)} stock symbol mappings")
         
     except Exception as e:
-        logger.error(f"Error loading stock symbol mappings: {e}")
+        print(f"ERROR loading stock symbol mappings: {e}")
         _stock_symbol_cache = {}
     
     return _stock_symbol_cache
@@ -83,7 +79,7 @@ def expand_stock_symbols(search_terms):
         if term.isupper() and len(term) <= 5:
             company_name = get_company_name_for_symbol(term)
             if company_name:
-                logger.info(f"Expanding stock symbol '{term}' to company name '{company_name}'")
+                print(f"Expanding stock symbol '{term}' to company name '{company_name}'")
                 
                 # Add the full company name
                 expanded_terms.append(company_name.lower())
@@ -132,7 +128,7 @@ def lambda_handler(event, context):
     try:
         # Parse request body
         body = json.loads(event.get('body', '{}'))
-        logger.info(f"Received search request: {json.dumps(body)}")
+        print(f"Received search request: {json.dumps(body)}")
         
         query_filters = body.get('query', {})
         date_range = body.get('dateRange', '12h')
@@ -144,7 +140,7 @@ def lambda_handler(event, context):
         
         # Expand stock symbols to company names
         expanded_terms = expand_stock_symbols(search_terms)
-        logger.info(f"Expanded search terms: {expanded_terms}")
+        print(f"Expanded search terms: {expanded_terms}")
         
         # Perform title-based search
         articles = perform_title_based_search(
@@ -161,7 +157,7 @@ def lambda_handler(event, context):
         # Convert Decimal types for JSON serialization
         serializable_articles = convert_decimals(paginated_articles)
         
-        logger.info(f"Returning {len(serializable_articles)} articles out of {total_count} total")
+        print(f"Returning {len(serializable_articles)} articles out of {total_count} total")
 
         return {
             'statusCode': 200,
@@ -175,7 +171,9 @@ def lambda_handler(event, context):
         }
         
     except Exception as e:
-        logger.error(f"Error processing search request: {str(e)}", exc_info=True)
+        print(f"ERROR processing search request: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {
             'statusCode': 500,
             'headers': headers,
@@ -243,11 +241,11 @@ def perform_title_based_search(search_terms, query_filters, date_range, limit):
     
     if not search_terms:
         # No keyword filters - scan all recent articles
-        logger.info("No search terms provided, fetching all recent articles")
+        print("No search terms provided, fetching all recent articles")
         all_articles = scan_all_articles(date_filter, limit)
     else:
         # Search for each term in titles using GSI5
-        logger.info(f"Searching for terms in titles: {search_terms}")
+        print(f"Searching for terms in titles: {search_terms}")
         
         # Use a set to track unique article IDs
         seen_ids = set()
@@ -296,15 +294,15 @@ def search_by_title(search_term, date_filter):
             query_params['FilterExpression'] = 'published_date >= :start_date'
             query_params['ExpressionAttributeValues'][':start_date'] = date_filter
         
-        logger.info(f"Querying GSI5 for term: {search_term} (date_filter: {date_filter})")
-        logger.info(f"Query params: {query_params}")
+        print(f"Querying GSI5 for term: {search_term} (date_filter: {date_filter})")
+        print(f"Query params: {query_params}")
         
         # Fetch all articles from GSI5 and filter client-side
         all_articles = []
         response = table.query(**query_params)
         all_articles.extend(response.get('Items', []))
         
-        logger.info(f"First query returned {len(response.get('Items', []))} items, Count: {response.get('Count', 0)}")
+        print(f"First query returned {len(response.get('Items', []))} items, Count: {response.get('Count', 0)}")
         
         # Handle pagination - fetch up to 1000 articles
         page_count = 1
@@ -313,27 +311,30 @@ def search_by_title(search_term, date_filter):
             response = table.query(**query_params)
             all_articles.extend(response.get('Items', []))
             page_count += 1
-            logger.info(f"Page {page_count}: fetched {len(response.get('Items', []))} more items")
+            print(f"Page {page_count}: fetched {len(response.get('Items', []))} more items")
         
-        logger.info(f"Total queried: {len(all_articles)} articles from GSI5")
+        print(f"Total queried: {len(all_articles)} articles from GSI5")
         
         # Filter client-side for case-insensitive title matching
         matching_articles = []
         for article in all_articles:
-            title = article.get('title', '').lower()
-            description = article.get('description', '').lower()
-            gsi5sk = article.get('GSI5SK', '').lower()
+            # Handle None values properly
+            title = (article.get('title') or '').lower()
+            description = (article.get('description') or '').lower()
+            gsi5sk = (article.get('GSI5SK') or '').lower()
             
             # Check if search term is in title, description, or GSI5SK
             if search_term_lower in title or search_term_lower in description or search_term_lower in gsi5sk:
                 matching_articles.append(article)
-                logger.debug(f"Match found in: {article.get('title', 'No title')[:50]}...")
+                print(f"Match found in: {article.get('title', 'No title')[:50]}...")
         
-        logger.info(f"Found {len(matching_articles)} articles for term '{search_term}' (queried {len(all_articles)} total)")
+        print(f"Found {len(matching_articles)} articles for term '{search_term}' (queried {len(all_articles)} total)")
         return matching_articles
         
     except Exception as e:
-        logger.error(f"Error searching by title for '{search_term}': {e}", exc_info=True)
+        print(f"ERROR searching by title for '{search_term}': {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def scan_all_articles(date_filter, limit):
@@ -355,11 +356,11 @@ def scan_all_articles(date_filter, limit):
         response = table.scan(**scan_params)
         articles = response.get('Items', [])
         
-        logger.info(f"Scanned {len(articles)} articles")
+        print(f"Scanned {len(articles)} articles")
         return articles
     
     except Exception as e:
-        logger.error(f"Error scanning articles: {e}")
+        print(f"Error scanning articles: {e}")
         return []
 
 def apply_additional_filters(articles, query_filters):
