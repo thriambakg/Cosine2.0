@@ -1099,6 +1099,9 @@ const NewsTile: React.FC<NewsTileProps> = ({
     setIsLoading(true);
     setError(null);
     
+    // Clear selected articles when running a new search
+    setSelectedArticles([]);
+    
     try {
       // Get current filters at the time of execution
       const currentFilters = localFiltersRef.current;
@@ -1129,9 +1132,20 @@ const NewsTile: React.FC<NewsTileProps> = ({
           total: response.total,
           sampleArticles: response.articles.slice(0, 2).map((article: any) => ({
             id: article.id,
+            SK: article.SK,
             title: article.title,
             source: article.source_name
           }))
+        });
+        
+        // Log all article IDs to check for uniqueness
+        const articleIds = response.articles.map((a: any) => a.id);
+        const uniqueIds = new Set(articleIds);
+        console.log('📊 Article ID Analysis:', {
+          totalArticles: articleIds.length,
+          uniqueIds: uniqueIds.size,
+          hasDuplicates: articleIds.length !== uniqueIds.size,
+          sampleIds: articleIds.slice(0, 5)
         });
         
         setNewsArticles(response.articles);
@@ -1226,11 +1240,20 @@ const NewsTile: React.FC<NewsTileProps> = ({
   };
 
   const handleArticleSelect = (articleId: string) => {
-    setSelectedArticles(prev => 
-      prev.includes(articleId) 
+    console.log('📌 Article selection:', {
+      articleId,
+      currentSelected: selectedArticles,
+      action: selectedArticles.includes(articleId) ? 'deselect' : 'select'
+    });
+    
+    setSelectedArticles(prev => {
+      const newSelection = prev.includes(articleId) 
         ? prev.filter(id => id !== articleId)
-        : [...prev, articleId]
-    );
+        : [...prev, articleId];
+      
+      console.log('📌 New selection state:', newSelection);
+      return newSelection;
+    });
   };
 
   const handleArticleClick = (article: NewsArticle) => {
@@ -1527,17 +1550,30 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 backgroundColor: 'rgba(59, 130, 246, 0.7)',
               },
             }}>
-            {currentArticles.map((article) => (
+            {currentArticles.map((article, index) => {
+              // Use source_url as the unique ID for each article
+              const articleId = article.source_url;
+              
+              // Debug: Log first article to check structure
+              if (index === 0) {
+                console.log('🔍 First article structure:', {
+                  articleId,
+                  source_url: article.source_url,
+                  title: article.title
+                });
+              }
+              
+              return (
               <ListItem
-                key={article.id}
+                key={articleId}
                 sx={{
                   border: '1px solid rgba(55, 65, 81, 0.3)',
                   borderRadius: '8px',
                   mb: 1,
-                  backgroundColor: selectedArticles.includes(article.id) 
+                  backgroundColor: selectedArticles.includes(articleId) 
                     ? 'rgba(34, 197, 94, 0.1)' 
                     : 'rgba(15, 23, 42, 0.3)',
-                  borderColor: selectedArticles.includes(article.id) 
+                  borderColor: selectedArticles.includes(articleId) 
                     ? '#22c55e' 
                     : 'rgba(55, 65, 81, 0.3)',
                   cursor: 'pointer',
@@ -1545,20 +1581,18 @@ const NewsTile: React.FC<NewsTileProps> = ({
                   alignItems: 'center',
                   minHeight: 60,
                   '&:hover': {
-                    backgroundColor: selectedArticles.includes(article.id)
+                    backgroundColor: selectedArticles.includes(articleId)
                       ? 'rgba(34, 197, 94, 0.15)'
                       : 'rgba(59, 130, 246, 0.05)',
                   },
                 }}
-                onClick={() => handleArticleClick(article)}
               >
                 {/* Left side: Checkbox and content */}
                 <Box sx={{ display: 'flex', alignItems: 'center', flex: 1, mr: 2 }}>
                   <Checkbox
-                    checked={selectedArticles.includes(article.id)}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      handleArticleSelect(article.id);
+                    checked={selectedArticles.includes(articleId)}
+                    onChange={() => {
+                      handleArticleSelect(articleId);
                     }}
                     sx={{ 
                       color: '#9ca3af',
@@ -1567,7 +1601,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
                     }}
                     size="small"
                   />
-                  <Box sx={{ flex: 1 }}>
+                  <Box 
+                    sx={{ flex: 1, cursor: 'pointer' }}
+                    onClick={() => handleArticleClick(article)}
+                  >
                     <Typography
                       variant="subtitle2"
                       color="white"
@@ -1676,7 +1713,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
                   </Box>
                 ) : null}
               </ListItem>
-            ))}
+              );
+            })}
           </List>
 
           {/* Pagination */}
