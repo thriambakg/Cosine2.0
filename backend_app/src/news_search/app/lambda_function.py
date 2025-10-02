@@ -223,7 +223,7 @@ def extract_terms_from_query(query_node):
     elif node_type == 'expression':
         children = query_node.get('children', [])
         terms = []
-            for child in children:
+        for child in children:
             terms.extend(extract_terms_from_query(child))
         return terms
     
@@ -539,6 +539,6 @@ def convert_decimals(obj):
             return int(obj)
         else:
             return float(obj)
-        else:
+    else:
         return obj
 
