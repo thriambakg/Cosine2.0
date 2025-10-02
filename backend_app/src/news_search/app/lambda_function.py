@@ -223,7 +223,7 @@ def extract_terms_from_query(query_node):
     elif node_type == 'expression':
         children = query_node.get('children', [])
         terms = []
-        for child in children:
+            for child in children:
             terms.extend(extract_terms_from_query(child))
         return terms
     
@@ -287,6 +287,12 @@ def evaluate_boolean_expression(query_node, keyword_to_articles):
                 # Evaluate the child expression/term/group
                 child_set = evaluate_boolean_expression(child, keyword_to_articles)
                 
+                # Check if this child has an embedded operator (frontend format)
+                embedded_operator = child.get('operator')
+                if embedded_operator:
+                    print(f"  Found embedded operator in term: {embedded_operator}")
+                    current_operator = embedded_operator
+                
                 if result_set is None:
                     # First operand
                     result_set = child_set
@@ -299,6 +305,9 @@ def evaluate_boolean_expression(query_node, keyword_to_articles):
                     elif current_operator == 'OR':
                         result_set = result_set | child_set  # Union
                         print(f"  After OR: {len(result_set)} articles")
+                    
+                    # Reset to default after applying (unless next child specifies)
+                    current_operator = 'OR'
         
         return result_set if result_set is not None else set()
     
@@ -530,6 +539,6 @@ def convert_decimals(obj):
             return int(obj)
         else:
             return float(obj)
-    else:
+        else:
         return obj
 
