@@ -229,35 +229,135 @@ def extract_terms_from_query(query_node):
     
     return []
 
+def evaluate_boolean_expression(query_node, keyword_to_articles):
+    """
+    Recursively evaluate boolean expression using Python's built-in set operations.
+    Returns a set of article IDs that match the boolean logic.
+    
+    Args:
+        query_node: Query tree node with structure {'type': 'term'|'group'|'expression', ...}
+        keyword_to_articles: Dict mapping {keyword: {article_id: article_object}}
+    
+    Returns:
+        set: Set of article IDs that match the boolean expression
+    """
+    if not query_node:
+        return set()
+    
+    node_type = query_node.get('type')
+    
+    if node_type == 'term':
+        # Base case: return set of article IDs for this keyword
+        value = query_node.get('value', '').strip().lower()
+        articles_dict = keyword_to_articles.get(value, {})
+        article_ids = set(articles_dict.keys())
+        print(f"  Term '{value}': {len(article_ids)} articles")
+        return article_ids
+    
+    elif node_type == 'group':
+        # Recursively evaluate grouped expression
+        children = query_node.get('children')
+        print(f"  Evaluating group...")
+        if isinstance(children, list):
+            # Group contains a list of children - evaluate as expression
+            return evaluate_boolean_expression({'type': 'expression', 'children': children}, keyword_to_articles)
+        elif isinstance(children, dict):
+            # Group contains a single child - evaluate it
+            return evaluate_boolean_expression(children, keyword_to_articles)
+        return set()
+    
+    elif node_type == 'expression':
+        # Evaluate expression with AND/OR operators
+        children = query_node.get('children', [])
+        if not children:
+            return set()
+        
+        result_set = None
+        current_operator = 'OR'  # Default operator
+        
+        for i, child in enumerate(children):
+            if not child or not child.get('type'):
+                continue
+                
+            if child.get('type') == 'operator':
+                # Store the operator for the next operation
+                current_operator = child.get('value', 'OR')
+                print(f"  Operator: {current_operator}")
+            else:
+                # Evaluate the child expression/term/group
+                child_set = evaluate_boolean_expression(child, keyword_to_articles)
+                
+                if result_set is None:
+                    # First operand
+                    result_set = child_set
+                    print(f"  Initial set: {len(result_set)} articles")
+                else:
+                    # Apply the operator
+                    if current_operator == 'AND':
+                        result_set = result_set & child_set  # Intersection
+                        print(f"  After AND: {len(result_set)} articles (was {len(result_set | child_set)} in union)")
+                    elif current_operator == 'OR':
+                        result_set = result_set | child_set  # Union
+                        print(f"  After OR: {len(result_set)} articles")
+        
+        return result_set if result_set is not None else set()
+    
+    # Unknown node type
+    print(f"  WARNING: Unknown node type '{node_type}'")
+    return set()
+
 def perform_title_based_search(search_terms, query_filters, date_range, limit):
     """
-    Perform title-based search using GSI5 with contains() filter
+    Perform title-based search using GSI5 with boolean logic evaluation.
+    Uses hashtable approach for proper AND/OR support.
     """
     
     # Calculate date range
     date_filter = calculate_date_filter(date_range)
     
-    all_articles = []
+    # Get the keywords query structure
+    keywords_query = query_filters.get('keywords') if query_filters else None
     
-    if not search_terms:
+    if not keywords_query and not search_terms:
         # No keyword filters - scan all recent articles
         print("No search terms provided, fetching all recent articles")
         all_articles = scan_all_articles(date_filter, limit)
     else:
-        # Search for each term in titles using GSI5
-        print(f"Searching for terms in titles: {search_terms}")
+        # Phase 1: Fetch articles for each unique keyword into hashtables
+        print(f"Fetching articles for keywords: {search_terms}")
+        keyword_to_articles = {}  # {keyword: {article_id: article_object}}
         
-        # Use a set to track unique article IDs
-        seen_ids = set()
-        
-        for term in search_terms:
-            articles = search_by_title(term, date_filter)
+        for term in set(search_terms):  # Deduplicate keywords
+            term_lower = term.lower()
+            articles = search_by_title(term_lower, date_filter)
             
-            # Add unique articles
-            for article in articles:
-                article_id = article.get('SK')
-                if article_id not in seen_ids:
-                    seen_ids.add(article_id)
+            # Store articles indexed by their SK (article_id)
+            keyword_to_articles[term_lower] = {
+                article.get('SK'): article for article in articles
+            }
+            print(f"Keyword '{term}': found {len(articles)} articles")
+        
+        # Phase 2: Evaluate boolean expression using set operations
+        if keywords_query:
+            print("Evaluating boolean expression...")
+            matching_article_ids = evaluate_boolean_expression(keywords_query, keyword_to_articles)
+            print(f"Boolean evaluation returned {len(matching_article_ids)} matching article IDs")
+            
+            # Phase 3: Retrieve full article objects for matching IDs
+            all_articles = []
+            for keyword, articles_dict in keyword_to_articles.items():
+                for article_id in matching_article_ids:
+                    if article_id in articles_dict and article_id not in [a.get('SK') for a in all_articles]:
+                        all_articles.append(articles_dict[article_id])
+        else:
+            # Fallback: if no query structure, return union of all articles
+            print("No query structure found, returning union of all keyword results")
+            seen_ids = set()
+            all_articles = []
+            for articles_dict in keyword_to_articles.values():
+                for article_id, article in articles_dict.items():
+                    if article_id not in seen_ids:
+                        seen_ids.add(article_id)
                     all_articles.append(article)
     
     # Apply additional filters (source, category, country)
@@ -266,6 +366,7 @@ def perform_title_based_search(search_terms, query_filters, date_range, limit):
     # Sort by published date (newest first)
     filtered_articles.sort(key=lambda x: x.get('published_date', ''), reverse=True)
     
+    print(f"Returning {len(filtered_articles[:limit * 2])} articles after filtering and sorting")
     return filtered_articles[:limit * 2]  # Return extra for pagination
 
 def search_by_title(search_term, date_filter):
@@ -330,7 +431,7 @@ def search_by_title(search_term, date_filter):
         
         print(f"Found {len(matching_articles)} articles for term '{search_term}' (queried {len(all_articles)} total)")
         return matching_articles
-                    
+        
     except Exception as e:
         print(f"ERROR searching by title for '{search_term}': {e}")
         import traceback
@@ -371,16 +472,12 @@ def apply_additional_filters(articles, query_filters):
     
     filtered = articles
     
-    # Apply source filter - freeform text search (case-insensitive contains)
+    # Apply source filter
     sources_query = query_filters.get('sources')
     if sources_query:
         source_terms = extract_terms_from_query(sources_query)
         if source_terms:
-            # Filter articles where ANY source term is contained in source_name (case-insensitive)
-            filtered = [
-                a for a in filtered 
-                if any(term.lower() in (a.get('source_name') or '').lower() for term in source_terms)
-            ]
+            filtered = [a for a in filtered if a.get('source_name', '') in source_terms]
     
     # Apply category filter
     categories_query = query_filters.get('categories')
