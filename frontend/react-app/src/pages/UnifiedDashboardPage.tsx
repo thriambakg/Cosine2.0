@@ -1062,41 +1062,49 @@ const UnifiedDashboardPage: React.FC = () => {
   const handleUpdateTile = (id: string, data: any) => {
     console.log('🔄 handleUpdateTile called:', { id, data });
     
-    if (activeTab) {
-      console.log('Current tiles before update:', (activeTab.tiles || []).map((t: any) => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
+    if (!activeTabId) {
+      console.warn('No active tab ID found, cannot update tile');
+      return;
+    }
+
+    // Use functional update to get current tiles
+    updateTabTiles(activeTabId, (currentTiles) => {
+      console.log('Current tiles before update:', currentTiles.map((t: any) => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
       
-      const updatedTiles = (activeTab.tiles || []).map((tile: any) => 
+      const updatedTiles = currentTiles.map((tile: any) => 
         tile.id === id ? { ...tile, ...data } : tile
       );
       
       console.log('Updated tiles after merge:', updatedTiles.map((t: any) => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
-      updateTabTiles(activeTab.id, updatedTiles);
-    } else {
-      console.warn('No active tab found, cannot update tile');
-    }
+      return updatedTiles;
+    });
   };
 
   const handleSettingsChange = (id: string, settings: any) => {
-    if (activeTab) {
-      const updatedTiles = (activeTab.tiles || []).map((tile: any) => 
+    console.log('⚙️ handleSettingsChange called:', { id, settings, activeTabId });
+    
+    if (!activeTabId) {
+      console.warn('No active tab ID found, cannot update tile settings');
+      return;
+    }
+    
+    // Use a function-based approach to get CURRENT tiles from state
+    // This ensures we always work with the latest data, not stale closures
+    updateTabTiles(activeTabId, (currentTiles: any[]) => {
+      console.log('Current tiles before settings update:', currentTiles.map((t: any) => ({ id: t.id, isPinned: t.isPinned, gridPosition: t.gridPosition, gridSize: t.gridSize })));
+      
+      const updatedTiles = currentTiles.map((tile: any) => 
         tile.id === id ? { ...tile, ...settings } : tile
       );
-      updateTabTiles(activeTab.id, updatedTiles);
-    } else {
-      console.warn('No active tab found, cannot update tile settings');
-    }
+      
+      console.log('Updated tiles after settings merge:', updatedTiles.map((t: any) => ({ id: t.id, isPinned: t.isPinned, gridPosition: t.gridPosition, gridSize: t.gridSize })));
+      return updatedTiles;
+    });
   };
 
   const handleResizeTile = (id: string, size: { width: number; height: number }) => {
     console.log('🔧 handleResizeTile called:', { id, size });
-    if (!activeTab) return;
-    
-    // Find the tile to get its current gridSize
-    const tile = (activeTab.tiles || []).find(t => t.id === id);
-    if (!tile) {
-      console.warn('Tile not found for resize:', id);
-      return;
-    }
+    if (!activeTabId) return;
 
     // Convert pixel size back to grid size for consistency
     const GRID_CELL_SIZE = 80;
@@ -1108,23 +1116,28 @@ const UnifiedDashboardPage: React.FC = () => {
 
     console.log('🔧 Converted to grid size:', gridSize);
     
-    const updatedTiles = (activeTab.tiles || []).map(tile => 
-      tile.id === id ? { 
-        ...tile, 
-        size, // Keep legacy size for backward compatibility
-        gridSize // Update grid size for new system
-      } : tile
-    );
-    updateTabTiles(activeTab.id, updatedTiles);
+    // Use functional update to get current tiles
+    updateTabTiles(activeTabId, (currentTiles) => {
+      const updatedTiles = currentTiles.map(tile => 
+        tile.id === id ? { 
+          ...tile, 
+          size, // Keep legacy size for backward compatibility
+          gridSize // Update grid size for new system
+        } : tile
+      );
+      return updatedTiles;
+    });
   };
 
   const handleMoveTile = (id: string, position: GridPosition) => {
-    if (!activeTab) return;
+    if (!activeTabId) return;
     
-    const updatedTiles = (activeTab.tiles || []).map(tile => 
-      tile.id === id ? { ...tile, gridPosition: position } : tile
-    );
-    updateTabTiles(activeTab.id, updatedTiles);
+    // Use functional update to get current tiles
+    updateTabTiles(activeTabId, (currentTiles) => {
+      return currentTiles.map(tile => 
+        tile.id === id ? { ...tile, gridPosition: position } : tile
+      );
+    });
   };
 
 

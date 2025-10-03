@@ -42,6 +42,7 @@ import {
   Speed as SpeedIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
+import { useTilePinning, PinButton } from './common';
 
 interface StockScreenerTileProps {
   id: string;
@@ -128,6 +129,14 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 }) => {
   const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
   const [criteriaDialogOpen, setCriteriaDialogOpen] = useState(false);
+
+  // Pinning functionality
+  const { isPinned: pinnedState, togglePin } = useTilePinning({
+    initialPinned: isPinned,
+    onPinChange: (pinned) => {
+      onSettingsChange(id, { isPinned: pinned });
+    },
+  });
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [localCriteria, setLocalCriteria] = useState<StockScreenerCriteria>(criteria);
   const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
@@ -388,7 +397,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   };
 
   const handlePinToggle = () => {
-    onSettingsChange(id, { isPinned: !isPinned });
+    togglePin();
   };
 
   const handleRemove = () => {
@@ -471,12 +480,16 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         overflow: 'hidden',
         width: '100%',
         height: '100%',
-        resize: onDragStart ? 'none' : 'both',
-        cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
+        cursor: pinnedState ? 'default' : (isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default')),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
         display: 'flex',
         flexDirection: 'column',
+        '&:hover': {
+          borderColor: '#3b82f6',
+          transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
+          boxShadow: (isDragging || pinnedState) ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
+        },
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -488,7 +501,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         },
       }}
       ref={tileRef}
-      onMouseDown={onDragStart}
+      onMouseDown={pinnedState ? undefined : onDragStart}
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
@@ -536,11 +549,6 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
             }}
           />
           
-          {isPinned && (
-            <Tooltip title="Pinned to top">
-              <PinIcon sx={{ color: '#3b82f6', fontSize: 16 }} />
-            </Tooltip>
-          )}
           {autoRefresh && (
             <Tooltip title="Auto-refresh enabled">
               <AutoRefreshIcon sx={{ color: '#22c55e', fontSize: 16 }} />
@@ -549,6 +557,11 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         </Box>
 
         <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <PinButton
+            isPinned={pinnedState}
+            onTogglePin={handlePinToggle}
+          />
+
           <Tooltip title="Run Screener">
             <IconButton
               size="small"
@@ -803,7 +816,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         </MenuItem>
         <MenuItem onClick={handlePinToggle}>
           <PinIcon sx={{ mr: 1, fontSize: 18 }} />
-          {isPinned ? 'Unpin' : 'Pin'} to Top
+          {pinnedState ? 'Unpin' : 'Pin'} Tile
         </MenuItem>
       </Menu>
 

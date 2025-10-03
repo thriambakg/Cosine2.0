@@ -29,6 +29,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { useCryptoStats } from '../../hooks/useAPI';
 import { useTileCache } from '../../hooks/useDashboardCache';
+import { useTilePinning, PinButton } from './common';
 
 interface CryptoTileProps {
   id: string;
@@ -91,6 +92,14 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   const [localTimeframe, setLocalTimeframe] = useState(timeframe);
   const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
   const tileRef = useRef<HTMLDivElement>(null);
+
+  // Pinning functionality
+  const { isPinned: pinnedState, togglePin } = useTilePinning({
+    initialPinned: isPinned,
+    onPinChange: (pinned) => {
+      onSettingsChange(id, { isPinned: pinned });
+    },
+  });
 
   // Get the API hook for fetching data
   const { executeForceRefresh } = useCryptoStats();
@@ -175,7 +184,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   };
 
   const handlePinToggle = () => {
-    onSettingsChange(id, { isPinned: !isPinned });
+    togglePin();
   };
 
   const handleRemove = () => {
@@ -277,14 +286,15 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         overflow: 'hidden',
         width: '100%',
         height: '100%',
-        resize: onDragStart ? 'none' : 'both', // Disable CSS resize when using grid system
-        cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
+        cursor: pinnedState ? 'default' : (isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default')),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
+        pointerEvents: pinnedState ? 'auto' : 'auto',
+        userSelect: pinnedState ? 'none' : 'auto',
         '&:hover': {
           borderColor: '#f59e0b',
-          transform: isDragging ? 'none' : 'translateY(-2px)',
-          boxShadow: isDragging ? 'none' : '0 8px 25px rgba(245, 158, 11, 0.15)',
+          transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
+          boxShadow: (isDragging || pinnedState) ? 'none' : '0 8px 25px rgba(245, 158, 11, 0.15)',
         },
         '&::before': {
           content: '""',
@@ -297,7 +307,7 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         },
       }}
       ref={tileRef}
-      onMouseDown={onDragStart}
+      onMouseDown={pinnedState ? undefined : onDragStart}
     >
              {/* Header with controls */}
        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -361,13 +371,8 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
                  cursor: 'help'
                }}
              />
-           </Tooltip>
-           {isPinned && (
-             <Tooltip title="Pinned to top">
-               <PinIcon sx={{ color: '#f59e0b', fontSize: 16 }} />
-             </Tooltip>
-           )}
-           {autoRefresh && (
+          </Tooltip>
+          {autoRefresh && (
              <Tooltip title="Auto-refresh enabled">
                <AutoRefreshIcon sx={{ color: '#22c55e', fontSize: 16 }} />
              </Tooltip>
@@ -375,6 +380,11 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
          </Box>
 
         <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <PinButton
+            isPinned={pinnedState}
+            onTogglePin={handlePinToggle}
+          />
+
           <Tooltip title="Refresh data">
             <IconButton
               size="small"

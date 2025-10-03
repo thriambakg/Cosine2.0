@@ -39,6 +39,7 @@ import {
   CalendarToday as CalendarIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest } from '../../services/api';
+import { useTilePinning, PinButton } from './common';
 
 interface NewsTileProps {
   id: string;
@@ -130,6 +131,14 @@ const NewsTile: React.FC<NewsTileProps> = ({
 }) => {
   const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
   const [filtersDialogOpen, setFiltersDialogOpen] = useState(false);
+
+  // Pinning functionality
+  const { isPinned: pinnedState, togglePin } = useTilePinning({
+    initialPinned: isPinned,
+    onPinChange: (pinned) => {
+      onSettingsChange(id, { isPinned: pinned });
+    },
+  });
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [localFilters, setLocalFilters] = useState<NewsFilters>(filters);
   const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
@@ -1226,10 +1235,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   };
 
   const handlePinToggle = () => {
-    // Debounce the settings change to prevent frequent updates
-    setTimeout(() => {
-      onSettingsChange(id, { isPinned: !isPinned });
-    }, 100);
+    togglePin();
   };
 
   const handleRemove = () => {
@@ -1349,13 +1355,13 @@ const NewsTile: React.FC<NewsTileProps> = ({
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        cursor: isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default'),
+        cursor: pinnedState ? 'default' : (isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default')),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
         '&:hover': {
           borderColor: '#3b82f6',
-          transform: isDragging ? 'none' : 'translateY(-2px)',
-          boxShadow: isDragging ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
+          transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
+          boxShadow: (isDragging || pinnedState) ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
         },
         '&::before': {
           content: '""',
@@ -1368,7 +1374,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         },
       }}
       ref={tileRef}
-      onMouseDown={onDragStart}
+      onMouseDown={pinnedState ? undefined : onDragStart}
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
@@ -1430,11 +1436,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
             />
           )}
           
-          {isPinned && (
-            <Tooltip title="Pinned to top">
-              <PinIcon sx={{ color: '#3b82f6', fontSize: 16 }} />
-            </Tooltip>
-          )}
           {autoRefresh && (
             <Tooltip title="Auto-refresh enabled">
               <AutoRefreshIcon sx={{ color: '#22c55e', fontSize: 16 }} />
@@ -1443,6 +1444,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
         </Box>
 
         <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <PinButton
+            isPinned={pinnedState}
+            onTogglePin={togglePin}
+          />
+
           {selectedArticles.length > 0 && (
             <Tooltip title="Perform Analysis">
               <IconButton
@@ -1772,7 +1778,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         </MenuItem>
         <MenuItem onClick={handlePinToggle}>
           <PinIcon sx={{ mr: 1, fontSize: 18 }} />
-          {isPinned ? 'Unpin' : 'Pin'} to Top
+          {pinnedState ? 'Unpin' : 'Pin'} Tile
         </MenuItem>
       </Menu>
 
@@ -2359,21 +2365,46 @@ const NewsTile: React.FC<NewsTileProps> = ({
   );
 };
 
-// Simplified memo comparison - only check essential props
+// Memo comparison - check essential props
 const NewsTileMemo = memo(NewsTile, (prevProps, nextProps) => {
   // Always re-render if key props change
   if (prevProps.id !== nextProps.id) {
     return false; // Re-render
   }
   
-  // Check if essential props changed
-  if (prevProps.isDragging !== nextProps.isDragging ||
+  // Check if display options changed
+  const prevDisplay = prevProps.displayOptions;
+  const nextDisplay = nextProps.displayOptions;
+  if (prevDisplay && nextDisplay) {
+    if (prevDisplay.showImages !== nextDisplay.showImages ||
+        prevDisplay.showSource !== nextDisplay.showSource ||
+        prevDisplay.showDate !== nextDisplay.showDate ||
+        prevDisplay.showKeywords !== nextDisplay.showKeywords ||
+        prevDisplay.maxResults !== nextDisplay.maxResults ||
+        prevDisplay.compactView !== nextDisplay.compactView) {
+      return false; // Re-render
+    }
+  }
+  
+  // Check if other important props changed
+  if (prevProps.autoRefresh !== nextProps.autoRefresh ||
+      prevProps.isPinned !== nextProps.isPinned ||
+      prevProps.isDragging !== nextProps.isDragging ||
       prevProps.isResizing !== nextProps.isResizing ||
       prevProps.isSelected !== nextProps.isSelected) {
     return false; // Re-render
   }
   
-  return true; // Don't re-render for other changes
+  // If size changed significantly, re-render
+  if (prevProps.size && nextProps.size) {
+    const sizeThreshold = 10; // 10px threshold
+    if (Math.abs(prevProps.size.width - nextProps.size.width) > sizeThreshold ||
+        Math.abs(prevProps.size.height - nextProps.size.height) > sizeThreshold) {
+      return false; // Re-render
+    }
+  }
+  
+  return true; // Don't re-render
 });
 
 export default NewsTileMemo;

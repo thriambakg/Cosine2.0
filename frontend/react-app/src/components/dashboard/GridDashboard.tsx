@@ -672,7 +672,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   const renderTile = (tile: UnifiedTile) => {
     const { position, size } = getDefaultGridProps(tile);
     const tileConfig = getTileConfig(tile.type);
-    const supportsResize = tileConfig?.supportsResize ?? true;
+    const supportsResize = (tileConfig?.supportsResize ?? true) && !tile.isPinned;
 
     // Check if this tile is being dragged
     const isDragging = dragState.dragTileId === tile.id;

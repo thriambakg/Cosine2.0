@@ -710,15 +710,27 @@ export const useTabManagement = ({
   }, [state.dashboards, updateState]);
 
   // Update tiles for a specific tab
-  const updateTabTiles = useCallback((tabId: string, tiles: UnifiedTile[]) => {
-    const updatedTabs = state.tabs.map(tab =>
-      tab.id === tabId 
-        ? { ...tab, tiles, updated_at: new Date().toISOString() }
-        : tab
-    );
-
-    updateState({ tabs: updatedTabs });
-  }, [state.tabs, updateState]);
+  const updateTabTiles = useCallback((tabId: string, tiles: UnifiedTile[] | ((currentTiles: UnifiedTile[]) => UnifiedTile[])) => {
+    // Use functional update to get CURRENT state, not stale closure
+    setState(prevState => {
+      const updatedTabs = prevState.tabs.map(tab => {
+        if (tab.id === tabId) {
+          // Support both direct array and function that receives current tiles
+          const newTiles = typeof tiles === 'function' 
+            ? tiles(tab.tiles || [])  // Pass current tiles to function
+            : tiles;
+          
+          return { ...tab, tiles: newTiles, updated_at: new Date().toISOString() };
+        }
+        return tab;
+      });
+      
+      const newState = { ...prevState, tabs: updatedTabs };
+      saveToStorage(newState);
+      debouncedSaveToDatabase(newState);
+      return newState;
+    });
+  }, [saveToStorage, debouncedSaveToDatabase]);
 
   // Get tabs by group
   const getTabsByGroup = useCallback(() => {
