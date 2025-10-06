@@ -23,6 +23,7 @@ import {
 } from '@mui/icons-material';
 import { useContextWindow } from '../../contexts/ContextWindowContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { stockDataAPI, cryptoStatsAPI, newsSearchAPI } from '../../services/api';
 import { ContextItem, TileContextData } from '../tiles/common/contextManager';
 
@@ -37,6 +38,7 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
 }) => {
   // Use context for global state management
   const { contextItems, removeContextItem, clearContext, isVisible: contextIsVisible } = useContextWindow();
+  const { openWithSession } = useGlobalChat();
   
   // Use external visibility control if provided, otherwise use context
   const isVisible = externalIsVisible !== undefined ? externalIsVisible : contextIsVisible;
@@ -174,9 +176,13 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       // Step 2: Create new chat session with context via WebSocket
       setSendProgress('Creating analysis session...');
       
+      // Generate a new session ID for this context-aware chat
+      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
       // Store context session data in sessionStorage for ChatPage to pick up
       const contextSessionData = {
         userId: user.id,
+        sessionId: newSessionId,
         userMessage: userMessage,
         contextItems: enrichedContextItems,
         timestamp: Date.now(),
@@ -190,6 +196,9 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       window.dispatchEvent(contextMessageEvent);
       
       console.log('✅ Context message sent to chat system (stored in sessionStorage)');
+      
+      // Auto-open GlobalChatSidebar with the new session
+      openWithSession(newSessionId);
       
       // Step 3: Show success message
       setShowSuccess(true);

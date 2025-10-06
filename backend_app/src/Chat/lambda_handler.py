@@ -404,6 +404,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         # Extract message from various possible locations
         logger.info("🔍 DEBUG: Starting message extraction")
         user_message = None
+        original_message = None  # For context-aware messages, store original for display
         session_id = 'default'
         
         # Try different possible message locations
@@ -437,6 +438,11 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                     logger.info("🔍 DEBUG: No 'message' or 'prompt' field in nested body")
             else:
                 logger.info("🔍 DEBUG: No 'body' field or body is not a dict")
+        
+        # Check if there's an originalMessage (for context-aware messages)
+        if 'originalMessage' in event_body:
+            original_message = event_body.get('originalMessage', '').strip()
+            logger.info(f"📌 Found originalMessage field for frontend display: '{original_message}'")
         
         # Extract session_id and user_id from various possible locations
         logger.info("🔍 DEBUG: Checking for session_id and user_id in various fields...")
@@ -651,10 +657,14 @@ Session Context:
             logger.info(f"🔍 DEBUG: Response content type: {type(response_content)}")
             
             # Update session context with new conversation
+            # Use original_message for display if available (for context-aware messages)
+            message_for_display = original_message if original_message else user_message
+            
             if session_context and user_id:
                 logger.info(f"🔍 DEBUG: Updating session context for session {session_id}")
+                logger.info(f"📌 Using message for display: '{message_for_display[:100]}...'")
                 update_success = session_manager.update_session_context(
-                    session_id, user_id, user_message, response_content, model=model
+                    session_id, user_id, message_for_display, response_content, model=model
                 )
                 if update_success:
                     logger.info(f"✅ Successfully updated session context for session {session_id}")

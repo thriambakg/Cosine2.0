@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ENV_CONFIG } from '@/config/environment';
 import { useChatPersistence } from '@/hooks/useChatPersistence';
 import { useClock } from '@/contexts/ClockContext';
+import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addChatSessionToContext } from '@/components/tiles/common';
 import {
   Box,
@@ -43,6 +44,7 @@ import {
   Dashboard as ContextIcon,
   ExpandLess as ExpandLessIcon,
   ExpandMore as ExpandMoreIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { ContextItem } from '@/components/tiles/common/contextManager';
 
@@ -198,6 +200,7 @@ export default function ChatPage() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
   const { clockTimezone, clockMilitaryTime } = useClock();
+  const { openWithSession } = useGlobalChat();
   
   // Chat persistence system
   const {
@@ -938,6 +941,19 @@ export default function ChatPage() {
     handleContextMenuClose();
   };
 
+  const handleOpenInSidebar = (sessionId: string, event?: React.MouseEvent) => {
+    if (event) {
+      event.stopPropagation(); // Prevent loading the session in the main page
+    }
+    console.log(`📂 Opening session in GlobalChatSidebar: ${sessionId}`);
+    
+    // Immediately open the sidebar with the session
+    openWithSession(sessionId);
+    
+    // If this is the current session, we can also share the WebSocket connection
+    // The GlobalChatSidebar will handle loading the session data
+  };
+
   const getFirstUserMessage = (messages: any[]) => {
     return messages.find(msg => msg.sender === 'user')?.text || 'No user messages';
   };
@@ -1371,19 +1387,37 @@ export default function ChatPage() {
                             </Typography>
                           }
                         />
-                        <IconButton
-                          onClick={(e) => handleDeleteSession(session.session_id, e)}
-                          sx={{
-                            color: '#9ca3af',
-                            padding: '2px',
-                            '&:hover': {
-                              color: '#ef4444',
-                              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                            },
-                          }}
-                        >
-                          <DeleteIcon sx={{ fontSize: '0.9rem' }} />
-                        </IconButton>
+                        <Tooltip title="Open in sidebar">
+                          <IconButton
+                            onClick={(e) => handleOpenInSidebar(session.session_id, e)}
+                            sx={{
+                              color: '#9ca3af',
+                              padding: '2px',
+                              mr: 0.5,
+                              '&:hover': {
+                                color: '#3b82f6',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <OpenInNewIcon sx={{ fontSize: '0.9rem' }} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete">
+                          <IconButton
+                            onClick={(e) => handleDeleteSession(session.session_id, e)}
+                            sx={{
+                              color: '#9ca3af',
+                              padding: '2px',
+                              '&:hover': {
+                                color: '#ef4444',
+                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                              },
+                            }}
+                          >
+                            <DeleteIcon sx={{ fontSize: '0.9rem' }} />
+                          </IconButton>
+                        </Tooltip>
                       </>
                     )}
                   </ListItemButton>

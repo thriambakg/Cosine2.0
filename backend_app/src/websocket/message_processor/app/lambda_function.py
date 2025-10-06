@@ -263,6 +263,9 @@ def process_message(connection_id, user_id, session_id, message_data):
         context_items = message_data.get('contextItems', [])
         has_context = len(context_items) > 0
         
+        # Store the original user message (without context prompt) for frontend display
+        original_user_message = message_text
+        
         if has_context:
             logger.info(f"📌 Context-aware message detected with {len(context_items)} context items")
             
@@ -292,14 +295,26 @@ def process_message(connection_id, user_id, session_id, message_data):
                 except Exception as e:
                     logger.error(f"❌ Failed to store context in session_variables: {e}")
                 
-                # Build enriched prompt with context
-                message_text = build_context_prompt(message_text, context_items)
-                logger.info(f"📌 Enhanced message with context (length: {len(message_text)})")
+                # Build enriched prompt with context (for AI only)
+                enriched_message = build_context_prompt(message_text, context_items)
+                logger.info(f"📌 Enhanced message with context (length: {len(enriched_message)})")
+                
+                # Send the enriched message to AI, but keep original for frontend
+                message_text = enriched_message
             else:
                 logger.warning(f"⚠️ Context builder not available, passing context items to chat agent for processing")
         
         # Call the existing chat agent Lambda (with enriched message if context present)
-        ai_response = call_chat_agent(user_id, message_text, model, files, session_id, context_items if has_context else None)
+        # Pass original_user_message so the chat agent can store it for display
+        ai_response = call_chat_agent(
+            user_id, 
+            message_text,  # Enriched message for AI
+            model, 
+            files, 
+            session_id, 
+            context_items if has_context else None,
+            original_user_message if has_context else None  # Original message for frontend display
+        )
         
         # Note: AI response is already added by the chat agent Lambda
         # No need to add it here to avoid duplicates
@@ -394,7 +409,7 @@ def create_session_for_first_message(user_id, session_id, model):
     except Exception as e:
         logger.error(f"Error creating session for first message: {str(e)}")
 
-def call_chat_agent(user_id, message_text, model, files, session_id, context_items=None):
+def call_chat_agent(user_id, message_text, model, files, session_id, context_items=None, original_user_message=None):
     """
     Call the existing chat agent Lambda function with kill signal checking
     
@@ -405,6 +420,7 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
         files: Uploaded files
         session_id: Session ID
         context_items: Optional context items (only passed if context builder not available)
+        original_user_message: Original user message (before context enrichment) for frontend display
         
     Returns:
         AI response text
@@ -442,6 +458,11 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
                 'sessionId': session_id  # Use the session_id from the function parameter
             }
         }
+        
+        # Include original message for frontend display if provided
+        if original_user_message:
+            payload['originalMessage'] = original_user_message
+            logger.info(f"📌 Including original user message for frontend display")
         
         # Only include contextItems if context builder is not available (fallback)
         if context_items and not CONTEXT_BUILDER_AVAILABLE:
