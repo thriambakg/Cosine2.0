@@ -8,14 +8,12 @@ import {
   InputAdornment,
   List,
   ListItem,
-  ListItemText,
   Chip,
   Divider,
   CircularProgress,
   Alert,
 } from '@mui/material';
 import {
-  Close as CloseIcon,
   Send as SendIcon,
   DragIndicator as DragIcon,
   Dashboard as ContextIcon,
@@ -254,7 +252,7 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
         case 'crypto': {
           const cryptoData = await cryptoStatsAPI.getStats({
             symbols: tileData.symbol ? [tileData.symbol] : undefined,
-            timeframe: tileData.timeframe || '30d',
+            timeframe: (tileData.timeframe as '1d' | '7d' | '30d' | '1y') || '30d',
           });
           return { ...item, data: { ...tileData, backendData: cryptoData } };
         }
@@ -277,7 +275,7 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
               ...tileData,
               backendData: {
                 articles,
-                total_count: newsData.total_articles || articles.length,
+                total_count: (newsData as any).total_articles || articles.length,
                 filters: tileData.filters,
               },
             },
