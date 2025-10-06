@@ -1353,6 +1353,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         overflow: 'hidden',
         width: '100%',
         height: '100%',
+        boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
         cursor: pinnedState ? 'default' : (isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default')),
@@ -1378,7 +1379,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'nowrap', overflow: 'hidden', minWidth: 0 }}>
           {/* Selection checkbox */}
           {onSelectionChange && (
             <Checkbox
@@ -1405,8 +1406,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
             />
           )}
           
-          <ArticleIcon sx={{ color: '#3b82f6', fontSize: '1.5rem', mr: 1 }} />
-          <Typography variant="h6" color="white" fontWeight={600}>
+          <ArticleIcon sx={{ color: '#3b82f6', fontSize: '1.5rem', mr: 1, flexShrink: 0 }} />
+          <Typography variant="h6" color="white" fontWeight={600} sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
             Financial News
           </Typography>
           
