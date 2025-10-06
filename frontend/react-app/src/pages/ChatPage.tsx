@@ -947,8 +947,21 @@ export default function ChatPage() {
     }
     console.log(`📂 Opening session in GlobalChatSidebar: ${sessionId}`);
     
+    // Set timestamp to prevent session restoration conflicts
+    sessionStorage.setItem('last-opened-session', Date.now().toString());
+    
     // Immediately open the sidebar with the session
     openWithSession(sessionId);
+    
+    // Dispatch custom event to force load the session in GlobalChatSidebar
+    const manualSessionEvent = new CustomEvent('manual-session-open', {
+      detail: {
+        sessionId: sessionId,
+        userId: user?.id,
+        timestamp: Date.now()
+      }
+    });
+    window.dispatchEvent(manualSessionEvent);
     
     // If this is the current session, we can also share the WebSocket connection
     // The GlobalChatSidebar will handle loading the session data

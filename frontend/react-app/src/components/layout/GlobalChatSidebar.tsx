@@ -39,40 +39,107 @@ interface Message {
 }
 
 const GlobalChatSidebar: React.FC = () => {
-  const { isVisible, activeSessionId, close } = useGlobalChat();
+  const { 
+    isVisible, 
+    activeSessionId, 
+    close, 
+    setActiveSessionId,
+    currentSession,
+    setCurrentSession,
+    messages,
+    setMessages
+  } = useGlobalChat();
   const { isConnected, connect, disconnect, sendMessage, websocket } = useWebSocket();
   const { user } = useAuth();
   
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
+  // Local state (simplified - no database loading)
   const [inputMessage, setInputMessage] = useState<string>('');
-  const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isLoadingMessage, setIsLoadingMessage] = useState<boolean>(false);
   const [selectedModel, setSelectedModel] = useState<string>('claude-3-sonnet');
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
   const [showContextBookmark, setShowContextBookmark] = useState<boolean>(false);
+  const [processedMessageIds, setProcessedMessageIds] = useState<Set<string>>(new Set());
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sidebarWidth = 500;
 
-  // Load session when activeSessionId changes
+  // Simple loadSession function - only loads from database when explicitly requested
+  const loadSessionFromDatabase = async (sessionId: string) => {
+    if (!user?.id) return;
+
+    try {
+      console.log('📋 Loading session from database:', sessionId);
+      const session = await sessionManagementAPI.getSession(sessionId, user.id);
+      
+      if (session) {
+        console.log('✅ Session loaded successfully:', {
+          sessionId: session.session_id,
+          messageCount: session.messages?.length || 0,
+          hasContext: !!session.session_variables?.context_items
+        });
+        
+        // Update context state (which persists to sessionStorage)
+        setCurrentSession(session);
+        setSelectedModel(session.model || 'claude-3-sonnet');
+
+        // Load messages
+        const loadedMessages: Message[] = (session.messages || []).map((msg: any) => ({
+          id: msg.message_id || msg.id || `msg_${Date.now()}_${Math.random()}`,
+          sender: msg.sender,
+          text: msg.text,
+          timestamp: msg.timestamp || Date.now(),
+        }));
+        setMessages(loadedMessages);
+
+        // Load context if available
+        if (session.session_variables?.context_items) {
+          setSessionContext(session.session_variables.context_items);
+        } else {
+          setSessionContext([]);
+        }
+      } else {
+        console.log('⚠️ Session not found in database, using current state');
+      }
+    } catch (error) {
+      console.error('❌ Failed to load session:', error);
+    }
+  };
+
+  // Connect WebSocket when activeSessionId changes - simple persistence like clock/context window
   useEffect(() => {
     if (activeSessionId && user?.id && isVisible) {
-      loadSession(activeSessionId);
+      console.log('🔌 Connecting WebSocket for session:', activeSessionId);
       connect(activeSessionId);
     }
-  }, [activeSessionId, user?.id, isVisible]);
+  }, [activeSessionId, user?.id, isVisible, connect]);
 
-  // Restore session when sidebar becomes visible
+  // Handle manual session opening from ChatPage - load from database when explicitly requested
   useEffect(() => {
-    if (isVisible && !currentSession && activeSessionId && user?.id) {
-      console.log('🔄 Restoring session when sidebar becomes visible:', activeSessionId);
-      loadSession(activeSessionId);
-      connect(activeSessionId);
-    }
-  }, [isVisible, activeSessionId, user?.id, currentSession]);
+    if (!isVisible) return;
 
-  // Handle pending context sessions from ContextWindow
+    const handleManualSessionOpen = (event: CustomEvent) => {
+      const sessionData = event.detail;
+      console.log('📂 GlobalChatSidebar received manual session open:', sessionData);
+      
+      if (sessionData.sessionId && sessionData.userId === user?.id) {
+        console.log('🔄 Loading manually opened session from database:', sessionData.sessionId);
+        
+        // Update the activeSessionId (this will trigger WebSocket connection)
+        setActiveSessionId(sessionData.sessionId);
+        
+        // Load session from database (this updates the persisted context state)
+        loadSessionFromDatabase(sessionData.sessionId);
+      }
+    };
+
+    window.addEventListener('manual-session-open', handleManualSessionOpen as EventListener);
+    
+    return () => {
+      window.removeEventListener('manual-session-open', handleManualSessionOpen as EventListener);
+    };
+  }, [isVisible, user?.id, loadSessionFromDatabase, setActiveSessionId]);
+
+  // Handle context sessions from ContextWindow - simple persistence approach
   useEffect(() => {
     if (!isVisible) return;
 
@@ -81,22 +148,27 @@ const GlobalChatSidebar: React.FC = () => {
       console.log('🎯 GlobalChatSidebar received context session:', contextData);
       
       if (contextData.sessionId && contextData.userId === user?.id) {
-        // Set the session as current and load it
-      setCurrentSession({
-        session_id: contextData.sessionId,
-        title: 'Context Analysis',
-        model: 'claude-3-sonnet',
-        created_at: Date.now() / 1000,
-        last_updated: Date.now() / 1000,
-        message_count: 0,
-        messages: [],
-        session_variables: {
-          context_items: contextData.contextItems || [],
-          context_added_at: Date.now().toString(),
-        }
-      });
+        // Update the active session ID in the global context
+        setActiveSessionId(contextData.sessionId);
+        
+        // Set the session as current and load it immediately
+        const newSession = {
+          session_id: contextData.sessionId,
+          title: 'Context Analysis',
+          model: 'claude-3-sonnet',
+          created_at: Date.now() / 1000,
+          last_updated: Date.now() / 1000,
+          message_count: 1,
+          messages: [],
+          session_variables: {
+            context_items: contextData.contextItems || [],
+            context_added_at: Date.now().toString(),
+          }
+        };
+        
+        setCurrentSession(newSession);
 
-        // Add the user's message to the UI immediately
+        // Add the user's message to the UI immediately (using context's setMessages)
         const userMessage: Message = {
           id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           sender: 'user',
@@ -105,12 +177,21 @@ const GlobalChatSidebar: React.FC = () => {
         };
         setMessages([userMessage]);
         
+        // Set context items for bookmark display
+        setSessionContext(contextData.contextItems || []);
+        
         // Connect WebSocket and send message
         connect(contextData.sessionId);
         
-        // Wait for WebSocket connection and send message
+        // Wait for WebSocket connection and send message with retry mechanism
+        let attempts = 0;
+        const maxAttempts = 50; // 5 seconds max wait time
+        
         const waitForConnection = () => {
+          attempts++;
+          
           if (websocket && websocket.readyState === WebSocket.OPEN) {
+            console.log('📤 WebSocket connected, sending context message');
             const sent = sendMessage({
               action: 'chat',
               type: 'chat_message',
@@ -125,12 +206,18 @@ const GlobalChatSidebar: React.FC = () => {
             
             if (sent) {
               setIsLoadingMessage(true);
+              console.log('✅ Context message sent successfully');
             } else {
-              console.error('Failed to send context message');
+              console.error('❌ Failed to send context message');
+              setIsLoadingMessage(false);
             }
-          } else {
+          } else if (attempts < maxAttempts) {
             // Retry after a short delay
+            console.log(`⏳ Waiting for WebSocket connection... (attempt ${attempts}/${maxAttempts})`);
             setTimeout(waitForConnection, 100);
+          } else {
+            console.error('❌ WebSocket connection timeout after 5 seconds');
+            setIsLoadingMessage(false);
           }
         };
         
@@ -153,18 +240,34 @@ const GlobalChatSidebar: React.FC = () => {
     const handleMessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
+        console.log('📨 GlobalChatSidebar received WebSocket message:', data);
         
         if (data.type === 'ai_response') {
+          // Check if we've already processed this message (prevent duplicates)
+          const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          if (processedMessageIds.has(messageId)) {
+            console.log('🤖 Duplicate AI response ignored in sidebar:', messageId);
+            return;
+          }
+          
+          // Mark message as processed
+          setProcessedMessageIds(prev => new Set(prev).add(messageId));
+          
+          // Use the context's setMessages function to update persisted state
           setMessages(prev => [
             ...prev,
             {
-              id: data.message_id || `msg_${Date.now()}`,
+              id: messageId,
               sender: 'ai',
-              text: data.content,
+              text: data.content || 'No response content',
               timestamp: Date.now(),
             }
           ]);
           setIsLoadingMessage(false);
+          console.log('✅ AI response added to sidebar messages:', messageId);
+        } else if (data.type === 'message_received') {
+          // Message was received by server, keep showing loading indicator
+          console.log('📨 Message received by server:', data.message_id);
         }
       } catch (error) {
         console.error('Error parsing WebSocket message:', error);
@@ -176,43 +279,13 @@ const GlobalChatSidebar: React.FC = () => {
     return () => {
       websocket.removeEventListener('message', handleMessage);
     };
-  }, [websocket]);
+  }, [websocket, setMessages, processedMessageIds]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const loadSession = async (sessionId: string) => {
-    if (!user?.id) return;
-
-    setIsLoadingSession(true);
-    try {
-      const session = await sessionManagementAPI.getSession(sessionId, user.id);
-      setCurrentSession(session);
-      setSelectedModel(session.model || 'claude-3-sonnet');
-
-      // Load messages
-      const loadedMessages: Message[] = (session.messages || []).map((msg: any) => ({
-        id: msg.message_id || `msg_${Date.now()}_${Math.random()}`,
-        sender: msg.sender,
-        text: msg.text,
-        timestamp: msg.timestamp || Date.now(),
-      }));
-      setMessages(loadedMessages);
-
-      // Load context if available
-      if (session.session_variables?.context_items) {
-        setSessionContext(session.session_variables.context_items);
-      } else {
-        setSessionContext([]);
-      }
-    } catch (error) {
-      console.error('Failed to load session:', error);
-    } finally {
-      setIsLoadingSession(false);
-    }
-  };
 
   const handleSendMessage = useCallback(() => {
     if (!inputMessage.trim() || !activeSessionId || !user?.id || !isConnected) return;
@@ -220,7 +293,7 @@ const GlobalChatSidebar: React.FC = () => {
     const userMessage = inputMessage.trim();
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Add user message to UI immediately
+    // Add user message to UI immediately (using context's setMessages)
     setMessages(prev => [
       ...prev,
       {
@@ -258,10 +331,6 @@ const GlobalChatSidebar: React.FC = () => {
     }
   };
 
-  if (!isVisible) {
-    return null;
-  }
-
   return (
     <Box
       sx={{
@@ -274,7 +343,7 @@ const GlobalChatSidebar: React.FC = () => {
         borderLeft: '2px solid #374151',
         backdropFilter: 'blur(10px)',
         zIndex: 1200,
-        display: 'flex',
+        display: isVisible ? 'flex' : 'none', // Hide with CSS instead of unmounting
         flexDirection: 'column',
         boxShadow: '-4px 0 16px rgba(0, 0, 0, 0.3)',
         animation: 'slideInFromRight 0.3s ease-out',
@@ -302,14 +371,13 @@ const GlobalChatSidebar: React.FC = () => {
           <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '1rem' }}>
             AI Chat
           </Typography>
-          {isLoadingSession && <CircularProgress size={16} sx={{ color: '#3b82f6' }} />}
         </Box>
 
         <Box sx={{ display: 'flex', gap: 0.5 }}>
           <Tooltip title="Refresh">
             <IconButton
               size="small"
-              onClick={() => activeSessionId && loadSession(activeSessionId)}
+              onClick={() => activeSessionId && loadSessionFromDatabase(activeSessionId)}
               sx={{
                 color: '#9ca3af',
                 '&:hover': {
@@ -367,6 +435,7 @@ const GlobalChatSidebar: React.FC = () => {
             <MenuItem value="claude-3-haiku">Claude 3 Haiku</MenuItem>
             <MenuItem value="nova-lite">Amazon Nova Lite</MenuItem>
             <MenuItem value="gpt-oss-120b">GPT-OSS 120B</MenuItem>
+            <MenuItem value="gpt-oss-20b">GPT-OSS 20B</MenuItem>
           </Select>
         </FormControl>
       </Box>
