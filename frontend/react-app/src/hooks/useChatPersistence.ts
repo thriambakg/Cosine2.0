@@ -16,6 +16,11 @@ export interface ChatSession {
   last_updated: number;
   message_count: number;
   messages: ChatMessage[];
+  session_variables?: {
+    context_items?: any[];
+    context_added_at?: string;
+    [key: string]: any;
+  };
 }
 
 interface UseChatPersistenceReturn {

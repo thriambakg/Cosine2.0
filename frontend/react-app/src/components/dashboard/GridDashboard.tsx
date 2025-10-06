@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Analytics as AnalyticsIcon, Add as AddIcon } from '@mui/icons-material';
+import { Analytics as AnalyticsIcon, Add as AddIcon, Dashboard as ContextIcon } from '@mui/icons-material';
 import CryptoTile from '../tiles/CryptoTile';
 import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
@@ -10,6 +10,7 @@ import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes'
 import { getTileConfig, validateTileSize } from '../tiles/tileConfig';
 import TileDataParser from '../tiles/TileDataParser';
 import { stockDataAPI, cryptoStatsAPI } from '../../services/api';
+import { addTileToContext, extractTileData } from '../tiles/common';
 
 interface GridDashboardProps {
   tiles: UnifiedTile[];
@@ -668,6 +669,30 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     handleContextMenuClose();
   }, [selectionState.selectedTiles, tiles, handleContextMenuClose]);
 
+  // Add selected tiles to context window
+  const handleAddToContext = useCallback(() => {
+    const selectedTilesArray = Array.from(selectionState.selectedTiles);
+    console.log('📦 Adding tiles to context:', selectedTilesArray);
+    
+    if (selectedTilesArray.length === 0) {
+      console.log('No tiles selected to add to context');
+      return;
+    }
+
+    // Get selected tiles data
+    const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
+    
+    // Add each tile to context
+    selectedTilesData.forEach(tile => {
+      const tileData = extractTileData(tile);
+      addTileToContext(tile.id, tile.type, tileData);
+      console.log(`✅ Added ${tile.type} tile to context:`, tile.id);
+    });
+    
+    // Close context menu
+    handleContextMenuClose();
+  }, [selectionState.selectedTiles, tiles, handleContextMenuClose]);
+
   // Render tile with grid positioning
   const renderTile = (tile: UnifiedTile) => {
     const { position, size } = getDefaultGridProps(tile);
@@ -1126,6 +1151,15 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           },
         }}
       >
+        <MenuItem onClick={handleAddToContext} disabled={selectionState.selectedTiles.size === 0}>
+          <ListItemIcon>
+            <ContextIcon sx={{ color: '#3b82f6' }} />
+          </ListItemIcon>
+          <ListItemText>
+            Add to Context ({selectionState.selectedTiles.size} selected)
+          </ListItemText>
+        </MenuItem>
+        
         <MenuItem onClick={handlePerformAnalysis} disabled={selectionState.selectedTiles.size === 0}>
           <ListItemIcon>
             <AnalyticsIcon sx={{ color: '#10b981' }} />

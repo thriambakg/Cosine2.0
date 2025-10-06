@@ -15,6 +15,20 @@ from decimal import Decimal
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Import context builder for enriching messages with context
+try:
+    from context_builder import build_context_prompt, extract_context_summary
+    logger.info("✅ Successfully imported context_builder")
+    CONTEXT_BUILDER_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import context_builder: {e}")
+    CONTEXT_BUILDER_AVAILABLE = False
+    # Fallback functions if import fails
+    def build_context_prompt(user_message, context_items):
+        return user_message
+    def extract_context_summary(context_items):
+        return {'total_items': len(context_items) if context_items else 0}
+
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 
@@ -245,8 +259,47 @@ def process_message(connection_id, user_id, session_id, message_data):
             logger.info(f"🔍 Session {session_id} doesn't exist, creating it for first message")
             create_session_for_first_message(user_id, session_id, model)
         
-        # Call the existing chat agent Lambda
-        ai_response = call_chat_agent(user_id, message_text, model, files, session_id)
+        # Extract context items from message data (if present)
+        context_items = message_data.get('contextItems', [])
+        has_context = len(context_items) > 0
+        
+        if has_context:
+            logger.info(f"📌 Context-aware message detected with {len(context_items)} context items")
+            
+            # Store context in session_variables for persistence
+            if CONTEXT_BUILDER_AVAILABLE:
+                context_summary = extract_context_summary(context_items)
+                logger.info(f"📌 Context summary: {context_summary}")
+                
+                # Update session variables in DynamoDB
+                try:
+                    chat_sessions_table.update_item(
+                        Key={
+                            'user_id': user_id,
+                            'session_id': session_id
+                        },
+                        UpdateExpression='SET session_variables = :vars, last_updated = :updated',
+                        ExpressionAttributeValues={
+                            ':vars': {
+                                'context_items': context_items,
+                                'context_added_at': int(datetime.now().timestamp()),
+                                'context_summary': context_summary,
+                            },
+                            ':updated': int(datetime.now().timestamp())
+                        }
+                    )
+                    logger.info(f"📌 Stored context in session_variables")
+                except Exception as e:
+                    logger.error(f"❌ Failed to store context in session_variables: {e}")
+                
+                # Build enriched prompt with context
+                message_text = build_context_prompt(message_text, context_items)
+                logger.info(f"📌 Enhanced message with context (length: {len(message_text)})")
+            else:
+                logger.warning(f"⚠️ Context builder not available, passing context items to chat agent for processing")
+        
+        # Call the existing chat agent Lambda (with enriched message if context present)
+        ai_response = call_chat_agent(user_id, message_text, model, files, session_id, context_items if has_context else None)
         
         # Note: AI response is already added by the chat agent Lambda
         # No need to add it here to avoid duplicates
@@ -341,16 +394,17 @@ def create_session_for_first_message(user_id, session_id, model):
     except Exception as e:
         logger.error(f"Error creating session for first message: {str(e)}")
 
-def call_chat_agent(user_id, message_text, model, files, session_id):
+def call_chat_agent(user_id, message_text, model, files, session_id, context_items=None):
     """
     Call the existing chat agent Lambda function with kill signal checking
     
     Args:
         user_id: User ID
-        message_text: User's message
+        message_text: User's message (already enriched with context if present)
         model: Selected AI model
         files: Uploaded files
         session_id: Session ID
+        context_items: Optional context items (only passed if context builder not available)
         
     Returns:
         AI response text
@@ -388,6 +442,11 @@ def call_chat_agent(user_id, message_text, model, files, session_id):
                 'sessionId': session_id  # Use the session_id from the function parameter
             }
         }
+        
+        # Only include contextItems if context builder is not available (fallback)
+        if context_items and not CONTEXT_BUILDER_AVAILABLE:
+            payload['contextItems'] = context_items
+            logger.info(f"📌 Including context items in payload as fallback (builder not available)")
         
         logger.info(f"Calling chat agent with payload: {json_dumps_safe(payload)}")
         

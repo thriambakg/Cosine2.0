@@ -34,12 +34,12 @@ import {
   FilterList as FilterIcon,
   Article as ArticleIcon,
   OpenInNew as OpenInNewIcon,
-  Analytics as AnalyticsIcon,
   Image as ImageIcon,
   CalendarToday as CalendarIcon,
+  Dashboard as ContextIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest } from '../../services/api';
-import { useTilePinning, PinButton } from './common';
+import { useTilePinning, PinButton, addArticleToContext } from './common';
 
 interface NewsTileProps {
   id: string;
@@ -1256,15 +1256,41 @@ const NewsTile: React.FC<NewsTileProps> = ({
     window.open(article.source_url, '_blank', 'noopener,noreferrer');
   };
 
-  const handlePerformAnalysis = () => {
+  const handleAddToContext = () => {
     if (selectedArticles.length === 0) {
-      alert('Please select at least one article for analysis');
+      alert('Please select at least one article to add to context');
       return;
     }
     
-    // TODO: Implement analysis functionality
-    console.log('Performing analysis on articles:', selectedArticles);
-    alert(`Analysis will be performed on ${selectedArticles.length} selected article(s)`);
+    // Get the selected article objects from newsArticles state
+    const selectedArticleObjects = newsArticles.filter(article => 
+      selectedArticles.includes(article.source_url)
+    );
+    
+    console.log(`📦 Adding ${selectedArticleObjects.length} article(s) to context`);
+    
+    // Add each selected article to context
+    selectedArticleObjects.forEach(article => {
+      addArticleToContext(
+        article.source_url, // Use URL as unique ID
+        article.title,
+        article.source_name,
+        {
+          url: article.source_url,
+          title: article.title,
+          description: article.description,
+          source: article.source_name,
+          published_date: article.published_date,
+          keywords: article.keywords,
+          category: article.category,
+          image_url: article.image_url,
+        }
+      );
+      console.log(`✅ Added article to context: ${article.title}`);
+    });
+    
+    // Clear selection after adding
+    setSelectedArticles([]);
   };
 
   const formatDate = (dateString: string) => {
@@ -1451,14 +1477,14 @@ const NewsTile: React.FC<NewsTileProps> = ({
           />
 
           {selectedArticles.length > 0 && (
-            <Tooltip title="Perform Analysis">
+            <Tooltip title={`Add ${selectedArticles.length} article${selectedArticles.length > 1 ? 's' : ''} to Context`}>
               <IconButton
                 size="small"
-                onClick={handlePerformAnalysis}
+                onClick={handleAddToContext}
                 onMouseDown={(e) => e.stopPropagation()}
-                sx={{ color: '#9ca3af', '&:hover': { color: '#22c55e' } }}
+                sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
               >
-                <AnalyticsIcon sx={{ fontSize: 18 }} />
+                <ContextIcon sx={{ fontSize: 18 }} />
               </IconButton>
             </Tooltip>
           )}

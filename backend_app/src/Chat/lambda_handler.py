@@ -12,6 +12,20 @@ import sys
 import time
 from typing import Dict, Any
 
+# Import context builder for handling context-aware messages
+try:
+    from context_builder import build_context_prompt, extract_context_summary
+    logger = logging.getLogger()
+    logger.info("✅ Successfully imported context_builder")
+except ImportError as e:
+    logger = logging.getLogger()
+    logger.warning(f"⚠️ Could not import context_builder: {e}")
+    # Fallback functions if import fails
+    def build_context_prompt(user_message, context_items):
+        return user_message
+    def extract_context_summary(context_items):
+        return {'total_items': len(context_items) if context_items else 0}
+
 # Fix OpenTelemetry context issue in Lambda environment
 os.environ.setdefault('OTEL_SDK_DISABLED', 'true')
 os.environ.setdefault('OTEL_PYTHON_DISABLED_INSTRUMENTATIONS', 'all')
@@ -551,12 +565,27 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         
         # No automatic welcome message - let the user start the conversation
         
+        # Context handling is now done in WebSocket message processor
+        # (message_text is already enriched if context was present)
+        # Fallback: If contextItems are in event_body, handle them here
+        context_items = event_body.get('contextItems', [])
+        has_context = len(context_items) > 0
+        
+        if has_context:
+            logger.info(f"📌 FALLBACK: Context items detected in chat lambda (should be handled by WebSocket processor)")
+            logger.info(f"📌 Context-aware message with {len(context_items)} items")
+            
+            # Build enriched prompt with context (fallback only)
+            user_message = build_context_prompt(user_message, context_items)
+            logger.info(f"📌 FALLBACK: Enhanced message with context (length: {len(user_message)})")
+        
         # Process message with session-aware agent
         logger.info(f"🔍 DEBUG: About to process message with session-aware agent")
-        logger.info(f"🔍 DEBUG: Message: '{user_message}'")
+        logger.info(f"🔍 DEBUG: Message: '{user_message[:200] if len(user_message) > 200 else user_message}...'")  # Truncate for logging
         logger.info(f"🔍 DEBUG: Session ID: '{session_id}'")
         
         # Create enhanced message with session context for the agent
+        # Note: user_message may already be enriched with context data from WebSocket processor
         enhanced_message = f"""
 User Message: {user_message}
 

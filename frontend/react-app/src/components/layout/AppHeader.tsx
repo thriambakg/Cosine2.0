@@ -18,11 +18,13 @@ import {
   Notifications as BellIcon,
   NavigateNext as NavigateNextIcon,
   AccessTime as ClockIcon,
+  Dashboard as ContextIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { toggleSidebar } from '../../store/slices/navigationSlice';
 import { useAuth } from '../../contexts/AuthContext';
+import { useContextWindow } from '../../contexts/ContextWindowContext';
 import NotificationCenter from './NotificationCenter';
 
 export default function AppHeader() {
@@ -31,6 +33,7 @@ export default function AppHeader() {
   // const location = useLocation(); // Removed unused variable
   const dispatch = useAppDispatch();
   const { user, logout } = useAuth();
+  const { isVisible: isContextVisible, setIsVisible: setContextVisible } = useContextWindow();
   
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [notificationAnchorEl, setNotificationAnchorEl] = useState<null | HTMLElement>(null);
@@ -76,6 +79,10 @@ export default function AppHeader() {
     window.dispatchEvent(new CustomEvent('clock-visibility-changed', { 
       detail: { isVisible: newVisibility } 
     }));
+  };
+
+  const handleContextToggle = () => {
+    setContextVisible(!isContextVisible);
   };
 
   return (
@@ -218,8 +225,31 @@ export default function AppHeader() {
             </Box>
           </Box>
 
-          {/* Right Section - Clock Toggle + Notifications + Profile */}
+          {/* Right Section - Context + Clock + Notifications + Profile */}
           <Box display="flex" alignItems="center" gap={1}>
+            <IconButton
+              color="inherit"
+              onClick={handleContextToggle}
+              sx={{
+                color: isContextVisible ? '#3b82f6' : '#8b8b8b',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                width: 44,
+                height: 44,
+                borderRadius: '8px',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  color: isContextVisible ? '#60a5fa' : '#ffffff',
+                  transform: 'translateY(-1px)',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                },
+              }}
+            >
+              <ContextIcon />
+            </IconButton>
+            
             <IconButton
               color="inherit"
               onClick={handleClockToggle}

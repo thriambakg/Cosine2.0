@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ENV_CONFIG } from '@/config/environment';
 import { useChatPersistence } from '@/hooks/useChatPersistence';
 import { useClock } from '@/contexts/ClockContext';
+import { addChatSessionToContext } from '@/components/tiles/common';
 import {
   Box,
   Typography,
@@ -24,6 +25,8 @@ import {
   ListItemIcon,
   ListItemText,
   Tooltip,
+  Checkbox,
+  Menu,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -37,7 +40,11 @@ import {
   Psychology as BrainIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
+  Dashboard as ContextIcon,
+  ExpandLess as ExpandLessIcon,
+  ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
+import { ContextItem } from '@/components/tiles/common/contextManager';
 
 interface Message {
   id: string;
@@ -229,10 +236,19 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
+  // Session selection for context
+  const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<HTMLElement | null>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  
   // Message editing state
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
+  
+  // Context bookmark state
+  const [showContextBookmark, setShowContextBookmark] = useState<boolean>(false);
+  const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -616,6 +632,147 @@ export default function ChatPage() {
     };
   }, [user?.id, ENV_CONFIG.websocketUrl]);
 
+  // Load context when session changes
+  useEffect(() => {
+    if (currentSession?.session_variables?.context_items) {
+      console.log('📌 Loading context for session:', currentSession.session_id);
+      setSessionContext(currentSession.session_variables.context_items);
+    } else {
+      setSessionContext([]);
+    }
+  }, [currentSession]);
+
+  // Track processing state to prevent duplicates
+  const processingRef = useRef(false);
+
+  // Listen for create-context-session event from ContextWindow
+  useEffect(() => {
+    const handleContextSession = async (eventData: any) => {
+      const { userId, userMessage, contextItems, timestamp } = eventData;
+      
+      console.log('🎯 Processing create-context-session:', {
+        userId,
+        messageLength: userMessage.length,
+        contextItemsCount: contextItems.length,
+        timestamp,
+      });
+      
+      // Prevent duplicate processing
+      if (processingRef.current) {
+        console.log('⚠️ Already processing a context session, skipping');
+        return;
+      }
+      
+      const lastProcessed = sessionStorage.getItem('last-processed-context-session');
+      if (lastProcessed && lastProcessed === String(timestamp)) {
+        console.log('⚠️ Context session already processed, skipping');
+        return;
+      }
+      
+      processingRef.current = true;
+      
+      try {
+        // Create new session
+        const sessionId = await createNewSession();
+        console.log('📋 Created context-aware session:', sessionId);
+        
+        // Mark as processed IMMEDIATELY to prevent duplicates
+        sessionStorage.setItem('last-processed-context-session', String(timestamp));
+        sessionStorage.removeItem('pending-context-session');
+        
+        // Store context items temporarily in frontend state for display
+        // (Backend will store in session_variables once implemented)
+        setSessionContext(contextItems);
+        console.log('📌 Stored context items for display:', contextItems.length);
+        
+        // Wait for WebSocket to be ready
+        let attempts = 0;
+        const maxAttempts = 10;
+        while ((!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) && attempts < maxAttempts) {
+          console.log(`⏳ Waiting for WebSocket connection... (attempt ${attempts + 1}/${maxAttempts})`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          attempts++;
+        }
+        
+        // Send message with context via WebSocket
+        if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+          // Add user message to UI first
+          const userMsg = {
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${userId}`,
+            text: userMessage,
+            sender: 'user' as const,
+            timestamp: new Date(),
+            status: 'sending' as const,
+          };
+          addPersistedMessage(userMsg);
+          
+          const messageData = {
+            type: 'chat',
+            messageId: userMsg.id,
+            message: userMessage,
+            model: selectedModel,
+            sessionId: sessionId,
+            userId: userId,
+            contextItems: contextItems, // ✅ Include context items
+            context: {
+              currentPage: 'chat',
+              sessionId: sessionId,
+              hasContext: true,
+              contextItemCount: contextItems.length,
+            }
+          };
+          
+          console.log('📤 Sending context-aware message to WebSocket:', {
+            messageId: messageData.messageId,
+            sessionId,
+            contextItemCount: contextItems.length,
+            messagePreview: userMessage.substring(0, 50),
+          });
+          
+          websocketRef.current.send(JSON.stringify(messageData));
+          
+          // Set loading state for the new session
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [sessionId]: true
+          }));
+        } else {
+          console.error('❌ WebSocket not connected after waiting');
+        }
+      } catch (error) {
+        console.error('❌ Error creating context session:', error);
+      } finally {
+        processingRef.current = false;
+      }
+    };
+    
+    // Check for pending context session on mount (only once)
+    const checkPendingContextSession = () => {
+      const pending = sessionStorage.getItem('pending-context-session');
+      if (pending) {
+        console.log('🔍 Found pending context session, processing...');
+        const eventData = JSON.parse(pending);
+        handleContextSession(eventData);
+      }
+    };
+    
+    // Delay check to ensure everything is mounted
+    const timer = setTimeout(() => {
+      checkPendingContextSession();
+    }, 100);
+    
+    // Listen for new events
+    const handleEvent = (event: CustomEvent) => {
+      handleContextSession(event.detail);
+    };
+    
+    window.addEventListener('create-context-session', handleEvent as any);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('create-context-session', handleEvent as any);
+    };
+  }, [createNewSession, selectedModel, user?.id, addPersistedMessage]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -708,6 +865,77 @@ export default function ChatPage() {
     } catch (error) {
       console.error('📋 Error deleting session:', error);
     }
+  };
+
+  // Session selection handlers for context
+  const handleSessionSelect = (sessionId: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent triggering the session load
+    setSelectedSessions((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(sessionId)) {
+        newSet.delete(sessionId);
+      } else {
+        newSet.add(sessionId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleContextMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    setContextMenuAnchor(event.currentTarget as HTMLElement);
+    setContextMenuPosition({ x: event.clientX, y: event.clientY });
+  };
+
+  const handleContextMenuClose = () => {
+    setContextMenuAnchor(null);
+    setContextMenuPosition(null);
+  };
+
+  const handleAddToContext = () => {
+    if (selectedSessions.size === 0) {
+      console.log('No sessions selected');
+      return;
+    }
+
+    // Add each selected session to context
+    selectedSessions.forEach((sessionId) => {
+      const session = sessions.find((s) => s.session_id === sessionId);
+      if (session) {
+        // Trim messages according to backend logic
+        const messageCount = session.messages.length;
+        let trimmedMessages = session.messages;
+        
+        if (messageCount > 10) {
+          // Include first 2 + last 3 messages (same as backend)
+          trimmedMessages = [
+            ...session.messages.slice(0, 2),
+            ...session.messages.slice(-3)
+          ];
+        } else if (messageCount > 5) {
+          // Include last 5 messages
+          trimmedMessages = session.messages.slice(-5);
+        }
+        // Otherwise include all messages
+
+        addChatSessionToContext(
+          session.session_id,
+          session.title,
+          session.model || 'claude-3-sonnet',
+          session.message_count || session.messages.length,
+          {
+            messages: trimmedMessages,
+            created_at: session.created_at,
+            last_updated: session.last_updated,
+          }
+        );
+        console.log(`✅ Added session to context: ${session.session_id}`);
+      }
+    });
+
+    // Clear selection and close menu
+    setSelectedSessions(new Set());
+    handleContextMenuClose();
   };
 
   const getFirstUserMessage = (messages: any[]) => {
@@ -1087,7 +1315,10 @@ export default function ChatPage() {
           )}
 
           {/* Chat Sessions */}
-          <Box sx={{ flex: 1, overflow: 'auto', px: sidebarCollapsed ? 0.5 : 1, minHeight: 0 }}>
+          <Box 
+            sx={{ flex: 1, overflow: 'auto', px: sidebarCollapsed ? 0.5 : 1, minHeight: 0 }}
+            onContextMenu={handleContextMenu}
+          >
             <List>
               {sessions.map((session) => (
                 <ListItem key={session.session_id} disablePadding>
@@ -1110,6 +1341,19 @@ export default function ChatPage() {
                       </Tooltip>
                     ) : (
                       <>
+                        {/* Selection Checkbox */}
+                        <Checkbox
+                          checked={selectedSessions.has(session.session_id)}
+                          onClick={(e) => handleSessionSelect(session.session_id, e)}
+                          sx={{
+                            color: '#9ca3af',
+                            '&.Mui-checked': { color: '#3b82f6' },
+                            p: 0.5,
+                            mr: 0.5,
+                            '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                          }}
+                          size="small"
+                        />
                         <ListItemIcon sx={{ minWidth: '32px' }}>
                           <ChatIcon sx={{ color: '#9ca3af', fontSize: '1.1rem' }} />
                         </ListItemIcon>
@@ -1147,6 +1391,35 @@ export default function ChatPage() {
               ))}
             </List>
           </Box>
+
+          {/* Context Menu for Session Selection */}
+          <Menu
+            anchorEl={contextMenuAnchor}
+            open={Boolean(contextMenuAnchor)}
+            onClose={handleContextMenuClose}
+            anchorReference="anchorPosition"
+            anchorPosition={contextMenuPosition ? {
+              top: contextMenuPosition.y,
+              left: contextMenuPosition.x
+            } : undefined}
+            PaperProps={{
+              sx: {
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                border: '1px solid #374151',
+                color: 'white',
+                minWidth: 200,
+              },
+            }}
+          >
+            <MenuItem onClick={handleAddToContext} disabled={selectedSessions.size === 0}>
+              <ListItemIcon>
+                <ContextIcon sx={{ color: '#3b82f6' }} />
+              </ListItemIcon>
+              <ListItemText>
+                Add to Context ({selectedSessions.size} selected)
+              </ListItemText>
+            </MenuItem>
+          </Menu>
 
           {/* AI Model Selector */}
           <Box sx={{ p: sidebarCollapsed ? 1 : 2, borderTop: '2px solid #374151' }}>
@@ -1459,6 +1732,137 @@ export default function ChatPage() {
               ))}
             </Box>
           </GlassCard>
+        )}
+
+        {/* Context Bookmark - Collapsible */}
+        {sessionContext.length > 0 && (
+          <Box
+            sx={{
+              position: 'relative',
+              borderTop: '2px solid #374151',
+            }}
+          >
+            {/* Collapse/Expand Button */}
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                borderBottom: showContextBookmark ? '1px solid #374151' : 'none',
+                cursor: 'pointer',
+                '&:hover': {
+                  backgroundColor: 'rgba(31, 41, 55, 0.95)',
+                },
+              }}
+              onClick={() => setShowContextBookmark(!showContextBookmark)}
+            >
+              <Tooltip title={showContextBookmark ? 'Hide context' : 'Show context'}>
+                <IconButton
+                  size="small"
+                  sx={{
+                    color: '#3b82f6',
+                    p: 0.5,
+                  }}
+                >
+                  {showContextBookmark ? <ExpandMoreIcon /> : <ExpandLessIcon />}
+                </IconButton>
+              </Tooltip>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#9ca3af',
+                  fontSize: '0.7rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                📌 Context ({sessionContext.length} {sessionContext.length === 1 ? 'item' : 'items'})
+              </Typography>
+            </Box>
+            
+            {/* Context Items List */}
+            {showContextBookmark && (
+              <Box
+                sx={{
+                  maxHeight: '200px',
+                  overflowY: 'auto',
+                  backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                  p: 1.5,
+                  '&::-webkit-scrollbar': {
+                    width: '6px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                    borderRadius: '3px',
+                  },
+                }}
+              >
+                <List sx={{ p: 0 }}>
+                  {sessionContext.map((item, index) => (
+                    <ListItem
+                      key={item.id}
+                      sx={{
+                        backgroundColor: 'rgba(59, 130, 246, 0.05)',
+                        border: '1px solid rgba(59, 130, 246, 0.2)',
+                        borderRadius: '6px',
+                        mb: index < sessionContext.length - 1 ? 1 : 0,
+                        p: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                      }}
+                    >
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: '#ffffff',
+                            fontWeight: 500,
+                            fontSize: '0.8rem',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {item.title}
+                        </Typography>
+                        {item.subtitle && (
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: '#9ca3af',
+                              fontSize: '0.7rem',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              display: 'block',
+                            }}
+                          >
+                            {item.subtitle}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Chip
+                        label={item.type}
+                        size="small"
+                        sx={{
+                          height: '16px',
+                          fontSize: '0.65rem',
+                          backgroundColor: 'rgba(139, 92, 246, 0.2)',
+                          color: '#a78bfa',
+                          border: '1px solid rgba(139, 92, 246, 0.3)',
+                        }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+            )}
+          </Box>
         )}
 
         {/* Input Area - Compact with Paperclip */}

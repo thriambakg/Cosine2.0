@@ -6,7 +6,9 @@ import { setCurrentPage } from '../../store/slices/navigationSlice';
 import AppHeader from './AppHeader';
 import AppSidebar from './AppSidebar';
 import FloatingClock from './FloatingClock';
+import ContextWindow from './ContextWindow';
 import { ClockProvider } from '../../contexts/ClockContext';
+import { ContextWindowProvider } from '../../contexts/ContextWindowContext';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -22,29 +24,34 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <ClockProvider>
-      <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-        {/* Header */}
-        <AppHeader />
-        
-        {/* Sidebar */}
-        <AppSidebar />
-        
-        {/* Main Content */}
-        <Box
-          component="main"
-          sx={{
-            flexGrow: 1,
-            pt: 8, // Account for fixed header
-            minHeight: '100vh',
-            backgroundColor: 'transparent',
-          }}
-        >
-          {children}
+      <ContextWindowProvider>
+        <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+          {/* Header */}
+          <AppHeader />
+          
+          {/* Sidebar */}
+          <AppSidebar />
+          
+          {/* Main Content */}
+          <Box
+            component="main"
+            sx={{
+              flexGrow: 1,
+              pt: 8, // Account for fixed header
+              minHeight: '100vh',
+              backgroundColor: 'transparent',
+            }}
+          >
+            {children}
+          </Box>
+          
+          {/* Floating Clock */}
+          <FloatingClock />
+          
+          {/* Context Window */}
+          <ContextWindow />
         </Box>
-        
-        {/* Floating Clock */}
-        <FloatingClock />
-      </Box>
+      </ContextWindowProvider>
     </ClockProvider>
   );
 }
