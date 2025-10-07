@@ -298,6 +298,8 @@ export default function ChatPage() {
       
       console.log('🔄 SESSION SWITCH: From', previousSessionIdRef.current, 'to', currentSessionId);
       
+      // Removed automatic session change dispatch - sidebar only changes via manual "Open in Sidebar"
+      
       // Process any cached messages for the new session
       if (currentSessionId && pendingMessages[currentSessionId]) {
         console.log('🔄 SESSION SWITCH: Processing cached messages for session:', currentSessionId);
@@ -529,6 +531,12 @@ export default function ChatPage() {
         break;
 
       case 'ai_response':
+        // Only process AI responses for the current session
+        if (data.session_id && currentSession?.session_id && data.session_id !== currentSession.session_id) {
+          console.log('🤖 AI response for different session, ignoring:', data.session_id, 'vs', currentSession.session_id);
+          break;
+        }
+        
         // Check if we've already processed this message
         const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         if (processedMessageIds.has(messageId)) {
@@ -569,7 +577,30 @@ export default function ChatPage() {
               [responseSessionId]: false
             }));
           }
-        } else if (responseSessionId) {
+          
+          console.log('📡 Adding AI response to current ChatPage session');
+        }
+        
+        // Always dispatch AI response event for sidebar (regardless of current session)
+        // This allows the sidebar to receive responses for its active session
+        const aiResponseEvent = new CustomEvent('chatpage-ai-response', {
+          detail: {
+            messageId: messageId,
+            content: data.content || 'No response content',
+            sessionId: responseSessionId,
+            userId: user?.id,
+            timestamp: Date.now()
+          }
+        });
+        window.dispatchEvent(aiResponseEvent);
+        console.log('📡 Dispatched AI response to sidebar:', {
+          messageId,
+          sessionId: responseSessionId,
+          userId: user?.id,
+          contentLength: (data.content || '').length
+        });
+        
+        if (responseSessionId && responseSessionId !== currentSession?.session_id) {
           // Cache the message for the session it belongs to
           console.log('🤖 Caching AI response for session:', responseSessionId);
           setPendingMessages(prev => ({
@@ -637,10 +668,19 @@ export default function ChatPage() {
 
   // Load context when session changes
   useEffect(() => {
+    console.log('📌 Session changed, checking for context:', {
+      hasSession: !!currentSession,
+      sessionId: currentSession?.session_id,
+      hasSessionVariables: !!currentSession?.session_variables,
+      hasContextItems: !!currentSession?.session_variables?.context_items,
+      contextItemsLength: currentSession?.session_variables?.context_items?.length || 0
+    });
+    
     if (currentSession?.session_variables?.context_items) {
-      console.log('📌 Loading context for session:', currentSession.session_id);
+      console.log('📌 Loading context for session:', currentSession.session_id, currentSession.session_variables.context_items);
       setSessionContext(currentSession.session_variables.context_items);
     } else {
+      console.log('📌 No context items found, clearing context');
       setSessionContext([]);
     }
   }, [currentSession]);
@@ -688,6 +728,19 @@ export default function ChatPage() {
         setSessionContext(contextItems);
         console.log('📌 Stored context items for display:', contextItems.length);
         
+        // Dispatch event to sync the new session with the sidebar AFTER database creation
+        const contextSessionEvent = new CustomEvent('create-context-session', {
+          detail: {
+            sessionId: sessionId, // This is now the actual database session ID
+            userId: user?.id,
+            contextItems: contextItems,
+            userMessage: userMessage,
+            timestamp: Date.now()
+          }
+        });
+        window.dispatchEvent(contextSessionEvent);
+        console.log('📡 Dispatched context session to sidebar with database session ID:', sessionId);
+        
         // Wait for WebSocket to be ready
         let attempts = 0;
         const maxAttempts = 10;
@@ -708,6 +761,20 @@ export default function ChatPage() {
             status: 'sending' as const,
           };
           addPersistedMessage(userMsg);
+          
+          // Mirror user message to GlobalChatSidebar
+          const userMessageEvent = new CustomEvent('chatpage-message', {
+            detail: {
+              messageId: userMsg.id,
+              sender: 'user',
+              text: userMsg.text,
+              sessionId: sessionId,
+              userId: userId,
+              timestamp: Date.now()
+            }
+          });
+          window.dispatchEvent(userMessageEvent);
+          console.log('📡 Dispatched context user message to sidebar:', userMsg.id);
           
           const messageData = {
             type: 'chat',
@@ -769,10 +836,62 @@ export default function ChatPage() {
       handleContextSession(event.detail);
     };
     
+    const handleSidebarMessage = (event: CustomEvent) => {
+      const messageData = event.detail;
+      console.log('📤 ChatPage received message from sidebar:', messageData);
+      
+      // Ensure we're on the same session as the sidebar
+      if (messageData.sessionId && messageData.userId === user?.id) {
+        // If ChatPage is on a different session, switch to the sidebar's session
+        if (currentSession?.session_id !== messageData.sessionId) {
+          console.log('🔄 Switching ChatPage to sidebar session:', messageData.sessionId);
+          // Load the session that the sidebar is using
+          loadSession(messageData.sessionId);
+        }
+        
+        // Add the user message to ChatPage immediately
+        const userMessage: Message = {
+          id: messageData.messageId,
+          text: messageData.message,
+          sender: 'user',
+          timestamp: new Date(messageData.timestamp),
+        };
+        addPersistedMessage(userMessage);
+        console.log('✅ Added sidebar message to ChatPage UI');
+        
+        // Update ChatPage's selected model to match the sidebar's selection
+        if (messageData.model && messageData.model !== selectedModel) {
+          console.log('🔄 Updating ChatPage model from sidebar:', messageData.model);
+          setSelectedModel(messageData.model);
+        }
+        
+        // Send the message via ChatPage's WebSocket (this will handle the actual sending)
+        if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+          const messagePayload = {
+            action: 'chat',
+            type: 'chat_message',
+            message: messageData.message,
+            userId: messageData.userId,
+            sessionId: messageData.sessionId,
+            model: messageData.model, // Use the sidebar's selected model
+            files: [],
+            messageId: messageData.messageId,
+          };
+          
+          websocketRef.current.send(JSON.stringify(messagePayload));
+          console.log('✅ Forwarded sidebar message to backend via ChatPage WebSocket with model:', messageData.model);
+        } else {
+          console.error('❌ ChatPage WebSocket not connected, cannot forward message');
+        }
+      }
+    };
+    
     window.addEventListener('create-context-session', handleEvent as any);
+    window.addEventListener('sidebar-send-message', handleSidebarMessage as any);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('create-context-session', handleEvent as any);
+      window.removeEventListener('sidebar-send-message', handleSidebarMessage as any);
     };
   }, [createNewSession, selectedModel, user?.id, addPersistedMessage]);
 
@@ -1147,6 +1266,20 @@ export default function ChatPage() {
     addPersistedMessage(userMessage);
     setInputMessage('');
     setUploadedFiles([]);
+    
+    // Mirror user message to GlobalChatSidebar
+    const userMessageEvent = new CustomEvent('chatpage-message', {
+      detail: {
+        messageId: userMessage.id,
+        sender: 'user',
+        text: userMessage.text,
+        sessionId: sessionToUse?.session_id,
+        userId: user?.id,
+        timestamp: Date.now()
+      }
+    });
+    window.dispatchEvent(userMessageEvent);
+    console.log('📡 Dispatched user message to sidebar:', userMessage.id);
     
     // Set loading state for the current session
     if (sessionToUse?.session_id) {

@@ -137,7 +137,8 @@ def list_sessions(user_id: str) -> Dict[str, Any]:
                 'title': item.get('title', f'Chat {item["session_id"][:8]}'),
                 'model': item.get('model', 'claude-3-sonnet'),
                 'message_count': item.get('message_count', 0),
-                'messages': item.get('messages', [])
+                'messages': item.get('messages', []),
+                'session_variables': item.get('session_variables', {})
             }
             session_list.append(session)
         
@@ -192,7 +193,8 @@ def get_session(user_id: str, session_id: str) -> Dict[str, Any]:
             'last_updated': session_data.get('last_updated', session_data.get('created_at')),
             'model': session_data.get('model', 'claude-3-sonnet'),
             'message_count': len(messages),
-            'messages': messages
+            'messages': messages,
+            'session_variables': session_data.get('session_variables', {})
         }
         
         return {
@@ -369,6 +371,10 @@ def update_session_metadata(user_id: str, session_id: str, metadata: Dict[str, A
         if 'model' in metadata:
             update_expression_parts.append('model = :model')
             expression_attribute_values[':model'] = metadata['model']
+        
+        if 'session_variables' in metadata:
+            update_expression_parts.append('session_variables = :session_variables')
+            expression_attribute_values[':session_variables'] = metadata['session_variables']
         
         if update_expression_parts:
             update_expression_parts.append('last_updated = :timestamp')

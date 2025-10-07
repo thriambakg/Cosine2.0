@@ -1,35 +1,37 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
   IconButton,
   TextField,
-  InputAdornment,
-  CircularProgress,
   Tooltip,
+  CircularProgress,
+  Alert,
+  Chip,
+  InputAdornment,
+  FormControl,
   Select,
   MenuItem,
-  FormControl,
-  Chip,
+  SelectChangeEvent,
+  Collapse,
   List,
   ListItem,
-  Collapse,
+  ListItemText,
 } from '@mui/material';
 import {
-  ChevronRight as ChevronRightIcon,
-  ChevronLeft as ChevronLeftIcon,
-  Send as SendIcon,
   Refresh as RefreshIcon,
+  Delete as DeleteIcon,
+  Send as SendIcon,
   Close as CloseIcon,
+  ChevronDown as ChevronDownIcon,
+  ChevronRight as ChevronRightIcon,
   ExpandLess as ExpandLessIcon,
   ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
-import { useWebSocket } from '../../contexts/WebSocketContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { ChatSession } from '../../hooks/useChatPersistence';
-import { sessionManagementAPI } from '../../services/api';
 import { ContextItem } from '../tiles/common/contextManager';
+import { sessionManagementAPI } from '../../services/api';
 
 interface Message {
   id: string;
@@ -38,32 +40,78 @@ interface Message {
   timestamp: number;
 }
 
+interface ChatSession {
+  session_id: string;
+  title: string;
+  model: string;
+  created_at: number;
+  last_updated: number;
+  message_count: number;
+  messages: Message[];
+  session_variables?: {
+    context_items?: any[];
+    context_added_at?: string;
+    [key: string]: any;
+  };
+}
+
 const GlobalChatSidebar: React.FC = () => {
-  const { 
-    isVisible, 
-    activeSessionId, 
-    close, 
-    setActiveSessionId,
-    currentSession,
-    setCurrentSession,
-    messages,
-    setMessages
-  } = useGlobalChat();
-  const { isConnected, connect, disconnect, sendMessage, websocket } = useWebSocket();
+  const { isVisible, activeSessionId, setActiveSessionId, close } = useGlobalChat();
   const { user } = useAuth();
   
-  // Local state (simplified - no database loading)
-  const [inputMessage, setInputMessage] = useState<string>('');
-  const [isLoadingMessage, setIsLoadingMessage] = useState<boolean>(false);
-  const [selectedModel, setSelectedModel] = useState<string>('claude-3-sonnet');
+  // Local state for the mirror
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
-  const [showContextBookmark, setShowContextBookmark] = useState<boolean>(false);
-  const [processedMessageIds, setProcessedMessageIds] = useState<Set<string>>(new Set());
+  const [inputMessage, setInputMessage] = useState('');
+  const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
+  const [isLoadingMessage, setIsLoadingMessage] = useState(false);
+  const [isContextExpanded, setIsContextExpanded] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const sidebarWidth = 500;
+  const sidebarWidth = 400;
 
-  // Simple loadSession function - only loads from database when explicitly requested
+  // Available models (matching ChatPage exactly)
+  const availableModels = [
+    { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' },
+    { value: 'claude-3-haiku', label: 'Claude 3 Haiku' },
+    { value: 'nova-lite', label: 'Amazon Nova Lite' },
+    { value: 'gpt-oss-120b', label: 'GPT-OSS 120B' },
+    { value: 'gpt-oss-20b', label: 'GPT-OSS 20B' },
+  ];
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Typewriter effect for AI responses (same speed as ChatPage)
+  const typewriterEffect = (messageId: string, fullText: string, speed: number = 2) => {
+    let currentIndex = 0;
+    setStreamingMessageId(messageId);
+    
+    const typeInterval = setInterval(() => {
+      currentIndex++;
+      const currentText = fullText.substring(0, currentIndex);
+      
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId 
+          ? { ...msg, text: currentText }
+          : msg
+      ));
+      
+      if (currentIndex >= fullText.length) {
+        clearInterval(typeInterval);
+        setStreamingMessageId(null);
+        console.log('✅ Streaming completed for message:', messageId);
+      }
+    }, speed);
+    
+    return typeInterval;
+  };
+
+  // Load session from database
   const loadSessionFromDatabase = async (sessionId: string) => {
     if (!user?.id) return;
 
@@ -72,13 +120,13 @@ const GlobalChatSidebar: React.FC = () => {
       const session = await sessionManagementAPI.getSession(sessionId, user.id);
       
       if (session) {
-        console.log('✅ Session loaded successfully:', {
+        console.log('✅ Session loaded from database successfully:', {
           sessionId: session.session_id,
           messageCount: session.messages?.length || 0,
           hasContext: !!session.session_variables?.context_items
         });
         
-        // Update context state (which persists to sessionStorage)
+        // Update session data
         setCurrentSession(session);
         setSelectedModel(session.model || 'claude-3-sonnet');
 
@@ -97,37 +145,103 @@ const GlobalChatSidebar: React.FC = () => {
         } else {
           setSessionContext([]);
         }
+        
+        console.log('✅ Session data loaded into sidebar');
       } else {
-        console.log('⚠️ Session not found in database, using current state');
+        console.log('⚠️ Session not found in database');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Failed to load session:', error);
+      
+      if (error?.response?.status === 404) {
+        console.log('🔄 Session not found (404) - might be newly created');
+      }
     }
   };
 
-  // Connect WebSocket when activeSessionId changes - simple persistence like clock/context window
+  // Mirror ChatPage's current session
   useEffect(() => {
-    if (activeSessionId && user?.id && isVisible) {
-      console.log('🔌 Connecting WebSocket for session:', activeSessionId);
-      connect(activeSessionId);
-    }
-  }, [activeSessionId, user?.id, isVisible, connect]);
+    if (!isVisible) return;
 
-  // Handle manual session opening from ChatPage - load from database when explicitly requested
+    // Removed automatic session change mirroring - only manual "Open in Sidebar" should change the sidebar
+
+    const handleChatPageMessage = (event: CustomEvent) => {
+      const messageData = event.detail;
+      console.log('📨 GlobalChatSidebar mirroring ChatPage message:', messageData);
+      
+      if (messageData.sessionId === activeSessionId && messageData.userId === user?.id) {
+        // Add message to sidebar
+        setMessages(prev => [
+          ...prev,
+          {
+            id: messageData.messageId,
+            sender: messageData.sender,
+            text: messageData.text,
+            timestamp: messageData.timestamp
+          }
+        ]);
+        
+        // If it's a user message, show loading state
+        if (messageData.sender === 'user') {
+          setIsLoadingMessage(true);
+        }
+      }
+    };
+
+    const handleChatPageAIResponse = (event: CustomEvent) => {
+      const responseData = event.detail;
+      console.log('🤖 GlobalChatSidebar mirroring AI response:', responseData);
+      console.log('🤖 Current activeSessionId:', activeSessionId);
+      console.log('🤖 Response sessionId:', responseData.sessionId);
+      console.log('🤖 Current user ID:', user?.id);
+      console.log('🤖 Response user ID:', responseData.userId);
+      
+      if (responseData.sessionId === activeSessionId && responseData.userId === user?.id) {
+        console.log('✅ Session and user match, adding AI response');
+        
+        // Clear loading state immediately
+        setIsLoadingMessage(false);
+        
+        // Add AI response with empty text initially for typewriter effect
+        const messageId = responseData.messageId;
+        setMessages(prev => [
+          ...prev,
+          {
+            id: messageId,
+            sender: 'ai',
+            text: '', // Start empty for typewriter effect
+            timestamp: responseData.timestamp
+          }
+        ]);
+        
+        // Start typewriter effect with same speed as ChatPage (2ms)
+        typewriterEffect(messageId, responseData.content, 2);
+        console.log('✅ AI response typewriter started in sidebar');
+      } else {
+        console.log('❌ Session or user mismatch, ignoring AI response');
+      }
+    };
+
+    window.addEventListener('chatpage-message', handleChatPageMessage as EventListener);
+    window.addEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
+    
+    return () => {
+      window.removeEventListener('chatpage-message', handleChatPageMessage as EventListener);
+      window.removeEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
+    };
+  }, [isVisible, activeSessionId, user?.id]);
+
+  // Handle manual session opening from ChatPage
   useEffect(() => {
     if (!isVisible) return;
 
     const handleManualSessionOpen = (event: CustomEvent) => {
       const sessionData = event.detail;
-      console.log('📂 GlobalChatSidebar received manual session open:', sessionData);
+      console.log('📂 GlobalChatSidebar opening session:', sessionData);
       
       if (sessionData.sessionId && sessionData.userId === user?.id) {
-        console.log('🔄 Loading manually opened session from database:', sessionData.sessionId);
-        
-        // Update the activeSessionId (this will trigger WebSocket connection)
         setActiveSessionId(sessionData.sessionId);
-        
-        // Load session from database (this updates the persisted context state)
+        // Load the session data from database
         loadSessionFromDatabase(sessionData.sessionId);
       }
     };
@@ -137,92 +251,38 @@ const GlobalChatSidebar: React.FC = () => {
     return () => {
       window.removeEventListener('manual-session-open', handleManualSessionOpen as EventListener);
     };
-  }, [isVisible, user?.id, loadSessionFromDatabase, setActiveSessionId]);
+  }, [isVisible, user?.id, setActiveSessionId]);
 
-  // Handle context sessions from ContextWindow - simple persistence approach
+  // Handle context sessions
   useEffect(() => {
     if (!isVisible) return;
 
     const handleContextSession = (event: CustomEvent) => {
       const contextData = event.detail;
-      console.log('🎯 GlobalChatSidebar received context session:', contextData);
+      console.log('🎯 GlobalChatSidebar handling context session:', contextData);
       
-      if (contextData.sessionId && contextData.userId === user?.id) {
-        // Update the active session ID in the global context
+      if (contextData.userId === user?.id) {
+        console.log('🎯 Context session received, syncing with new session:', contextData.sessionId);
+        
+        // Update the active session ID to match the new context session
         setActiveSessionId(contextData.sessionId);
         
-        // Set the session as current and load it immediately
-        const newSession = {
-          session_id: contextData.sessionId,
-          title: 'Context Analysis',
-          model: 'claude-3-sonnet',
-          created_at: Date.now() / 1000,
-          last_updated: Date.now() / 1000,
-          message_count: 1,
-          messages: [],
-          session_variables: {
-            context_items: contextData.contextItems || [],
-            context_added_at: Date.now().toString(),
-          }
-        };
-        
-        setCurrentSession(newSession);
-
-        // Add the user's message to the UI immediately (using context's setMessages)
-        const userMessage: Message = {
-          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          sender: 'user',
-          text: contextData.userMessage,
-          timestamp: Date.now(),
-        };
-        setMessages([userMessage]);
-        
-        // Set context items for bookmark display
+        // Set context items
         setSessionContext(contextData.contextItems || []);
         
-        // Connect WebSocket and send message
-        connect(contextData.sessionId);
+        // Clear any existing messages - the user message will come via chatpage-message event
+        setMessages([]);
         
-        // Wait for WebSocket connection and send message with retry mechanism
-        let attempts = 0;
-        const maxAttempts = 50; // 5 seconds max wait time
+        // Show loading state
+        setIsLoadingMessage(true);
         
-        const waitForConnection = () => {
-          attempts++;
-          
-          if (websocket && websocket.readyState === WebSocket.OPEN) {
-            console.log('📤 WebSocket connected, sending context message');
-            const sent = sendMessage({
-              action: 'chat',
-              type: 'chat_message',
-              message: contextData.userMessage,
-              userId: user.id,
-              sessionId: contextData.sessionId,
-              model: 'claude-3-sonnet',
-              files: [],
-              contextItems: contextData.contextItems,
-              messageId: userMessage.id,
-            });
-            
-            if (sent) {
-              setIsLoadingMessage(true);
-              console.log('✅ Context message sent successfully');
-            } else {
-              console.error('❌ Failed to send context message');
-              setIsLoadingMessage(false);
-            }
-          } else if (attempts < maxAttempts) {
-            // Retry after a short delay
-            console.log(`⏳ Waiting for WebSocket connection... (attempt ${attempts}/${maxAttempts})`);
-            setTimeout(waitForConnection, 100);
-          } else {
-            console.error('❌ WebSocket connection timeout after 5 seconds');
-            setIsLoadingMessage(false);
-          }
-        };
+        // Load the session data from the database to get complete session info
+        loadSessionFromDatabase(contextData.sessionId);
         
-        // Start waiting for connection
-        waitForConnection();
+        // Make sure the sidebar is visible (it should already be visible from ContextWindow)
+        console.log('🎯 Sidebar visibility status:', isVisible);
+        
+        console.log('🎯 Context session set up in sidebar');
       }
     };
 
@@ -231,69 +291,51 @@ const GlobalChatSidebar: React.FC = () => {
     return () => {
       window.removeEventListener('create-context-session', handleContextSession as EventListener);
     };
-  }, [isVisible, user?.id, connect, sendMessage, websocket]);
+  }, [isVisible, user?.id, loadSessionFromDatabase]);
 
-  // Listen for WebSocket messages
-  useEffect(() => {
-    if (!websocket) return;
-
-    const handleMessage = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log('📨 GlobalChatSidebar received WebSocket message:', data);
-        
-        if (data.type === 'ai_response') {
-          // Check if we've already processed this message (prevent duplicates)
-          const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-          if (processedMessageIds.has(messageId)) {
-            console.log('🤖 Duplicate AI response ignored in sidebar:', messageId);
-            return;
-          }
-          
-          // Mark message as processed
-          setProcessedMessageIds(prev => new Set(prev).add(messageId));
-          
-          // Use the context's setMessages function to update persisted state
-          setMessages(prev => [
-            ...prev,
-            {
-              id: messageId,
-              sender: 'ai',
-              text: data.content || 'No response content',
-              timestamp: Date.now(),
-            }
-          ]);
-          setIsLoadingMessage(false);
-          console.log('✅ AI response added to sidebar messages:', messageId);
-        } else if (data.type === 'message_received') {
-          // Message was received by server, keep showing loading indicator
-          console.log('📨 Message received by server:', data.message_id);
-        }
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
-      }
-    };
-
-    websocket.addEventListener('message', handleMessage);
-
-    return () => {
-      websocket.removeEventListener('message', handleMessage);
-    };
-  }, [websocket, setMessages, processedMessageIds]);
-
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-
-  const handleSendMessage = useCallback(() => {
-    if (!inputMessage.trim() || !activeSessionId || !user?.id || !isConnected) return;
+  // Send message - forward to ChatPage
+  const handleSendMessage = useCallback(async () => {
+    if (!inputMessage.trim() || !user?.id) return;
 
     const userMessage = inputMessage.trim();
+    let sessionId = activeSessionId;
+
+    // If no active session, create a new one
+    if (!sessionId) {
+      try {
+        console.log('🆕 Creating new session for sidebar message');
+        const response = await fetch(`https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production/sessions?user_id=${user.id}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: new Date().toLocaleString(),
+            model: selectedModel,
+            create_welcome_message: false
+          })
+        });
+        
+        if (response.ok) {
+          const newSession = await response.json();
+          sessionId = newSession.session_id;
+          setActiveSessionId(sessionId);
+          console.log('✅ New session created:', sessionId);
+        } else {
+          throw new Error('Failed to create session');
+        }
+      } catch (error) {
+        console.error('❌ Failed to create new session:', error);
+        // Create local session as fallback
+        sessionId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        setActiveSessionId(sessionId);
+        console.log('✅ Local session created:', sessionId);
+      }
+    }
+
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Add user message to UI immediately (using context's setMessages)
+    // Add user message to sidebar immediately
     setMessages(prev => [
       ...prev,
       {
@@ -304,25 +346,24 @@ const GlobalChatSidebar: React.FC = () => {
       }
     ]);
 
-    // Send via WebSocket
-    const sent = sendMessage({
-      action: 'chat',
-      type: 'chat_message',
-      message: userMessage,
-      userId: user.id,
-      sessionId: activeSessionId,
-      model: selectedModel,
-      files: [],
-      messageId: messageId,
-    });
+    setInputMessage('');
+    setIsLoadingMessage(true);
 
-    if (sent) {
-      setInputMessage('');
-      setIsLoadingMessage(true);
-    } else {
-      console.error('Failed to send message - WebSocket not connected');
-    }
-  }, [inputMessage, activeSessionId, user?.id, isConnected, selectedModel, sendMessage]);
+    // Forward message to ChatPage
+    const sidebarMessageEvent = new CustomEvent('sidebar-send-message', {
+      detail: {
+        message: userMessage,
+        sessionId: sessionId,
+        model: selectedModel,
+        userId: user.id,
+        messageId: messageId,
+        timestamp: Date.now()
+      }
+    });
+    window.dispatchEvent(sidebarMessageEvent);
+    
+    console.log('📤 Forwarded message to ChatPage with model:', selectedModel, 'Message:', userMessage.substring(0, 50));
+  }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId]);
 
   const handleKeyPress = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -331,29 +372,33 @@ const GlobalChatSidebar: React.FC = () => {
     }
   };
 
+  const handleModelChange = (event: SelectChangeEvent) => {
+    setSelectedModel(event.target.value);
+  };
+
+  if (!isVisible) {
+    return null;
+  }
+
   return (
     <Box
       sx={{
         position: 'fixed',
         right: 0,
-        top: 64, // Below header
+        top: 64,
         bottom: 0,
         width: sidebarWidth,
         backgroundColor: 'rgba(15, 23, 42, 0.98)',
         borderLeft: '2px solid #374151',
         backdropFilter: 'blur(10px)',
         zIndex: 1200,
-        display: isVisible ? 'flex' : 'none', // Hide with CSS instead of unmounting
+        display: 'flex',
         flexDirection: 'column',
         boxShadow: '-4px 0 16px rgba(0, 0, 0, 0.3)',
         animation: 'slideInFromRight 0.3s ease-out',
         '@keyframes slideInFromRight': {
-          from: {
-            transform: 'translateX(100%)',
-          },
-          to: {
-            transform: 'translateX(0)',
-          },
+          from: { transform: 'translateX(100%)' },
+          to: { transform: 'translateX(0)' },
         },
       }}
     >
@@ -371,13 +416,26 @@ const GlobalChatSidebar: React.FC = () => {
           <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '1rem' }}>
             AI Chat
           </Typography>
+          {currentSession && (
+            <Chip
+              label={currentSession.title}
+              size="small"
+              sx={{
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                color: '#60a5fa',
+                fontSize: '0.75rem',
+                height: '20px',
+              }}
+            />
+          )}
         </Box>
 
         <Box sx={{ display: 'flex', gap: 0.5 }}>
-          <Tooltip title="Refresh">
+          {activeSessionId && (
             <IconButton
               size="small"
-              onClick={() => activeSessionId && loadSessionFromDatabase(activeSessionId)}
+              onClick={() => loadSessionFromDatabase(activeSessionId)}
+              title="Refresh Session"
               sx={{
                 color: '#9ca3af',
                 '&:hover': {
@@ -388,40 +446,191 @@ const GlobalChatSidebar: React.FC = () => {
             >
               <RefreshIcon fontSize="small" />
             </IconButton>
-          </Tooltip>
-
-          <Tooltip title="Close">
-            <IconButton
-              size="small"
-              onClick={close}
-              sx={{
-                color: '#9ca3af',
-                '&:hover': {
-                  color: '#ef4444',
-                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                },
-              }}
-            >
-              <CloseIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+          )}
+          
+          <IconButton
+            size="small"
+            onClick={() => {
+              setActiveSessionId(null);
+              setCurrentSession(null);
+              setMessages([]);
+              setSessionContext([]);
+              setInputMessage('');
+              setIsLoadingMessage(false);
+              console.log('🗑️ Chat cleared');
+            }}
+            title="Clear Chat"
+            sx={{
+              color: '#9ca3af',
+              '&:hover': {
+                color: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              },
+            }}
+          >
+            <DeleteIcon fontSize="small" />
+          </IconButton>
+          
+          <IconButton
+            size="small"
+            onClick={close}
+            title="Close"
+            sx={{
+              color: '#9ca3af',
+              '&:hover': {
+                color: '#ffffff',
+                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              },
+            }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
         </Box>
       </Box>
 
-      {/* Model Selector */}
-      <Box sx={{ p: 2, borderBottom: '1px solid #374151' }}>
-        <FormControl fullWidth size="small">
+      {/* Context Items */}
+      {sessionContext.length > 0 && (
+        <Box sx={{ borderBottom: '1px solid #374151' }}>
+          <Box
+            sx={{
+              p: 1,
+              display: 'flex',
+              alignItems: 'center',
+              cursor: 'pointer',
+              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
+            }}
+            onClick={() => setIsContextExpanded(!isContextExpanded)}
+          >
+            <Typography variant="body2" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+              Context ({sessionContext.length} items)
+            </Typography>
+            {isContextExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+          </Box>
+          <Collapse in={isContextExpanded}>
+            <List dense sx={{ py: 0 }}>
+              {sessionContext.map((item, index) => (
+                <ListItem key={index} sx={{ py: 0.5, px: 1 }}>
+                  <ListItemText
+                    primary={item.title}
+                    secondary={item.subtitle}
+                    primaryTypographyProps={{
+                      fontSize: '0.75rem',
+                      color: '#ffffff',
+                    }}
+                    secondaryTypographyProps={{
+                      fontSize: '0.65rem',
+                      color: '#9ca3af',
+                    }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Collapse>
+        </Box>
+      )}
+
+      {/* Messages */}
+      <Box
+        sx={{
+          flex: 1,
+          overflowY: 'auto',
+          p: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 1,
+        }}
+      >
+        {messages.map((message) => (
+          <Box
+            key={message.id}
+            sx={{
+              alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start',
+              maxWidth: '85%',
+              p: 1.5,
+              borderRadius: 2,
+              backgroundColor: message.sender === 'user' 
+                ? 'rgba(59, 130, 246, 0.2)' 
+                : 'rgba(255, 255, 255, 0.1)',
+              border: message.sender === 'user' 
+                ? '1px solid rgba(59, 130, 246, 0.3)' 
+                : '1px solid rgba(255, 255, 255, 0.2)',
+            }}
+          >
+            <Typography
+              variant="body2"
+              sx={{
+                color: '#ffffff',
+                fontSize: '0.875rem',
+                lineHeight: 1.4,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {message.text}
+              {streamingMessageId === message.id && (
+                <Box
+                  component="span"
+                  sx={{
+                    display: 'inline-block',
+                    width: '8px',
+                    height: '16px',
+                    backgroundColor: '#60a5fa',
+                    marginLeft: '2px',
+                    animation: 'blink 1s infinite',
+                    '@keyframes blink': {
+                      '0%, 50%': { opacity: 1 },
+                      '51%, 100%': { opacity: 0 },
+                    },
+                  }}
+                />
+              )}
+            </Typography>
+          </Box>
+        ))}
+        
+        {isLoadingMessage && (
+          <Box
+            sx={{
+              alignSelf: 'flex-start',
+              p: 1.5,
+              borderRadius: 2,
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+            }}
+          >
+            <CircularProgress size={16} sx={{ color: '#60a5fa' }} />
+            <Typography variant="body2" sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
+              AI is thinking...
+            </Typography>
+          </Box>
+        )}
+        
+        <div ref={messagesEndRef} />
+      </Box>
+
+      {/* Input Area */}
+      <Box
+        sx={{
+          p: 2,
+          borderTop: '1px solid #374151',
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+        }}
+      >
+        {/* Model Selection */}
+        <FormControl fullWidth size="small" sx={{ mb: 1 }}>
           <Select
             value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
+            onChange={handleModelChange}
             sx={{
               color: '#ffffff',
-              backgroundColor: 'rgba(31, 41, 55, 0.5)',
               '& .MuiOutlinedInput-notchedOutline': {
                 borderColor: '#374151',
               },
               '&:hover .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#4b5563',
+                borderColor: '#6b7280',
               },
               '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
                 borderColor: '#3b82f6',
@@ -431,259 +640,43 @@ const GlobalChatSidebar: React.FC = () => {
               },
             }}
           >
-            <MenuItem value="claude-3-sonnet">Claude 3 Sonnet</MenuItem>
-            <MenuItem value="claude-3-haiku">Claude 3 Haiku</MenuItem>
-            <MenuItem value="nova-lite">Amazon Nova Lite</MenuItem>
-            <MenuItem value="gpt-oss-120b">GPT-OSS 120B</MenuItem>
-            <MenuItem value="gpt-oss-20b">GPT-OSS 20B</MenuItem>
+            {availableModels.map((model) => (
+              <MenuItem key={model.value} value={model.value}>
+                <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                  {model.label}
+                </Typography>
+              </MenuItem>
+            ))}
           </Select>
         </FormControl>
-      </Box>
 
-      {/* Messages */}
-      <Box
-        sx={{
-          flex: 1,
-          overflowY: 'auto',
-          p: 2,
-          '&::-webkit-scrollbar': {
-            width: '6px',
-          },
-          '&::-webkit-scrollbar-track': {
-            backgroundColor: 'rgba(55, 65, 81, 0.3)',
-          },
-          '&::-webkit-scrollbar-thumb': {
-            backgroundColor: 'rgba(59, 130, 246, 0.5)',
-            borderRadius: '3px',
-          },
-          '&::-webkit-scrollbar-thumb:hover': {
-            backgroundColor: 'rgba(59, 130, 246, 0.7)',
-          },
-        }}
-      >
-        {messages.length === 0 ? (
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: '#6b7280',
-              textAlign: 'center',
-              px: 4,
-            }}
-          >
-            <Typography variant="body2">
-              Start a conversation with the AI assistant
-            </Typography>
-          </Box>
-        ) : (
-          messages.map((message) => (
-            <Box
-              key={message.id}
-              sx={{
-                mb: 2,
-                display: 'flex',
-                flexDirection: message.sender === 'user' ? 'row-reverse' : 'row',
-                gap: 1,
-              }}
-            >
-              <Box
-                sx={{
-                  maxWidth: '80%',
-                  p: 1.5,
-                  borderRadius: '8px',
-                  backgroundColor: message.sender === 'user'
-                    ? 'rgba(59, 130, 246, 0.2)'
-                    : 'rgba(55, 65, 81, 0.5)',
-                  border: message.sender === 'user'
-                    ? '1px solid rgba(59, 130, 246, 0.3)'
-                    : '1px solid rgba(107, 114, 128, 0.3)',
-                }}
-              >
-                <Typography
-                  variant="body2"
-                  sx={{
-                    color: '#ffffff',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {message.text}
-                </Typography>
-              </Box>
-            </Box>
-          ))
-        )}
-        {isLoadingMessage && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-            <CircularProgress size={16} sx={{ color: '#3b82f6' }} />
-            <Typography variant="body2" sx={{ color: '#9ca3af' }}>
-              AI is thinking...
-            </Typography>
-          </Box>
-        )}
-        <div ref={messagesEndRef} />
-      </Box>
-
-      {/* Context Bookmark */}
-      {sessionContext.length > 0 && (
-        <Box
-          sx={{
-            borderTop: '2px solid #374151',
-          }}
-        >
-          <Box
-            sx={{
-              p: 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: 'rgba(15, 23, 42, 0.95)',
-              borderBottom: showContextBookmark ? '1px solid #374151' : 'none',
-              cursor: 'pointer',
-              '&:hover': {
-                backgroundColor: 'rgba(31, 41, 55, 0.95)',
-              },
-            }}
-            onClick={() => setShowContextBookmark(!showContextBookmark)}
-          >
-            <Tooltip title={showContextBookmark ? 'Hide context' : 'Show context'}>
-              <IconButton
-                size="small"
-                sx={{
-                  color: '#3b82f6',
-                  p: 0.5,
-                }}
-              >
-                {showContextBookmark ? <ExpandMoreIcon /> : <ExpandLessIcon />}
-              </IconButton>
-            </Tooltip>
-            <Typography
-              variant="caption"
-              sx={{
-                color: '#9ca3af',
-                ml: 1,
-              }}
-            >
-              📌 Context ({sessionContext.length} {sessionContext.length === 1 ? 'item' : 'items'})
-            </Typography>
-          </Box>
-
-          {showContextBookmark && (
-            <Box
-              sx={{
-                maxHeight: '150px',
-                overflowY: 'auto',
-                backgroundColor: 'rgba(15, 23, 42, 0.8)',
-                p: 1,
-                '&::-webkit-scrollbar': {
-                  width: '4px',
-                },
-                '&::-webkit-scrollbar-track': {
-                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                  borderRadius: '2px',
-                },
-              }}
-            >
-              <List sx={{ p: 0 }}>
-                {sessionContext.map((item, index) => (
-                  <ListItem
-                    key={item.id}
-                    sx={{
-                      backgroundColor: 'rgba(59, 130, 246, 0.05)',
-                      border: '1px solid rgba(59, 130, 246, 0.2)',
-                      borderRadius: '6px',
-                      mb: index < sessionContext.length - 1 ? 1 : 0,
-                      p: 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1,
-                    }}
-                  >
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          color: '#ffffff',
-                          fontWeight: 500,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          display: 'block',
-                        }}
-                      >
-                        {item.title}
-                      </Typography>
-                      {item.subtitle && (
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            color: '#9ca3af',
-                            fontSize: '0.65rem',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            display: 'block',
-                          }}
-                        >
-                          {item.subtitle}
-                        </Typography>
-                      )}
-                    </Box>
-                    <Chip
-                      label={item.type}
-                      size="small"
-                      sx={{
-                        height: '16px',
-                        fontSize: '0.65rem',
-                        backgroundColor: 'rgba(139, 92, 246, 0.2)',
-                        color: '#a78bfa',
-                        border: '1px solid rgba(139, 92, 246, 0.3)',
-                      }}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Box>
-          )}
-        </Box>
-      )}
-
-      {/* Input */}
-      <Box sx={{ p: 2, borderTop: '1px solid #374151' }}>
+        {/* Message Input */}
         <TextField
           fullWidth
           multiline
           maxRows={4}
+          placeholder="Type your message..."
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
-          onKeyDown={handleKeyPress}
-          placeholder={isConnected ? "Ask a question..." : "Connecting..."}
-          disabled={!isConnected || isLoadingMessage}
+          onKeyPress={handleKeyPress}
+          disabled={isLoadingMessage}
           sx={{
             '& .MuiOutlinedInput-root': {
-              color: '#ffffff',
-              backgroundColor: 'rgba(31, 41, 55, 0.5)',
-              '& fieldset': {
-                borderColor: '#374151',
+              backgroundColor: 'rgba(31, 41, 55, 0.8)',
+              border: '1px solid #374151',
+              borderRadius: 2,
+              '&:hover': {
+                borderColor: '#6b7280',
               },
-              '&:hover fieldset': {
-                borderColor: '#4b5563',
-              },
-              '&.Mui-focused fieldset': {
+              '&.Mui-focused': {
                 borderColor: '#3b82f6',
               },
-              '&.Mui-disabled': {
-                color: '#6b7280',
-              },
             },
-            '& .MuiInputBase-input': {
+            '& .MuiOutlinedInput-input': {
+              color: '#ffffff',
+              fontSize: '0.875rem',
               '&::placeholder': {
-                color: '#6b7280',
+                color: '#9ca3af',
                 opacity: 1,
               },
             },
@@ -693,18 +686,15 @@ const GlobalChatSidebar: React.FC = () => {
               <InputAdornment position="end">
                 <IconButton
                   onClick={handleSendMessage}
-                  disabled={!inputMessage.trim() || !isConnected || isLoadingMessage}
+                  disabled={!inputMessage.trim() || isLoadingMessage}
                   sx={{
-                    color: inputMessage.trim() && isConnected ? '#3b82f6' : '#6b7280',
+                    color: inputMessage.trim() ? '#3b82f6' : '#6b7280',
                     '&:hover': {
                       backgroundColor: 'rgba(59, 130, 246, 0.1)',
                     },
-                    '&.Mui-disabled': {
-                      color: '#374151',
-                    },
                   }}
                 >
-                  <SendIcon />
+                  <SendIcon fontSize="small" />
                 </IconButton>
               </InputAdornment>
             ),
@@ -716,4 +706,3 @@ const GlobalChatSidebar: React.FC = () => {
 };
 
 export default GlobalChatSidebar;
-

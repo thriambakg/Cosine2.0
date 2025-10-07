@@ -323,12 +323,12 @@ const UnifiedDashboardPage: React.FC = () => {
   const activeTab = tabs.find(tab => tab.id === activeTabId);
 
   // Handle hot reload scenario where user might be temporarily undefined
+  // Instead of reloading the page (which loses sidebar state), just show a warning
   useEffect(() => {
     if (!user && typeof window !== 'undefined') {
       console.warn('🚨 No user found during dashboard load - this might be due to hot reload');
-      // Refresh the page to properly reinitialize authentication
-      console.log('🔄 Refreshing page to reinitialize authentication...');
-      window.location.reload();
+      // Don't reload the page as it causes sidebar state loss
+      // The authentication system will handle this gracefully
     }
   }, [user]);
 

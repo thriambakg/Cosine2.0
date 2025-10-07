@@ -46,74 +46,52 @@ function AppContent() {
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       
-      {/* Protected Routes */}
-      <Route path="/" element={
+      {/* Protected Routes with persistent AppLayout */}
+      <Route path="/*" element={
         user ? (
           <AppLayout>
-            <UnifiedDashboardPage />
+            <Routes>
+              <Route path="/" element={<UnifiedDashboardPage />} />
+              <Route path="/chat" element={
+                <ProtectedRoute>
+                  <ChatPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/robinhood" element={
+                <ProtectedRoute>
+                  <Robinhood />
+                </ProtectedRoute>
+              } />
+              <Route path="/portfolio-risk" element={
+                <ProtectedRoute>
+                  <PortfolioRisk />
+                </ProtectedRoute>
+              } />
+              <Route path="/stock-volatility" element={
+                <ProtectedRoute>
+                  <StockVolatilityPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/stock-alerts" element={
+                <ProtectedRoute>
+                  <StockAlertsPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/option-pricing" element={
+                <ProtectedRoute>
+                  <OptionPricingPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/heatmap" element={
+                <ProtectedRoute>
+                  <HeatmapPage />
+                </ProtectedRoute>
+              } />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
           </AppLayout>
         ) : <LandingPageMUI />
       } />
-      
-      <Route path="/chat" element={
-        <ProtectedRoute>
-          <AppLayout>
-            <ChatPage />
-          </AppLayout>
-        </ProtectedRoute>
-      } />
-      
-      <Route path="/robinhood" element={
-        <ProtectedRoute>
-          <AppLayout>
-            <Robinhood />
-          </AppLayout>
-        </ProtectedRoute>
-      } />
-      
-      <Route path="/portfolio-risk" element={
-        <ProtectedRoute>
-          <AppLayout>
-            <PortfolioRisk />
-          </AppLayout>
-        </ProtectedRoute>
-      } />
-      
-      <Route path="/stock-volatility" element={
-        <ProtectedRoute>
-          <AppLayout>
-            <StockVolatilityPage />
-          </AppLayout>
-        </ProtectedRoute>
-      } />
-      
-      <Route path="/stock-alerts" element={
-        <ProtectedRoute>
-          <AppLayout>
-            <StockAlertsPage />
-          </AppLayout>
-        </ProtectedRoute>
-      } />
-      
-      
-      <Route path="/option-pricing" element={
-        <ProtectedRoute>
-          <AppLayout>
-            <OptionPricingPage />
-          </AppLayout>
-        </ProtectedRoute>
-      } />
-      
-      <Route path="/heatmap" element={
-        <ProtectedRoute>
-          <AppLayout>
-            <HeatmapPage />
-          </AppLayout>
-        </ProtectedRoute>
-      } />
-      
-      {/* Catch all route */}
-      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

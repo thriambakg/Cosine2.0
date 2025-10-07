@@ -182,22 +182,16 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       // Store context session data in sessionStorage for ChatPage to pick up
       const contextSessionData = {
         userId: user.id,
-        sessionId: newSessionId,
+        sessionId: newSessionId, // This is temporary - ChatPage will create the real session ID
         userMessage: userMessage,
         contextItems: enrichedContextItems,
         timestamp: Date.now(),
       };
       sessionStorage.setItem('pending-context-session', JSON.stringify(contextSessionData));
       
-      // Also dispatch event for immediate handling if ChatPage is mounted
-      const contextMessageEvent = new CustomEvent('create-context-session', {
-        detail: contextSessionData,
-      });
-      window.dispatchEvent(contextMessageEvent);
-      
       console.log('✅ Context message sent to chat system (stored in sessionStorage)');
       
-      // Auto-open GlobalChatSidebar with the new session
+      // Auto-open GlobalChatSidebar immediately (it will update with real session ID later)
       openWithSession(newSessionId);
       
       // Step 3: Show success message
