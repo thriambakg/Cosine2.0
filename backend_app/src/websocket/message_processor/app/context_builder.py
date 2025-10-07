@@ -71,6 +71,23 @@ def format_stock_tile(index: int, title: str, tile_data: Dict[str, Any]) -> str:
     result = f"\n[Context Item {index}: Stock Data - {symbol}]\n"
     result += f"Timeframe: {timeframe}\n"
     
+    # Add tile metadata
+    grid_position = tile_data.get('gridPosition')
+    grid_size = tile_data.get('gridSize')
+    display_options = tile_data.get('displayOptions')
+    is_pinned = tile_data.get('isPinned', False)
+    
+    if grid_position:
+        result += f"Dashboard Position: Grid ({grid_position.get('x')}, {grid_position.get('y')})\n"
+    if grid_size:
+        result += f"Dashboard Size: {grid_size.get('width')}x{grid_size.get('height')} grid units\n"
+    if is_pinned:
+        result += "Status: Pinned to dashboard\n"
+    if display_options:
+        enabled_options = [k for k, v in display_options.items() if v]
+        if enabled_options:
+            result += f"Display Options: {', '.join(enabled_options)}\n"
+    
     if backend_data:
         # Extract key metrics
         current_price = backend_data.get('current_price')
@@ -78,7 +95,7 @@ def format_stock_tile(index: int, title: str, tile_data: Dict[str, Any]) -> str:
         annual_return = backend_data.get('annual_return')
         volatility = backend_data.get('volatility')
         
-        result += "Market Data:\n"
+        result += "\nMarket Data:\n"
         if current_price:
             result += f"  - Current Price: ${current_price:.2f}\n"
         if price_change:
@@ -100,11 +117,28 @@ def format_crypto_tile(index: int, title: str, tile_data: Dict[str, Any]) -> str
     result = f"\n[Context Item {index}: Crypto Data - {symbol}]\n"
     result += f"Timeframe: {timeframe}\n"
     
+    # Add tile metadata
+    grid_position = tile_data.get('gridPosition')
+    grid_size = tile_data.get('gridSize')
+    display_options = tile_data.get('displayOptions')
+    is_pinned = tile_data.get('isPinned', False)
+    
+    if grid_position:
+        result += f"Dashboard Position: Grid ({grid_position.get('x')}, {grid_position.get('y')})\n"
+    if grid_size:
+        result += f"Dashboard Size: {grid_size.get('width')}x{grid_size.get('height')} grid units\n"
+    if is_pinned:
+        result += "Status: Pinned to dashboard\n"
+    if display_options:
+        enabled_options = [k for k, v in display_options.items() if v]
+        if enabled_options:
+            result += f"Display Options: {', '.join(enabled_options)}\n"
+    
     if backend_data and 'data' in backend_data:
         crypto_list = backend_data['data']
         if crypto_list and len(crypto_list) > 0:
             crypto = crypto_list[0]
-            result += "Market Data:\n"
+            result += "\nMarket Data:\n"
             
             # Extract metrics
             for key, value in crypto.items():
@@ -122,6 +156,18 @@ def format_news_tile(index: int, title: str, tile_data: Dict[str, Any]) -> str:
     filters = backend_data.get('filters', {})
     
     result = f"\n[Context Item {index}: News Articles]\n"
+    
+    # Add tile metadata
+    grid_position = tile_data.get('gridPosition')
+    grid_size = tile_data.get('gridSize')
+    is_pinned = tile_data.get('isPinned', False)
+    
+    if grid_position:
+        result += f"Dashboard Position: Grid ({grid_position.get('x')}, {grid_position.get('y')})\n"
+    if grid_size:
+        result += f"Dashboard Size: {grid_size.get('width')}x{grid_size.get('height')} grid units\n"
+    if is_pinned:
+        result += "Status: Pinned to dashboard\n"
     
     if filters:
         result += f"Filters Applied: {json.dumps(filters, indent=2)}\n"
