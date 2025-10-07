@@ -100,20 +100,44 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
         setIsConnected(false);
         websocketRef.current = null;
 
-        // Auto-reconnect if not a normal closure
-        if (event.code !== 1000 && reconnectAttemptsRef.current < maxReconnectAttempts) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
-          console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1}/${maxReconnectAttempts})`);
-          
-          reconnectTimeoutRef.current = setTimeout(() => {
-            reconnectAttemptsRef.current++;
-            connect(sessionId);
-          }, delay);
+        // Don't auto-reconnect if:
+        // 1. Normal closure (code 1000)
+        // 2. Going away (code 1001) - likely intentional disconnect
+        // 3. Max reconnect attempts reached
+        if (event.code === 1000 || event.code === 1001) {
+          console.log('🔌 WebSocket closed normally or going away, not reconnecting');
+          return;
         }
+        
+        if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+          console.log('🔌 Max reconnect attempts reached, giving up');
+          return;
+        }
+
+        // Auto-reconnect for unexpected closures
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
+        console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1}/${maxReconnectAttempts})`);
+        
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectAttemptsRef.current++;
+          // Use the latest session ID from sessionStorage instead of closure variable
+          const latestSessionId = sessionStorage.getItem('global-chat-active-session');
+          const reconnectSessionId = latestSessionId || sessionId;
+          console.log(`🔄 Reconnecting to session: ${reconnectSessionId} (latest from storage: ${latestSessionId}, closure: ${sessionId})`);
+          connect(reconnectSessionId);
+        }, delay);
       };
 
       ws.onerror = (error) => {
         console.error('❌ WebSocket error:', error);
+      };
+
+      ws.onmessage = (event) => {
+        // Dispatch custom event so other components can listen
+        const messageEvent = new CustomEvent('websocket-message', {
+          detail: JSON.parse(event.data)
+        });
+        window.dispatchEvent(messageEvent);
       };
 
       websocketRef.current = ws;

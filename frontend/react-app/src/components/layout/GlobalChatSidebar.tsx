@@ -30,6 +30,7 @@ import {
 } from '@mui/icons-material';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useWebSocket } from '../../contexts/WebSocketContext';
 import { ContextItem } from '../tiles/common/contextManager';
 import { sessionManagementAPI } from '../../services/api';
 
@@ -56,8 +57,9 @@ interface ChatSession {
 }
 
 const GlobalChatSidebar: React.FC = () => {
-  const { isVisible, activeSessionId, setActiveSessionId, close } = useGlobalChat();
+  const { isVisible, setIsVisible, activeSessionId, setActiveSessionId, close } = useGlobalChat();
   const { user } = useAuth();
+  const { websocket, connect: connectWebSocket, sendMessage, isConnected } = useWebSocket();
   
   // Local state for the mirror
   const [messages, setMessages] = useState<Message[]>([]);
@@ -70,6 +72,7 @@ const GlobalChatSidebar: React.FC = () => {
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const processedMessageIdsRef = useRef<Set<string>>(new Set());
   const sidebarWidth = 400;
 
   // Available models (matching ChatPage exactly)
@@ -146,6 +149,8 @@ const GlobalChatSidebar: React.FC = () => {
           setSessionContext([]);
         }
         
+        // Don't reconnect WebSocket here - it should already be connected
+        // Reconnecting will close the existing connection and miss AI responses
         console.log('✅ Session data loaded into sidebar');
       } else {
         console.log('⚠️ Session not found in database');
@@ -191,6 +196,13 @@ const GlobalChatSidebar: React.FC = () => {
     const handleChatPageAIResponse = (event: CustomEvent) => {
       const responseData = event.detail;
       console.log('🤖 GlobalChatSidebar mirroring AI response:', responseData);
+      
+      // Check for duplicate
+      if (processedMessageIdsRef.current.has(responseData.messageId)) {
+        console.log('🤖 Duplicate AI response ignored (already processed):', responseData.messageId);
+        return;
+      }
+      
       console.log('🤖 Current activeSessionId:', activeSessionId);
       console.log('🤖 Response sessionId:', responseData.sessionId);
       console.log('🤖 Current user ID:', user?.id);
@@ -198,6 +210,9 @@ const GlobalChatSidebar: React.FC = () => {
       
       if (responseData.sessionId === activeSessionId && responseData.userId === user?.id) {
         console.log('✅ Session and user match, adding AI response');
+        
+        // Mark as processed
+        processedMessageIdsRef.current.add(responseData.messageId);
         
         // Clear loading state immediately
         setIsLoadingMessage(false);
@@ -253,47 +268,207 @@ const GlobalChatSidebar: React.FC = () => {
     };
   }, [isVisible, user?.id, setActiveSessionId]);
 
-  // Handle context sessions
+  // Handle context sessions from global handler
   useEffect(() => {
-    if (!isVisible) return;
-
-    const handleContextSession = (event: CustomEvent) => {
+    const handleContextSessionReady = async (event: CustomEvent) => {
       const contextData = event.detail;
-      console.log('🎯 GlobalChatSidebar handling context session:', contextData);
+      console.log('🎯 GlobalChatSidebar: Context session ready:', contextData);
       
       if (contextData.userId === user?.id) {
-        console.log('🎯 Context session received, syncing with new session:', contextData.sessionId);
+        console.log('🎯 GlobalChatSidebar: Processing context session:', contextData.sessionId);
         
-        // Update the active session ID to match the new context session
+        // Clear any existing session - this is a new context session
+        if (activeSessionId && activeSessionId !== contextData.sessionId) {
+          console.log('🎯 GlobalChatSidebar: Clearing old session:', activeSessionId);
+          setCurrentSession(null);
+          setMessages([]);
+          setSessionContext([]);
+        }
+        
+        // Open the sidebar
+        setIsVisible(true);
+        
+        // Update the active session ID (context will persist to sessionStorage)
+        console.log('🎯 Setting activeSessionId to:', contextData.sessionId);
         setActiveSessionId(contextData.sessionId);
+        // Also update sessionStorage immediately to ensure it's set before WebSocket reads it
+        sessionStorage.setItem('global-chat-active-session', contextData.sessionId);
+        
+        // Also update the GlobalChatContext's session state immediately
+        setCurrentSession({
+          session_id: contextData.sessionId,
+          title: new Date().toLocaleString(),
+          model: 'claude-3-sonnet',
+          created_at: Date.now(),
+          last_updated: Date.now(),
+          message_count: 0,
+          messages: []
+        });
         
         // Set context items
         setSessionContext(contextData.contextItems || []);
         
-        // Clear any existing messages - the user message will come via chatpage-message event
-        setMessages([]);
+        // Add the user message immediately
+        const userMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const userMessage: Message = {
+          id: userMessageId,
+          sender: 'user',
+          text: contextData.userMessage,
+          timestamp: Date.now(),
+        };
+        setMessages([userMessage]);
         
         // Show loading state
         setIsLoadingMessage(true);
         
-        // Load the session data from the database to get complete session info
-        loadSessionFromDatabase(contextData.sessionId);
+        // Small delay to ensure sessionStorage is written before WebSocket reads it
+        await new Promise(resolve => setTimeout(resolve, 50));
         
-        // Make sure the sidebar is visible (it should already be visible from ContextWindow)
-        console.log('🎯 Sidebar visibility status:', isVisible);
+        // Connect WebSocket for this session
+        console.log(`🔌 Requesting WebSocket connection for session: ${contextData.sessionId}`);
+        connectWebSocket(contextData.sessionId);
         
-        console.log('🎯 Context session set up in sidebar');
+        // Wait for WebSocket to fully establish
+        // This needs to account for:
+        // 1. Closing old connection (~100ms)
+        // 2. Opening new connection (~500ms)
+        // 3. Receiving connection_established (~500ms)
+        // 4. WebSocket ref stabilization (~100ms)
+        console.log('⏳ Waiting for WebSocket connection to establish...');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        console.log('🚀 WebSocket should be ready, sending message');
+        
+        // Send the contextualized message
+        const messagePayload = {
+          action: 'chat',
+          type: 'chat_message',
+          message: contextData.userMessage,
+          userId: user.id,
+          sessionId: contextData.sessionId,
+          model: 'claude-3-sonnet',
+          files: [],
+          messageId: userMessageId,
+          contextItems: contextData.contextItems,
+          context: {
+            currentPage: window.location.pathname,
+            sessionId: contextData.sessionId,
+            hasContext: true,
+            contextItemCount: contextData.contextItems.length,
+          }
+        };
+        
+        const sent = sendMessage(messagePayload);
+        if (sent) {
+          console.log('✅ GlobalChatSidebar: Sent contextualized message via WebSocket');
+        } else {
+          console.error('❌ GlobalChatSidebar: Failed to send message');
+          setIsLoadingMessage(false);
+        }
       }
     };
 
-    window.addEventListener('create-context-session', handleContextSession as EventListener);
+    window.addEventListener('context-session-ready', handleContextSessionReady as EventListener);
     
     return () => {
-      window.removeEventListener('create-context-session', handleContextSession as EventListener);
+      window.removeEventListener('context-session-ready', handleContextSessionReady as EventListener);
     };
-  }, [isVisible, user?.id, loadSessionFromDatabase]);
+  }, [user?.id, activeSessionId, setIsVisible, setActiveSessionId, connectWebSocket, sendMessage]);
 
-  // Send message - forward to ChatPage
+  // Listen for WebSocket messages
+  useEffect(() => {
+    if (!isVisible) return;
+
+    const handleWebSocketMessage = (event: CustomEvent) => {
+      const data = event.detail;
+      console.log('📨 Sidebar received WebSocket message:', data.type);
+
+      switch (data.type) {
+        case 'ai_response':
+          const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          
+          // Get the latest activeSessionId from sessionStorage to avoid stale closures
+          const latestActiveSessionId = sessionStorage.getItem('global-chat-active-session');
+          
+          // Log session comparison for debugging
+          console.log('🤖 Sidebar received AI response:', {
+            responseSessionId: data.session_id,
+            activeSessionIdFromState: activeSessionId,
+            activeSessionIdFromStorage: latestActiveSessionId,
+            match: data.session_id === latestActiveSessionId,
+            messageId: messageId
+          });
+          
+          // Only process if it's for the active session (check sessionStorage for latest value)
+          if (data.session_id === latestActiveSessionId || !latestActiveSessionId) {
+            // Check for duplicate
+            if (processedMessageIdsRef.current.has(messageId)) {
+              console.log('🤖 Duplicate AI response ignored (WebSocket):', messageId);
+              break;
+            }
+            
+            console.log('🤖 Sidebar processing AI response for session:', data.session_id);
+            
+            // Mark as processed
+            processedMessageIdsRef.current.add(messageId);
+            
+            // Clear loading state
+            setIsLoadingMessage(false);
+            
+            // Add AI response with empty text for typewriter effect
+            setMessages(prev => [
+              ...prev,
+              {
+                id: messageId,
+                sender: 'ai',
+                text: '',
+                timestamp: Date.now(),
+              }
+            ]);
+            
+            // Start typewriter effect
+            typewriterEffect(messageId, data.content || 'No response', 2);
+            
+            // Dispatch AI response to ChatPage so it can mirror it
+            const aiResponseEvent = new CustomEvent('chatpage-ai-response', {
+              detail: {
+                messageId: messageId,
+                content: data.content || 'No response',
+                sessionId: data.session_id,
+                userId: user?.id,
+                timestamp: Date.now()
+              }
+            });
+            window.dispatchEvent(aiResponseEvent);
+            console.log('📡 Sidebar dispatched AI response to ChatPage:', messageId);
+          } else {
+            console.log('⚠️ AI response session mismatch - not processing:', {
+              responseSessionId: data.session_id,
+              activeSessionIdFromState: activeSessionId,
+              activeSessionIdFromStorage: latestActiveSessionId
+            });
+          }
+          break;
+          
+        case 'message_received':
+          console.log('✅ Message received confirmation:', data.message_id);
+          break;
+          
+        case 'error':
+          console.error('❌ WebSocket error:', data.message);
+          setIsLoadingMessage(false);
+          break;
+      }
+    };
+
+    window.addEventListener('websocket-message', handleWebSocketMessage as EventListener);
+
+    return () => {
+      window.removeEventListener('websocket-message', handleWebSocketMessage as EventListener);
+    };
+  }, [isVisible, activeSessionId, typewriterEffect, user?.id]);
+
+  // Send message - uses WebSocket directly
   const handleSendMessage = useCallback(async () => {
     if (!inputMessage.trim() || !user?.id) return;
 
@@ -349,21 +524,47 @@ const GlobalChatSidebar: React.FC = () => {
     setInputMessage('');
     setIsLoadingMessage(true);
 
-    // Forward message to ChatPage
-    const sidebarMessageEvent = new CustomEvent('sidebar-send-message', {
-      detail: {
-        message: userMessage,
-        sessionId: sessionId,
-        model: selectedModel,
-        userId: user.id,
-        messageId: messageId,
-        timestamp: Date.now()
-      }
-    });
-    window.dispatchEvent(sidebarMessageEvent);
+    // Ensure WebSocket is connected for this session
+    if (!isConnected) {
+      console.log('🔌 WebSocket not connected, connecting to session:', sessionId);
+      connectWebSocket(sessionId);
+      // Wait a moment for connection
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    // Send message directly via WebSocket
+    const messagePayload = {
+      action: 'chat',
+      type: 'chat_message',
+      message: userMessage,
+      userId: user.id,
+      sessionId: sessionId,
+      model: selectedModel,
+      files: [],
+      messageId: messageId,
+    };
     
-    console.log('📤 Forwarded message to ChatPage with model:', selectedModel, 'Message:', userMessage.substring(0, 50));
-  }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId]);
+    const sent = sendMessage(messagePayload);
+    if (sent) {
+      console.log('✅ Sent message via WebSocket with model:', selectedModel, 'Message:', userMessage.substring(0, 50));
+      
+      // Also dispatch event for ChatPage to mirror if it's open
+      const sidebarMessageEvent = new CustomEvent('sidebar-send-message', {
+        detail: {
+          message: userMessage,
+          sessionId: sessionId,
+          model: selectedModel,
+          userId: user.id,
+          messageId: messageId,
+          timestamp: Date.now()
+        }
+      });
+      window.dispatchEvent(sidebarMessageEvent);
+    } else {
+      console.error('❌ Failed to send message via WebSocket');
+      setIsLoadingMessage(false);
+    }
+  }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId, connectWebSocket, sendMessage, isConnected]);
 
   const handleKeyPress = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -538,6 +739,19 @@ const GlobalChatSidebar: React.FC = () => {
           display: 'flex',
           flexDirection: 'column',
           gap: 1,
+          '&::-webkit-scrollbar': {
+            width: '6px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+            borderRadius: '3px',
+          },
+          '&::-webkit-scrollbar-thumb:hover': {
+            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+          },
         }}
       >
         {messages.map((message) => (

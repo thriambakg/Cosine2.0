@@ -8,6 +8,7 @@ import AppSidebar from './AppSidebar';
 import FloatingClock from './FloatingClock';
 import ContextWindow from './ContextWindow';
 import GlobalChatSidebar from './GlobalChatSidebar';
+import ContextSessionHandler from './ContextSessionHandler';
 import { ClockProvider } from '../../contexts/ClockContext';
 import { ContextWindowProvider } from '../../contexts/ContextWindowContext';
 import { WebSocketProvider } from '../../contexts/WebSocketContext';
@@ -56,6 +57,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
               {/* Global Chat Sidebar */}
               <GlobalChatSidebar />
             </Box>
+            
+            {/* Global Context Session Handler - processes context sessions from any page */}
+            <ContextSessionHandler />
             
             {/* Context Window - moved outside main Box to ensure proper provider access */}
             <ContextWindow />

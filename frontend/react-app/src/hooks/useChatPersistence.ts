@@ -37,7 +37,7 @@ interface UseChatPersistenceReturn {
   updateSessionTitle: (sessionId: string, newTitle: string) => Promise<void>;
   
   // Message management
-  addMessage: (message: ChatMessage) => void;
+  addMessage: (message: ChatMessage, targetSessionId?: string) => void;
   truncateMessagesAfter: (messageId: string, newText?: string) => void;
   saveMessagesToBackend: () => Promise<void>;
   
@@ -481,37 +481,51 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     }
   }, [userId, currentSession, saveCachedData]);
 
-  const addMessage = useCallback((message: ChatMessage): void => {
+  const addMessage = useCallback((message: ChatMessage, targetSessionId?: string): void => {
+    // Use targetSessionId if provided, otherwise fall back to currentSession
+    const sessionId = targetSessionId || currentSession?.session_id;
+    
     console.log('📋 Adding message to persistence:', {
       messageId: message.id,
       sender: message.sender,
       text: message.text.substring(0, 50) + '...',
+      targetSessionId: targetSessionId,
       currentSessionId: currentSession?.session_id,
+      effectiveSessionId: sessionId,
       currentMessageCount: currentSession?.messages?.length || 0
     });
     
-    // Add to current session
-    setCurrentSession(prev => {
-      if (!prev) {
-        console.log('📋 No current session to add message to');
-        return prev;
-      }
-      const updatedSession = {
-        ...prev,
-        messages: [...prev.messages, message],
-        message_count: prev.message_count + 1,
-        last_updated: Date.now()
-      };
-      console.log('📋 Updated current session:', {
-        sessionId: updatedSession.session_id,
-        newMessageCount: updatedSession.message_count,
-        totalMessages: updatedSession.messages.length
+    // Add to current session (only if it matches the target session)
+    if (!targetSessionId || currentSession?.session_id === targetSessionId) {
+      setCurrentSession(prev => {
+        if (!prev) {
+          console.log('📋 No current session to add message to');
+          return prev;
+        }
+        
+        // Check for duplicate messages by ID
+        const messageExists = prev.messages.some(m => m.id === message.id);
+        if (messageExists) {
+          console.log('📋 Message already exists in session, skipping duplicate:', message.id);
+          return prev;
+        }
+        
+        const updatedSession = {
+          ...prev,
+          messages: [...prev.messages, message],
+          message_count: prev.message_count + 1,
+          last_updated: Date.now()
+        };
+        console.log('📋 Updated current session:', {
+          sessionId: updatedSession.session_id,
+          newMessageCount: updatedSession.message_count,
+          totalMessages: updatedSession.messages.length
+        });
+        return updatedSession;
       });
-      return updatedSession;
-    });
+    }
     
     // Add to pending messages for backend save (session-specific)
-    const sessionId = currentSession?.session_id;
     if (sessionId) {
       if (!pendingMessagesRef.current[sessionId]) {
         pendingMessagesRef.current[sessionId] = [];
@@ -526,25 +540,32 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       }));
     }
     
-    // Update sessions list - only if we have a current session
-    if (currentSession?.session_id) {
+    // Update sessions list - using the effective session ID
+    if (sessionId) {
       setSessions(prev => {
-        const updated = prev.map(s => 
-          s.session_id === currentSession.session_id 
-            ? { ...s, messages: [...s.messages, message], message_count: s.message_count + 1 }
-            : s
-        );
+        const updated = prev.map(s => {
+          if (s.session_id === sessionId) {
+            // Check for duplicate before adding to session
+            const messageExists = s.messages.some(m => m.id === message.id);
+            if (messageExists) {
+              console.log('📋 Message already exists in sessions list, skipping:', message.id);
+              return s;
+            }
+            return { ...s, messages: [...s.messages, message], message_count: s.message_count + 1 };
+          }
+          return s;
+        });
         
         console.log('📋 Updated sessions list:', {
-          sessionId: currentSession.session_id,
+          sessionId: sessionId,
           totalSessions: updated.length,
-          targetSession: updated.find(s => s.session_id === currentSession.session_id)?.messages.length || 0
+          targetSession: updated.find(s => s.session_id === sessionId)?.messages.length || 0
         });
         
         return updated;
       });
     } else {
-      console.log('📋 Skipping sessions list update - no current session ID');
+      console.log('📋 Skipping sessions list update - no effective session ID');
     }
     
     saveCachedData();

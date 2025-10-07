@@ -212,6 +212,7 @@ export default function ChatPage() {
     deleteSession,
     addMessage: addPersistedMessage,
     truncateMessagesAfter,
+    loadSessionsFromBackend,
   } = useChatPersistence(user?.id || '');
   
   // Use messages from current session
@@ -685,156 +686,27 @@ export default function ChatPage() {
     }
   }, [currentSession]);
 
-  // Track processing state to prevent duplicates
-  const processingRef = useRef(false);
-
-  // Listen for create-context-session event from ContextWindow
+  // Listen for context session ready events from global handler
   useEffect(() => {
-    const handleContextSession = async (eventData: any) => {
-      const { userId, userMessage, contextItems, timestamp } = eventData;
+    const handleContextSessionReady = (event: CustomEvent) => {
+      const { sessionId, userId, contextItems } = event.detail;
       
-      console.log('🎯 Processing create-context-session:', {
-        userId,
-        messageLength: userMessage.length,
-        contextItemsCount: contextItems.length,
-        timestamp,
-      });
+      console.log('📋 ChatPage: Context session ready:', sessionId);
       
-      // Prevent duplicate processing
-      if (processingRef.current) {
-        console.log('⚠️ Already processing a context session, skipping');
-        return;
-      }
-      
-      const lastProcessed = sessionStorage.getItem('last-processed-context-session');
-      if (lastProcessed && lastProcessed === String(timestamp)) {
-        console.log('⚠️ Context session already processed, skipping');
-        return;
-      }
-      
-      processingRef.current = true;
-      
-      try {
-        // Create new session
-        const sessionId = await createNewSession();
-        console.log('📋 Created context-aware session:', sessionId);
+      if (userId === user?.id) {
+        // Load the new session in ChatPage to display it
+        loadSession(sessionId);
         
-        // Mark as processed IMMEDIATELY to prevent duplicates
-        sessionStorage.setItem('last-processed-context-session', String(timestamp));
-        sessionStorage.removeItem('pending-context-session');
+        // Store context items for display
+        setSessionContext(contextItems || []);
+        console.log('📌 ChatPage: Loaded context session and stored context items');
         
-        // Store context items temporarily in frontend state for display
-        // (Backend will store in session_variables once implemented)
-        setSessionContext(contextItems);
-        console.log('📌 Stored context items for display:', contextItems.length);
-        
-        // Dispatch event to sync the new session with the sidebar AFTER database creation
-        const contextSessionEvent = new CustomEvent('create-context-session', {
-          detail: {
-            sessionId: sessionId, // This is now the actual database session ID
-            userId: user?.id,
-            contextItems: contextItems,
-            userMessage: userMessage,
-            timestamp: Date.now()
-          }
-        });
-        window.dispatchEvent(contextSessionEvent);
-        console.log('📡 Dispatched context session to sidebar with database session ID:', sessionId);
-        
-        // Wait for WebSocket to be ready
-        let attempts = 0;
-        const maxAttempts = 10;
-        while ((!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) && attempts < maxAttempts) {
-          console.log(`⏳ Waiting for WebSocket connection... (attempt ${attempts + 1}/${maxAttempts})`);
-          await new Promise(resolve => setTimeout(resolve, 500));
-          attempts++;
-        }
-        
-        // Send message with context via WebSocket
-        if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-          // Add user message to UI first
-          const userMsg = {
-            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${userId}`,
-            text: userMessage,
-            sender: 'user' as const,
-            timestamp: new Date(),
-            status: 'sending' as const,
-          };
-          addPersistedMessage(userMsg);
-          
-          // Mirror user message to GlobalChatSidebar
-          const userMessageEvent = new CustomEvent('chatpage-message', {
-            detail: {
-              messageId: userMsg.id,
-              sender: 'user',
-              text: userMsg.text,
-              sessionId: sessionId,
-              userId: userId,
-              timestamp: Date.now()
-            }
-          });
-          window.dispatchEvent(userMessageEvent);
-          console.log('📡 Dispatched context user message to sidebar:', userMsg.id);
-          
-          const messageData = {
-            type: 'chat',
-            messageId: userMsg.id,
-            message: userMessage,
-            model: selectedModel,
-            sessionId: sessionId,
-            userId: userId,
-            contextItems: contextItems, // ✅ Include context items
-            context: {
-              currentPage: 'chat',
-              sessionId: sessionId,
-              hasContext: true,
-              contextItemCount: contextItems.length,
-            }
-          };
-          
-          console.log('📤 Sending context-aware message to WebSocket:', {
-            messageId: messageData.messageId,
-            sessionId,
-            contextItemCount: contextItems.length,
-            messagePreview: userMessage.substring(0, 50),
-          });
-          
-          websocketRef.current.send(JSON.stringify(messageData));
-          
-          // Set loading state for the new session
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [sessionId]: true
-          }));
-        } else {
-          console.error('❌ WebSocket not connected after waiting');
-        }
-      } catch (error) {
-        console.error('❌ Error creating context session:', error);
-      } finally {
-        processingRef.current = false;
+        // Refresh sessions list to show the new session in sidebar
+        loadSessionsFromBackend();
       }
     };
     
-    // Check for pending context session on mount (only once)
-    const checkPendingContextSession = () => {
-      const pending = sessionStorage.getItem('pending-context-session');
-      if (pending) {
-        console.log('🔍 Found pending context session, processing...');
-        const eventData = JSON.parse(pending);
-        handleContextSession(eventData);
-      }
-    };
-    
-    // Delay check to ensure everything is mounted
-    const timer = setTimeout(() => {
-      checkPendingContextSession();
-    }, 100);
-    
-    // Listen for new events
-    const handleEvent = (event: CustomEvent) => {
-      handleContextSession(event.detail);
-    };
+    // No longer need to check for pending sessions - global handler processes them
     
     const handleSidebarMessage = (event: CustomEvent) => {
       const messageData = event.detail;
@@ -859,41 +731,76 @@ export default function ChatPage() {
         addPersistedMessage(userMessage);
         console.log('✅ Added sidebar message to ChatPage UI');
         
+        // Set loading state for the session to show "AI is thinking" indicator
+        if (messageData.sessionId) {
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [messageData.sessionId]: true
+          }));
+          console.log('💭 ChatPage showing AI is thinking for sidebar message (session loading)');
+        }
+        
         // Update ChatPage's selected model to match the sidebar's selection
         if (messageData.model && messageData.model !== selectedModel) {
           console.log('🔄 Updating ChatPage model from sidebar:', messageData.model);
           setSelectedModel(messageData.model);
         }
         
-        // Send the message via ChatPage's WebSocket (this will handle the actual sending)
-        if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-          const messagePayload = {
-            action: 'chat',
-            type: 'chat_message',
-            message: messageData.message,
-            userId: messageData.userId,
-            sessionId: messageData.sessionId,
-            model: messageData.model, // Use the sidebar's selected model
-            files: [],
-            messageId: messageData.messageId,
-          };
-          
-          websocketRef.current.send(JSON.stringify(messagePayload));
-          console.log('✅ Forwarded sidebar message to backend via ChatPage WebSocket with model:', messageData.model);
-        } else {
-          console.error('❌ ChatPage WebSocket not connected, cannot forward message');
-        }
+        // Don't re-send the message - sidebar already sent it via WebSocket
+        // ChatPage just mirrors the UI state
+        console.log('📋 ChatPage mirrored sidebar message (sidebar already sent via WebSocket)');
       }
     };
     
-    window.addEventListener('create-context-session', handleEvent as any);
-    window.addEventListener('sidebar-send-message', handleSidebarMessage as any);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('create-context-session', handleEvent as any);
-      window.removeEventListener('sidebar-send-message', handleSidebarMessage as any);
+    // Also listen to shared WebSocket messages (for sidebar-initiated messages)
+    const handleSharedWebSocketMessage = (event: CustomEvent) => {
+      const data = event.detail;
+      
+      // Only process AI responses (user messages already handled by sidebar-send-message event)
+      if (data.type === 'ai_response' && data.session_id === currentSession?.session_id) {
+        const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Check for duplicate
+        if (processedMessageIds.has(messageId)) {
+          console.log('🤖 Duplicate AI response from shared WebSocket ignored:', messageId);
+          return;
+        }
+        
+        console.log('🤖 ChatPage received AI response from shared WebSocket:', messageId);
+        
+        // Process the same way as direct WebSocket
+        const aiMessage: Message = {
+          id: messageId,
+          text: data.content || 'No response content',
+          sender: 'bot',
+          timestamp: new Date(data.timestamp || Date.now()),
+        };
+        
+        setProcessedMessageIds(prev => new Set([...prev, messageId]));
+        addPersistedMessage(aiMessage);
+        setTypingMessages(prev => new Set([...prev, aiMessage.id]));
+        
+        // Clear loading state for this session
+        if (data.session_id) {
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [data.session_id]: false
+          }));
+        }
+        
+        console.log('✅ ChatPage processed AI response from shared WebSocket');
+      }
     };
-  }, [createNewSession, selectedModel, user?.id, addPersistedMessage]);
+    
+    window.addEventListener('context-session-ready', handleContextSessionReady as any);
+    window.addEventListener('sidebar-send-message', handleSidebarMessage as any);
+    window.addEventListener('websocket-message', handleSharedWebSocketMessage as any);
+    return () => {
+      window.removeEventListener('context-session-ready', handleContextSessionReady as any);
+      window.removeEventListener('sidebar-send-message', handleSidebarMessage as any);
+      window.removeEventListener('websocket-message', handleSharedWebSocketMessage as any);
+    };
+  }, [user?.id, currentSession?.session_id, processedMessageIds, addPersistedMessage, loadSession, setSessionContext, loadSessionsFromBackend]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1478,7 +1385,25 @@ export default function ChatPage() {
 
           {/* Chat Sessions */}
           <Box 
-            sx={{ flex: 1, overflow: 'auto', px: sidebarCollapsed ? 0.5 : 1, minHeight: 0 }}
+            sx={{ 
+              flex: 1, 
+              overflow: 'auto', 
+              px: sidebarCollapsed ? 0.5 : 1, 
+              minHeight: 0,
+              '&::-webkit-scrollbar': {
+                width: '6px',
+              },
+              '&::-webkit-scrollbar-track': {
+                backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                borderRadius: '3px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.7)',
+              },
+            }}
             onContextMenu={handleContextMenu}
           >
             <List>
@@ -1683,7 +1608,25 @@ export default function ChatPage() {
         </Box>
 
         {/* Messages */}
-        <Box sx={{ flex: 1, overflow: 'auto', p: 2, minHeight: 0 }}>
+        <Box sx={{ 
+          flex: 1, 
+          overflow: 'auto', 
+          p: 2, 
+          minHeight: 0,
+          '&::-webkit-scrollbar': {
+            width: '6px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+            borderRadius: '3px',
+          },
+          '&::-webkit-scrollbar-thumb:hover': {
+            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+          },
+        }}>
           <Stack spacing={2}>
             {messages.length === 0 && !currentSession && (
               <Box sx={{ 
@@ -1978,6 +1921,9 @@ export default function ChatPage() {
                   '&::-webkit-scrollbar-thumb': {
                     backgroundColor: 'rgba(59, 130, 246, 0.5)',
                     borderRadius: '3px',
+                  },
+                  '&::-webkit-scrollbar-thumb:hover': {
+                    backgroundColor: 'rgba(59, 130, 246, 0.7)',
                   },
                 }}
               >

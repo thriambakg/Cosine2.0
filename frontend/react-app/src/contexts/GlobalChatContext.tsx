@@ -113,11 +113,21 @@ export const GlobalChatProvider: React.FC<GlobalChatProviderProps> = ({ children
     sessionStorage.setItem('global-chat-visible', JSON.stringify(visible));
   }, []);
 
+  // Custom setActiveSessionId that persists to sessionStorage
+  const setActiveSessionIdPersistent = useCallback((sessionId: string | null) => {
+    setActiveSessionId(sessionId);
+    if (sessionId) {
+      sessionStorage.setItem('global-chat-active-session', sessionId);
+    } else {
+      sessionStorage.removeItem('global-chat-active-session');
+    }
+  }, []);
+
   const value: GlobalChatContextType = {
     isVisible,
     setIsVisible: setIsVisiblePersistent,
     activeSessionId,
-    setActiveSessionId,
+    setActiveSessionId: setActiveSessionIdPersistent,
     openWithSession,
     close,
     toggle,

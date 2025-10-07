@@ -189,10 +189,13 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       };
       sessionStorage.setItem('pending-context-session', JSON.stringify(contextSessionData));
       
-      console.log('✅ Context message sent to chat system (stored in sessionStorage)');
+      // Dispatch event immediately for the global handler to process
+      const contextSessionEvent = new CustomEvent('create-context-session', {
+        detail: contextSessionData
+      });
+      window.dispatchEvent(contextSessionEvent);
       
-      // Auto-open GlobalChatSidebar immediately (it will update with real session ID later)
-      openWithSession(newSessionId);
+      console.log('✅ Context message sent to global handler');
       
       // Step 3: Show success message
       setShowSuccess(true);
