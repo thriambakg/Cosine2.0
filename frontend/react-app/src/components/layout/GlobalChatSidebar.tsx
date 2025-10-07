@@ -526,7 +526,7 @@ const GlobalChatSidebar: React.FC = () => {
     setIsLoadingMessage(true);
 
     // Ensure WebSocket is connected for this session
-    if (!isConnected) {
+    if (!isConnected && sessionId) {
       console.log('🔌 WebSocket not connected, connecting to session:', sessionId);
       connectWebSocket(sessionId);
       // Wait a moment for connection
