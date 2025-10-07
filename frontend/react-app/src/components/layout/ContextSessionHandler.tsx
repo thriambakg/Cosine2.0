@@ -1,9 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useGlobalChat } from '../../contexts/GlobalChatContext';
-import { useWebSocket } from '../../contexts/WebSocketContext';
 import { sessionManagementAPI } from '../../services/api';
-import { ContextItem } from '../tiles/common/contextManager';
 
 /**
  * Global Context Session Handler
@@ -13,8 +10,6 @@ import { ContextItem } from '../tiles/common/contextManager';
  */
 const ContextSessionHandler: React.FC = () => {
   const { user } = useAuth();
-  const { setIsVisible, setActiveSessionId } = useGlobalChat();
-  const { connect: connectWebSocket, sendMessage } = useWebSocket();
   const processingRef = useRef(false);
 
   useEffect(() => {
@@ -88,12 +83,12 @@ const ContextSessionHandler: React.FC = () => {
     };
 
     // Listen for context session events from ContextWindow
-    window.addEventListener('create-context-session', handleContextSession as EventListener);
+    window.addEventListener('create-context-session', handleContextSession as any);
 
     return () => {
-      window.removeEventListener('create-context-session', handleContextSession as EventListener);
+      window.removeEventListener('create-context-session', handleContextSession as any);
     };
-  }, [user?.id, setIsVisible, setActiveSessionId, connectWebSocket, sendMessage]);
+  }, [user?.id]);
 
   // This component doesn't render anything - it's just a global event handler
   return null;

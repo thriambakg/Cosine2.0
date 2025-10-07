@@ -4,9 +4,7 @@ import {
   Typography,
   IconButton,
   TextField,
-  Tooltip,
   CircularProgress,
-  Alert,
   Chip,
   InputAdornment,
   FormControl,
@@ -23,8 +21,6 @@ import {
   Delete as DeleteIcon,
   Send as SendIcon,
   Close as CloseIcon,
-  ChevronDown as ChevronDownIcon,
-  ChevronRight as ChevronRightIcon,
   ExpandLess as ExpandLessIcon,
   ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
@@ -59,7 +55,7 @@ interface ChatSession {
 const GlobalChatSidebar: React.FC = () => {
   const { isVisible, setIsVisible, activeSessionId, setActiveSessionId, close } = useGlobalChat();
   const { user } = useAuth();
-  const { websocket, connect: connectWebSocket, sendMessage, isConnected } = useWebSocket();
+  const { connect: connectWebSocket, sendMessage, isConnected } = useWebSocket();
   
   // Local state for the mirror
   const [messages, setMessages] = useState<Message[]>([]);
@@ -274,7 +270,12 @@ const GlobalChatSidebar: React.FC = () => {
       const contextData = event.detail;
       console.log('🎯 GlobalChatSidebar: Context session ready:', contextData);
       
-      if (contextData.userId === user?.id) {
+      if (!user?.id) {
+        console.log('⚠️ GlobalChatSidebar: No user, skipping context session');
+        return;
+      }
+      
+      if (contextData.userId === user.id) {
         console.log('🎯 GlobalChatSidebar: Processing context session:', contextData.sessionId);
         
         // Clear any existing session - this is a new context session
@@ -368,10 +369,10 @@ const GlobalChatSidebar: React.FC = () => {
       }
     };
 
-    window.addEventListener('context-session-ready', handleContextSessionReady as EventListener);
+    window.addEventListener('context-session-ready', handleContextSessionReady as any);
     
     return () => {
-      window.removeEventListener('context-session-ready', handleContextSessionReady as EventListener);
+      window.removeEventListener('context-session-ready', handleContextSessionReady as any);
     };
   }, [user?.id, activeSessionId, setIsVisible, setActiveSessionId, connectWebSocket, sendMessage]);
 

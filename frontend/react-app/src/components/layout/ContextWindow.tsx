@@ -38,7 +38,6 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
 }) => {
   // Use context for global state management
   const { contextItems, removeContextItem, clearContext, isVisible: contextIsVisible } = useContextWindow();
-  const { openWithSession } = useGlobalChat();
   
   // Use external visibility control if provided, otherwise use context
   const isVisible = externalIsVisible !== undefined ? externalIsVisible : contextIsVisible;
