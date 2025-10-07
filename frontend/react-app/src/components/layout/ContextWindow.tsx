@@ -23,7 +23,6 @@ import {
 } from '@mui/icons-material';
 import { useContextWindow } from '../../contexts/ContextWindowContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { stockDataAPI, cryptoStatsAPI, newsSearchAPI } from '../../services/api';
 import { ContextItem, TileContextData } from '../tiles/common/contextManager';
 

@@ -636,7 +636,7 @@ const GlobalChatSidebar: React.FC = () => {
           {activeSessionId && (
             <IconButton
               size="small"
-              onClick={() => loadSessionFromDatabase(activeSessionId)}
+              onClick={() => activeSessionId && loadSessionFromDatabase(activeSessionId)}
               title="Refresh Session"
               sx={{
                 color: '#9ca3af',
