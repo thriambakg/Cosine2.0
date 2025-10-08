@@ -757,7 +757,8 @@ export default function ChatPage() {
       const data = event.detail;
       
       // Only process AI responses (user messages already handled by sidebar-send-message event)
-      if (data.type === 'ai_response' && data.session_id === currentSession?.session_id) {
+      // Accept responses with no session_id (edit responses sometimes omit it) or matching session_id
+      if (data.type === 'ai_response' && (!data.session_id || data.session_id === currentSession?.session_id)) {
         const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
         // Check for duplicate
@@ -780,27 +781,51 @@ export default function ChatPage() {
         addPersistedMessage(aiMessage);
         setTypingMessages(prev => new Set([...prev, aiMessage.id]));
         
-        // Clear loading state for this session
-        if (data.session_id) {
+        // Clear loading state for this session (use currentSession if response has no session_id)
+        const sessionIdToClear = data.session_id || currentSession?.session_id;
+        if (sessionIdToClear) {
           setSessionLoadingStates(prev => ({
             ...prev,
-            [data.session_id]: false
+            [sessionIdToClear]: false
           }));
+          console.log('🔄 Cleared loading state for session:', sessionIdToClear);
         }
         
         console.log('✅ ChatPage processed AI response from shared WebSocket');
       }
     };
     
+    const handleSidebarEdit = (event: CustomEvent) => {
+      const editData = event.detail;
+      console.log('✏️ ChatPage mirroring Sidebar edit:', editData);
+      
+      if (editData.sessionId === currentSession?.session_id && editData.userId === user?.id) {
+        // Update message and truncate messages after it using the persistence system
+        truncateMessagesAfter(editData.messageId, editData.newText);
+        
+        // Set loading state
+        if (currentSession?.session_id) {
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [currentSession.session_id]: true
+          }));
+        }
+        
+        console.log('✅ ChatPage mirrored Sidebar edit');
+      }
+    };
+    
     window.addEventListener('context-session-ready', handleContextSessionReady as any);
     window.addEventListener('sidebar-send-message', handleSidebarMessage as any);
+    window.addEventListener('sidebar-edit-message', handleSidebarEdit as any);
     window.addEventListener('websocket-message', handleSharedWebSocketMessage as any);
     return () => {
       window.removeEventListener('context-session-ready', handleContextSessionReady as any);
       window.removeEventListener('sidebar-send-message', handleSidebarMessage as any);
+      window.removeEventListener('sidebar-edit-message', handleSidebarEdit as any);
       window.removeEventListener('websocket-message', handleSharedWebSocketMessage as any);
     };
-  }, [user?.id, currentSession?.session_id, processedMessageIds, addPersistedMessage, loadSession, setSessionContext, loadSessionsFromBackend]);
+  }, [user?.id, currentSession?.session_id, processedMessageIds, addPersistedMessage, truncateMessagesAfter, loadSession, setSessionContext, loadSessionsFromBackend]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -874,6 +899,19 @@ export default function ChatPage() {
             [currentSession.session_id]: true
           }));
         }
+        
+        // Dispatch event to sidebar to mirror the edit
+        const editEvent = new CustomEvent('chatpage-edit-message', {
+          detail: {
+            messageId: editingMessage.id,
+            newText: editText,
+            sessionId: currentSession?.session_id,
+            userId: user?.id,
+            timestamp: Date.now()
+          }
+        });
+        window.dispatchEvent(editEvent);
+        console.log('📡 ChatPage dispatched edit event to Sidebar');
       }
     } catch (error) {
       console.error('Error sending edit message:', error);

@@ -15,6 +15,7 @@ import {
   List,
   ListItem,
   ListItemText,
+  Tooltip,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -23,6 +24,7 @@ import {
   Close as CloseIcon,
   ExpandLess as ExpandLessIcon,
   ExpandMore as ExpandMoreIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -67,7 +69,13 @@ const GlobalChatSidebar: React.FC = () => {
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   
+  // Message editing state
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const editContainerRef = useRef<HTMLDivElement>(null);
   const processedMessageIdsRef = useRef<Set<string>>(new Set());
   const sidebarWidth = 400;
 
@@ -108,6 +116,96 @@ const GlobalChatSidebar: React.FC = () => {
     }, speed);
     
     return typeInterval;
+  };
+
+  // Edit message handlers
+  const handleEditMessage = (message: Message, messageIndex: number) => {
+    setEditingMessage(message);
+    setEditingMessageIndex(messageIndex);
+    setEditText(message.text);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingMessage || editingMessageIndex === null || !editText.trim() || !activeSessionId) return;
+    
+    try {
+      // Ensure WebSocket is connected
+      if (!isConnected && activeSessionId) {
+        console.log('🔌 WebSocket not connected for edit, connecting to session:', activeSessionId);
+        connectWebSocket(activeSessionId);
+        // Wait for connection
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      // Send edit message via shared WebSocket
+      const messageData = {
+        action: 'chat',
+        type: 'edit_message',
+        messageId: editingMessage.id,
+        newText: editText,
+        model: selectedModel,
+        sessionId: activeSessionId,
+        userId: user?.id,
+        context: {
+          currentPage: window.location.pathname,
+          sessionId: activeSessionId
+        }
+      };
+
+      // Immediately update local UI
+      setMessages(prev => {
+        const messageIndexInArray = prev.findIndex(m => m.id === editingMessage.id);
+        if (messageIndexInArray === -1) return prev;
+        
+        // Clear processed IDs for truncated messages
+        const truncatedMessages = prev.slice(messageIndexInArray + 1);
+        truncatedMessages.forEach(msg => {
+          processedMessageIdsRef.current.delete(msg.id);
+          console.log('🗑️ Cleared processed ID for truncated message:', msg.id);
+        });
+        
+        // Update the message text and remove all messages after it
+        return prev.slice(0, messageIndexInArray + 1).map(m => 
+          m.id === editingMessage.id ? { ...m, text: editText } : m
+        );
+      });
+      
+      const sent = sendMessage(messageData);
+      if (sent) {
+        console.log('✅ Sidebar sent edit message via WebSocket');
+        
+        // Clear editing state
+        setEditingMessage(null);
+        setEditingMessageIndex(null);
+        setEditText('');
+        
+        // Set loading state
+        setIsLoadingMessage(true);
+        
+        // Dispatch event to ChatPage to mirror the edit
+        const editEvent = new CustomEvent('sidebar-edit-message', {
+          detail: {
+            messageId: editingMessage.id,
+            newText: editText,
+            sessionId: activeSessionId,
+            userId: user?.id,
+            timestamp: Date.now()
+          }
+        });
+        window.dispatchEvent(editEvent);
+        console.log('📡 Sidebar dispatched edit event to ChatPage');
+      } else {
+        console.error('❌ Failed to send edit message');
+      }
+    } catch (error) {
+      console.error('Error sending edit message:', error);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+    setEditingMessageIndex(null);
+    setEditText('');
   };
 
   // Load session from database
@@ -189,6 +287,37 @@ const GlobalChatSidebar: React.FC = () => {
       }
     };
 
+    const handleChatPageEdit = (event: CustomEvent) => {
+      const editData = event.detail;
+      console.log('✏️ GlobalChatSidebar mirroring ChatPage edit:', editData);
+      
+      if (editData.sessionId === activeSessionId && editData.userId === user?.id) {
+        // Update message and truncate messages after it
+        setMessages(prev => {
+          const messageIndex = prev.findIndex(m => m.id === editData.messageId);
+          if (messageIndex === -1) {
+            console.log('⚠️ Message not found for edit:', editData.messageId);
+            return prev;
+          }
+          
+          // Clear processed IDs for truncated messages
+          const truncatedMessages = prev.slice(messageIndex + 1);
+          truncatedMessages.forEach(msg => {
+            processedMessageIdsRef.current.delete(msg.id);
+            console.log('🗑️ Cleared processed ID for truncated message:', msg.id);
+          });
+          
+          return prev.slice(0, messageIndex + 1).map(m => 
+            m.id === editData.messageId ? { ...m, text: editData.newText } : m
+          );
+        });
+        
+        // Show loading state
+        setIsLoadingMessage(true);
+        console.log('✅ Sidebar mirrored ChatPage edit, expecting new AI response');
+      }
+    };
+
     const handleChatPageAIResponse = (event: CustomEvent) => {
       const responseData = event.detail;
       console.log('🤖 GlobalChatSidebar mirroring AI response:', responseData);
@@ -234,10 +363,12 @@ const GlobalChatSidebar: React.FC = () => {
     };
 
     window.addEventListener('chatpage-message', handleChatPageMessage as EventListener);
+    window.addEventListener('chatpage-edit-message', handleChatPageEdit as EventListener);
     window.addEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
     
     return () => {
       window.removeEventListener('chatpage-message', handleChatPageMessage as EventListener);
+      window.removeEventListener('chatpage-edit-message', handleChatPageEdit as EventListener);
       window.removeEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
     };
   }, [isVisible, activeSessionId, user?.id]);
@@ -401,7 +532,8 @@ const GlobalChatSidebar: React.FC = () => {
           });
           
           // Only process if it's for the active session (check sessionStorage for latest value)
-          if (data.session_id === latestActiveSessionId || !latestActiveSessionId) {
+          // If response has no session_id, assume it's for the active session (edit responses sometimes omit it)
+          if (!data.session_id || data.session_id === latestActiveSessionId || !latestActiveSessionId) {
             // Check for duplicate
             if (processedMessageIdsRef.current.has(messageId)) {
               console.log('🤖 Duplicate AI response ignored (WebSocket):', messageId);
@@ -755,51 +887,159 @@ const GlobalChatSidebar: React.FC = () => {
           },
         }}
       >
-        {messages.map((message) => (
+        {messages.map((message, messageIndex) => (
           <Box
             key={message.id}
             sx={{
               alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start',
               maxWidth: '85%',
-              p: 1.5,
-              borderRadius: 2,
-              backgroundColor: message.sender === 'user' 
-                ? 'rgba(59, 130, 246, 0.2)' 
-                : 'rgba(255, 255, 255, 0.1)',
-              border: message.sender === 'user' 
-                ? '1px solid rgba(59, 130, 246, 0.3)' 
-                : '1px solid rgba(255, 255, 255, 0.2)',
             }}
           >
-            <Typography
-              variant="body2"
+            <Box
               sx={{
-                color: '#ffffff',
-                fontSize: '0.875rem',
-                lineHeight: 1.4,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
+                p: 1.5,
+                borderRadius: 2,
+                backgroundColor: message.sender === 'user' 
+                  ? 'rgba(59, 130, 246, 0.2)' 
+                  : 'rgba(255, 255, 255, 0.1)',
+                border: message.sender === 'user' 
+                  ? '1px solid rgba(59, 130, 246, 0.3)' 
+                  : '1px solid rgba(255, 255, 255, 0.2)',
               }}
             >
-              {message.text}
-              {streamingMessageId === message.id && (
-                <Box
-                  component="span"
+              {editingMessage && editingMessage.id === message.id ? (
+                <Box ref={editContainerRef} sx={{ position: 'relative' }}>
+                  <TextField
+                    fullWidth
+                    multiline
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        handleCancelEdit();
+                      } else if (e.key === 'Enter' && e.shiftKey === false) {
+                        e.preventDefault();
+                        if (editText.trim()) {
+                          handleSaveEdit();
+                        }
+                      }
+                    }}
+                    variant="outlined"
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        color: 'white',
+                        fontSize: '0.875rem',
+                        '& fieldset': {
+                          borderColor: 'rgba(59, 130, 246, 0.3)',
+                        },
+                        '&:hover fieldset': {
+                          borderColor: 'rgba(59, 130, 246, 0.5)',
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: 'rgba(59, 130, 246, 0.7)',
+                        },
+                      },
+                    }}
+                  />
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      bottom: 8,
+                      right: 8,
+                      display: 'flex',
+                      gap: 0.5,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Tooltip title="Cancel (Esc)">
+                      <IconButton
+                        size="small"
+                        onClick={handleCancelEdit}
+                        sx={{
+                          color: '#9ca3af',
+                          '&:hover': { color: '#ef4444' },
+                          width: 28,
+                          height: 28,
+                        }}
+                      >
+                        <CloseIcon sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Send (Enter)">
+                      <IconButton
+                        size="small"
+                        onClick={handleSaveEdit}
+                        disabled={!editText.trim()}
+                        sx={{
+                          color: editText.trim() ? '#22c55e' : '#6b7280',
+                          '&:hover': { 
+                            color: editText.trim() ? '#16a34a' : '#6b7280',
+                            backgroundColor: editText.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
+                          },
+                          width: 28,
+                          height: 28,
+                        }}
+                      >
+                        <SendIcon sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                </Box>
+              ) : (
+                <Typography
+                  variant="body2"
                   sx={{
-                    display: 'inline-block',
-                    width: '8px',
-                    height: '16px',
-                    backgroundColor: '#60a5fa',
-                    marginLeft: '2px',
-                    animation: 'blink 1s infinite',
-                    '@keyframes blink': {
-                      '0%, 50%': { opacity: 1 },
-                      '51%, 100%': { opacity: 0 },
-                    },
+                    color: '#ffffff',
+                    fontSize: '0.875rem',
+                    lineHeight: 1.4,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
                   }}
-                />
+                >
+                  {message.text}
+                  {streamingMessageId === message.id && (
+                    <Box
+                      component="span"
+                      sx={{
+                        display: 'inline-block',
+                        width: '8px',
+                        height: '16px',
+                        backgroundColor: '#60a5fa',
+                        marginLeft: '2px',
+                        animation: 'blink 1s infinite',
+                        '@keyframes blink': {
+                          '0%, 50%': { opacity: 1 },
+                          '51%, 100%': { opacity: 0 },
+                        },
+                      }}
+                    />
+                  )}
+                </Typography>
               )}
-            </Typography>
+            </Box>
+            
+            {/* Message metadata and edit button */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5, px: 0.5 }}>
+              <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.65rem' }}>
+                {new Date(message.timestamp).toLocaleTimeString()}
+              </Typography>
+              {message.sender === 'user' && !editingMessage && (
+                <Tooltip title="Edit message">
+                  <IconButton
+                    size="small"
+                    onClick={() => handleEditMessage(message, messageIndex)}
+                    sx={{ 
+                      color: '#9ca3af',
+                      '&:hover': { color: '#3b82f6' },
+                      width: 20,
+                      height: 20,
+                    }}
+                  >
+                    <EditIcon sx={{ fontSize: 12 }} />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
           </Box>
         ))}
         
