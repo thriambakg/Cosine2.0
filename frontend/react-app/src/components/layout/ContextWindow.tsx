@@ -36,7 +36,7 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
   isVisible: externalIsVisible
 }) => {
   // Use context for global state management
-  const { contextItems, removeContextItem, clearContext, isVisible: contextIsVisible } = useContextWindow();
+  const { contextItems, removeContextItem, clearContext, isVisible: contextIsVisible, setIsVisible: setContextIsVisible } = useContextWindow();
   
   // Use external visibility control if provided, otherwise use context
   const isVisible = externalIsVisible !== undefined ? externalIsVisible : contextIsVisible;
@@ -205,9 +205,11 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
         setCountdown((prev) => {
           if (prev <= 1) {
             clearInterval(timer);
-            // Reset and close
+            // Reset, clear, and collapse the window
             setShowSuccess(false);
             clearContext();
+            setContextIsVisible(false);
+            console.log('🔽 Context window collapsed after sending message');
             return 5;
           }
           return prev - 1;

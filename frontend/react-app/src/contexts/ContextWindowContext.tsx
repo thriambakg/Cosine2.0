@@ -73,6 +73,11 @@ export const ContextWindowProvider: React.FC<ContextWindowProviderProps> = ({ ch
           return prev;
         }
         console.log('✅ Adding item to context:', newItem);
+        
+        // Show the context window when item is added
+        setIsVisible(true);
+        console.log('🔼 Context window opened automatically');
+        
         return [...prev, newItem];
       });
     };
