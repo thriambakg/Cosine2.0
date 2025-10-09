@@ -240,3 +240,4 @@ Expected response:
 - No Terraform changes needed (DynamoDB is schema-less)
 - Backward compatible - old sessions without `session_variables` will work fine
 
+

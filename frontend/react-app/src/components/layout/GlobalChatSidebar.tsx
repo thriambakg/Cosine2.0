@@ -120,6 +120,26 @@ const GlobalChatSidebar: React.FC = () => {
 
   // Edit message handlers
   const handleEditMessage = (message: Message, messageIndex: number) => {
+    // Check if AI is currently processing
+    if (isLoadingMessage) {
+      console.log('🛑 Sidebar cancelling ongoing AI processing for edit');
+      
+      // Immediately clear the loading state to stop "AI is thinking" indicator
+      setIsLoadingMessage(false);
+      
+      // Notify ChatPage and other listeners
+      const cancelEvent = new CustomEvent('cancel-ai-processing', {
+        detail: {
+          sessionId: activeSessionId,
+          reason: 'user_edit',
+          source: 'sidebar',
+          timestamp: Date.now()
+        }
+      });
+      window.dispatchEvent(cancelEvent);
+      console.log('📡 Sidebar dispatched cancel-ai-processing event');
+    }
+    
     setEditingMessage(message);
     setEditingMessageIndex(messageIndex);
     setEditText(message.text);
@@ -361,15 +381,28 @@ const GlobalChatSidebar: React.FC = () => {
         console.log('❌ Session or user mismatch, ignoring AI response');
       }
     };
+    
+    // Handle AI processing cancellation from ChatPage
+    const handleCancelAIProcessing = (event: CustomEvent) => {
+      const { sessionId, source } = event.detail;
+      
+      // Only process if it's NOT from sidebar (to avoid self-triggering) and matches active session
+      if (source !== 'sidebar' && sessionId === activeSessionId) {
+        console.log('🛑 Sidebar received cancel from ChatPage, clearing loading state');
+        setIsLoadingMessage(false);
+      }
+    };
 
     window.addEventListener('chatpage-message', handleChatPageMessage as EventListener);
     window.addEventListener('chatpage-edit-message', handleChatPageEdit as EventListener);
     window.addEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
+    window.addEventListener('cancel-ai-processing', handleCancelAIProcessing as EventListener);
     
     return () => {
       window.removeEventListener('chatpage-message', handleChatPageMessage as EventListener);
       window.removeEventListener('chatpage-edit-message', handleChatPageEdit as EventListener);
       window.removeEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
+      window.removeEventListener('cancel-ai-processing', handleCancelAIProcessing as EventListener);
     };
   }, [isVisible, activeSessionId, user?.id]);
 

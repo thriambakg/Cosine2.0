@@ -815,15 +815,31 @@ export default function ChatPage() {
       }
     };
     
+    // Handle AI processing cancellation from sidebar
+    const handleCancelAIProcessing = (event: CustomEvent) => {
+      const { sessionId, source } = event.detail;
+      
+      // Only process if it's from sidebar and matches current session
+      if (source === 'sidebar' && sessionId === currentSession?.session_id) {
+        console.log('🛑 ChatPage received cancel from sidebar, clearing loading state');
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [sessionId]: false
+        }));
+      }
+    };
+    
     window.addEventListener('context-session-ready', handleContextSessionReady as any);
     window.addEventListener('sidebar-send-message', handleSidebarMessage as any);
     window.addEventListener('sidebar-edit-message', handleSidebarEdit as any);
     window.addEventListener('websocket-message', handleSharedWebSocketMessage as any);
+    window.addEventListener('cancel-ai-processing', handleCancelAIProcessing as any);
     return () => {
       window.removeEventListener('context-session-ready', handleContextSessionReady as any);
       window.removeEventListener('sidebar-send-message', handleSidebarMessage as any);
       window.removeEventListener('sidebar-edit-message', handleSidebarEdit as any);
       window.removeEventListener('websocket-message', handleSharedWebSocketMessage as any);
+      window.removeEventListener('cancel-ai-processing', handleCancelAIProcessing as any);
     };
   }, [user?.id, currentSession?.session_id, processedMessageIds, addPersistedMessage, truncateMessagesAfter, loadSession, setSessionContext, loadSessionsFromBackend]);
 
@@ -858,6 +874,32 @@ export default function ChatPage() {
   };
 
   const handleEditMessage = (message: Message, messageIndex: number) => {
+    // Check if AI is currently processing for this session
+    const isCurrentlyProcessing = currentSession?.session_id && sessionLoadingStates[currentSession.session_id];
+    
+    if (isCurrentlyProcessing) {
+      console.log('🛑 Cancelling ongoing AI processing for edit');
+      
+      // Immediately clear the loading state to stop "AI is thinking" indicator
+      if (currentSession?.session_id) {
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [currentSession.session_id]: false
+        }));
+      }
+      
+      // Notify via event for any other listeners
+      const cancelEvent = new CustomEvent('cancel-ai-processing', {
+        detail: {
+          sessionId: currentSession?.session_id,
+          reason: 'user_edit',
+          timestamp: Date.now()
+        }
+      });
+      window.dispatchEvent(cancelEvent);
+      console.log('📡 Dispatched cancel-ai-processing event');
+    }
+    
     setEditingMessage(message);
     setEditingMessageIndex(messageIndex);
     setEditText(message.text);

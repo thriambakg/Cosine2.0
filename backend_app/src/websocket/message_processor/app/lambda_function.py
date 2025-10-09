@@ -553,6 +553,25 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         logger.info(f"🔍 EDIT: Starting edit process for message {message_id} in session {session_id}")
         logger.info(f"🔍 EDIT: Looking for message {message_id} in session {session_id} for user {user_id}")
         
+        # Step 1: Set kill signal to stop any ongoing AI processing for this session
+        logger.info(f"🛑 EDIT: Setting kill signal for session {session_id} to cancel ongoing AI processing")
+        timestamp_ms = int(datetime.now().timestamp() * 1000)
+        try:
+            chat_sessions_table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression='SET killed_at = :killed_at',
+                ExpressionAttributeValues={
+                    ':killed_at': timestamp_ms
+                }
+            )
+            logger.info(f"✅ EDIT: Kill signal set for session {session_id} at {timestamp_ms}")
+        except Exception as kill_error:
+            logger.error(f"⚠️ EDIT: Failed to set kill signal: {kill_error}")
+            # Continue with edit even if kill signal fails
+        
         # Get current session
         response = chat_sessions_table.get_item(
             Key={
@@ -642,14 +661,14 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         logger.info(f"✅ EDIT: Successfully truncated {original_message_count} messages to {len(truncated_messages)} messages")
         logger.info(f"✅ EDIT: Updated message text from '{message_to_edit.get('text', '')[:50]}...' to '{new_text[:50]}...'")
         
-        # Update the session with truncated messages
+        # Update the session with truncated messages and clear kill signal
         timestamp = int(datetime.now().timestamp())
         chat_sessions_table.update_item(
             Key={
                 'user_id': user_id,
                 'session_id': session_id
             },
-            UpdateExpression='SET messages = :messages, message_count = :message_count, last_updated = :last_updated',
+            UpdateExpression='SET messages = :messages, message_count = :message_count, last_updated = :last_updated REMOVE killed_at',
             ExpressionAttributeValues={
                 ':messages': truncated_messages,
                 ':message_count': len(truncated_messages),
@@ -658,6 +677,7 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         )
         
         logger.info(f"✅ EDIT: Updated session {session_id} in DynamoDB with {len(truncated_messages)} truncated messages")
+        logger.info(f"✅ EDIT: Cleared kill signal for session {session_id} - ready for new AI response")
         
         # Send acknowledgment to frontend
         ack_message = {

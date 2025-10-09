@@ -605,6 +605,23 @@ Session Context:
 """
         
         try:
+            # Final kill signal check before calling agent
+            logger.info("🔍 DEBUG: Final kill signal check before agent call...")
+            session_context_check = session_manager.get_session_context(session_id, user_id)
+            if session_context_check and session_context_check.get('killed_at'):
+                logger.warning(f"🔴 KILL: Session {session_id} killed before agent call (killed_at: {session_context_check.get('killed_at')})")
+                return {
+                    'statusCode': 410,  # Gone status code
+                    'body': {
+                        'error': 'Session terminated',
+                        'message': f'Session {session_id} was terminated before processing',
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'killed_at': session_context_check.get('killed_at')
+                    }
+                }
+            logger.info("✅ KILL CHECK: Session active, proceeding with agent call")
+            
             logger.info("🔍 DEBUG: Calling session-aware agent...")
             agent_response = agent(enhanced_message)
             logger.info(f"🔍 DEBUG: Agent response received: {agent_response}")
