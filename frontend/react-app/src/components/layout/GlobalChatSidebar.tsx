@@ -619,6 +619,20 @@ const GlobalChatSidebar: React.FC = () => {
         case 'message_received':
           console.log('✅ Message received confirmation:', data.message_id);
           break;
+        
+        case 'edit_acknowledged':
+          console.log('✏️ Sidebar received edit acknowledgment:', data.message_id);
+          
+          // Check if message was unchanged (user clicked edit but didn't change text)
+          if (data.unchanged) {
+            console.log('⚠️ Edit acknowledged but message unchanged - no AI response expected');
+            // Clear loading state since no AI response will come
+            setIsLoadingMessage(false);
+          } else {
+            console.log('✅ Edit acknowledged - waiting for AI response');
+            // Loading state will be cleared when AI response arrives
+          }
+          break;
           
         case 'error':
           console.error('❌ WebSocket error:', data.message);

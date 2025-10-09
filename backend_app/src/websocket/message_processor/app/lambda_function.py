@@ -653,6 +653,40 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
                 'body': json_dumps_safe({'error': 'Can only edit user messages'})
             }
         
+        # Check if the message text actually changed
+        original_text = message_to_edit.get('text', '').strip()
+        new_text_stripped = new_text.strip()
+        
+        if original_text == new_text_stripped:
+            logger.info(f"⚠️ EDIT: Message text unchanged - skipping duplicate processing")
+            logger.info(f"⚠️ EDIT: Original: '{original_text[:100]}...'")
+            logger.info(f"⚠️ EDIT: New: '{new_text_stripped[:100]}...'")
+            
+            # Send acknowledgment but don't process
+            ack_message = {
+                'type': 'edit_acknowledged',
+                'message_id': message_id,
+                'message_index': message_to_edit_index,
+                'unchanged': True,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            send_message_to_client(connection_id, ack_message)
+            logger.info(f"✅ EDIT: Sent edit_acknowledged (unchanged) to frontend for message {message_id}")
+            
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({
+                    'message': 'Message unchanged, no processing needed',
+                    'message_id': message_id,
+                    'unchanged': True
+                })
+            }
+        
+        logger.info(f"✅ EDIT: Message text changed, proceeding with edit")
+        logger.info(f"✅ EDIT: Original: '{original_text[:50]}...'")
+        logger.info(f"✅ EDIT: New: '{new_text_stripped[:50]}...'")
+        
         # Truncate messages after the edited message
         original_message_count = len(messages)
         truncated_messages = messages[:message_to_edit_index + 1]  # Keep messages up to and including the edited one

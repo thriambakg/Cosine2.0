@@ -70,6 +70,7 @@ interface WebSocketMessage {
   content?: string;
   message?: string;
   timestamp?: string;
+  unchanged?: boolean;
 }
 
 
@@ -618,8 +619,22 @@ export default function ChatPage() {
 
       case 'edit_acknowledged':
         console.log('✏️ Edit acknowledged:', data.message_id);
-        // UI has already been updated in handleSaveEdit, just log acknowledgment
-        // The AI response will come as a separate 'ai_response' message
+        
+        // Check if message was unchanged (user clicked edit but didn't change text)
+        if (data.unchanged) {
+          console.log('⚠️ Edit acknowledged but message unchanged - no AI response expected');
+          // Clear loading state since no AI response will come
+          if (currentSession?.session_id) {
+            setSessionLoadingStates(prev => ({
+              ...prev,
+              [currentSession.session_id]: false
+            }));
+          }
+        } else {
+          // UI has already been updated in handleSaveEdit, just log acknowledgment
+          // The AI response will come as a separate 'ai_response' message
+          console.log('✅ Edit acknowledged - waiting for AI response');
+        }
         break;
 
       case 'error':
