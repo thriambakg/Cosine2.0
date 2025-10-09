@@ -60,6 +60,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   onResizeTile,
   onMoveTile: _onMoveTile,
 }) => {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(1200); // Default width
   const [dragState, setDragState] = useState<DragState>({
@@ -90,8 +91,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   // Resize observer to track container width changes
   useEffect(() => {
     const updateContainerWidth = () => {
-      if (containerRef.current) {
-        const newWidth = containerRef.current.offsetWidth;
+      // Measure the scrollable container width (visible viewport)
+      if (scrollContainerRef.current) {
+        const newWidth = scrollContainerRef.current.clientWidth; // Use clientWidth to exclude scrollbar
         setContainerWidth(newWidth);
       }
     };
@@ -99,13 +101,13 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     // Initial measurement
     updateContainerWidth();
 
-    // Create resize observer for the container
+    // Create resize observer for the scrollable container
     const resizeObserver = new ResizeObserver(() => {
       updateContainerWidth();
     });
     
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
+    if (scrollContainerRef.current) {
+      resizeObserver.observe(scrollContainerRef.current);
     }
 
     // Listen to window resize events (including dev tools open/close)
@@ -122,8 +124,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
     // Add a periodic check as a safety net (every 2 seconds)
     const periodicCheck = setInterval(() => {
-      if (containerRef.current) {
-        const currentWidth = containerRef.current.offsetWidth;
+      if (scrollContainerRef.current) {
+        const currentWidth = scrollContainerRef.current.clientWidth;
         if (currentWidth !== containerWidth) {
           updateContainerWidth();
         }
@@ -1086,24 +1088,50 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
   return (
     <>
+      {/* Scrollable wrapper container */}
       <Box
-        ref={containerRef}
-        onContextMenu={handleGridContextMenu}
+        ref={scrollContainerRef}
         sx={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${gridColumns}, ${cellSize}px)`,
-          gridAutoRows: `${cellSize}px`,
-          gap: `${GRID_GAP}px`,
-          minHeight: '600px',
+          width: '100%',
+          height: '100%',
+          overflow: 'auto', // Enable scrolling
           background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%)',
           border: '1px solid #374151',
           borderRadius: '8px',
-          overflow: 'hidden',
-          padding: `${GRID_PADDING}px`,
-          width: '100%',
-          maxWidth: 'none', // Remove any max-width constraints
+          // Custom scrollbar styling
+          '&::-webkit-scrollbar': {
+            width: '12px',
+            height: '12px',
+          },
+          '&::-webkit-scrollbar-track': {
+            background: 'rgba(31, 41, 55, 0.5)',
+            borderRadius: '8px',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            background: 'rgba(75, 85, 99, 0.8)',
+            borderRadius: '8px',
+            '&:hover': {
+              background: 'rgba(107, 114, 128, 0.9)',
+            },
+          },
         }}
       >
+        <Box
+          ref={containerRef}
+          onContextMenu={handleGridContextMenu}
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${gridColumns}, ${cellSize}px)`,
+            gridAutoRows: `${cellSize}px`,
+            gap: `${GRID_GAP}px`,
+            minHeight: '600px',
+            padding: `${GRID_PADDING}px`,
+            // Allow grid to expand beyond viewport
+            width: 'fit-content',
+            minWidth: '100%', // At minimum, fill the container
+            position: 'relative',
+          }}
+        >
       {/* Grid background */}
       <Box
         sx={{
@@ -1130,6 +1158,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       
       {/* Resize preview */}
       {renderResizePreview()}
+        </Box>
       </Box>
 
       {/* Grid Context Menu */}
