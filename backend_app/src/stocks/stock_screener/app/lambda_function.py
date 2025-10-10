@@ -11,6 +11,7 @@ import random
 import hashlib
 import boto3
 import re
+import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlencode, quote
@@ -18,6 +19,74 @@ from urllib.parse import urlencode, quote
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Load comprehensive stock lists from CSV files
+def load_stock_symbols_from_csv():
+    """
+    Load all available stock symbols from NYSE and NASDAQ CSV files.
+    Returns a list of unique stock symbols.
+    """
+    all_symbols = []
+    
+    # Load NYSE stocks from local directory
+    nyse_path = os.path.join(os.path.dirname(__file__), 'nyse-listed.csv')
+    if os.path.exists(nyse_path):
+        try:
+            with open(nyse_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    symbol = row.get('ACT Symbol', '').strip().upper()
+                    # Filter out preferred stocks, warrants, units, rights, notes
+                    if symbol and not any(x in symbol for x in ['$', '.', '-', 'W', 'U', 'R', '+']):
+                        # Additional validation - only include simple equity symbols
+                        if len(symbol) <= 5 and symbol.isalpha():
+                            all_symbols.append(symbol)
+            logger.info(f"✅ Loaded {len(all_symbols)} symbols from NYSE CSV")
+        except Exception as e:
+            logger.error(f"Failed to load NYSE CSV: {str(e)}")
+    else:
+        logger.warning(f"⚠️ NYSE CSV not found at: {nyse_path}")
+    
+    # Load NASDAQ stocks from local directory
+    nasdaq_path = os.path.join(os.path.dirname(__file__), 'nasdaq-listed.csv')
+    if os.path.exists(nasdaq_path):
+        try:
+            with open(nasdaq_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    symbol = row.get('Symbol', '').strip().upper()
+                    # Filter out preferred stocks, warrants, units, rights, notes
+                    if symbol and not any(x in symbol for x in ['$', '.', '-', 'W', 'U', 'R', '+']):
+                        # Additional validation - only include simple equity symbols
+                        if len(symbol) <= 5 and symbol.isalpha():
+                            all_symbols.append(symbol)
+            logger.info(f"✅ Loaded {len(all_symbols)} total symbols from NASDAQ CSV")
+        except Exception as e:
+            logger.error(f"Failed to load NASDAQ CSV: {str(e)}")
+    else:
+        logger.warning(f"⚠️ NASDAQ CSV not found at: {nasdaq_path}")
+    
+    # Remove duplicates and sort
+    unique_symbols = sorted(list(set(all_symbols)))
+    logger.info(f"✅ Total unique stock symbols loaded: {len(unique_symbols)}")
+    
+    return unique_symbols
+
+# Load stock symbols at module initialization (cached for Lambda reuse)
+try:
+    logger.info("🔄 Initializing stock symbols from CSV files...")
+    ALL_AVAILABLE_STOCKS = load_stock_symbols_from_csv()
+    if not ALL_AVAILABLE_STOCKS:
+        logger.warning("⚠️ CSV loading returned empty list, falling back to predefined list")
+        ALL_AVAILABLE_STOCKS = None
+    else:
+        logger.info(f"✅ Successfully loaded {len(ALL_AVAILABLE_STOCKS)} stock symbols from CSV")
+        logger.info(f"✅ Sample symbols: {ALL_AVAILABLE_STOCKS[:20]}")
+except Exception as e:
+    logger.error(f"❌ Failed to load stock symbols from CSV: {str(e)}")
+    import traceback
+    logger.error(f"Traceback: {traceback.format_exc()}")
+    ALL_AVAILABLE_STOCKS = None
 
 # Rate limiting configuration - STRICT for yfinance
 RATE_LIMIT_DELAY = 2.0  # Base delay between operations
@@ -169,30 +238,113 @@ def download_stock_data_bulk(symbols: List[str], period: str = "1mo") -> pd.Data
         symbols_str = ' '.join(symbols)
         
         logger.info(f"📥 Downloading data for {len(symbols)} symbols using yf.download()")
-        logger.info(f"📥 Symbols: {symbols_str[:200]}{'...' if len(symbols_str) > 200 else ''}")
+        logger.info(f"📥 Period: {period}, Symbols sample: {symbols[:10]}")
         
-        # Download data with error handling
-        data = yf.download(
-            tickers=symbols_str,
-            period=period,
-            interval='1d',
-            group_by='ticker',
-            auto_adjust=True,
-            prepost=False,
-            threads=False,  # Disable threading to respect rate limits
-            progress=False,  # Disable progress bar in Lambda
-            show_errors=False  # Don't print errors for each failed ticker
-        )
+        # Suppress yfinance logging
+        import logging as yf_logging
+        yf_logging.getLogger('yfinance').setLevel(yf_logging.CRITICAL)
         
-        if data.empty:
-            logger.warning(f"⚠️ yf.download returned empty DataFrame for {len(symbols)} symbols")
+        # Download data with error handling - try different approaches
+        data = None
+        
+        # First, test with a few known good symbols to verify yfinance is working
+        test_symbols = ['AAPL', 'MSFT', 'GOOGL']
+        test_str = ' '.join(test_symbols)
+        logger.info(f"🧪 Testing yfinance with known good symbols: {test_symbols}")
+        
+        try:
+            test_data = yf.download(
+                tickers=test_str,
+                period='5d',
+                interval='1d',
+                group_by='ticker',
+                auto_adjust=True,
+                prepost=False,
+                threads=False,
+                progress=False
+            )
+            
+            if not test_data.empty:
+                logger.info(f"✅ Test download successful, yfinance is working! Shape: {test_data.shape}")
+            else:
+                logger.error(f"❌ Test download failed - yfinance may be down or blocked")
+                return pd.DataFrame()
+        except Exception as e:
+            logger.error(f"❌ Test download failed with error: {str(e)}")
             return pd.DataFrame()
         
-        logger.info(f"✅ Downloaded data shape: {data.shape}")
-        return data
+        # Approach 1: Bulk download with group_by='ticker'
+        try:
+            logger.info("📥 Attempting bulk download with group_by='ticker'")
+            data = yf.download(
+                tickers=symbols_str,
+                period=period,
+                interval='1d',
+                group_by='ticker',
+                auto_adjust=True,
+                prepost=False,
+                threads=False,
+                progress=False
+            )
+            
+            if not data.empty:
+                logger.info(f"✅ Bulk download successful (group_by='ticker'), shape: {data.shape}")
+                return data
+        except Exception as e:
+            logger.warning(f"⚠️ Bulk download with group_by='ticker' failed: {str(e)}")
+        
+        # Approach 2: Try without group_by if first approach fails
+        if data is None or data.empty:
+            logger.info("📥 Attempting bulk download without group_by")
+            enforce_yf_rate_limit()
+            
+            data = yf.download(
+                tickers=symbols_str,
+                period=period,
+                interval='1d',
+                auto_adjust=True,
+                prepost=False,
+                threads=False,
+                progress=False
+            )
+            
+            if not data.empty:
+                logger.info(f"✅ Bulk download successful (no group_by), shape: {data.shape}")
+                return data
+        
+        # Approach 3: Fall back to downloading a smaller batch
+        if data is None or data.empty:
+            logger.warning(f"⚠️ Bulk approaches failed, trying smaller batch (first 50 symbols)")
+            enforce_yf_rate_limit()
+            
+            # Try with just the first 50 symbols to see if that works
+            small_batch = symbols[:50]
+            small_symbols_str = ' '.join(small_batch)
+            
+            data = yf.download(
+                tickers=small_symbols_str,
+                period=period,
+                interval='1d',
+                group_by='ticker',
+                auto_adjust=True,
+                prepost=False,
+                threads=False,
+                progress=False
+            )
+            
+            if not data.empty:
+                logger.info(f"✅ Small batch download successful, shape: {data.shape}")
+                logger.warning(f"⚠️ Only processed {len(small_batch)}/{len(symbols)} symbols due to download issues")
+                return data
+        
+        logger.warning(f"⚠️ All bulk download approaches returned empty DataFrame")
+        logger.warning(f"⚠️ This might indicate yfinance API issues or network problems")
+        return pd.DataFrame()
         
     except Exception as e:
-        logger.error(f"❌ Bulk download failed: {str(e)}")
+        logger.error(f"❌ Bulk download failed with exception: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return pd.DataFrame()
 
 def get_stock_info_bulk(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -354,6 +506,112 @@ def get_comprehensive_stock_list(criteria: Dict[str, Any]) -> List[str]:
     except Exception as e:
         logger.error(f"Comprehensive stock list generation failed: {str(e)}")
         return COMMON_STOCKS[:50]  # Emergency fallback
+
+def select_liquid_stocks_from_csv(all_symbols: List[str], max_symbols: int = 200) -> List[str]:
+    """
+    Select the most liquid/popular stocks from the comprehensive list.
+    Prioritizes stocks that are likely to have good data quality and liquidity.
+    
+    Strategy:
+    1. Prioritize stocks from major indices (NASDAQ-100, S&P 500)
+    2. Prefer shorter symbols (often more established companies)
+    3. Return a diverse, representative sample
+    """
+    # Major tech and popular stocks (likely to be in major indices)
+    priority_stocks = [
+        'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'LLY',
+        'AVGO', 'JPM', 'V', 'UNH', 'XOM', 'MA', 'COST', 'HD', 'PG', 'NFLX',
+        'JNJ', 'BAC', 'ABBV', 'CRM', 'CVX', 'MRK', 'KO', 'WMT', 'AMD', 'ORCL',
+        'PEP', 'CSCO', 'ACN', 'ADBE', 'TMO', 'LIN', 'MCD', 'ABT', 'DHR', 'GE',
+        'TXN', 'QCOM', 'INTC', 'VZ', 'CMCSA', 'AMGN', 'NEE', 'DIS', 'INTU', 'IBM',
+        'PM', 'CAT', 'UNP', 'HON', 'RTX', 'T', 'SPGI', 'BA', 'GS', 'AXP',
+        'DE', 'UBER', 'SYK', 'BLK', 'BKNG', 'SCHW', 'AMAT', 'NOW', 'ELV', 'PLD',
+        'GILD', 'MMC', 'VRTX', 'C', 'ADP', 'ADI', 'MDLZ', 'REGN', 'CI', 'ISRG',
+        'PYPL', 'MO', 'LRCX', 'SBUX', 'CB', 'PGR', 'BMY', 'SLB', 'ETN', 'EQIX'
+    ]
+    
+    selected = []
+    
+    # First, add priority stocks that exist in our comprehensive list
+    for symbol in priority_stocks:
+        if symbol in all_symbols:
+            selected.append(symbol)
+    
+    logger.info(f"Added {len(selected)} priority stocks")
+    
+    # Then, add additional stocks to reach max_symbols
+    # Prefer shorter symbols (typically more established companies)
+    remaining_symbols = [s for s in all_symbols if s not in selected]
+    remaining_symbols.sort(key=lambda x: (len(x), x))  # Sort by length, then alphabetically
+    
+    needed = max_symbols - len(selected)
+    selected.extend(remaining_symbols[:needed])
+    
+    logger.info(f"✅ Selected {len(selected)} total liquid stocks")
+    return selected
+
+def get_stocks_by_industry_from_csv(industries: List[str], all_symbols: List[str]) -> List[str]:
+    """
+    Filter stocks by industry using the comprehensive CSV list.
+    This is more expensive as it requires fetching info for each stock.
+    
+    Strategy:
+    1. Start with a subset of symbols (avoid checking all 7,000+)
+    2. Sample evenly across the alphabet for diversity
+    3. Check each symbol's industry/sector via yfinance
+    4. Return matches
+    """
+    logger.info(f"🔍 Filtering {len(all_symbols)} symbols by industries: {industries}")
+    
+    # Sample stocks evenly across the alphabet for diversity
+    # This avoids only getting stocks starting with 'A'
+    sample_size = min(300, len(all_symbols))  # Check up to 300 stocks
+    step = len(all_symbols) // sample_size
+    sampled_symbols = [all_symbols[i] for i in range(0, len(all_symbols), max(step, 1))][:sample_size]
+    
+    logger.info(f"Sampled {len(sampled_symbols)} symbols for industry checking")
+    
+    matched_stocks = []
+    industries_lower = [ind.lower() for ind in industries]
+    
+    # Check each sampled symbol's industry (with rate limiting)
+    for symbol in sampled_symbols:
+        try:
+            enforce_yf_rate_limit()
+            
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            
+            if not info:
+                continue
+            
+            stock_sector = info.get('sector', '').lower()
+            stock_industry = info.get('industry', '').lower()
+            
+            # Check if stock matches any of the requested industries
+            for industry in industries_lower:
+                if industry in stock_sector or industry in stock_industry:
+                    matched_stocks.append(symbol)
+                    logger.info(f"✅ Matched {symbol} - Sector: {stock_sector}, Industry: {stock_industry}")
+                    break
+            
+            # Early exit if we have enough matches
+            if len(matched_stocks) >= 150:
+                logger.info(f"✅ Found enough matches ({len(matched_stocks)}), stopping early")
+                break
+                
+        except Exception as e:
+            logger.warning(f"Failed to check industry for {symbol}: {str(e)}")
+            continue
+    
+    logger.info(f"✅ Found {len(matched_stocks)} stocks matching industries")
+    
+    # If we didn't find enough matches, fall back to predefined industry lists
+    if len(matched_stocks) < 50:
+        logger.warning(f"⚠️ Only found {len(matched_stocks)} matches, using fallback industry mapping")
+        return get_stocks_by_industry_fallback(industries)
+    
+    return matched_stocks
 
 def get_stocks_by_industry_fallback(industries: List[str]) -> List[str]:
     """
@@ -558,22 +816,41 @@ def screen_stocks_with_bulk_download(criteria: Dict[str, Any], max_results: int 
         logger.info(f"=== Starting bulk download stock screening ===")
         logger.info(f"Criteria: {criteria}")
         
-        # Step 1: Get candidate stock list based on industry
-        if criteria.get('industries') and len(criteria['industries']) > 0:
-            candidate_symbols = get_stocks_by_industry_fallback(criteria['industries'])
-            logger.info(f"Found {len(candidate_symbols)} stocks for industries: {criteria['industries']}")
+        # Step 1: Get candidate stock list
+        # Use comprehensive CSV list if available, otherwise fall back to predefined list
+        if ALL_AVAILABLE_STOCKS:
+            logger.info(f"📊 Using comprehensive stock list: {len(ALL_AVAILABLE_STOCKS)} total symbols available")
+            
+            # Apply industry filter if specified
+            if criteria.get('industries') and len(criteria['industries']) > 0:
+                # For industry filtering, use yfinance Ticker.info (expensive but necessary)
+                # Limit to a reasonable subset for performance
+                candidate_symbols = get_stocks_by_industry_from_csv(criteria['industries'], ALL_AVAILABLE_STOCKS)
+                logger.info(f"Found {len(candidate_symbols)} stocks for industries: {criteria['industries']}")
+            else:
+                # No industry filter - use popular/liquid stocks from the comprehensive list
+                # Prioritize stocks likely to have good data quality
+                candidate_symbols = select_liquid_stocks_from_csv(ALL_AVAILABLE_STOCKS, max_symbols=200)
+                logger.info(f"Selected {len(candidate_symbols)} liquid stocks from comprehensive list")
         else:
-            # Use a curated list of liquid, popular stocks for faster screening
-            candidate_symbols = COMMON_STOCKS[:100]
-            logger.info(f"Using default stock list: {len(candidate_symbols)} symbols")
+            # Fallback to predefined list
+            logger.warning("⚠️ Comprehensive stock list not available, using fallback")
+            if criteria.get('industries') and len(criteria['industries']) > 0:
+                candidate_symbols = get_stocks_by_industry_fallback(criteria['industries'])
+            else:
+                candidate_symbols = COMMON_STOCKS[:100]
         
-        # Limit candidates to avoid timeout
+        # Limit candidates to avoid timeout (150 is a good balance)
         candidate_symbols = candidate_symbols[:150]
         logger.info(f"Proceeding with {len(candidate_symbols)} candidate symbols")
         
         # Step 2: Bulk download historical data for all candidates
         period = criteria.get('timeframe', '1mo')
         logger.info(f"📥 Bulk downloading {period} data for {len(candidate_symbols)} symbols...")
+        logger.info(f"📥 First 20 symbols to download: {candidate_symbols[:20]}")
+        logger.info(f"📥 Symbol validation - all strings: {all(isinstance(s, str) for s in candidate_symbols)}")
+        logger.info(f"📥 Symbol validation - no empty strings: {all(s.strip() for s in candidate_symbols)}")
+        
         hist_data = download_stock_data_bulk(candidate_symbols, period=period)
         
         if hist_data.empty:
