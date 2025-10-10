@@ -1072,8 +1072,4 @@ def lambda_handler(event, context):
                 'message': str(e),
                 'timestamp': datetime.now().isoformat()
             })
-<<<<<<< HEAD
         }
-=======
-        }
->>>>>>> 005a609b94363ccc5f0afbf11f723cc3fdef16cd
