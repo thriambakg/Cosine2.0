@@ -19,55 +19,23 @@ from urllib.parse import urlencode, quote
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Rate limiting configuration - using same scheme as stock-data lambda
-RATE_LIMIT_DELAY = 5.0  # Minimum delay between requests (increased to avoid 429 errors)
-MAX_RETRIES = 5  # Increased retries
-RETRY_DELAY = 10.0  # Increased base delay
-MAX_WORKERS = 8  # Reduced concurrent workers to avoid rate limits
-BATCH_SIZE = 50  # Process stocks in batches
+# Rate limiting configuration - STRICT for yfinance
+RATE_LIMIT_DELAY = 2.0  # Base delay between operations
+MAX_RETRIES = 3  # Limited retries to avoid extended failures
+RETRY_DELAY = 15.0  # Long delay on retry to avoid rate limit escalation
+BATCH_SIZE = 50  # Download stocks in batches
 
-# Alpha Vantage API key - will be fetched from Secrets Manager
-ALPHA_VANTAGE_API_KEY = None
-ALPHA_VANTAGE_SECRET_NAME = "cosine-alpha-vantage-api-production"
+# Global last request timestamp for strict rate limiting
+_last_yf_request_time = 0
+_yf_request_lock = None  # Will be initialized on first use
 
-def get_alpha_vantage_api_key():
-    """
-    Fetch Alpha Vantage API key from AWS Secrets Manager
-    """
-    global ALPHA_VANTAGE_API_KEY
-    
-    if ALPHA_VANTAGE_API_KEY is not None:
-        return ALPHA_VANTAGE_API_KEY
-    
-    try:
-        # Initialize Secrets Manager client
-        secrets_client = boto3.client('secretsmanager')
-        
-        # Get secret name from environment variable or use default
-        secret_name = os.environ.get('ALPHA_VANTAGE_SECRET_NAME', ALPHA_VANTAGE_SECRET_NAME)
-        
-        logger.info(f"Fetching Alpha Vantage API key from secret: {secret_name}")
-        
-        # Retrieve the secret
-        response = secrets_client.get_secret_value(SecretId=secret_name)
-        secret_data = json.loads(response['SecretString'])
-        
-        # Extract API key
-        ALPHA_VANTAGE_API_KEY = secret_data.get('api_key')
-        
-        if ALPHA_VANTAGE_API_KEY:
-            logger.info("Alpha Vantage API key successfully retrieved")
-            return ALPHA_VANTAGE_API_KEY
-        else:
-            logger.error("Alpha Vantage API key not found in secret")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Failed to fetch Alpha Vantage API key: {str(e)}")
-        return None
-
-# In-memory cache for rate limiting (simple approach for Lambda)
-request_timestamps = {}
+def get_rate_limit_lock():
+    """Get or create the rate limit lock"""
+    global _yf_request_lock
+    if _yf_request_lock is None:
+        import threading
+        _yf_request_lock = threading.Lock()
+    return _yf_request_lock
 
 # Common stock symbols for screening (expandable)
 COMMON_STOCKS = [
@@ -112,64 +80,30 @@ COMMON_STOCKS = [
     'TWTR', 'SNAP', 'PINS', 'MTCH', 'ZG', 'TRIP', 'EXPE', 'BKNG', 'LYFT', 'UBER'
 ]
 
-def get_alpha_vantage_api_key():
-    """Fetch Alpha Vantage API key from AWS Secrets Manager"""
-    global ALPHA_VANTAGE_API_KEY
-    
-    if ALPHA_VANTAGE_API_KEY is not None:
-        return ALPHA_VANTAGE_API_KEY
-    
-    try:
-        secrets_client = boto3.client('secretsmanager')
-        secret_name = os.environ.get('ALPHA_VANTAGE_SECRET_NAME', ALPHA_VANTAGE_SECRET_NAME)
-        
-        logger.info(f"Fetching Alpha Vantage API key from secret: {secret_name}")
-        response = secrets_client.get_secret_value(SecretId=secret_name)
-        secret_data = json.loads(response['SecretString'])
-        
-        api_key = secret_data.get('api_key')
-        if not api_key or api_key == "PLACEHOLDER_ALPHA_VANTAGE_API_KEY":
-            logger.warning("Alpha Vantage API key not properly configured in Secrets Manager")
-            return None
-        
-        ALPHA_VANTAGE_API_KEY = api_key
-        logger.info("Successfully retrieved Alpha Vantage API key from Secrets Manager")
-        return ALPHA_VANTAGE_API_KEY
-        
-    except Exception as e:
-        logger.error(f"Failed to retrieve Alpha Vantage API key from Secrets Manager: {str(e)}")
-        return None
 
-def rate_limit_check(operation_type="screener"):
-    """Enhanced rate limiting check - same as stock-data lambda"""
-    global request_timestamps
-    current_time = time.time()
-    cache_key = f"rate_limit_{operation_type}"
+def enforce_yf_rate_limit():
+    """
+    Strict rate limiting for yfinance to avoid 429 errors.
+    Thread-safe with guaranteed minimum delay between ALL yfinance calls.
+    """
+    global _last_yf_request_time
+    lock = get_rate_limit_lock()
     
-    if cache_key in request_timestamps:
-        last_request = request_timestamps[cache_key]
-        time_since_last = current_time - last_request
+    with lock:
+        current_time = time.time()
+        time_since_last = current_time - _last_yf_request_time
         
-        # Use progressive delays based on how many requests we've made
-        required_delay = RATE_LIMIT_DELAY
-        if len(request_timestamps) > 3:  # If we've made multiple requests recently
-            required_delay = RATE_LIMIT_DELAY * 2  # Double the delay
-        
-        if time_since_last < required_delay:
-            delay_needed = required_delay - time_since_last
-            # Add jitter to make requests less predictable
-            jitter = random.uniform(1.0, 3.0)
+        if time_since_last < RATE_LIMIT_DELAY:
+            delay_needed = RATE_LIMIT_DELAY - time_since_last
+            # Add small jitter to avoid thundering herd
+            jitter = random.uniform(0.1, 0.5)
             total_delay = delay_needed + jitter
-            logger.info(f"Rate limiting: waiting {total_delay:.2f}s before next request for {operation_type}")
+            
+            logger.info(f"🕐 Rate limiting: waiting {total_delay:.2f}s before yfinance call")
             time.sleep(total_delay)
-    
-    request_timestamps[cache_key] = time.time()
-    
-    # Clean up old timestamps to prevent memory issues
-    if len(request_timestamps) > 50:
-        # Remove timestamps older than 1 hour
-        cutoff_time = current_time - 3600
-        request_timestamps = {k: v for k, v in request_timestamps.items() if v > cutoff_time}
+        
+        _last_yf_request_time = time.time()
+        logger.info(f"✅ Rate limit check passed, proceeding with yfinance call")
 
 def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES, json_payload=None):
     """Make Yahoo Finance request with retry logic - same as stock-data lambda"""
@@ -216,7 +150,83 @@ def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES, json_pa
     
     raise Exception(f"All {max_retries} attempts failed")
 
-def screen_stocks_yahoo_finance(criteria: Dict[str, Any]) -> List[str]:
+def download_stock_data_bulk(symbols: List[str], period: str = "1mo") -> pd.DataFrame:
+    """
+    Download stock data in bulk using yfinance.download() with robust rate limiting.
+    This is more efficient than individual Ticker() calls.
+    
+    Args:
+        symbols: List of stock symbols to download
+        period: Time period for historical data (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, max)
+    
+    Returns:
+        DataFrame with multi-level columns (symbol, data_field)
+    """
+    try:
+        enforce_yf_rate_limit()
+        
+        # Convert list to space-separated string for yfinance
+        symbols_str = ' '.join(symbols)
+        
+        logger.info(f"📥 Downloading data for {len(symbols)} symbols using yf.download()")
+        logger.info(f"📥 Symbols: {symbols_str[:200]}{'...' if len(symbols_str) > 200 else ''}")
+        
+        # Download data with error handling
+        data = yf.download(
+            tickers=symbols_str,
+            period=period,
+            interval='1d',
+            group_by='ticker',
+            auto_adjust=True,
+            prepost=False,
+            threads=False,  # Disable threading to respect rate limits
+            progress=False,  # Disable progress bar in Lambda
+            show_errors=False  # Don't print errors for each failed ticker
+        )
+        
+        if data.empty:
+            logger.warning(f"⚠️ yf.download returned empty DataFrame for {len(symbols)} symbols")
+            return pd.DataFrame()
+        
+        logger.info(f"✅ Downloaded data shape: {data.shape}")
+        return data
+        
+    except Exception as e:
+        logger.error(f"❌ Bulk download failed: {str(e)}")
+        return pd.DataFrame()
+
+def get_stock_info_bulk(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Get current stock info for multiple symbols using Ticker.info with rate limiting.
+    
+    Args:
+        symbols: List of stock symbols
+    
+    Returns:
+        Dictionary mapping symbol to stock info
+    """
+    stock_info = {}
+    
+    for symbol in symbols:
+        try:
+            enforce_yf_rate_limit()
+            
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            
+            if info and 'regularMarketPrice' in info or 'currentPrice' in info:
+                stock_info[symbol] = info
+                logger.info(f"✅ Got info for {symbol}")
+            else:
+                logger.warning(f"⚠️ No valid info for {symbol}")
+                
+        except Exception as e:
+            logger.warning(f"❌ Failed to get info for {symbol}: {str(e)}")
+            continue
+    
+    return stock_info
+
+def screen_stocks_yahoo_finance_OLD(criteria: Dict[str, Any]) -> List[str]:
     """
     Screen stocks using Yahoo Finance's screener interface.
     Returns list of stock symbols matching the criteria.
@@ -403,24 +413,12 @@ def get_stocks_by_industry_fallback(industries: List[str]) -> List[str]:
         logger.error(f"Industry fallback failed: {str(e)}")
         return COMMON_STOCKS[:50]
 
-def fetch_stock_basic_info(symbol: str, use_alpha_vantage: bool = False) -> Optional[Dict[str, Any]]:
+def fetch_stock_basic_info(symbol: str) -> Optional[Dict[str, Any]]:
     """
-    Fetch basic stock information for screening with retry logic and Alpha Vantage fallback.
+    Fetch basic stock information for screening with retry logic.
     Returns None if stock doesn't meet basic criteria or fails to fetch.
     """
-    # For faster processing, try Alpha Vantage first if yfinance is rate limited
-    if use_alpha_vantage:
-        try:
-            logger.info(f"🔑 Using Alpha Vantage API for {symbol}")
-            result = fetch_stock_info_alpha_vantage(symbol)
-            if result:
-                logger.info(f"✅ Alpha Vantage successful for {symbol}")
-                return result
-        except Exception as e:
-            logger.warning(f"Alpha Vantage failed for {symbol}: {str(e)}")
-        return None
-    
-    # Try yfinance first with minimal retries for speed
+    # Try yfinance with minimal retries for speed
     try:
         logger.info(f"Fetching basic info for {symbol} via yfinance")
         result = fetch_stock_info_yfinance(symbol)
@@ -432,21 +430,9 @@ def fetch_stock_basic_info(symbol: str, use_alpha_vantage: bool = False) -> Opti
             logger.warning(f"No data returned from yfinance for {symbol}")
             
     except Exception as e:
-        error_msg = str(e)
-        logger.warning(f"yfinance failed for {symbol}: {error_msg}")
-        
-        # If it's a rate limit error, immediately try Alpha Vantage
-        if "429" in error_msg or "Too Many Requests" in error_msg:
-            logger.info(f"🔄 Rate limited on yfinance, immediately trying Alpha Vantage for {symbol}")
-            try:
-                result = fetch_stock_info_alpha_vantage(symbol)
-                if result:
-                    logger.info(f"✅ Alpha Vantage successful for {symbol}")
-                    return result
-            except Exception as av_e:
-                logger.warning(f"Alpha Vantage fallback failed for {symbol}: {str(av_e)}")
+        logger.warning(f"yfinance failed for {symbol}: {str(e)}")
     
-    logger.warning(f"All methods failed for {symbol}")
+    logger.warning(f"Failed to fetch data for {symbol}")
     return None
 
 def fetch_stock_info_yfinance(symbol: str) -> Optional[Dict[str, Any]]:
@@ -505,84 +491,6 @@ def fetch_stock_info_yfinance(symbol: str) -> Optional[Dict[str, Any]]:
         logger.warning(f"yfinance failed for {symbol}: {str(e)}")
         return None
 
-def fetch_stock_info_alpha_vantage(symbol: str) -> Optional[Dict[str, Any]]:
-    """Fetch stock info using Alpha Vantage API"""
-    try:
-        logger.info(f"🔑 Using Alpha Vantage API for {symbol}")
-        
-        api_key = get_alpha_vantage_api_key()
-        if not api_key:
-            logger.error("Alpha Vantage API key not available")
-            return None
-        
-        rate_limit_check(f"alpha_vantage_{symbol}")
-        
-        # Get quote data
-        quote_url = "https://www.alphavantage.co/query"
-        quote_params = {
-            'function': 'GLOBAL_QUOTE',
-            'symbol': symbol,
-            'apikey': api_key,
-            'datatype': 'json'
-        }
-        
-        response = requests.get(quote_url, params=quote_params, timeout=10)
-        if response.status_code != 200:
-            return None
-        
-        quote_data = response.json()
-        
-        if 'Global Quote' not in quote_data:
-            return None
-        
-        quote = quote_data['Global Quote']
-        
-        current_price = float(quote.get('05. price', 0))
-        previous_close = float(quote.get('08. previous close', current_price))
-        volume = int(quote.get('06. volume', 0))
-        
-        price_change = current_price - previous_close
-        price_change_percent = (price_change / previous_close * 100) if previous_close > 0 else 0
-        
-        # Get additional info (company overview)
-        overview_url = "https://www.alphavantage.co/query"
-        overview_params = {
-            'function': 'OVERVIEW',
-            'symbol': symbol,
-            'apikey': api_key,
-            'datatype': 'json'
-        }
-        
-        overview_response = requests.get(overview_url, params=overview_params, timeout=10)
-        overview_data = {}
-        
-        if overview_response.status_code == 200:
-            overview_data = overview_response.json()
-        
-        market_cap = overview_data.get('MarketCapitalization', '0')
-        if market_cap and market_cap != 'None':
-            market_cap_billions = float(market_cap) / 1_000_000_000
-        else:
-            market_cap_billions = 0
-        
-        return {
-            'symbol': symbol.upper(),
-            'name': overview_data.get('Name', symbol.upper()),
-            'price': round(current_price, 2),
-            'priceChange': round(price_change, 2),
-            'priceChangePercent': round(price_change_percent, 2),
-            'marketCap': round(market_cap_billions, 2),
-            'volatility': 0.0,  # Alpha Vantage doesn't provide volatility in basic endpoints
-            'industry': overview_data.get('Industry', 'Unknown'),
-            'sector': overview_data.get('Sector', 'Unknown'),
-            'volume': volume,
-            'pe': float(overview_data.get('PERatio', 0)) if overview_data.get('PERatio') != 'None' else 0,
-            'data_source': 'alpha_vantage'
-        }
-        
-    except Exception as e:
-        logger.warning(f"Alpha Vantage failed for {symbol}: {str(e)}")
-        return None
 
 def filter_stocks(stocks: List[Dict[str, Any]], criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Filter stocks based on screening criteria"""
@@ -635,7 +543,180 @@ def filter_stocks(stocks: List[Dict[str, Any]], criteria: Dict[str, Any]) -> Lis
     
     return filtered_stocks
 
-def screen_stocks_comprehensive(criteria: Dict[str, Any], max_results: int = 100) -> List[Dict[str, Any]]:
+def screen_stocks_with_bulk_download(criteria: Dict[str, Any], max_results: int = 100) -> List[Dict[str, Any]]:
+    """
+    Screen stocks using yfinance bulk download for efficiency and better rate limit compliance.
+    
+    Strategy:
+    1. Select relevant symbols based on industry filter
+    2. Bulk download historical data for all symbols at once (single API call)
+    3. Calculate metrics from historical data (volatility, price change)
+    4. Get current info for filtered symbols only (minimized API calls)
+    5. Filter and return results
+    """
+    try:
+        logger.info(f"=== Starting bulk download stock screening ===")
+        logger.info(f"Criteria: {criteria}")
+        
+        # Step 1: Get candidate stock list based on industry
+        if criteria.get('industries') and len(criteria['industries']) > 0:
+            candidate_symbols = get_stocks_by_industry_fallback(criteria['industries'])
+            logger.info(f"Found {len(candidate_symbols)} stocks for industries: {criteria['industries']}")
+        else:
+            # Use a curated list of liquid, popular stocks for faster screening
+            candidate_symbols = COMMON_STOCKS[:100]
+            logger.info(f"Using default stock list: {len(candidate_symbols)} symbols")
+        
+        # Limit candidates to avoid timeout
+        candidate_symbols = candidate_symbols[:150]
+        logger.info(f"Proceeding with {len(candidate_symbols)} candidate symbols")
+        
+        # Step 2: Bulk download historical data for all candidates
+        period = criteria.get('timeframe', '1mo')
+        logger.info(f"📥 Bulk downloading {period} data for {len(candidate_symbols)} symbols...")
+        hist_data = download_stock_data_bulk(candidate_symbols, period=period)
+        
+        if hist_data.empty:
+            logger.error("Bulk download returned no data")
+            return []
+        
+        # Step 3: Calculate metrics from historical data
+        logger.info(f"📊 Calculating metrics from historical data...")
+        stock_metrics = []
+        
+        for symbol in candidate_symbols:
+            try:
+                # Handle single symbol vs multi-symbol DataFrame structure
+                if len(candidate_symbols) == 1:
+                    symbol_data = hist_data
+                else:
+                    if symbol not in hist_data.columns.get_level_values(0):
+                        continue
+                    symbol_data = hist_data[symbol]
+                
+                if symbol_data.empty or len(symbol_data) < 2:
+                    continue
+                
+                # Get current and previous price
+                close_prices = symbol_data['Close'].dropna()
+                if len(close_prices) < 2:
+                    continue
+                
+                current_price = float(close_prices.iloc[-1])
+                previous_price = float(close_prices.iloc[-2])
+                
+                # Calculate price change
+                price_change = current_price - previous_price
+                price_change_percent = (price_change / previous_price * 100) if previous_price > 0 else 0
+                
+                # Calculate volatility (annualized standard deviation of log returns)
+                log_returns = np.log(close_prices / close_prices.shift(1)).dropna()
+                volatility = 0.0
+                if len(log_returns) > 1:
+                    volatility = float(log_returns.std() * np.sqrt(252))  # Annualized
+                
+                # Calculate average volume
+                volumes = symbol_data['Volume'].dropna()
+                avg_volume = int(volumes.mean()) if len(volumes) > 0 else 0
+                
+                stock_metrics.append({
+                    'symbol': symbol,
+                    'price': round(current_price, 2),
+                    'priceChange': round(price_change, 2),
+                    'priceChangePercent': round(price_change_percent, 2),
+                    'volatility': round(volatility, 4),
+                    'volume': avg_volume
+                })
+                
+            except Exception as e:
+                logger.warning(f"Failed to calculate metrics for {symbol}: {str(e)}")
+                continue
+        
+        logger.info(f"✅ Calculated metrics for {len(stock_metrics)} stocks")
+        
+        # Step 4: Apply initial filters based on calculated metrics
+        filtered_metrics = []
+        for stock in stock_metrics:
+            # Price range filter
+            if criteria.get('priceRange'):
+                price_min, price_max = criteria['priceRange']
+                if not (price_min <= stock['price'] <= price_max):
+                    continue
+            
+            # Volatility range filter
+            if criteria.get('volatilityRange'):
+                vol_min, vol_max = criteria['volatilityRange']
+                stock_vol_pct = stock['volatility'] * 100
+                if not (vol_min <= stock_vol_pct <= vol_max):
+                    continue
+            
+            # Price change range filter
+            if criteria.get('priceChangeRange'):
+                change_min, change_max = criteria['priceChangeRange']
+                if not (change_min <= stock['priceChangePercent'] <= change_max):
+                    continue
+            
+            filtered_metrics.append(stock)
+        
+        logger.info(f"✅ {len(filtered_metrics)} stocks passed initial filters")
+        
+        # Step 5: Get detailed info for filtered stocks only (market cap, industry, PE)
+        # Limit to top candidates to minimize API calls
+        top_candidates = filtered_metrics[:max_results * 2]  # Get 2x for filtering
+        top_symbols = [stock['symbol'] for stock in top_candidates]
+        
+        logger.info(f"📥 Getting detailed info for top {len(top_symbols)} candidates...")
+        stock_info = get_stock_info_bulk(top_symbols)
+        
+        # Step 6: Combine metrics with detailed info
+        final_results = []
+        for stock_metric in top_candidates:
+            symbol = stock_metric['symbol']
+            info = stock_info.get(symbol, {})
+            
+            if not info:
+                # If no info available, skip this stock
+                continue
+            
+            # Extract additional info
+            market_cap = info.get('marketCap', 0)
+            market_cap_billions = market_cap / 1_000_000_000 if market_cap > 0 else 0
+            
+            # Apply market cap filter
+            if criteria.get('marketCapRange'):
+                mcap_min, mcap_max = criteria['marketCapRange']
+                if not (mcap_min <= market_cap_billions <= mcap_max):
+                    continue
+            
+            # Build final result
+            final_results.append({
+                'symbol': symbol,
+                'name': info.get('longName', symbol),
+                'price': stock_metric['price'],
+                'priceChange': stock_metric['priceChange'],
+                'priceChangePercent': stock_metric['priceChangePercent'],
+                'marketCap': round(market_cap_billions, 2),
+                'volatility': stock_metric['volatility'],
+                'industry': info.get('industry', 'Unknown'),
+                'sector': info.get('sector', 'Unknown'),
+                'volume': stock_metric['volume'],
+                'pe': info.get('trailingPE', info.get('forwardPE', 0)),
+                'data_source': 'yfinance_bulk'
+            })
+        
+        # Step 7: Sort by market cap and return
+        final_results.sort(key=lambda x: x.get('marketCap', 0), reverse=True)
+        
+        logger.info(f"✅ Final screening results: {len(final_results)} stocks")
+        return final_results[:max_results]
+        
+    except Exception as e:
+        logger.error(f"❌ Bulk download screening failed: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return []
+
+def screen_stocks_comprehensive_OLD(criteria: Dict[str, Any], max_results: int = 100) -> List[Dict[str, Any]]:
     """
     Comprehensive stock screening using Yahoo Finance + yfinance.
     Uses Yahoo Finance for initial screening, then yfinance for detailed data.
@@ -667,7 +748,7 @@ def screen_stocks_comprehensive(criteria: Dict[str, Any], max_results: int = 100
             with ThreadPoolExecutor(max_workers=batch_size) as executor:
                 # Submit batch tasks
                 future_to_symbol = {
-                    executor.submit(fetch_stock_basic_info, symbol, False): symbol 
+                    executor.submit(fetch_stock_basic_info, symbol): symbol 
                     for symbol in batch
                 }
                 
@@ -733,7 +814,7 @@ def screen_stocks_parallel_fallback(criteria: Dict[str, Any], max_results: int =
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # Submit all tasks
         future_to_symbol = {
-            executor.submit(fetch_stock_basic_info, symbol, False): symbol 
+            executor.submit(fetch_stock_basic_info, symbol): symbol 
             for symbol in stock_symbols
         }
         
@@ -876,12 +957,12 @@ def lambda_handler(event, context):
                 })
             }
         
-        # Use comprehensive screening approach with Yahoo Finance + yfinance
+        # Use bulk download screening approach with strict rate limiting
         try:
-            logger.info("=== Using comprehensive Yahoo Finance + yfinance screening ===")
+            logger.info("=== Using yfinance bulk download screening ===")
             logger.info(f"Criteria: {criteria}")
             logger.info(f"Max results: {max_results}")
-            results = screen_stocks_comprehensive(criteria, max_results)
+            results = screen_stocks_with_bulk_download(criteria, max_results)
             logger.info(f"Screening completed, got {len(results)} results")
             
             if not results:

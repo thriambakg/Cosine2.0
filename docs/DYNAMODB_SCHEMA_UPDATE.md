@@ -241,3 +241,4 @@ Expected response:
 - Backward compatible - old sessions without `session_variables` will work fine
 
 
+

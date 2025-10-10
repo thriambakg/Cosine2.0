@@ -12,20 +12,6 @@ import sys
 import time
 from typing import Dict, Any
 
-# Import context builder for handling context-aware messages
-try:
-    from context_builder import build_context_prompt, extract_context_summary
-    logger = logging.getLogger()
-    logger.info("✅ Successfully imported context_builder")
-except ImportError as e:
-    logger = logging.getLogger()
-    logger.warning(f"⚠️ Could not import context_builder: {e}")
-    # Fallback functions if import fails
-    def build_context_prompt(user_message, context_items):
-        return user_message
-    def extract_context_summary(context_items):
-        return {'total_items': len(context_items) if context_items else 0}
-
 # Fix OpenTelemetry context issue in Lambda environment
 os.environ.setdefault('OTEL_SDK_DISABLED', 'true')
 os.environ.setdefault('OTEL_PYTHON_DISABLED_INSTRUMENTATIONS', 'all')
@@ -404,7 +390,6 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         # Extract message from various possible locations
         logger.info("🔍 DEBUG: Starting message extraction")
         user_message = None
-        original_message = None  # For context-aware messages, store original for display
         session_id = 'default'
         
         # Try different possible message locations
@@ -438,11 +423,6 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                     logger.info("🔍 DEBUG: No 'message' or 'prompt' field in nested body")
             else:
                 logger.info("🔍 DEBUG: No 'body' field or body is not a dict")
-        
-        # Check if there's an originalMessage (for context-aware messages)
-        if 'originalMessage' in event_body:
-            original_message = event_body.get('originalMessage', '').strip()
-            logger.info(f"📌 Found originalMessage field for frontend display: '{original_message}'")
         
         # Extract session_id and user_id from various possible locations
         logger.info("🔍 DEBUG: Checking for session_id and user_id in various fields...")
@@ -571,27 +551,12 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         
         # No automatic welcome message - let the user start the conversation
         
-        # Context handling is now done in WebSocket message processor
-        # (message_text is already enriched if context was present)
-        # Fallback: If contextItems are in event_body, handle them here
-        context_items = event_body.get('contextItems', [])
-        has_context = len(context_items) > 0
-        
-        if has_context:
-            logger.info(f"📌 FALLBACK: Context items detected in chat lambda (should be handled by WebSocket processor)")
-            logger.info(f"📌 Context-aware message with {len(context_items)} items")
-            
-            # Build enriched prompt with context (fallback only)
-            user_message = build_context_prompt(user_message, context_items)
-            logger.info(f"📌 FALLBACK: Enhanced message with context (length: {len(user_message)})")
-        
         # Process message with session-aware agent
         logger.info(f"🔍 DEBUG: About to process message with session-aware agent")
-        logger.info(f"🔍 DEBUG: Message: '{user_message[:200] if len(user_message) > 200 else user_message}...'")  # Truncate for logging
+        logger.info(f"🔍 DEBUG: Message: '{user_message}'")
         logger.info(f"🔍 DEBUG: Session ID: '{session_id}'")
         
         # Create enhanced message with session context for the agent
-        # Note: user_message may already be enriched with context data from WebSocket processor
         enhanced_message = f"""
 User Message: {user_message}
 
@@ -605,23 +570,6 @@ Session Context:
 """
         
         try:
-            # Final kill signal check before calling agent
-            logger.info("🔍 DEBUG: Final kill signal check before agent call...")
-            session_context_check = session_manager.get_session_context(session_id, user_id)
-            if session_context_check and session_context_check.get('killed_at'):
-                logger.warning(f"🔴 KILL: Session {session_id} killed before agent call (killed_at: {session_context_check.get('killed_at')})")
-                return {
-                    'statusCode': 410,  # Gone status code
-                    'body': {
-                        'error': 'Session terminated',
-                        'message': f'Session {session_id} was terminated before processing',
-                        'session_id': session_id,
-                        'user_id': user_id,
-                        'killed_at': session_context_check.get('killed_at')
-                    }
-                }
-            logger.info("✅ KILL CHECK: Session active, proceeding with agent call")
-            
             logger.info("🔍 DEBUG: Calling session-aware agent...")
             agent_response = agent(enhanced_message)
             logger.info(f"🔍 DEBUG: Agent response received: {agent_response}")
@@ -674,14 +622,10 @@ Session Context:
             logger.info(f"🔍 DEBUG: Response content type: {type(response_content)}")
             
             # Update session context with new conversation
-            # Use original_message for display if available (for context-aware messages)
-            message_for_display = original_message if original_message else user_message
-            
             if session_context and user_id:
                 logger.info(f"🔍 DEBUG: Updating session context for session {session_id}")
-                logger.info(f"📌 Using message for display: '{message_for_display[:100]}...'")
                 update_success = session_manager.update_session_context(
-                    session_id, user_id, message_for_display, response_content, model=model
+                    session_id, user_id, user_message, response_content, model=model
                 )
                 if update_success:
                     logger.info(f"✅ Successfully updated session context for session {session_id}")

@@ -393,3 +393,4 @@ No additional configuration required. The sidebar uses existing environment vari
 The Global Chat Sidebar provides a seamless, Cursor-like AI chat experience accessible from anywhere in the application. It integrates deeply with the existing context system, maintains persistent sessions, and provides a clean, intuitive UI for interacting with the AI assistant.
 
 
+
