@@ -219,10 +219,166 @@ def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES, json_pa
     
     raise Exception(f"All {max_retries} attempts failed")
 
+def download_stock_data_bulk_http(symbols: List[str], period: str = "1mo") -> Dict[str, pd.DataFrame]:
+    """
+    Download stock data for multiple symbols using direct HTTP calls in parallel batches.
+    Yahoo Finance doesn't support multi-symbol chart API, so we batch individual requests.
+    
+    Args:
+        symbols: List of stock symbols
+        period: Time period for historical data
+    
+    Returns:
+        Dict mapping symbol to its historical DataFrame
+    """
+    results = {}
+    
+    # Yahoo Finance chart API doesn't support multiple symbols in one request
+    # But we can parallelize individual requests for better performance
+    logger.info(f"📥 Bulk HTTP download for {len(symbols)} symbols using parallel requests")
+    
+    # Process in batches to avoid overwhelming the API
+    batch_size = 10  # Download 10 stocks at a time in parallel
+    
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i + batch_size]
+        batch_num = i//batch_size + 1
+        total_batches = (len(symbols) + batch_size - 1)//batch_size
+        logger.info(f"📥 Processing batch {batch_num}/{total_batches}: {len(batch)} symbols")
+        
+        # Download batch in parallel using ThreadPoolExecutor
+        batch_results = []
+        
+        def download_with_delay(symbol):
+            """Download a single symbol with random delay to spread requests"""
+            try:
+                # Add small random delay to spread out parallel requests
+                time.sleep(random.uniform(0.2, 0.5))
+                df = download_stock_data_direct_http(symbol, period)
+                if not df.empty:
+                    return (symbol, df)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to download {symbol}: {str(e)}")
+            return None
+        
+        # Use ThreadPoolExecutor for true parallel downloads within batch
+        with ThreadPoolExecutor(max_workers=min(5, len(batch))) as executor:
+            futures = [executor.submit(download_with_delay, symbol) for symbol in batch]
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    batch_results.append(result)
+        
+        # Add batch results
+        for symbol, df in batch_results:
+            results[symbol] = df
+        
+        logger.info(f"✅ Batch {batch_num} complete: {len(batch_results)}/{len(batch)} successful")
+        
+        # Delay between batches to avoid rate limiting (but not within batches)
+        if i + batch_size < len(symbols):
+            delay = random.uniform(2.0, 3.0)
+            logger.info(f"⏱️ Waiting {delay:.1f}s before next batch...")
+            time.sleep(delay)
+    
+    logger.info(f"✅ Bulk HTTP download complete: {len(results)}/{len(symbols)} symbols")
+    return results
+
+def download_stock_data_direct_http(symbol: str, period: str = "1mo") -> pd.DataFrame:
+    """
+    Download stock data using direct HTTP call to Yahoo Finance.
+    This bypasses yfinance library to avoid rate limiting issues.
+    
+    Based on working stock-data Lambda implementation.
+    
+    Args:
+        symbol: Stock symbol
+        period: Time period for historical data
+    
+    Returns:
+        DataFrame with historical price data
+    """
+    try:
+        # Map period to Yahoo Finance parameters
+        period_map = {
+            '1d': {'range': '1d', 'interval': '1m'},
+            '7d': {'range': '7d', 'interval': '1h'},
+            '1mo': {'range': '1mo', 'interval': '1d'},
+            '3mo': {'range': '3mo', 'interval': '1d'},
+            '6mo': {'range': '6mo', 'interval': '1d'},
+            '1y': {'range': '1y', 'interval': '1d'}
+        }
+        
+        period_config = period_map.get(period, period_map['1mo'])
+        
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        params = {
+            'range': period_config['range'],
+            'interval': period_config['interval'],
+            'includePrePost': 'true'
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+        }
+        
+        # Add delay between requests
+        time.sleep(random.uniform(1.0, 2.0))
+        
+        response = requests.get(url, params=params, headers=headers, timeout=30)
+        
+        if response.status_code != 200:
+            logger.warning(f"⚠️ HTTP request failed for {symbol}: {response.status_code}")
+            return pd.DataFrame()
+        
+        data = response.json()
+        
+        if 'chart' not in data or not data['chart']['result']:
+            logger.warning(f"⚠️ No chart data for {symbol}")
+            return pd.DataFrame()
+        
+        result = data['chart']['result'][0]
+        timestamps = result.get('timestamp', [])
+        quotes = result.get('indicators', {}).get('quote', [{}])[0]
+        closes = quotes.get('close', [])
+        opens = quotes.get('open', [])
+        highs = quotes.get('high', [])
+        lows = quotes.get('low', [])
+        volumes = quotes.get('volume', [])
+        
+        # Build DataFrame
+        df_data = []
+        for i, timestamp in enumerate(timestamps):
+            if i < len(closes) and closes[i] is not None:
+                df_data.append({
+                    'Date': pd.Timestamp.fromtimestamp(timestamp),
+                    'Open': opens[i] if i < len(opens) and opens[i] is not None else closes[i],
+                    'High': highs[i] if i < len(highs) and highs[i] is not None else closes[i],
+                    'Low': lows[i] if i < len(lows) and lows[i] is not None else closes[i],
+                    'Close': closes[i],
+                    'Volume': volumes[i] if i < len(volumes) and volumes[i] is not None else 0
+                })
+        
+        if not df_data:
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(df_data)
+        df.set_index('Date', inplace=True)
+        
+        return df
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Direct HTTP download failed for {symbol}: {str(e)}")
+        return pd.DataFrame()
+
 def download_stock_data_individual(symbols: List[str], period: str = "1mo", max_symbols: int = 50) -> Dict[str, pd.DataFrame]:
     """
-    Download stock data individually with strict rate limiting.
-    Fallback for when yf.download() is blocked/rate-limited.
+    Download stock data individually using direct HTTP to Yahoo Finance.
+    This avoids yfinance library rate limiting issues.
     
     Args:
         symbols: List of stock symbols
@@ -235,19 +391,16 @@ def download_stock_data_individual(symbols: List[str], period: str = "1mo", max_
     results = {}
     symbols_to_process = symbols[:max_symbols]
     
-    logger.info(f"📥 Downloading individual stock data for {len(symbols_to_process)} symbols")
+    logger.info(f"📥 Downloading individual stock data via direct HTTP for {len(symbols_to_process)} symbols")
     
     for i, symbol in enumerate(symbols_to_process):
         try:
-            enforce_yf_rate_limit()
+            df = download_stock_data_direct_http(symbol, period)
             
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period=period)
-            
-            if not hist.empty:
-                results[symbol] = hist
+            if not df.empty:
+                results[symbol] = df
                 if (i + 1) % 10 == 0:
-                    logger.info(f"📥 Progress: {i + 1}/{len(symbols_to_process)} symbols")
+                    logger.info(f"📥 Progress: {i + 1}/{len(symbols_to_process)} symbols downloaded")
             else:
                 logger.warning(f"⚠️ No data for {symbol}")
                 
@@ -255,7 +408,7 @@ def download_stock_data_individual(symbols: List[str], period: str = "1mo", max_
             logger.warning(f"⚠️ Failed to download {symbol}: {str(e)}")
             continue
     
-    logger.info(f"✅ Successfully downloaded data for {len(results)}/{len(symbols_to_process)} symbols")
+    logger.info(f"✅ Successfully downloaded data for {len(results)}/{len(symbols_to_process)} symbols via direct HTTP")
     return results
 
 def download_stock_data_bulk(symbols: List[str], period: str = "1mo") -> pd.DataFrame:
@@ -892,31 +1045,36 @@ def screen_stocks_with_bulk_download(criteria: Dict[str, Any], max_results: int 
         logger.info(f"📥 Symbol validation - all strings: {all(isinstance(s, str) for s in candidate_symbols)}")
         logger.info(f"📥 Symbol validation - no empty strings: {all(s.strip() for s in candidate_symbols)}")
         
-        hist_data = download_stock_data_bulk(candidate_symbols, period=period)
+        # Use direct HTTP bulk downloads (bypasses yfinance rate limiting)
+        logger.info("📥 Using direct HTTP bulk method (bypasses yfinance library issues)")
+        logger.info("📥 Downloading data via Yahoo Finance direct API in batches...")
         
-        # If bulk download fails, try individual downloads as fallback
-        if hist_data.empty:
-            logger.warning("⚠️ Bulk download failed, falling back to individual downloads")
-            logger.warning("⚠️ This will be slower but should work around yfinance rate limiting")
-            
-            # Limit to 30 symbols for individual downloads to avoid Lambda timeout
-            hist_data_dict = download_stock_data_individual(candidate_symbols, period=period, max_symbols=30)
-            
-            if not hist_data_dict:
-                logger.error("❌ Both bulk and individual downloads failed")
-                logger.error("❌ yfinance appears to be completely blocked in Lambda environment")
-                return []
-            
-            logger.info(f"✅ Individual download succeeded with {len(hist_data_dict)} stocks")
-            # Convert dict of DataFrames to multi-index DataFrame format
-            # (similar to what yf.download returns with group_by='ticker')
-            hist_data = pd.DataFrame()
-            for symbol, df in hist_data_dict.items():
-                for col in df.columns:
-                    hist_data[(symbol, col)] = df[col]
-            
-            # Flatten column names to match expected format
-            hist_data.columns = pd.MultiIndex.from_tuples(hist_data.columns)
+        # Bulk download up to 100 symbols (batches of 10 with delays)
+        # This should complete within Lambda timeout (~2-3 minutes for 100 stocks)
+        max_symbols_to_screen = min(100, len(candidate_symbols))
+        symbols_to_download = candidate_symbols[:max_symbols_to_screen]
+        
+        logger.info(f"📥 Downloading {len(symbols_to_download)} symbols via bulk HTTP")
+        hist_data_dict = download_stock_data_bulk_http(symbols_to_download, period=period)
+        
+        if not hist_data_dict:
+            logger.error("❌ Bulk HTTP downloads failed")
+            logger.error("❌ Yahoo Finance API may be down or blocked")
+            return []
+        
+        logger.info(f"✅ Bulk HTTP download succeeded with {len(hist_data_dict)} stocks")
+        
+        # Convert dict of DataFrames to multi-index DataFrame format
+        # (similar to what yf.download returns with group_by='ticker')
+        hist_data = pd.DataFrame()
+        for symbol, df in hist_data_dict.items():
+            for col in df.columns:
+                hist_data[(symbol, col)] = df[col]
+        
+        # Flatten column names to match expected format
+        hist_data.columns = pd.MultiIndex.from_tuples(hist_data.columns)
+        
+        logger.info(f"✅ Converted to multi-index format: {hist_data.shape}")
         
         # Step 3: Calculate metrics from historical data
         logger.info(f"📊 Calculating metrics from historical data...")
