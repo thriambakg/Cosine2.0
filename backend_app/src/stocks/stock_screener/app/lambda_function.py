@@ -219,6 +219,45 @@ def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES, json_pa
     
     raise Exception(f"All {max_retries} attempts failed")
 
+def download_stock_data_individual(symbols: List[str], period: str = "1mo", max_symbols: int = 50) -> Dict[str, pd.DataFrame]:
+    """
+    Download stock data individually with strict rate limiting.
+    Fallback for when yf.download() is blocked/rate-limited.
+    
+    Args:
+        symbols: List of stock symbols
+        period: Time period for historical data
+        max_symbols: Maximum number of symbols to process (to avoid timeout)
+    
+    Returns:
+        Dict mapping symbol to its historical DataFrame
+    """
+    results = {}
+    symbols_to_process = symbols[:max_symbols]
+    
+    logger.info(f"📥 Downloading individual stock data for {len(symbols_to_process)} symbols")
+    
+    for i, symbol in enumerate(symbols_to_process):
+        try:
+            enforce_yf_rate_limit()
+            
+            ticker = yf.Ticker(symbol)
+            hist = ticker.history(period=period)
+            
+            if not hist.empty:
+                results[symbol] = hist
+                if (i + 1) % 10 == 0:
+                    logger.info(f"📥 Progress: {i + 1}/{len(symbols_to_process)} symbols")
+            else:
+                logger.warning(f"⚠️ No data for {symbol}")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to download {symbol}: {str(e)}")
+            continue
+    
+    logger.info(f"✅ Successfully downloaded data for {len(results)}/{len(symbols_to_process)} symbols")
+    return results
+
 def download_stock_data_bulk(symbols: List[str], period: str = "1mo") -> pd.DataFrame:
     """
     Download stock data in bulk using yfinance.download() with robust rate limiting.
@@ -247,17 +286,16 @@ def download_stock_data_bulk(symbols: List[str], period: str = "1mo") -> pd.Data
         # Download data with error handling - try different approaches
         data = None
         
-        # First, test with a few known good symbols to verify yfinance is working
-        test_symbols = ['AAPL', 'MSFT', 'GOOGL']
-        test_str = ' '.join(test_symbols)
-        logger.info(f"🧪 Testing yfinance with known good symbols: {test_symbols}")
+        # First, test with a single known good symbol to verify yfinance is working
+        # Using single symbol is less likely to trigger rate limits
+        test_symbol = 'AAPL'
+        logger.info(f"🧪 Testing yfinance with single symbol: {test_symbol}")
         
         try:
             test_data = yf.download(
-                tickers=test_str,
+                tickers=test_symbol,
                 period='5d',
                 interval='1d',
-                group_by='ticker',
                 auto_adjust=True,
                 prepost=False,
                 threads=False,
@@ -267,10 +305,13 @@ def download_stock_data_bulk(symbols: List[str], period: str = "1mo") -> pd.Data
             if not test_data.empty:
                 logger.info(f"✅ Test download successful, yfinance is working! Shape: {test_data.shape}")
             else:
-                logger.error(f"❌ Test download failed - yfinance may be down or blocked")
+                logger.error(f"❌ Test download failed - yfinance may be down or blocked in Lambda environment")
+                logger.error(f"❌ This is a known issue with yfinance in AWS Lambda due to rate limiting")
+                logger.error(f"❌ Consider using alternative data sources (Alpha Vantage, FMP, etc.)")
                 return pd.DataFrame()
         except Exception as e:
             logger.error(f"❌ Test download failed with error: {str(e)}")
+            logger.error(f"❌ yfinance is likely blocked or rate-limited in this Lambda environment")
             return pd.DataFrame()
         
         # Approach 1: Bulk download with group_by='ticker'
@@ -853,9 +894,29 @@ def screen_stocks_with_bulk_download(criteria: Dict[str, Any], max_results: int 
         
         hist_data = download_stock_data_bulk(candidate_symbols, period=period)
         
+        # If bulk download fails, try individual downloads as fallback
         if hist_data.empty:
-            logger.error("Bulk download returned no data")
-            return []
+            logger.warning("⚠️ Bulk download failed, falling back to individual downloads")
+            logger.warning("⚠️ This will be slower but should work around yfinance rate limiting")
+            
+            # Limit to 30 symbols for individual downloads to avoid Lambda timeout
+            hist_data_dict = download_stock_data_individual(candidate_symbols, period=period, max_symbols=30)
+            
+            if not hist_data_dict:
+                logger.error("❌ Both bulk and individual downloads failed")
+                logger.error("❌ yfinance appears to be completely blocked in Lambda environment")
+                return []
+            
+            logger.info(f"✅ Individual download succeeded with {len(hist_data_dict)} stocks")
+            # Convert dict of DataFrames to multi-index DataFrame format
+            # (similar to what yf.download returns with group_by='ticker')
+            hist_data = pd.DataFrame()
+            for symbol, df in hist_data_dict.items():
+                for col in df.columns:
+                    hist_data[(symbol, col)] = df[col]
+            
+            # Flatten column names to match expected format
+            hist_data.columns = pd.MultiIndex.from_tuples(hist_data.columns)
         
         # Step 3: Calculate metrics from historical data
         logger.info(f"📊 Calculating metrics from historical data...")
