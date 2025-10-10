@@ -1229,8 +1229,9 @@ module "stock_screener_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    ENVIRONMENT           = var.environment
+    LOG_LEVEL             = var.environment == "development" ? "DEBUG" : "INFO"
+    STOCK_DATA_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.stock_data_table_name
   }
 
   # Attach core and financial layers
@@ -1242,7 +1243,8 @@ module "stock_screener_lambda" {
   # Additional IAM policies
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn
+    aws_iam_policy.lambda_kms_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.stock_data_table_policy_arn
   ]
 
   tags = var.common_tags

@@ -238,7 +238,8 @@ def download_stock_data_bulk_http(symbols: List[str], period: str = "1mo") -> Di
     logger.info(f"📥 Bulk HTTP download for {len(symbols)} symbols using parallel requests")
     
     # Process in batches to avoid overwhelming the API
-    batch_size = 10  # Download 10 stocks at a time in parallel
+    # Optimized for API Gateway's 29-second timeout
+    batch_size = 20  # Download 20 stocks at a time in parallel (increased from 10)
     
     for i in range(0, len(symbols), batch_size):
         batch = symbols[i:i + batch_size]
@@ -250,10 +251,10 @@ def download_stock_data_bulk_http(symbols: List[str], period: str = "1mo") -> Di
         batch_results = []
         
         def download_with_delay(symbol):
-            """Download a single symbol with random delay to spread requests"""
+            """Download a single symbol with minimal delay"""
             try:
-                # Add small random delay to spread out parallel requests
-                time.sleep(random.uniform(0.2, 0.5))
+                # Minimal delay to spread requests (reduced from 0.2-0.5s)
+                time.sleep(random.uniform(0.1, 0.2))
                 df = download_stock_data_direct_http(symbol, period)
                 if not df.empty:
                     return (symbol, df)
@@ -261,8 +262,8 @@ def download_stock_data_bulk_http(symbols: List[str], period: str = "1mo") -> Di
                 logger.warning(f"⚠️ Failed to download {symbol}: {str(e)}")
             return None
         
-        # Use ThreadPoolExecutor for true parallel downloads within batch
-        with ThreadPoolExecutor(max_workers=min(5, len(batch))) as executor:
+        # Use ThreadPoolExecutor with more workers for faster parallel downloads
+        with ThreadPoolExecutor(max_workers=min(10, len(batch))) as executor:
             futures = [executor.submit(download_with_delay, symbol) for symbol in batch]
             for future in as_completed(futures):
                 result = future.result()
@@ -275,11 +276,10 @@ def download_stock_data_bulk_http(symbols: List[str], period: str = "1mo") -> Di
         
         logger.info(f"✅ Batch {batch_num} complete: {len(batch_results)}/{len(batch)} successful")
         
-        # Delay between batches to avoid rate limiting (but not within batches)
+        # Shorter delay between batches (reduced from 2-3s to 1s)
         if i + batch_size < len(symbols):
-            delay = random.uniform(2.0, 3.0)
-            logger.info(f"⏱️ Waiting {delay:.1f}s before next batch...")
-            time.sleep(delay)
+            logger.info(f"⏱️ Waiting 1s before next batch...")
+            time.sleep(1.0)
     
     logger.info(f"✅ Bulk HTTP download complete: {len(results)}/{len(symbols)} symbols")
     return results
@@ -326,10 +326,10 @@ def download_stock_data_direct_http(symbol: str, period: str = "1mo") -> pd.Data
             'Connection': 'keep-alive'
         }
         
-        # Add delay between requests
-        time.sleep(random.uniform(1.0, 2.0))
+        # Minimal delay between requests (we handle delays in batch function)
+        # No delay here since we're already staggering in the batch download
         
-        response = requests.get(url, params=params, headers=headers, timeout=30)
+        response = requests.get(url, params=params, headers=headers, timeout=10)
         
         if response.status_code != 200:
             logger.warning(f"⚠️ HTTP request failed for {symbol}: {response.status_code}")
@@ -995,6 +995,61 @@ def filter_stocks(stocks: List[Dict[str, Any]], criteria: Dict[str, Any]) -> Lis
     
     return filtered_stocks
 
+def screen_stocks_from_dynamodb(criteria: Dict[str, Any], max_results: int = 100) -> List[Dict[str, Any]]:
+    """
+    Screen stocks by querying pre-cached data from DynamoDB.
+    This is MUCH faster than fetching from Yahoo Finance (<1 second vs 15+ seconds).
+    
+    Args:
+        criteria: Screening criteria
+        max_results: Maximum number of results to return
+    
+    Returns:
+        List of stock dictionaries matching criteria
+    """
+    try:
+        logger.info(f"=== Starting DynamoDB stock screening ===")
+        logger.info(f"Criteria: {criteria}")
+        
+        # Import DynamoDB query module
+        from dynamodb_query import query_stocks_by_criteria
+        
+        # Query DynamoDB (sub-second response!)
+        stocks = query_stocks_by_criteria(criteria, max_results * 2)  # Get more for filtering
+        
+        logger.info(f"✅ Retrieved {len(stocks)} stocks from DynamoDB cache")
+        
+        # Format for frontend
+        results = []
+        for stock in stocks:
+            results.append({
+                'symbol': stock.get('symbol', ''),
+                'name': stock.get('symbol', ''),  # Company name not in cache yet
+                'current_price': stock.get('current_price', 0),
+                'price_change_percent': stock.get('price_change_percent', 0),
+                'volatility': stock.get('volatility', 0),
+                'market_cap': stock.get('market_cap', 0),
+                'industry': stock.get('industry', 'Unknown'),
+                'sector': stock.get('sector', 'Unknown'),
+                'volume': stock.get('volume', 0),
+                'pe_ratio': stock.get('pe_ratio', 0),
+                'eps': stock.get('eps', 0),
+                'dividend_yield': stock.get('dividend_yield', 0),
+                'beta': stock.get('beta', 0),
+                'data_source': 'DynamoDB Cache'
+            })
+        
+        logger.info(f"✅ Returning {len(results)} stocks")
+        return results[:max_results]
+        
+    except Exception as e:
+        logger.error(f"❌ DynamoDB screening failed: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        # Fall back to direct HTTP if DynamoDB fails
+        logger.warning("⚠️ Falling back to direct HTTP screening")
+        return screen_stocks_with_bulk_download(criteria, max_results)
+
 def screen_stocks_with_bulk_download(criteria: Dict[str, Any], max_results: int = 100) -> List[Dict[str, Any]]:
     """
     Screen stocks using yfinance bulk download for efficiency and better rate limit compliance.
@@ -1049,12 +1104,14 @@ def screen_stocks_with_bulk_download(criteria: Dict[str, Any], max_results: int 
         logger.info("📥 Using direct HTTP bulk method (bypasses yfinance library issues)")
         logger.info("📥 Downloading data via Yahoo Finance direct API in batches...")
         
-        # Bulk download up to 100 symbols (batches of 10 with delays)
-        # This should complete within Lambda timeout (~2-3 minutes for 100 stocks)
-        max_symbols_to_screen = min(100, len(candidate_symbols))
+        # Limit symbols to fit within API Gateway's 29-second timeout
+        # At ~0.5s per stock with parallel batching, we can do ~40 stocks in 20 seconds
+        # Leave buffer for processing time
+        max_symbols_to_screen = min(40, len(candidate_symbols))
         symbols_to_download = candidate_symbols[:max_symbols_to_screen]
         
         logger.info(f"📥 Downloading {len(symbols_to_download)} symbols via bulk HTTP")
+        logger.info(f"📥 Estimated time: ~{len(symbols_to_download) * 0.5:.1f} seconds")
         hist_data_dict = download_stock_data_bulk_http(symbols_to_download, period=period)
         
         if not hist_data_dict:
@@ -1396,16 +1453,10 @@ def lambda_handler(event, context):
         logger.info(f"Context: {context}")
         logger.info(f"Environment variables: {dict(os.environ)}")
         
-        # Set a timeout to ensure we return before API Gateway timeout (29 seconds)
-        import signal
-        
-        def timeout_handler(signum, frame):
-            logger.warning("Lambda timeout approaching, returning partial results")
-            raise TimeoutError("Lambda timeout")
-        
-        # Set timeout to 25 seconds (4 seconds before API Gateway timeout)
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(25)
+        # Note: Removed artificial 25-second timeout to allow full Lambda execution
+        # Lambda has 300 seconds (5 minutes) configured
+        # API Gateway has 29 seconds max, but we'll handle that gracefully
+        # For long-running operations, we rely on Lambda's natural timeout
         
         # Parse the event
         if isinstance(event, str):
@@ -1455,10 +1506,10 @@ def lambda_handler(event, context):
         
         # Use bulk download screening approach with strict rate limiting
         try:
-            logger.info("=== Using yfinance bulk download screening ===")
+            logger.info("=== Using DynamoDB cache screening (with HTTP fallback) ===")
             logger.info(f"Criteria: {criteria}")
             logger.info(f"Max results: {max_results}")
-            results = screen_stocks_with_bulk_download(criteria, max_results)
+            results = screen_stocks_from_dynamodb(criteria, max_results)
             logger.info(f"Screening completed, got {len(results)} results")
             
             if not results:

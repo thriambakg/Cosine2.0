@@ -140,10 +140,37 @@ def format_crypto_tile(index: int, title: str, tile_data: Dict[str, Any]) -> str
             crypto = crypto_list[0]
             result += "\nMarket Data:\n"
             
-            # Extract metrics
-            for key, value in crypto.items():
-                if key not in ['symbol', 'name']:
-                    result += f"  - {key.replace('_', ' ').title()}: {value}\n"
+            # Extract and format key metrics with proper labels
+            # Handle both camelCase (from API) and snake_case (if standardized later)
+            current_price = crypto.get('currentPrice') or crypto.get('current_price')
+            price_change_24h = crypto.get('return24h') or crypto.get('price_change_24h')
+            week_return = crypto.get('weekReturn') or crypto.get('week_return')
+            annual_return = crypto.get('annualReturn') or crypto.get('annual_return')
+            volatility = crypto.get('annualizedVolatility') or crypto.get('volatility')
+            market_cap = crypto.get('marketCap') or crypto.get('market_cap')
+            volume_24h = crypto.get('volume24h') or crypto.get('volume_24h')
+            chart_data = crypto.get('chartData') or crypto.get('chart_data', [])
+            
+            if current_price is not None:
+                result += f"  - Current Price: ${current_price:,.2f}\n"
+            if price_change_24h is not None:
+                result += f"  - 24h Price Change: {price_change_24h:,.2f}%\n"
+            if week_return is not None:
+                result += f"  - 7-Day Return: {week_return:.2f}%\n"
+            if annual_return is not None:
+                result += f"  - Annual Return: {annual_return:.2f}%\n"
+            if volatility is not None:
+                result += f"  - Annualized Volatility: {volatility:.2f}%\n"
+            if market_cap is not None:
+                result += f"  - Market Cap: ${market_cap:,.0f}\n"
+            if volume_24h is not None:
+                result += f"  - 24h Volume: ${volume_24h:,.0f}\n"
+            if chart_data and len(chart_data) > 0:
+                result += f"  - Historical Data: {len(chart_data)} data points over {timeframe}\n"
+                # Extract price range from chart data
+                prices = [p.get('price') or p.get('value') or p.get('close', 0) for p in chart_data if isinstance(p, dict)]
+                if prices:
+                    result += f"  - Price Range (Period): ${min(prices):,.2f} - ${max(prices):,.2f}\n"
     
     return result
 
