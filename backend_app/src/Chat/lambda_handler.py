@@ -465,7 +465,13 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         else:
             logger.info(f"🔍 DEBUG: No model found in event_body, using default: '{model}'")
         
-        logger.info(f"🔍 DEBUG: Final extracted user_message: '{user_message}'")
+        # Check for originalMessage (used when context is enriched)
+        original_user_message = event_body.get('originalMessage')
+        if original_user_message:
+            logger.info(f"📌 Using originalMessage for display: '{original_user_message[:100]}...'")
+            logger.info(f"📌 Enriched message for AI: '{user_message[:100]}...'")
+        
+        logger.info(f"🔍 DEBUG: Final extracted user_message: '{user_message[:100] if user_message else None}...'")
         logger.info(f"🔍 DEBUG: Final extracted session_id: '{session_id}'")
         logger.info(f"🔍 DEBUG: Final extracted user_id: '{user_id}'")
         logger.info(f"🔍 DEBUG: Final extracted model: '{model}'")
@@ -624,8 +630,13 @@ Session Context:
             # Update session context with new conversation
             if session_context and user_id:
                 logger.info(f"🔍 DEBUG: Updating session context for session {session_id}")
+                # Use original_user_message for display if provided (context-enriched case)
+                # Otherwise use user_message (normal case)
+                message_for_display = original_user_message if original_user_message else user_message
+                logger.info(f"📌 Saving message for display: '{message_for_display[:100]}...'")
+                
                 update_success = session_manager.update_session_context(
-                    session_id, user_id, user_message, response_content, model=model
+                    session_id, user_id, message_for_display, response_content, model=model
                 )
                 if update_success:
                     logger.info(f"✅ Successfully updated session context for session {session_id}")
