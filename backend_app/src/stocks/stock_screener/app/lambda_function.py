@@ -1540,19 +1540,26 @@ def lambda_handler(event, context):
             results = screen_stocks_from_dynamodb(criteria, max_results)
             logger.info(f"Screening completed, got {len(results)} results")
             
+            # Return empty results with message instead of mock data
             if not results:
-                logger.warning("No stocks found matching criteria, generating mock results")
-                results = generate_mock_stock_results(criteria, max_results)
-            
-            logger.info(f"Stock screening completed: {len(results)} results found")
-            
-            response = {
-                'success': True,
-                'results': results,
-                'totalResults': len(results),
-                'criteria': criteria,
-                'timestamp': datetime.now().isoformat()
-            }
+                logger.info("No stocks found matching criteria")
+                response = {
+                    'success': True,
+                    'results': [],
+                    'totalResults': 0,
+                    'criteria': criteria,
+                    'timestamp': datetime.now().isoformat(),
+                    'message': 'No stocks match the selected criteria. Try adjusting your filters.'
+                }
+            else:
+                logger.info(f"Stock screening completed: {len(results)} results found")
+                response = {
+                    'success': True,
+                    'results': results,
+                    'totalResults': len(results),
+                    'criteria': criteria,
+                    'timestamp': datetime.now().isoformat()
+                }
             
             return {
                 'statusCode': 200,
@@ -1568,18 +1575,18 @@ def lambda_handler(event, context):
             
         except Exception as screening_error:
             logger.error(f"Screening failed: {str(screening_error)}")
-            logger.info("Falling back to mock results")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             
-            # Fallback to mock results
-            mock_results = generate_mock_stock_results(criteria, max_results)
-            
+            # Return error response instead of mock data
             response = {
-                'success': True,
-                'results': mock_results,
-                'totalResults': len(mock_results),
+                'success': False,
+                'results': [],
+                'totalResults': 0,
                 'criteria': criteria,
                 'timestamp': datetime.now().isoformat(),
-                'warning': 'Using mock data due to screening error'
+                'error': str(screening_error),
+                'message': 'Screening failed. Please try again or adjust your criteria.'
             }
             
             return {
@@ -1595,35 +1602,28 @@ def lambda_handler(event, context):
             }
         
     except TimeoutError as e:
-        logger.warning(f"=== LAMBDA TIMEOUT - RETURNING PARTIAL RESULTS ===")
+        logger.warning(f"=== LAMBDA TIMEOUT ===")
         logger.warning(f"Timeout error: {str(e)}")
         
-        # Return partial results or mock data
-        try:
-            results = generate_mock_stock_results(criteria, max_results)
-            logger.info(f"Returning {len(results)} mock results due to timeout")
-            
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
-                    'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Max-Age': '1728000',
-                    'Content-Type': 'application/json'
-                },
-                'body': json.dumps({
-                    'success': True,
-                    'results': results,
-                    'totalResults': len(results),
-                    'criteria': criteria,
-                    'timestamp': datetime.now().isoformat(),
-                    'warning': 'Results may be incomplete due to timeout'
-                })
-            }
-        except Exception as mock_error:
-            logger.error(f"Failed to generate mock results: {str(mock_error)}")
-            # Fall through to general error handling
+        return {
+            'statusCode': 408,  # Request Timeout
+            'headers': {
+                'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
+                'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Max-Age': '1728000',
+                'Content-Type': 'application/json'
+            },
+            'body': json.dumps({
+                'success': False,
+                'results': [],
+                'totalResults': 0,
+                'criteria': criteria,
+                'timestamp': datetime.now().isoformat(),
+                'error': 'Request timeout',
+                'message': 'The screening request took too long. Please try with fewer criteria.'
+            })
+        }
         
     except Exception as e:
         logger.error(f"=== STOCK SCREENER LAMBDA ERROR ===")

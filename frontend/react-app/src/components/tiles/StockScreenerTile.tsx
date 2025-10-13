@@ -149,11 +149,12 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Industry options for autocomplete
-  const industryOptions = [
-    'Technology',
-    'Healthcare',
-    'Financial Services',
+  // GICS Sector options (mapped from SEC SIC codes)
+  // Note: These are sectors, not industries. The backend stores GICS sectors.
+  const sectorOptions = [
+    'Information Technology',
+    'Health Care',
+    'Financials',
     'Consumer Discretionary',
     'Consumer Staples',
     'Industrials',
@@ -163,6 +164,9 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     'Utilities',
     'Communication Services',
   ];
+  
+  // Keep as industryOptions for backwards compatibility with existing code
+  const industryOptions = sectorOptions;
 
   // Mock stock data for demonstration (currently unused)
   /*
@@ -326,8 +330,14 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     
     try {
       // Format the request properly for the API
+      // Map 'industries' to 'sectors' for backend compatibility (industries are actually GICS sectors)
+      const backendCriteria = {
+        ...localCriteria,
+        sectors: localCriteria.industries,  // Map industries to sectors
+      };
+      
       const requestPayload = {
-        criteria: localCriteria,
+        criteria: backendCriteria,
         maxResults: localDisplayOptions.maxResults || 20
       };
       
@@ -343,9 +353,21 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           criteria: localCriteria,
           lastUpdated: new Date().toISOString(),
         });
+        
+        // Clear error if successful
+        setError(null);
+      } else if (response?.message) {
+        // Show message from backend (e.g., "No stocks match criteria")
+        setStockResults([]);
+        setError(null);  // Not an error, just no results
+      } else {
+        // Unknown response format
+        setStockResults([]);
+        setError('Unexpected response format');
       }
     } catch (err) {
-      setError('Failed to fetch stock data');
+      setError('Failed to fetch stock data. Please try again.');
+      setStockResults([]);
       console.error('Stock screener error:', err);
     } finally {
       setIsLoading(false);
@@ -710,34 +732,43 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                 </TableRow>
               </TableHead>
               <TableBody>
-                {currentResults.map((stock) => (
-                  <TableRow key={stock.symbol} hover>
-                    <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>{stock.symbol}</TableCell>
-                    {localDisplayOptions.showIndustry && (
-                      <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{stock.industry}</TableCell>
-                    )}
-                    <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>
-                      ${stock.price.toFixed(2)}
-                    </TableCell>
-                    {localDisplayOptions.showPriceChange && (
-                      <TableCell
-                        sx={{
-                          color: stock.priceChangePercent >= 0 ? '#22c55e' : '#dc2626',
-                          fontWeight: 600,
-                          fontSize: '0.875rem',
-                        }}
-                      >
-                        {stock.priceChangePercent >= 0 ? '+' : ''}{stock.priceChangePercent.toFixed(2)}%
+                {currentResults.map((stock) => {
+                  // Safe accessors with defaults
+                  const price = stock.price ?? stock.current_price ?? 0;
+                  const priceChangePercent = stock.priceChangePercent ?? stock.price_change_percent ?? 0;
+                  const marketCap = stock.marketCap ?? stock.market_cap ?? 0;
+                  const volatility = stock.volatility ?? 0;
+                  const industry = stock.industry ?? 'Unknown';
+                  
+                  return (
+                    <TableRow key={stock.symbol} hover>
+                      <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>{stock.symbol}</TableCell>
+                      {localDisplayOptions.showIndustry && (
+                        <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{industry}</TableCell>
+                      )}
+                      <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>
+                        ${price.toFixed(2)}
                       </TableCell>
-                    )}
-                    {localDisplayOptions.showMarketCap && (
-                      <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{formatMarketCap(stock.marketCap)}</TableCell>
-                    )}
-                    {localDisplayOptions.showVolatility && (
-                      <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{stock.volatility.toFixed(1)}%</TableCell>
-                    )}
-                  </TableRow>
-                ))}
+                      {localDisplayOptions.showPriceChange && (
+                        <TableCell
+                          sx={{
+                            color: priceChangePercent >= 0 ? '#22c55e' : '#dc2626',
+                            fontWeight: 600,
+                            fontSize: '0.875rem',
+                          }}
+                        >
+                          {priceChangePercent >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%
+                        </TableCell>
+                      )}
+                      {localDisplayOptions.showMarketCap && (
+                        <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{formatMarketCap(marketCap)}</TableCell>
+                      )}
+                      {localDisplayOptions.showVolatility && (
+                        <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{volatility.toFixed(1)}%</TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>

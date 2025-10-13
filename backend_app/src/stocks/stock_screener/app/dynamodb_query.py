@@ -61,33 +61,33 @@ def query_stocks_by_criteria(
         # Determine which GSI to use based on criteria priority
         # Priority: Industry > Volatility > Price Change > Market Cap > Price
         
-        # STRATEGY 1: Industry-based query with volatility range
-        if criteria.get('industries') and criteria.get('volatilityRange'):
-            logger.info("📊 Using Industry+Volatility GSI (GSI1)")
+        # STRATEGY 1: Sector-based query with volatility range
+        if criteria.get('sectors') and criteria.get('volatilityRange'):
+            logger.info("📊 Using Sector+Volatility GSI (GSI1)")
             vol_min, vol_max = criteria['volatilityRange']
             
-            for industry in criteria['industries']:
+            for sector in criteria['sectors']:
                 response = table.query(
-                    IndexName='IndustryVolatilityIndex',
-                    KeyConditionExpression=Key('GSI1PK').eq(f'INDUSTRY#{industry}#{timeframe}') & 
+                    IndexName='SectorVolatilityIndex',
+                    KeyConditionExpression=Key('GSI1PK').eq(f'SECTOR#{sector}#{timeframe}') & 
                                          Key('GSI1SK').between(Decimal(str(vol_min)), Decimal(str(vol_max))),
                     Limit=max_results
                 )
                 results.extend(response.get('Items', []))
-                logger.info(f"  Found {len(response.get('Items', []))} stocks in {industry} with vol {vol_min}-{vol_max}")
+                logger.info(f"  Found {len(response.get('Items', []))} stocks in {sector} with vol {vol_min}-{vol_max}")
         
-        # STRATEGY 2: Industry-only query (all volatilities)
-        elif criteria.get('industries'):
-            logger.info("📊 Using Industry GSI (GSI1) - all volatilities")
+        # STRATEGY 2: Sector-only query (all volatilities)
+        elif criteria.get('sectors'):
+            logger.info("📊 Using Sector GSI (GSI1) - all volatilities")
             
-            for industry in criteria['industries']:
+            for sector in criteria['sectors']:
                 response = table.query(
-                    IndexName='IndustryVolatilityIndex',
-                    KeyConditionExpression=Key('GSI1PK').eq(f'INDUSTRY#{industry}#{timeframe}'),
+                    IndexName='SectorVolatilityIndex',
+                    KeyConditionExpression=Key('GSI1PK').eq(f'SECTOR#{sector}#{timeframe}'),
                     Limit=max_results
                 )
                 results.extend(response.get('Items', []))
-                logger.info(f"  Found {len(response.get('Items', []))} stocks in {industry}")
+                logger.info(f"  Found {len(response.get('Items', []))} stocks in {sector}")
         
         # STRATEGY 3: Volatility range query
         elif criteria.get('volatilityRange'):
@@ -209,7 +209,12 @@ def passes_all_filters(stock: Dict[str, Any], criteria: Dict[str, Any]) -> bool:
     Returns:
         True if stock passes all filters, False otherwise
     """
-    # Industry filter
+    # Sector filter
+    if criteria.get('sectors'):
+        if stock.get('sector') not in criteria['sectors']:
+            return False
+    
+    # Industry filter (for backwards compatibility)
     if criteria.get('industries'):
         if stock.get('industry') not in criteria['industries']:
             return False
