@@ -31,6 +31,36 @@ def decimal_to_float(obj):
         return [decimal_to_float(item) for item in obj]
     return obj
 
+def normalize_sector_name(sector: str) -> str:
+    """
+    Normalize sector names to match GICS standard.
+    Handles legacy/shortened sector names.
+    """
+    sector_mapping = {
+        'Technology': 'Information Technology',
+        'Tech': 'Information Technology',
+        'IT': 'Information Technology',
+        'Healthcare': 'Health Care',
+        'Financial Services': 'Financials',
+        'Finance': 'Financials',
+        'Comm Services': 'Communication Services',
+        'Telecom': 'Communication Services',
+        # Exact matches pass through
+        'Information Technology': 'Information Technology',
+        'Health Care': 'Health Care',
+        'Financials': 'Financials',
+        'Consumer Discretionary': 'Consumer Discretionary',
+        'Consumer Staples': 'Consumer Staples',
+        'Industrials': 'Industrials',
+        'Energy': 'Energy',
+        'Materials': 'Materials',
+        'Real Estate': 'Real Estate',
+        'Utilities': 'Utilities',
+        'Communication Services': 'Communication Services',
+    }
+    return sector_mapping.get(sector, sector)
+
+
 def query_stocks_by_criteria(
     criteria: Dict[str, Any], 
     max_results: int = 100,
@@ -41,7 +71,8 @@ def query_stocks_by_criteria(
     
     Args:
         criteria: Screening criteria with optional filters:
-            - industries: List[str] - Industry names
+            - sectors: List[str] - GICS sector names
+            - industries: List[str] - Industry names (legacy)
             - volatilityRange: [min, max] - Volatility range (e.g., [0.1, 0.3])
             - priceRange: [min, max] - Price range (e.g., [50, 200])
             - priceChangeRange: [min, max] - Price change % range (e.g., [-5, 5])
@@ -55,6 +86,14 @@ def query_stocks_by_criteria(
     try:
         table = get_stock_data_table()
         results = []
+        
+        # Normalize sector names to handle legacy values
+        if criteria.get('sectors'):
+            criteria['sectors'] = [normalize_sector_name(s) for s in criteria['sectors']]
+        if criteria.get('industries'):
+            # Map old 'industries' to 'sectors' if sectors not provided
+            if not criteria.get('sectors'):
+                criteria['sectors'] = [normalize_sector_name(i) for i in criteria['industries']]
         
         logger.info(f"📊 Querying DynamoDB - timeframe: {timeframe}, criteria: {criteria}")
         
@@ -161,11 +200,19 @@ def query_stocks_by_criteria(
         
         # Apply additional filters in-memory for multi-criteria queries
         logger.info(f"📊 Applying additional filters to {len(results)} stocks...")
+        logger.info(f"📊 Filters: sectors={criteria.get('sectors')}, priceChange={criteria.get('priceChangeRange')}, volatility={criteria.get('volatilityRange')}")
+        
         filtered_results = []
+        filter_debug_count = 0
         
         for stock in results:
             # Convert Decimal to float for comparisons
             stock_data = decimal_to_float(stock)
+            
+            # Debug log first few stocks
+            if filter_debug_count < 3:
+                logger.info(f"  Sample stock: {stock_data.get('symbol')} - sector={stock_data.get('sector')}, price_change={stock_data.get('price_change_percent')}%, volatility={stock_data.get('volatility')}, market_cap={stock_data.get('market_cap')}")
+                filter_debug_count += 1
             
             # Apply all filters
             if not passes_all_filters(stock_data, criteria):
@@ -173,7 +220,7 @@ def query_stocks_by_criteria(
             
             filtered_results.append(stock_data)
         
-        logger.info(f"✅ Filtered to {len(filtered_results)} stocks matching all criteria")
+        logger.info(f"✅ Filtered to {len(filtered_results)} stocks matching all criteria (from {len(results)} initial results)")
         
         # Sort by volume (liquidity) descending by default
         sort_by = criteria.get('sortBy', 'volume')
@@ -222,10 +269,14 @@ def passes_all_filters(stock: Dict[str, Any], criteria: Dict[str, Any]) -> bool:
     # Volatility range filter
     if criteria.get('volatilityRange'):
         vol_min, vol_max = criteria['volatilityRange']
-        # Convert percentage to decimal for comparison (15% → 0.15)
+        # Volatility is already stored as decimal (e.g., 0.23 for 23%)
+        # Frontend sends as percentage (0-100), so convert
         vol_min_decimal = vol_min / 100
         vol_max_decimal = vol_max / 100
         volatility = stock.get('volatility', 0)
+        # Handle case where volatility might already be a percentage
+        if volatility > 1:
+            volatility = volatility / 100
         if not (vol_min_decimal <= volatility <= vol_max_decimal):
             return False
     
