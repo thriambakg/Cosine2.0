@@ -203,6 +203,14 @@ def query_stocks_by_criteria(
         logger.info(f"📊 Applying additional filters to {len(results)} stocks...")
         logger.info(f"📊 Filters: sectors={criteria.get('sectors')}, priceChange={criteria.get('priceChangeRange')}, volatility={criteria.get('volatilityRange')}")
         
+        # Count sectors for debugging
+        sector_counts = {}
+        for stock in results:
+            sector = stock.get('sector', 'Unknown')
+            sector_counts[sector] = sector_counts.get(sector, 0) + 1
+        
+        logger.info(f"📊 Sector breakdown in {len(results)} results: {dict(sorted(sector_counts.items(), key=lambda x: x[1], reverse=True)[:10])}")
+        
         filtered_results = []
         filter_debug_count = 0
         
