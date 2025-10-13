@@ -944,23 +944,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         
         {/* Content */}
         <Box sx={{ position: 'relative', zIndex: 10 }}>
-          {/* Icon */}
-          <Box sx={{
-            width: 80,
-            height: 80,
-            background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
-            borderRadius: '0px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            mx: 'auto',
-            mb: 3,
-            boxShadow: '0 20px 40px rgba(59, 130, 246, 0.3)'
-          }}>
-            <AddIcon sx={{ fontSize: 40, color: '#ffffff' }} />
-          </Box>
-
-          {/* Title */}
+          {/* Title - moved up, no icon */}
           <Typography 
             variant="h4" 
             sx={{ 
