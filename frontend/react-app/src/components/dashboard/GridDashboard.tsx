@@ -782,7 +782,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         showPriceChange: true,
         showResultsTable: true,
         showCriteriaSummary: true,
-        maxResults: 10,
+        maxResults: 5000,  // Get all matching stocks (frontend will paginate)
       },
       autoRefresh: tile.autoRefresh,
       isPinned: tile.isPinned,
