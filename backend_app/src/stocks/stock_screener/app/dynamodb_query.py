@@ -98,10 +98,25 @@ def query_stocks_by_criteria(
         logger.info(f"📊 Querying DynamoDB - timeframe: {timeframe}, criteria: {criteria}")
         
         # Determine which GSI to use based on criteria priority
-        # Priority: Industry > Volatility > Price Change > Market Cap > Price
+        # Priority: Price Change > Sector+Volatility > Sector > Volatility > Market Cap > Price
+        # Rationale: Price change filters are usually most selective
         
-        # STRATEGY 1: Sector-based query with volatility range
-        if criteria.get('sectors') and criteria.get('volatilityRange'):
+        # STRATEGY 1: Price change range query (most selective for screeners)
+        if criteria.get('priceChangeRange'):
+            logger.info("📊 Using Price Change Range GSI (GSI3)")
+            change_min, change_max = criteria['priceChangeRange']
+            
+            response = table.query(
+                IndexName='PriceChangeRangeIndex',
+                KeyConditionExpression=Key('GSI3PK').eq(f'PRICE_CHANGE#{timeframe}') & 
+                                     Key('GSI3SK').between(Decimal(str(change_min)), Decimal(str(change_max))),
+                Limit=max_results * 10  # Get more to filter down by sector
+            )
+            results = response.get('Items', [])
+            logger.info(f"  Found {len(results)} stocks with price change {change_min}%-{change_max}%")
+        
+        # STRATEGY 2: Sector-based query with volatility range
+        elif criteria.get('sectors') and criteria.get('volatilityRange'):
             logger.info("📊 Using Sector+Volatility GSI (GSI1)")
             vol_min, vol_max = criteria['volatilityRange']
             
@@ -115,7 +130,7 @@ def query_stocks_by_criteria(
                 results.extend(response.get('Items', []))
                 logger.info(f"  Found {len(response.get('Items', []))} stocks in {sector} with vol {vol_min}-{vol_max}")
         
-        # STRATEGY 2: Sector-only query (all volatilities)
+        # STRATEGY 3: Sector-only query (all volatilities)
         elif criteria.get('sectors'):
             logger.info("📊 Using Sector GSI (GSI1) - all volatilities")
             
@@ -123,12 +138,12 @@ def query_stocks_by_criteria(
                 response = table.query(
                     IndexName='SectorVolatilityIndex',
                     KeyConditionExpression=Key('GSI1PK').eq(f'SECTOR#{sector}#{timeframe}'),
-                    Limit=max_results
+                    Limit=max_results * 2  # Get more to filter down
                 )
                 results.extend(response.get('Items', []))
                 logger.info(f"  Found {len(response.get('Items', []))} stocks in {sector}")
         
-        # STRATEGY 3: Volatility range query
+        # STRATEGY 4: Volatility range query
         elif criteria.get('volatilityRange'):
             logger.info("📊 Using Volatility Range GSI (GSI2)")
             vol_min, vol_max = criteria['volatilityRange']
@@ -145,20 +160,6 @@ def query_stocks_by_criteria(
             )
             results = response.get('Items', [])
             logger.info(f"  Found {len(results)} stocks with volatility {vol_min}%-{vol_max}%")
-        
-        # STRATEGY 4: Price change range query
-        elif criteria.get('priceChangeRange'):
-            logger.info("📊 Using Price Change Range GSI (GSI3)")
-            change_min, change_max = criteria['priceChangeRange']
-            
-            response = table.query(
-                IndexName='PriceChangeRangeIndex',
-                KeyConditionExpression=Key('GSI3PK').eq(f'PRICE_CHANGE#{timeframe}') & 
-                                     Key('GSI3SK').between(Decimal(str(change_min)), Decimal(str(change_max))),
-                Limit=max_results * 2
-            )
-            results = response.get('Items', [])
-            logger.info(f"  Found {len(results)} stocks with price change {change_min}%-{change_max}%")
         
         # STRATEGY 5: Market cap range query
         elif criteria.get('marketCapRange'):
