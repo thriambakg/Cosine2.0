@@ -100,8 +100,29 @@ export interface StockResult {
   marketCap: number;
   volatility: number;
   industry: string;
+  sector?: string;
   volume: number;
   pe: number;
+  // Additional fields from EOD aggregator
+  current_price?: number;  // Backend compatibility
+  price_change_percent?: number;  // Backend compatibility
+  market_cap?: number;  // Backend compatibility
+  week_return?: number;
+  weekReturn?: number;
+  shares_outstanding?: number;
+  day_high?: number;
+  day_low?: number;
+  year_high?: number;
+  year_low?: number;
+  previous_close?: number;
+  price_change?: number;
+  avg_volume?: number;
+  pe_ratio?: number;
+  eps?: number;
+  dividend_yield?: number;
+  beta?: number;
+  data_source?: string;
+  last_updated?: string;
 }
 
 // News specific interfaces

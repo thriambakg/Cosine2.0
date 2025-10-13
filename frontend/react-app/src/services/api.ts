@@ -343,12 +343,35 @@ export interface StockScreenerResponse {
     marketCap: number;
     volatility: number;
     industry: string;
+    sector?: string;
     volume: number;
     pe: number;
+    // Additional fields from EOD aggregator
+    current_price?: number;
+    price_change_percent?: number;
+    market_cap?: number;
+    week_return?: number;
+    weekReturn?: number;
+    shares_outstanding?: number;
+    day_high?: number;
+    day_low?: number;
+    year_high?: number;
+    year_low?: number;
+    previous_close?: number;
+    price_change?: number;
+    avg_volume?: number;
+    pe_ratio?: number;
+    eps?: number;
+    dividend_yield?: number;
+    beta?: number;
+    data_source?: string;
+    last_updated?: string;
   }>;
   totalResults: number;
   criteria: StockScreenerRequest['criteria'];
   timestamp: string;
+  message?: string;  // Added for "no results" message
+  error?: string;    // Added for error messages
 }
 
 export const stockScreenerAPI = {
