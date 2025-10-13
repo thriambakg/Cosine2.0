@@ -734,10 +734,11 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
               </TableHead>
               <TableBody>
                 {currentResults.map((stock) => {
-                  // Safe accessors with defaults
-                  const price = stock.price ?? stock.current_price ?? 0;
-                  const priceChangePercent = stock.priceChangePercent ?? stock.price_change_percent ?? 0;
-                  const marketCap = stock.marketCap ?? stock.market_cap ?? 0;
+                  // Safe accessors with defaults - type assertion for backend compatibility
+                  const stockData = stock as any;
+                  const price = stock.price ?? stockData.current_price ?? 0;
+                  const priceChangePercent = stock.priceChangePercent ?? stockData.price_change_percent ?? 0;
+                  const marketCap = stock.marketCap ?? stockData.market_cap ?? 0;
                   const volatility = stock.volatility ?? 0;
                   const industry = stock.industry ?? 'Unknown';
                   
