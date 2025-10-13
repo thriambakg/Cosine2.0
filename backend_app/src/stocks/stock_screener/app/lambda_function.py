@@ -1031,29 +1031,38 @@ def screen_stocks_from_dynamodb(criteria: Dict[str, Any], max_results: int = 100
             market_cap_raw = stock.get('market_cap', 0)
             market_cap_billions = market_cap_raw / 1_000_000_000 if market_cap_raw > 0 else 0
             
+            current_price = stock.get('current_price', 0)
+            price_change_pct = stock.get('price_change_percent', 0)
+            volatility_pct = stock.get('volatility', 0) * 100  # Convert to percentage
+            
             results.append({
                 'symbol': stock.get('symbol', ''),
-                'name': stock.get('company_name', stock.get('symbol', '')),  # Use company_name from EOD aggregator
-                'current_price': stock.get('current_price', 0),
-                'price_change_percent': stock.get('price_change_percent', 0),
-                'volatility': stock.get('volatility', 0) * 100,  # Convert to percentage for display
-                'market_cap': round(market_cap_billions, 2),  # In billions
+                'name': stock.get('company_name', stock.get('symbol', '')),
+                'price': current_price,  # Frontend expects 'price'
+                'current_price': current_price,  # Keep for compatibility
+                'priceChange': stock.get('price_change', 0),  # Frontend expects 'priceChange'
+                'priceChangePercent': price_change_pct,  # Frontend expects camelCase
+                'price_change_percent': price_change_pct,  # Keep snake_case for compatibility
+                'volatility': volatility_pct,  # Already converted to percentage
+                'marketCap': round(market_cap_billions, 2),  # Frontend expects camelCase, in billions
+                'market_cap': market_cap_billions,  # Keep for compatibility
                 'industry': stock.get('industry', 'Unknown'),
                 'sector': stock.get('sector', 'Unknown'),
                 'volume': stock.get('volume', 0),
-                'week_return': stock.get('week_return', 0),  # NEW: Include week return
-                'shares_outstanding': stock.get('shares_outstanding', 0),  # NEW: Include shares outstanding
+                'weekReturn': stock.get('week_return', 0),  # camelCase for frontend
+                'week_return': stock.get('week_return', 0),  # snake_case for compatibility
+                'shares_outstanding': stock.get('shares_outstanding', 0),
                 'day_high': stock.get('day_high', 0),
                 'day_low': stock.get('day_low', 0),
                 'year_high': stock.get('year_high', 0),
                 'year_low': stock.get('year_low', 0),
                 'previous_close': stock.get('previous_close', 0),
-                'price_change': stock.get('price_change', 0),
                 'avg_volume': stock.get('avg_volume', 0),
-                'pe_ratio': stock.get('pe_ratio', 0),  # Will be 0 if not available
-                'eps': stock.get('eps', 0),  # Will be 0 if not available
-                'dividend_yield': stock.get('dividend_yield', 0),  # Will be 0 if not available
-                'beta': stock.get('beta', 0),  # Will be 0 if not available
+                'pe': stock.get('pe_ratio', 0),  # Frontend expects 'pe'
+                'pe_ratio': stock.get('pe_ratio', 0),  # Keep for compatibility
+                'eps': stock.get('eps', 0),
+                'dividend_yield': stock.get('dividend_yield', 0),
+                'beta': stock.get('beta', 0),
                 'data_source': 'DynamoDB-EOD-Cache',
                 'last_updated': stock.get('last_updated', '')
             })
