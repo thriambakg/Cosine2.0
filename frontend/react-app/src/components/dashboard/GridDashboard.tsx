@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Analytics as AnalyticsIcon, Add as AddIcon, Dashboard as ContextIcon } from '@mui/icons-material';
+import { Analytics as AnalyticsIcon, Dashboard as ContextIcon } from '@mui/icons-material';
 import CryptoTile from '../tiles/CryptoTile';
 import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
