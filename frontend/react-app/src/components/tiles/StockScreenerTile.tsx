@@ -110,7 +110,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     industries: [],
     volatilityRange: [0, 100],
     priceChangeRange: [-50, 50],
-    marketCapRange: [0, 1000000000000],
+    marketCapRange: [0, 10000000000000], // $0 to $10 trillion
     priceRange: [0, 1000],
     timeframe: '1d',
   },
@@ -122,7 +122,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     showPriceChange: true,
     showResultsTable: true,
     showCriteriaSummary: true,
-    maxResults: 10,
+    maxResults: 5000, // Get all matching stocks (backend will return up to this limit)
   },
   autoRefresh = false,
   isPinned = false,
@@ -331,14 +331,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     try {
       // Format the request properly for the API
       // Map 'industries' to 'sectors' for backend compatibility (industries are actually GICS sectors)
+      const { industries, ...criteriaWithoutIndustries } = localCriteria;
       const backendCriteria = {
-        ...localCriteria,
-        sectors: localCriteria.industries,  // Map industries to sectors
+        ...criteriaWithoutIndustries,
+        sectors: industries,  // Map industries to sectors (and remove industries field)
       };
       
       const requestPayload = {
         criteria: backendCriteria,
-        maxResults: localDisplayOptions.maxResults || 20
+        maxResults: localDisplayOptions.maxResults || 5000  // Get all matching stocks
       };
       
       // Use the API hook to fetch data with criteria
@@ -945,8 +946,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                 }}
                 valueLabelDisplay="auto"
                 min={0}
-                max={1000000000000}
-                step={1000000000}
+                max={10000000000000}  // $10 trillion to include mega-caps like AAPL, NVDA
+                step={10000000000}    // $10 billion steps
                 scale={(x) => Math.log10(x + 1)}
                 sx={{ color: '#3b82f6' }}
               />

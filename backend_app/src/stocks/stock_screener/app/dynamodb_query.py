@@ -106,13 +106,25 @@ def query_stocks_by_criteria(
             logger.info("📊 Using Price Change Range GSI (GSI3)")
             change_min, change_max = criteria['priceChangeRange']
             
-            response = table.query(
-                IndexName='PriceChangeRangeIndex',
-                KeyConditionExpression=Key('GSI3PK').eq(f'PRICE_CHANGE#{timeframe}') & 
-                                     Key('GSI3SK').between(Decimal(str(change_min)), Decimal(str(change_max))),
-                Limit=max_results * 10  # Get more to filter down by sector
-            )
-            results = response.get('Items', [])
+            # Paginate through results to get all matching stocks
+            last_key = None
+            while True:
+                query_params = {
+                    'IndexName': 'PriceChangeRangeIndex',
+                    'KeyConditionExpression': Key('GSI3PK').eq(f'PRICE_CHANGE#{timeframe}') & 
+                                             Key('GSI3SK').between(Decimal(str(change_min)), Decimal(str(change_max))),
+                    'Limit': 1000  # DynamoDB max per request
+                }
+                if last_key:
+                    query_params['ExclusiveStartKey'] = last_key
+                
+                response = table.query(**query_params)
+                results.extend(response.get('Items', []))
+                
+                last_key = response.get('LastEvaluatedKey')
+                if not last_key or len(results) >= max_results * 10:
+                    break
+            
             logger.info(f"  Found {len(results)} stocks with price change {change_min}%-{change_max}%")
         
         # STRATEGY 2: Sector-based query with volatility range
@@ -213,6 +225,8 @@ def query_stocks_by_criteria(
         
         filtered_results = []
         filter_debug_count = 0
+        it_stocks_checked = 0
+        it_stocks_rejected = 0
         
         for stock in results:
             # Convert Decimal to float for comparisons
@@ -223,11 +237,26 @@ def query_stocks_by_criteria(
                 logger.info(f"  Sample stock: {stock_data.get('symbol')} - sector={stock_data.get('sector')}, price_change={stock_data.get('price_change_percent')}%, volatility={stock_data.get('volatility')}, market_cap={stock_data.get('market_cap')}")
                 filter_debug_count += 1
             
+            # Track Information Technology stocks for debugging
+            is_it_stock = stock_data.get('sector') == 'Information Technology'
+            if is_it_stock:
+                it_stocks_checked += 1
+                if it_stocks_checked <= 3:
+                    logger.info(f"🔍 IT Stock #{it_stocks_checked}: {stock_data.get('symbol')} - price_change={stock_data.get('price_change_percent')}%, vol={stock_data.get('volatility')}, price=${stock_data.get('current_price')}, mcap={stock_data.get('market_cap')}")
+            
             # Apply all filters
-            if not passes_all_filters(stock_data, criteria):
+            passes = passes_all_filters(stock_data, criteria)
+            
+            if is_it_stock and not passes:
+                it_stocks_rejected += 1
+            
+            if not passes:
                 continue
             
             filtered_results.append(stock_data)
+        
+        if it_stocks_checked > 0:
+            logger.info(f"📊 Information Technology: found {it_stocks_checked}, rejected {it_stocks_rejected}, passed {it_stocks_checked - it_stocks_rejected}")
         
         logger.info(f"✅ Filtered to {len(filtered_results)} stocks matching all criteria (from {len(results)} initial results)")
         
@@ -278,14 +307,12 @@ def passes_all_filters(stock: Dict[str, Any], criteria: Dict[str, Any]) -> bool:
     # Volatility range filter
     if criteria.get('volatilityRange'):
         vol_min, vol_max = criteria['volatilityRange']
-        # Volatility is already stored as decimal (e.g., 0.23 for 23%)
-        # Frontend sends as percentage (0-100), so convert
+        # Volatility is stored as decimal (e.g., 0.23 for 23%, 0.89 for 89%)
+        # Frontend sends as percentage (0-100), so convert to decimal
         vol_min_decimal = vol_min / 100
         vol_max_decimal = vol_max / 100
         volatility = stock.get('volatility', 0)
-        # Handle case where volatility might already be a percentage
-        if volatility > 1:
-            volatility = volatility / 100
+        # Volatility is already in decimal format from DynamoDB, no conversion needed
         if not (vol_min_decimal <= volatility <= vol_max_decimal):
             return False
     

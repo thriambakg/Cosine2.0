@@ -1492,24 +1492,24 @@ def lambda_handler(event, context):
         
         # Extract parameters
         criteria = {}
-        max_results = 50
+        max_results = 5000  # Default to allow unlimited results with frontend pagination
         
         if event.get('queryStringParameters'):
             # API Gateway GET request
             params = event['queryStringParameters']
             criteria = json.loads(params.get('criteria', '{}'))
-            max_results = int(params.get('maxResults', 50))
+            max_results = int(params.get('maxResults', 5000))
         elif event.get('body'):
             # API Gateway POST request
             body = event['body']
             if isinstance(body, str):
                 body = json.loads(body)
             criteria = body.get('criteria', {})
-            max_results = body.get('maxResults', 50)
+            max_results = body.get('maxResults', 5000)
         else:
             # Direct Lambda invocation
             criteria = event.get('criteria', {})
-            max_results = event.get('maxResults', 50)
+            max_results = event.get('maxResults', 5000)
         
         logger.info(f"Screening criteria: {criteria}")
         logger.info(f"Max results: {max_results}")
