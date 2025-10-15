@@ -81,6 +81,49 @@ export const addTileToContext = (
 };
 
 /**
+ * Add multiple tiles to the context window
+ * Used for adding multiple selected tiles from the grid
+ */
+export const addMultipleTilesToContext = (
+  tiles: Array<{
+    tileId: string;
+    tileType: string;
+    tileData: TileContextData;
+    options?: {
+      fetchBackendData?: boolean;
+      customTitle?: string;
+      customSubtitle?: string;
+    };
+  }>,
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  const contextItems: ContextItem[] = tiles.map(tile => {
+    const title = tile.options?.customTitle || `${getTileTypeName(tile.tileType)} Tile`;
+    const subtitle = tile.options?.customSubtitle || getTileSubtitle(tile.tileType, tile.tileData);
+    
+    return {
+      id: `tile_${tile.tileId}_${Date.now()}_${Math.random()}`,
+      type: 'tile',
+      title,
+      subtitle,
+      data: tile.tileData,
+      timestamp: Date.now(),
+    };
+  });
+  
+  if (target === 'sidebar') {
+    // Add multiple items to current sidebar session's context
+    const event = new CustomEvent('add-multiple-to-sidebar-context', {
+      detail: contextItems
+    });
+    window.dispatchEvent(event);
+  } else {
+    // Add to new chat (existing behavior) - dispatch each item separately
+    contextItems.forEach(item => addToContext(item));
+  }
+};
+
+/**
  * Get a friendly name for a tile type
  */
 const getTileTypeName = (tileType: string): string => {
@@ -153,6 +196,40 @@ export const addArticleToContext = (
 };
 
 /**
+ * Add multiple articles to the context window
+ * Used for adding multiple selected articles from the news tile
+ */
+export const addMultipleArticlesToContext = (
+  articles: Array<{
+    articleId: string;
+    title: string;
+    source: string;
+    articleData: any;
+  }>,
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  const contextItems: ContextItem[] = articles.map(article => ({
+    id: `article_${article.articleId}_${Date.now()}_${Math.random()}`,
+    type: 'article',
+    title: article.title,
+    subtitle: `Source: ${article.source}`,
+    data: article.articleData,
+    timestamp: Date.now(),
+  }));
+  
+  if (target === 'sidebar') {
+    // Add multiple items to current sidebar session's context
+    const event = new CustomEvent('add-multiple-to-sidebar-context', {
+      detail: contextItems
+    });
+    window.dispatchEvent(event);
+  } else {
+    // Add to new chat (existing behavior) - dispatch each item separately
+    contextItems.forEach(item => addToContext(item));
+  }
+};
+
+/**
  * Add a stock to the context window
  * Used for adding individual stocks from the stock screener
  */
@@ -190,6 +267,45 @@ export const addStockToContext = (
 };
 
 /**
+ * Add multiple stocks to the context window
+ * Used for adding multiple selected stocks from the stock screener
+ */
+export const addMultipleStocksToContext = (
+  stocks: Array<{
+    symbol: string;
+    name: string;
+    timeframe: string;
+    stockData: any;
+  }>,
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  const contextItems: ContextItem[] = stocks.map(stock => ({
+    id: `stock_${stock.symbol}_${Date.now()}_${Math.random()}`,
+    type: 'stock_data',
+    title: `${stock.symbol} - ${stock.name}`,
+    subtitle: `${stock.timeframe} • ${stock.stockData.sector || 'Unknown Sector'}`,
+    data: {
+      symbol: stock.symbol,
+      name: stock.name,
+      timeframe: stock.timeframe,
+      ...stock.stockData,
+    },
+    timestamp: Date.now(),
+  }));
+  
+  if (target === 'sidebar') {
+    // Add multiple items to current sidebar session's context
+    const event = new CustomEvent('add-multiple-to-sidebar-context', {
+      detail: contextItems
+    });
+    window.dispatchEvent(event);
+  } else {
+    // Add to new chat (existing behavior) - dispatch each item separately
+    contextItems.forEach(item => addToContext(item));
+  }
+};
+
+/**
  * Add a chat session to the context window
  * 
  * @param sessionId - Unique session identifier
@@ -222,6 +338,50 @@ export const addChatSessionToContext = (
   };
   
   addToContext(contextItem);
+};
+
+/**
+ * Add multiple chat sessions to the context window
+ * Used for adding multiple selected chat sessions
+ */
+export const addMultipleChatSessionsToContext = (
+  sessions: Array<{
+    sessionId: string;
+    title: string;
+    model: string;
+    messageCount: number;
+    sessionData: any;
+  }>,
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  const contextItems: ContextItem[] = sessions.map(session => {
+    const subtitle = `${session.model} • ${session.messageCount} message${session.messageCount !== 1 ? 's' : ''}`;
+    
+    return {
+      id: `chat_${session.sessionId}_${Date.now()}_${Math.random()}`,
+      type: 'chat',
+      title: session.title,
+      subtitle: subtitle,
+      data: {
+        session_id: session.sessionId,
+        model: session.model,
+        message_count: session.messageCount,
+        ...session.sessionData
+      },
+      timestamp: Date.now(),
+    };
+  });
+  
+  if (target === 'sidebar') {
+    // Add multiple items to current sidebar session's context
+    const event = new CustomEvent('add-multiple-to-sidebar-context', {
+      detail: contextItems
+    });
+    window.dispatchEvent(event);
+  } else {
+    // Add to new chat (existing behavior) - dispatch each item separately
+    contextItems.forEach(item => addToContext(item));
+  }
 };
 
 /**

@@ -41,7 +41,7 @@ import {
   Chat as SidebarChatIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest } from '../../services/api';
-import { useTilePinning, PinButton, addArticleToContext } from './common';
+import { useTilePinning, PinButton, addArticleToContext, addMultipleArticlesToContext } from './common';
 
 interface NewsTileProps {
   id: string;
@@ -1281,26 +1281,38 @@ const NewsTile: React.FC<NewsTileProps> = ({
     
     console.log(`📦 Adding ${selectedArticleObjects.length} article(s) to context (target: ${target})`);
     
-    // Add each selected article to context
-    selectedArticleObjects.forEach(article => {
+    // Prepare article data for batch addition
+    const articlesToAdd = selectedArticleObjects.map(article => ({
+      articleId: article.source_url, // Use URL as unique ID
+      title: article.title,
+      source: article.source_name,
+      articleData: {
+        url: article.source_url,
+        title: article.title,
+        description: article.description,
+        source: article.source_name,
+        published_date: article.published_date,
+        keywords: article.keywords,
+        category: article.category,
+        image_url: article.image_url,
+      }
+    }));
+    
+    // Use batch addition for multiple articles, single addition for one article
+    if (articlesToAdd.length > 1) {
+      addMultipleArticlesToContext(articlesToAdd, target);
+      console.log(`✅ Added ${articlesToAdd.length} articles to context in batch`);
+    } else if (articlesToAdd.length === 1) {
+      const article = articlesToAdd[0];
       addArticleToContext(
-        article.source_url, // Use URL as unique ID
+        article.articleId,
         article.title,
-        article.source_name,
-        {
-          url: article.source_url,
-          title: article.title,
-          description: article.description,
-          source: article.source_name,
-          published_date: article.published_date,
-          keywords: article.keywords,
-          category: article.category,
-          image_url: article.image_url,
-        },
+        article.source,
+        article.articleData,
         target
       );
       console.log(`✅ Added article to context: ${article.title}`);
-    });
+    }
     
     // Clear selection and close menu
     setSelectedArticles([]);

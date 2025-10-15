@@ -5,8 +5,8 @@ import { ENV_CONFIG } from '@/config/environment';
 import { useChatPersistence } from '@/hooks/useChatPersistence';
 import { useClock } from '@/contexts/ClockContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
-import { addChatSessionToContext } from '@/components/tiles/common';
 import { sessionManagementAPI } from '@/services/api';
+import { ContextItem } from '@/components/tiles/common/contextManager';
 import {
   Box,
   Typography,
@@ -28,7 +28,6 @@ import {
   ListItemText,
   Tooltip,
   Checkbox,
-  Menu,
   Collapse,
 } from '@mui/material';
 import {
@@ -44,11 +43,10 @@ import {
   Delete as DeleteIcon,
   Edit as EditIcon,
   Dashboard as ContextIcon,
+  OpenInNew as OpenInNewIcon,
   ExpandLess as ExpandLessIcon,
   ExpandMore as ExpandMoreIcon,
-  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
-import { ContextItem } from '@/components/tiles/common/contextManager';
 
 interface Message {
   id: string;
@@ -246,18 +244,16 @@ export default function ChatPage() {
   
   // Session selection for context
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
-  const [contextMenuAnchor, setContextMenuAnchor] = useState<HTMLElement | null>(null);
-  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   
   // Message editing state
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
   
-  // Context bookmark state
-  const [showContextBookmark, setShowContextBookmark] = useState<boolean>(false);
+  // Context state
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
+  
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -335,95 +331,7 @@ export default function ChatPage() {
     previousSessionIdRef.current = currentSessionId || null;
   }, [currentSession?.session_id, pendingMessages, addPersistedMessage]);
 
-  // Load session context when session changes
-  useEffect(() => {
-    console.log('🔍 ChatPage: Loading session context:', {
-      sessionId: currentSession?.session_id,
-      hasSessionVariables: !!currentSession?.session_variables,
-      hasContextItems: !!currentSession?.session_variables?.context_items,
-      contextItemsLength: currentSession?.session_variables?.context_items?.length || 0,
-      contextItems: currentSession?.session_variables?.context_items
-    });
-    
-    if (currentSession?.session_variables?.context_items) {
-      setSessionContext(currentSession.session_variables.context_items);
-      console.log('✅ ChatPage: Set session context:', currentSession.session_variables.context_items.length, 'items');
-    } else {
-      setSessionContext([]);
-      console.log('📭 ChatPage: No context items in session');
-    }
-  }, [currentSession?.session_id, currentSession?.session_variables]);
 
-  // Listen for items being added to sidebar context (works for both sidebar and main ChatPage)
-  useEffect(() => {
-    const handleAddToSidebarContext = async (event: CustomEvent) => {
-      const contextItem = event.detail;
-      console.log('📌 ChatPage: Received add-to-sidebar-context event:', contextItem);
-      
-      if (!currentSession?.session_id) {
-        console.warn('⚠️ ChatPage: No active session, cannot add context');
-        return;
-      }
-      
-      // Add to current session context
-      const newContext = [...sessionContext, contextItem];
-      setSessionContext(newContext);
-      console.log('✅ ChatPage: Updated session context, now has', newContext.length, 'items');
-      
-      // Notify Sidebar of context change
-      const syncEvent = new CustomEvent('session-context-updated', {
-        detail: { sessionId: currentSession.session_id, contextItems: newContext }
-      });
-      window.dispatchEvent(syncEvent);
-      
-          // Persist the updated context to backend immediately
-          if (user?.id) {
-            try {
-              await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
-                session_variables: {
-                  context_items: newContext,
-                  context_added_at: Date.now(),
-                }
-              });
-              console.log('✅ ChatPage: Persisted context to backend');
-              
-              // Update sessions list with new context
-              updateSessionContext(currentSession.session_id, newContext);
-            } catch (error) {
-              console.error('❌ ChatPage: Failed to persist context to backend:', error);
-            }
-          }
-    };
-
-    console.log('👂 ChatPage: Listening for add-to-sidebar-context events');
-    window.addEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
-    
-    return () => {
-      window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
-    };
-  }, [currentSession?.session_id, sessionContext, user?.id]);
-
-  // Listen for context updates from Sidebar
-  useEffect(() => {
-    const handleContextSync = (event: CustomEvent) => {
-      const { sessionId, contextItems } = event.detail;
-      console.log('🔄 ChatPage: Received context sync from Sidebar:', { sessionId, itemCount: contextItems.length });
-      
-      if (sessionId === currentSession?.session_id) {
-        setSessionContext(contextItems);
-        console.log('✅ ChatPage: Synced context from Sidebar');
-        
-        // Update sessions list with new context
-        updateSessionContext(sessionId, contextItems);
-      }
-    };
-
-    window.addEventListener('session-context-updated', handleContextSync as any);
-    
-    return () => {
-      window.removeEventListener('session-context-updated', handleContextSync as any);
-    };
-  }, [currentSession?.session_id, updateSessionContext]);
 
   // Process cached messages immediately when they're added for the current session
   useEffect(() => {
@@ -786,37 +694,21 @@ export default function ChatPage() {
       contextItemsLength: currentSession?.session_variables?.context_items?.length || 0
     });
     
-    if (currentSession?.session_variables?.context_items) {
-      console.log('📌 Loading context for session:', currentSession.session_id, currentSession.session_variables.context_items);
-      setSessionContext(currentSession.session_variables.context_items);
-    } else {
-      console.log('📌 No context items found, clearing context');
-      setSessionContext([]);
-    }
   }, [currentSession]);
 
-  // Listen for context session ready events from global handler
+  // Load session context when session changes
   useEffect(() => {
-    const handleContextSessionReady = (event: CustomEvent) => {
-      const { sessionId, userId, contextItems } = event.detail;
-      
-      console.log('📋 ChatPage: Context session ready:', sessionId);
-      
-      if (userId === user?.id) {
-        // Load the new session in ChatPage to display it
-        loadSession(sessionId);
-        
-        // Store context items for display
-        setSessionContext(contextItems || []);
-        console.log('📌 ChatPage: Loaded context session and stored context items');
-        
-        // Refresh sessions list to show the new session in sidebar
-        loadSessionsFromBackend();
-      }
-    };
-    
-    // No longer need to check for pending sessions - global handler processes them
-    
+    if (currentSession?.session_variables?.context_items) {
+      setSessionContext(currentSession.session_variables.context_items);
+      console.log('✅ ChatPage: Set session context:', currentSession.session_variables.context_items.length, 'items');
+    } else {
+      setSessionContext([]);
+      console.log('📭 ChatPage: No context items in session');
+    }
+  }, [currentSession?.session_id, currentSession?.session_variables]);
+
+  // Listen for sidebar messages and other events
+  useEffect(() => {
     const handleSidebarMessage = (event: CustomEvent) => {
       const messageData = event.detail;
       console.log('📤 ChatPage received message from sidebar:', messageData);
@@ -937,20 +829,34 @@ export default function ChatPage() {
         }));
       }
     };
+
+    // Handle context updates from sidebar
+    const handleContextSync = (event: CustomEvent) => {
+      const { sessionId, contextItems } = event.detail;
+      console.log('🔄 ChatPage: Received context sync from Sidebar:', { sessionId, itemCount: contextItems.length });
+      
+      if (sessionId === currentSession?.session_id) {
+        setSessionContext(contextItems);
+        console.log('✅ ChatPage: Synced context from Sidebar');
+        
+        // Update sessions list with new context
+        updateSessionContext(sessionId, contextItems);
+      }
+    };
     
-    window.addEventListener('context-session-ready', handleContextSessionReady as any);
     window.addEventListener('sidebar-send-message', handleSidebarMessage as any);
     window.addEventListener('sidebar-edit-message', handleSidebarEdit as any);
     window.addEventListener('websocket-message', handleSharedWebSocketMessage as any);
     window.addEventListener('cancel-ai-processing', handleCancelAIProcessing as any);
+    window.addEventListener('session-context-updated', handleContextSync as any);
     return () => {
-      window.removeEventListener('context-session-ready', handleContextSessionReady as any);
       window.removeEventListener('sidebar-send-message', handleSidebarMessage as any);
       window.removeEventListener('sidebar-edit-message', handleSidebarEdit as any);
       window.removeEventListener('websocket-message', handleSharedWebSocketMessage as any);
       window.removeEventListener('cancel-ai-processing', handleCancelAIProcessing as any);
+      window.removeEventListener('session-context-updated', handleContextSync as any);
     };
-  }, [user?.id, currentSession?.session_id, processedMessageIds, addPersistedMessage, truncateMessagesAfter, loadSession, setSessionContext, loadSessionsFromBackend]);
+  }, [user?.id, currentSession?.session_id, processedMessageIds, addPersistedMessage, truncateMessagesAfter, loadSession, loadSessionsFromBackend, updateSessionContext]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1099,62 +1005,6 @@ export default function ChatPage() {
     });
   };
 
-  const handleContextMenu = (event: React.MouseEvent) => {
-    event.preventDefault();
-    setContextMenuAnchor(event.currentTarget as HTMLElement);
-    setContextMenuPosition({ x: event.clientX, y: event.clientY });
-  };
-
-  const handleContextMenuClose = () => {
-    setContextMenuAnchor(null);
-    setContextMenuPosition(null);
-  };
-
-  const handleAddToContext = () => {
-    if (selectedSessions.size === 0) {
-      console.log('No sessions selected');
-      return;
-    }
-
-    // Add each selected session to context
-    selectedSessions.forEach((sessionId) => {
-      const session = sessions.find((s) => s.session_id === sessionId);
-      if (session) {
-        // Trim messages according to backend logic
-        const messageCount = session.messages.length;
-        let trimmedMessages = session.messages;
-        
-        if (messageCount > 10) {
-          // Include first 2 + last 3 messages (same as backend)
-          trimmedMessages = [
-            ...session.messages.slice(0, 2),
-            ...session.messages.slice(-3)
-          ];
-        } else if (messageCount > 5) {
-          // Include last 5 messages
-          trimmedMessages = session.messages.slice(-5);
-        }
-        // Otherwise include all messages
-
-        addChatSessionToContext(
-          session.session_id,
-          session.title,
-          session.model || 'claude-3-sonnet',
-          session.message_count || session.messages.length,
-          {
-            messages: trimmedMessages,
-            created_at: session.created_at,
-            last_updated: session.last_updated,
-          }
-        );
-        console.log(`✅ Added session to context: ${session.session_id}`);
-      }
-    });
-
-    // Clear selection and close menu
-    setSelectedSessions(new Set());
-    handleContextMenuClose();
-  };
 
   const handleOpenInSidebar = (sessionId: string, event?: React.MouseEvent) => {
     if (event) {
@@ -1398,10 +1248,6 @@ export default function ChatPage() {
           currentPage: 'chat',
           sessionId: sessionId // Use the validated sessionId
         },
-        // Include context if present
-        ...(sessionContext.length > 0 && {
-          contextItems: sessionContext,
-        }),
       };
 
       try {
@@ -1597,7 +1443,6 @@ export default function ChatPage() {
                 backgroundColor: 'rgba(59, 130, 246, 0.7)',
               },
             }}
-            onContextMenu={handleContextMenu}
           >
             <List>
               {sessions.map((session) => (
@@ -1710,34 +1555,6 @@ export default function ChatPage() {
             </List>
           </Box>
 
-          {/* Context Menu for Session Selection */}
-          <Menu
-            anchorEl={contextMenuAnchor}
-            open={Boolean(contextMenuAnchor)}
-            onClose={handleContextMenuClose}
-            anchorReference="anchorPosition"
-            anchorPosition={contextMenuPosition ? {
-              top: contextMenuPosition.y,
-              left: contextMenuPosition.x
-            } : undefined}
-            PaperProps={{
-              sx: {
-                backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                border: '1px solid #374151',
-                color: 'white',
-                minWidth: 200,
-              },
-            }}
-          >
-            <MenuItem onClick={handleAddToContext} disabled={selectedSessions.size === 0}>
-              <ListItemIcon>
-                <ContextIcon sx={{ color: '#3b82f6' }} />
-              </ListItemIcon>
-              <ListItemText>
-                Add to Context ({selectedSessions.size} selected)
-              </ListItemText>
-            </MenuItem>
-          </Menu>
 
           {/* AI Model Selector */}
           <Box sx={{ p: sidebarCollapsed ? 1 : 2, borderTop: '2px solid #374151' }}>
@@ -2070,140 +1887,6 @@ export default function ChatPage() {
           </GlassCard>
         )}
 
-        {/* Context Bookmark - Collapsible */}
-        {sessionContext.length > 0 && (
-          <Box
-            sx={{
-              position: 'relative',
-              borderTop: '2px solid #374151',
-            }}
-          >
-            {/* Collapse/Expand Button */}
-            <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                borderBottom: showContextBookmark ? '1px solid #374151' : 'none',
-                cursor: 'pointer',
-                '&:hover': {
-                  backgroundColor: 'rgba(31, 41, 55, 0.95)',
-                },
-              }}
-              onClick={() => setShowContextBookmark(!showContextBookmark)}
-            >
-              <Tooltip title={showContextBookmark ? 'Hide context' : 'Show context'}>
-                <IconButton
-                  size="small"
-                  sx={{
-                    color: '#3b82f6',
-                    p: 0.5,
-                  }}
-                >
-                  {showContextBookmark ? <ExpandMoreIcon /> : <ExpandLessIcon />}
-                </IconButton>
-              </Tooltip>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: '#9ca3af',
-                  fontSize: '0.7rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                }}
-              >
-                📌 Context ({sessionContext.length} {sessionContext.length === 1 ? 'item' : 'items'})
-              </Typography>
-            </Box>
-            
-            {/* Context Items List */}
-            {showContextBookmark && (
-              <Box
-                sx={{
-                  maxHeight: '200px',
-                  overflowY: 'auto',
-                  backgroundColor: 'rgba(15, 23, 42, 0.8)',
-                  p: 1.5,
-                  '&::-webkit-scrollbar': {
-                    width: '6px',
-                  },
-                  '&::-webkit-scrollbar-track': {
-                    backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                  },
-                  '&::-webkit-scrollbar-thumb': {
-                    backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                    borderRadius: '3px',
-                  },
-                  '&::-webkit-scrollbar-thumb:hover': {
-                    backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                  },
-                }}
-              >
-                <List sx={{ p: 0 }}>
-                  {sessionContext.map((item, index) => (
-                    <ListItem
-                      key={item.id}
-                      sx={{
-                        backgroundColor: 'rgba(59, 130, 246, 0.05)',
-                        border: '1px solid rgba(59, 130, 246, 0.2)',
-                        borderRadius: '6px',
-                        mb: index < sessionContext.length - 1 ? 1 : 0,
-                        p: 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1,
-                      }}
-                    >
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            color: '#ffffff',
-                            fontWeight: 500,
-                            fontSize: '0.8rem',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {item.title}
-                        </Typography>
-                        {item.subtitle && (
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              color: '#9ca3af',
-                              fontSize: '0.7rem',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              display: 'block',
-                            }}
-                          >
-                            {item.subtitle}
-                          </Typography>
-                        )}
-                      </Box>
-                      <Chip
-                        label={item.type}
-                        size="small"
-                        sx={{
-                          height: '16px',
-                          fontSize: '0.65rem',
-                          backgroundColor: 'rgba(139, 92, 246, 0.2)',
-                          color: '#a78bfa',
-                          border: '1px solid rgba(139, 92, 246, 0.3)',
-                        }}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            )}
-          </Box>
-        )}
-
         {/* Context Items - Collapsible */}
         {sessionContext.length > 0 && (
           <Box sx={{ borderTop: '2px solid #374151', backgroundColor: 'rgba(15, 23, 42, 0.95)' }}>
@@ -2235,6 +1918,8 @@ export default function ChatPage() {
                       py: 0.5, 
                       px: 1,
                       borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
                       '&:hover': {
                         backgroundColor: 'rgba(255, 255, 255, 0.05)',
                         '& .remove-context-btn': {
@@ -2242,53 +1927,54 @@ export default function ChatPage() {
                         }
                       }
                     }}
-                    secondaryAction={
-                      <IconButton
-                        edge="end"
-                        size="small"
-                        className="remove-context-btn"
-                        onClick={async () => {
-                          const newContext = sessionContext.filter((_, i) => i !== index);
-                          setSessionContext(newContext);
-                          console.log(`🗑️ Removed context item: ${item.title}`);
-                          
-                          // Notify Sidebar of context change
-                          if (currentSession?.session_id) {
-                            const syncEvent = new CustomEvent('session-context-updated', {
-                              detail: { sessionId: currentSession.session_id, contextItems: newContext }
-                            });
-                            window.dispatchEvent(syncEvent);
-                          }
-                          
-                          // Persist the updated context to backend immediately
-                          if (currentSession?.session_id && user?.id) {
-                            try {
-                              await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
-                                session_variables: {
-                                  context_items: newContext,
-                                  context_added_at: Date.now(),
-                                }
-                              });
-                              console.log('✅ Updated context in backend');
-                              
-                              // Update sessions list with new context
-                              updateSessionContext(currentSession.session_id, newContext);
-                            } catch (error) {
-                              console.error('❌ Failed to update context in backend:', error);
-                            }
-                          }
-                        }}
-                        sx={{ 
-                          opacity: 0,
-                          transition: 'opacity 0.2s',
-                          color: '#dc2626',
-                          '&:hover': { color: '#ef4444' }
-                        }}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    }
                   >
+                    {/* Delete button on the left */}
+                    <IconButton
+                      size="small"
+                      className="remove-context-btn"
+                      onClick={async () => {
+                        const newContext = sessionContext.filter((_, i) => i !== index);
+                        setSessionContext(newContext);
+                        console.log(`🗑️ Removed context item: ${item.title}`);
+                        
+                        // Notify Sidebar of context change immediately
+                        if (currentSession?.session_id) {
+                          const syncEvent = new CustomEvent('session-context-updated', {
+                            detail: { sessionId: currentSession.session_id, contextItems: newContext }
+                          });
+                          window.dispatchEvent(syncEvent);
+                        }
+                        
+                        // Persist the updated context to backend immediately
+                        if (currentSession?.session_id && user?.id) {
+                          try {
+                            await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
+                              session_variables: {
+                                context_items: newContext,
+                                context_added_at: Date.now(),
+                              }
+                            });
+                            console.log('✅ Updated context in backend');
+                            
+                            // Update sessions list with new context
+                            updateSessionContext(currentSession.session_id, newContext);
+                          } catch (error) {
+                            console.error('❌ Failed to update context in backend:', error);
+                          }
+                        }
+                      }}
+                      sx={{ 
+                        opacity: 0,
+                        transition: 'opacity 0.2s',
+                        color: '#dc2626',
+                        mr: 1,
+                        '&:hover': { color: '#ef4444' }
+                      }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                    
+                    {/* Content on the right */}
                     <ListItemText
                       primary={item.title}
                       secondary={item.subtitle}

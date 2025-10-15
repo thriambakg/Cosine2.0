@@ -10,7 +10,7 @@ import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes'
 import { getTileConfig, validateTileSize } from '../tiles/tileConfig';
 import TileDataParser from '../tiles/TileDataParser';
 import { stockDataAPI, cryptoStatsAPI } from '../../services/api';
-import { addTileToContext, extractTileData } from '../tiles/common';
+import { addTileToContext, addMultipleTilesToContext, extractTileData } from '../tiles/common';
 
 interface GridDashboardProps {
   tiles: UnifiedTile[];
@@ -684,12 +684,26 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     // Get selected tiles data
     const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
     
-    // Add each tile to context
-    selectedTilesData.forEach(tile => {
-      const tileData = extractTileData(tile);
-      addTileToContext(tile.id, tile.type, tileData);
-      console.log(`✅ Added ${tile.type} tile to context:`, tile.id);
-    });
+    // Prepare tile data for batch addition
+    const tilesToAdd = selectedTilesData.map(tile => ({
+      tileId: tile.id,
+      tileType: tile.type,
+      tileData: extractTileData(tile),
+      options: {
+        customTitle: `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} Tile`,
+        customSubtitle: tile.symbol ? `${tile.symbol} • ${tile.timeframe || '1d'}` : `Tile ${tile.id.substring(0, 8)}`
+      }
+    }));
+    
+    // Use batch addition for multiple tiles, single addition for one tile
+    if (tilesToAdd.length > 1) {
+      addMultipleTilesToContext(tilesToAdd, 'new');
+      console.log(`✅ Added ${tilesToAdd.length} tiles to context in batch`);
+    } else if (tilesToAdd.length === 1) {
+      const tile = tilesToAdd[0];
+      addTileToContext(tile.tileId, tile.tileType, tile.tileData, tile.options);
+      console.log(`✅ Added ${tile.tileType} tile to context:`, tile.tileId);
+    }
     
     // Close context menu
     handleContextMenuClose();
@@ -704,24 +718,39 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     // Get selected tiles data
     const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
     
-    // Add each tile to sidebar context
-    selectedTilesData.forEach(tile => {
+    // Prepare tile data for batch addition
+    const tilesToAdd = selectedTilesData.map(tile => ({
+      tileId: tile.id,
+      tileType: tile.type,
+      tileData: extractTileData(tile),
+      options: {
+        customTitle: `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} Tile`,
+        customSubtitle: tile.symbol ? `${tile.symbol} • ${tile.timeframe || '1d'}` : `Tile ${tile.id.substring(0, 8)}`
+      }
+    }));
+    
+    // Use batch addition for multiple tiles, single addition for one tile
+    if (tilesToAdd.length > 1) {
+      addMultipleTilesToContext(tilesToAdd, 'sidebar');
+      console.log(`✅ Added ${tilesToAdd.length} tiles to sidebar context in batch`);
+    } else if (tilesToAdd.length === 1) {
+      const tile = tilesToAdd[0];
       const tileData = extractTileData(tile);
       
       // Dispatch event to add to sidebar context
       const event = new CustomEvent('add-to-sidebar-context', {
         detail: {
-          id: `tile_${tile.id}_${Date.now()}`,
+          id: `tile_${tile.tileId}_${Date.now()}`,
           type: 'tile',
-          title: `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} Tile`,
-          subtitle: tile.symbol ? `${tile.symbol} • ${tile.timeframe || '1d'}` : `Tile ${tile.id.substring(0, 8)}`,
+          title: tile.options.customTitle,
+          subtitle: tile.options.customSubtitle,
           data: tileData,
           timestamp: Date.now(),
         }
       });
       window.dispatchEvent(event);
-      console.log(`✅ Added ${tile.type} tile to sidebar context:`, tile.id);
-    });
+      console.log(`✅ Added ${tile.tileType} tile to sidebar context:`, tile.tileId);
+    }
     
     // Close context menu
     handleContextMenuClose();

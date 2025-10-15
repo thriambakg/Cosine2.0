@@ -593,10 +593,48 @@ const GlobalChatSidebar: React.FC = () => {
       }
     };
 
+    const handleAddMultipleToSidebarContext = async (event: CustomEvent) => {
+      const contextItems = event.detail;
+      console.log(`📌 Adding ${contextItems.length} items to sidebar context:`, contextItems);
+      
+      if (!activeSessionId) {
+        console.warn('⚠️ No active sidebar session, cannot add context');
+        return;
+      }
+      
+      // Add all items to current session context
+      const newContext = [...sessionContext, ...contextItems];
+      setSessionContext(newContext);
+      console.log(`✅ Added ${contextItems.length} items to sidebar context`);
+      
+      // Notify ChatPage of context change
+      const syncEvent = new CustomEvent('session-context-updated', {
+        detail: { sessionId: activeSessionId, contextItems: newContext }
+      });
+      window.dispatchEvent(syncEvent);
+      
+      // Persist the updated context to backend immediately
+      if (user?.id) {
+        try {
+          await sessionManagementAPI.updateSession(activeSessionId, user.id, {
+            session_variables: {
+              context_items: newContext,
+              context_added_at: Date.now(),
+            }
+          });
+          console.log('✅ Persisted context to backend');
+        } catch (error) {
+          console.error('❌ Failed to persist context to backend:', error);
+        }
+      }
+    };
+
     window.addEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
+    window.addEventListener('add-multiple-to-sidebar-context', handleAddMultipleToSidebarContext as any);
     
     return () => {
       window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
+      window.removeEventListener('add-multiple-to-sidebar-context', handleAddMultipleToSidebarContext as any);
     };
   }, [activeSessionId, sessionContext, user?.id]);
 

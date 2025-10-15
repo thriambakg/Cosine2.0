@@ -45,7 +45,7 @@ import {
   Chat as SidebarChatIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
-import { useTilePinning, PinButton, addStockToContext } from './common';
+import { useTilePinning, PinButton, addStockToContext, addMultipleStocksToContext } from './common';
 
 interface StockScreenerTileProps {
   id: string;
@@ -483,14 +483,14 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     
     console.log(`📦 Adding ${selectedStockObjects.length} stock(s) to context (target: ${target})`);
     
-    // Add each selected stock to context with full data
-    selectedStockObjects.forEach(stock => {
+    // Prepare stock data for batch addition
+    const stocksToAdd = selectedStockObjects.map(stock => {
       const stockData = stock as any; // Type assertion for backend compatibility
-      addStockToContext(
-        stock.symbol,
-        stock.name || stock.symbol,
-        localCriteria.timeframe,
-        {
+      return {
+        symbol: stock.symbol,
+        name: stock.name || stock.symbol,
+        timeframe: localCriteria.timeframe,
+        stockData: {
           symbol: stock.symbol,
           name: stock.name || stock.symbol,
           price: stock.price ?? stockData.current_price ?? 0,
@@ -511,11 +511,25 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           weekReturn: stockData.week_return ?? 0,
           previousClose: stockData.previous_close ?? 0,
           timeframe: localCriteria.timeframe,
-        },
-        target  // Pass target to context manager
+        }
+      };
+    });
+    
+    // Use batch addition for multiple stocks, single addition for one stock
+    if (stocksToAdd.length > 1) {
+      addMultipleStocksToContext(stocksToAdd, target);
+      console.log(`✅ Added ${stocksToAdd.length} stocks to context in batch`);
+    } else if (stocksToAdd.length === 1) {
+      const stock = stocksToAdd[0];
+      addStockToContext(
+        stock.symbol,
+        stock.name,
+        stock.timeframe,
+        stock.stockData,
+        target
       );
       console.log(`✅ Added stock to context: ${stock.symbol}`);
-    });
+    }
     
     // Clear selection and close menu
     setSelectedStocks([]);
