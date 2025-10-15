@@ -587,10 +587,10 @@ const GlobalChatSidebar: React.FC = () => {
       }
     };
 
-    window.addEventListener('add-to-sidebar-context', handleAddToSidebarContext as EventListener);
+    window.addEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
     
     return () => {
-      window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as EventListener);
+      window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
     };
   }, [activeSessionId, sessionContext, user?.id]);
 

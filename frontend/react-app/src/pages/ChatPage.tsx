@@ -386,10 +386,10 @@ export default function ChatPage() {
     };
 
     console.log('👂 ChatPage: Listening for add-to-sidebar-context events');
-    window.addEventListener('add-to-sidebar-context', handleAddToSidebarContext as EventListener);
+    window.addEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
     
     return () => {
-      window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as EventListener);
+      window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
     };
   }, [currentSession?.session_id, sessionContext, user?.id]);
 
