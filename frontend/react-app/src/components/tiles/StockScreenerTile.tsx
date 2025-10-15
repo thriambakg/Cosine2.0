@@ -522,11 +522,12 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     handleContextMenuClose();
   };
 
-  const formatMarketCap = (marketCap: number) => {
-    if (marketCap >= 1e12) return `$${(marketCap / 1e12).toFixed(1)}T`;
-    if (marketCap >= 1e9) return `$${(marketCap / 1e9).toFixed(1)}B`;
-    if (marketCap >= 1e6) return `$${(marketCap / 1e6).toFixed(1)}M`;
-    return `$${marketCap.toFixed(0)}`;
+  const formatMarketCap = (marketCap: number | null | undefined) => {
+    if (marketCap === null || marketCap === undefined || marketCap === 0) return 'N/A';
+    if (marketCap >= 1e12) return `$${(marketCap / 1e12).toFixed(1)}T USD`;
+    if (marketCap >= 1e9) return `$${(marketCap / 1e9).toFixed(1)}B USD`;
+    if (marketCap >= 1e6) return `$${(marketCap / 1e6).toFixed(1)}M USD`;
+    return `$${marketCap.toFixed(0)} USD`;
   };
 
   const formatVolatilityRange = (range: [number, number]) => {
