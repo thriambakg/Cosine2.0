@@ -216,6 +216,7 @@ export default function ChatPage() {
     addMessage: addPersistedMessage,
     truncateMessagesAfter,
     loadSessionsFromBackend,
+    updateSessionContext,
   } = useChatPersistence(user?.id || '');
   
   // Use messages from current session
@@ -369,20 +370,29 @@ export default function ChatPage() {
       setSessionContext(newContext);
       console.log('✅ ChatPage: Updated session context, now has', newContext.length, 'items');
       
-      // Persist the updated context to backend immediately
-      if (user?.id) {
-        try {
-          await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
-            session_variables: {
-              context_items: newContext,
-              context_added_at: Date.now(),
+      // Notify Sidebar of context change
+      const syncEvent = new CustomEvent('session-context-updated', {
+        detail: { sessionId: currentSession.session_id, contextItems: newContext }
+      });
+      window.dispatchEvent(syncEvent);
+      
+          // Persist the updated context to backend immediately
+          if (user?.id) {
+            try {
+              await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
+                session_variables: {
+                  context_items: newContext,
+                  context_added_at: Date.now(),
+                }
+              });
+              console.log('✅ ChatPage: Persisted context to backend');
+              
+              // Update sessions list with new context
+              updateSessionContext(currentSession.session_id, newContext);
+            } catch (error) {
+              console.error('❌ ChatPage: Failed to persist context to backend:', error);
             }
-          });
-          console.log('✅ ChatPage: Persisted context to backend');
-        } catch (error) {
-          console.error('❌ ChatPage: Failed to persist context to backend:', error);
-        }
-      }
+          }
     };
 
     console.log('👂 ChatPage: Listening for add-to-sidebar-context events');
@@ -392,6 +402,28 @@ export default function ChatPage() {
       window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
     };
   }, [currentSession?.session_id, sessionContext, user?.id]);
+
+  // Listen for context updates from Sidebar
+  useEffect(() => {
+    const handleContextSync = (event: CustomEvent) => {
+      const { sessionId, contextItems } = event.detail;
+      console.log('🔄 ChatPage: Received context sync from Sidebar:', { sessionId, itemCount: contextItems.length });
+      
+      if (sessionId === currentSession?.session_id) {
+        setSessionContext(contextItems);
+        console.log('✅ ChatPage: Synced context from Sidebar');
+        
+        // Update sessions list with new context
+        updateSessionContext(sessionId, contextItems);
+      }
+    };
+
+    window.addEventListener('session-context-updated', handleContextSync as any);
+    
+    return () => {
+      window.removeEventListener('session-context-updated', handleContextSync as any);
+    };
+  }, [currentSession?.session_id, updateSessionContext]);
 
   // Process cached messages immediately when they're added for the current session
   useEffect(() => {
@@ -2220,6 +2252,14 @@ export default function ChatPage() {
                           setSessionContext(newContext);
                           console.log(`🗑️ Removed context item: ${item.title}`);
                           
+                          // Notify Sidebar of context change
+                          if (currentSession?.session_id) {
+                            const syncEvent = new CustomEvent('session-context-updated', {
+                              detail: { sessionId: currentSession.session_id, contextItems: newContext }
+                            });
+                            window.dispatchEvent(syncEvent);
+                          }
+                          
                           // Persist the updated context to backend immediately
                           if (currentSession?.session_id && user?.id) {
                             try {
@@ -2230,6 +2270,9 @@ export default function ChatPage() {
                                 }
                               });
                               console.log('✅ Updated context in backend');
+                              
+                              // Update sessions list with new context
+                              updateSessionContext(currentSession.session_id, newContext);
                             } catch (error) {
                               console.error('❌ Failed to update context in backend:', error);
                             }

@@ -571,6 +571,12 @@ const GlobalChatSidebar: React.FC = () => {
       setSessionContext(newContext);
       console.log('✅ Added to sidebar context');
       
+      // Notify ChatPage of context change
+      const syncEvent = new CustomEvent('session-context-updated', {
+        detail: { sessionId: activeSessionId, contextItems: newContext }
+      });
+      window.dispatchEvent(syncEvent);
+      
       // Persist the updated context to backend immediately
       if (user?.id) {
         try {
@@ -593,6 +599,25 @@ const GlobalChatSidebar: React.FC = () => {
       window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
     };
   }, [activeSessionId, sessionContext, user?.id]);
+
+  // Listen for context updates from ChatPage
+  useEffect(() => {
+    const handleContextSync = (event: CustomEvent) => {
+      const { sessionId, contextItems } = event.detail;
+      console.log('🔄 Sidebar: Received context sync from ChatPage:', { sessionId, itemCount: contextItems.length });
+      
+      if (sessionId === activeSessionId) {
+        setSessionContext(contextItems);
+        console.log('✅ Sidebar: Synced context from ChatPage');
+      }
+    };
+
+    window.addEventListener('session-context-updated', handleContextSync as any);
+    
+    return () => {
+      window.removeEventListener('session-context-updated', handleContextSync as any);
+    };
+  }, [activeSessionId]);
 
   // Listen for WebSocket messages
   useEffect(() => {
@@ -975,6 +1000,14 @@ const GlobalChatSidebar: React.FC = () => {
                         const newContext = sessionContext.filter((_, i) => i !== index);
                         setSessionContext(newContext);
                         console.log(`🗑️ Removed context item: ${item.title}`);
+                        
+                        // Notify ChatPage of context change
+                        if (activeSessionId) {
+                          const syncEvent = new CustomEvent('session-context-updated', {
+                            detail: { sessionId: activeSessionId, contextItems: newContext }
+                          });
+                          window.dispatchEvent(syncEvent);
+                        }
                         
                         // Persist the updated context to backend immediately
                         if (activeSessionId && user?.id) {

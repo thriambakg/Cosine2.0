@@ -35,6 +35,7 @@ interface UseChatPersistenceReturn {
   loadSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   updateSessionTitle: (sessionId: string, newTitle: string) => Promise<void>;
+  updateSessionContext: (sessionId: string, contextItems: any[]) => void;
   
   // Message management
   addMessage: (message: ChatMessage, targetSessionId?: string) => void;
@@ -787,6 +788,37 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     console.log(`📋 Truncated messages after ${messageId}: ${truncatedMessages.length} messages remaining`);
   }, [currentSession]);
 
+  const updateSessionContext = useCallback((sessionId: string, contextItems: any[]) => {
+    console.log('📋 Updating session context:', { sessionId, itemCount: contextItems.length });
+    
+    // Update sessions array
+    setSessions(prev => {
+      const updated = prev.map(s => 
+        s.session_id === sessionId 
+          ? { ...s, session_variables: { ...s.session_variables, context_items: contextItems } }
+          : s
+      );
+      console.log('📋 Updated sessions array, session now has:', updated.find(s => s.session_id === sessionId)?.session_variables?.context_items?.length, 'context items');
+      return updated;
+    });
+    
+    // Update current session if it matches
+    if (currentSession?.session_id === sessionId) {
+      setCurrentSession(prev => {
+        if (!prev) return null;
+        const updated = {
+          ...prev,
+          session_variables: { ...prev.session_variables, context_items: contextItems }
+        };
+        console.log('📋 Updated currentSession, now has:', updated.session_variables?.context_items?.length, 'context items');
+        return updated;
+      });
+    }
+    
+    // Save will happen automatically via the useEffect that watches sessions/currentSession
+    console.log('✅ Updated session context in local state');
+  }, [currentSession?.session_id]);
+
   return {
     // Current session state
     currentSession,
@@ -799,6 +831,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     loadSession,
     deleteSession,
     updateSessionTitle,
+    updateSessionContext,
     
     // Message management
     addMessage,
