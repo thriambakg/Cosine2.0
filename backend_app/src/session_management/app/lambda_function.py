@@ -411,7 +411,7 @@ def update_session_metadata(user_id: str, session_id: str, metadata: Dict[str, A
             expression_attribute_values[':timestamp'] = int(time.time())
             
             table.update_item(
-                Key={'session_id': session_id, 'message_id': 'SESSION_METADATA'},
+                Key={'user_id': user_id, 'session_id': session_id},
                 UpdateExpression='SET ' + ', '.join(update_expression_parts),
                 ExpressionAttributeValues=expression_attribute_values
             )
