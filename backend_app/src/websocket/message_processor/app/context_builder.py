@@ -36,6 +36,12 @@ def build_context_prompt(user_message: str, context_items: List[Dict[str, Any]])
             prompt_parts.append(format_article_context(i, item))
         elif item_type == 'chat':
             prompt_parts.append(format_chat_context(i, item))
+        elif item_type == 'stock_data':
+            # Handle stock data from screener
+            prompt_parts.append(format_stock_data(i, item.get('title', 'Stock'), item.get('data', {})))
+        elif item_type == 'custom':
+            # Handle other custom types
+            prompt_parts.append(format_tile_context(i, item))
         else:
             prompt_parts.append(f"[Context Item {i}: Unknown Type]")
     
@@ -48,18 +54,116 @@ def build_context_prompt(user_message: str, context_items: List[Dict[str, Any]])
 
 def format_tile_context(index: int, item: Dict[str, Any]) -> str:
     """Format tile data for prompt"""
+    item_type = item.get('type')
     tile_data = item.get('data', {})
-    tile_type = tile_data.get('tileType')
+    tile_type = tile_data.get('tileType') or tile_data.get('type')
     title = item.get('title', 'Unknown Tile')
     
-    if tile_type == 'stock':
+    # Debug logging
+    import logging
+    logger = logging.getLogger()
+    logger.info(f"🔍 Formatting context item {index}: item_type={item_type}, tile_type={tile_type}, title={title}")
+    
+    # Handle stock_data from screener (type: 'custom' with type: 'stock_data')
+    if tile_type == 'stock_data':
+        logger.info(f"📊 Formatting as stock_data")
+        return format_stock_data(index, title, tile_data)
+    elif tile_type == 'stock':
+        logger.info(f"📈 Formatting as stock tile")
         return format_stock_tile(index, title, tile_data)
     elif tile_type == 'crypto':
+        logger.info(f"₿ Formatting as crypto tile")
         return format_crypto_tile(index, title, tile_data)
     elif tile_type == 'news':
+        logger.info(f"📰 Formatting as news tile")
         return format_news_tile(index, title, tile_data)
     else:
+        logger.warning(f"⚠️ Unknown tile type, using default format")
         return f"[Context Item {index}: {title}]"
+
+
+def format_stock_data(index: int, title: str, stock_data: Dict[str, Any]) -> str:
+    """Format stock data from screener"""
+    symbol = stock_data.get('symbol', 'Unknown')
+    name = stock_data.get('name', symbol)
+    timeframe = stock_data.get('timeframe', 'Unknown')
+    sector = stock_data.get('sector', 'Unknown')
+    industry = stock_data.get('industry', 'Unknown')
+    
+    result = f"\n[Context Item {index}: Stock - {symbol}]\n"
+    result += f"Company: {name}\n"
+    result += f"Sector: {sector}\n"
+    result += f"Industry: {industry}\n"
+    result += f"Timeframe: {timeframe}\n\n"
+    
+    result += "Market Data:\n"
+    
+    # Price information
+    price = stock_data.get('price', 0)
+    if price:
+        result += f"  - Current Price: ${float(price):.2f}\n"
+    
+    price_change = stock_data.get('priceChange')
+    if price_change is not None:
+        result += f"  - Price Change: ${float(price_change):.2f}\n"
+    
+    price_change_percent = stock_data.get('priceChangePercent')
+    if price_change_percent is not None:
+        result += f"  - Price Change %: {float(price_change_percent):.2f}%\n"
+    
+    # Market metrics
+    market_cap = stock_data.get('marketCap', 0)
+    if market_cap:
+        if market_cap >= 1e12:
+            result += f"  - Market Cap: ${float(market_cap)/1e12:.2f}T\n"
+        elif market_cap >= 1e9:
+            result += f"  - Market Cap: ${float(market_cap)/1e9:.2f}B\n"
+        elif market_cap >= 1e6:
+            result += f"  - Market Cap: ${float(market_cap)/1e6:.2f}M\n"
+        else:
+            result += f"  - Market Cap: ${float(market_cap):,.0f}\n"
+    
+    volatility = stock_data.get('volatility')
+    if volatility is not None:
+        result += f"  - Volatility: {float(volatility):.2f}%\n"
+    
+    volume = stock_data.get('volume')
+    if volume:
+        result += f"  - Volume: {int(volume):,}\n"
+    
+    avg_volume = stock_data.get('avgVolume')
+    if avg_volume:
+        result += f"  - Avg Volume: {int(avg_volume):,}\n"
+    
+    # Fundamental metrics
+    pe_ratio = stock_data.get('peRatio')
+    if pe_ratio and pe_ratio > 0:
+        result += f"  - P/E Ratio: {float(pe_ratio):.2f}\n"
+    
+    dividend_yield = stock_data.get('dividendYield')
+    if dividend_yield and dividend_yield > 0:
+        result += f"  - Dividend Yield: {float(dividend_yield):.2f}%\n"
+    
+    # Price ranges
+    day_high = stock_data.get('dayHigh')
+    day_low = stock_data.get('dayLow')
+    if day_high and day_low:
+        result += f"  - Day Range: ${float(day_low):.2f} - ${float(day_high):.2f}\n"
+    
+    year_high = stock_data.get('yearHigh')
+    year_low = stock_data.get('yearLow')
+    if year_high and year_low:
+        result += f"  - 52-Week Range: ${float(year_low):.2f} - ${float(year_high):.2f}\n"
+    
+    week_return = stock_data.get('weekReturn')
+    if week_return is not None:
+        result += f"  - Week Return: {float(week_return):.2f}%\n"
+    
+    previous_close = stock_data.get('previousClose')
+    if previous_close:
+        result += f"  - Previous Close: ${float(previous_close):.2f}\n"
+    
+    return result
 
 
 def format_stock_tile(index: int, title: str, tile_data: Dict[str, Any]) -> str:

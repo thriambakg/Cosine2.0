@@ -41,6 +41,35 @@ def json_dumps_safe(obj):
     
     return json.dumps(obj, default=decimal_default)
 
+def convert_floats_to_decimal(obj):
+    """
+    Recursively convert all float values to Decimal for DynamoDB compatibility
+    
+    Args:
+        obj: Object to convert (dict, list, or primitive)
+        
+    Returns:
+        Converted object with Decimals instead of floats
+    """
+    if isinstance(obj, list):
+        return [convert_floats_to_decimal(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_floats_to_decimal(value) for key, value in obj.items()}
+    elif isinstance(obj, float):
+        # Handle special float values (inf, nan)
+        if obj != obj:  # NaN check
+            return None
+        elif obj == float('inf'):
+            return Decimal('999999999')  # Large number
+        elif obj == float('-inf'):
+            return Decimal('-999999999')  # Large negative number
+        else:
+            return Decimal(str(obj))
+    elif isinstance(obj, int):
+        return obj  # Keep integers as-is
+    else:
+        return obj
+
 # Get the WebSocket API Gateway endpoint from environment variable
 websocket_endpoint = os.environ.get('WEBSOCKET_ENDPOINT')
 if not websocket_endpoint:
@@ -268,6 +297,7 @@ def process_message(connection_id, user_id, session_id, message_data):
         
         if has_context:
             logger.info(f"📌 Context-aware message detected with {len(context_items)} context items")
+            logger.info(f"📌 Context items preview: {json_dumps_safe(context_items[:1])}")  # Log first item
             
             # Store context in session_variables for persistence
             if CONTEXT_BUILDER_AVAILABLE:
@@ -276,6 +306,10 @@ def process_message(connection_id, user_id, session_id, message_data):
                 
                 # Update session variables in DynamoDB
                 try:
+                    # Convert all floats to Decimal for DynamoDB compatibility
+                    context_items_decimal = convert_floats_to_decimal(context_items)
+                    context_summary_decimal = convert_floats_to_decimal(context_summary)
+                    
                     chat_sessions_table.update_item(
                         Key={
                             'user_id': user_id,
@@ -284,9 +318,9 @@ def process_message(connection_id, user_id, session_id, message_data):
                         UpdateExpression='SET session_variables = :vars, last_updated = :updated',
                         ExpressionAttributeValues={
                             ':vars': {
-                                'context_items': context_items,
+                                'context_items': context_items_decimal,
                                 'context_added_at': int(datetime.now().timestamp()),
-                                'context_summary': context_summary,
+                                'context_summary': context_summary_decimal,
                             },
                             ':updated': int(datetime.now().timestamp())
                         }
@@ -294,13 +328,21 @@ def process_message(connection_id, user_id, session_id, message_data):
                     logger.info(f"📌 Stored context in session_variables")
                 except Exception as e:
                     logger.error(f"❌ Failed to store context in session_variables: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                 
                 # Build enriched prompt with context (for AI only)
-                enriched_message = build_context_prompt(message_text, context_items)
-                logger.info(f"📌 Enhanced message with context (length: {len(enriched_message)})")
-                
-                # Send the enriched message to AI, but keep original for frontend
-                message_text = enriched_message
+                try:
+                    enriched_message = build_context_prompt(message_text, context_items)
+                    logger.info(f"📌 Enhanced message with context (length: {len(enriched_message)})")
+                    logger.info(f"📌 Enriched message preview (first 500 chars): {enriched_message[:500]}")
+                    
+                    # Send the enriched message to AI, but keep original for frontend
+                    message_text = enriched_message
+                except Exception as e:
+                    logger.error(f"❌ Failed to build context prompt: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
             else:
                 logger.warning(f"⚠️ Context builder not available, passing context items to chat agent for processing")
         

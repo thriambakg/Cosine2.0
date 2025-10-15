@@ -88,6 +88,8 @@ export interface StockScreenerCriteria {
   priceChangeRange: [number, number];
   marketCapRange: [number, number];
   priceRange: [number, number];
+  peRatioRange: [number, number];
+  dividendYieldRange: [number, number];
   timeframe: string;
 }
 

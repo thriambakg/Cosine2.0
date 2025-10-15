@@ -7,7 +7,7 @@
 
 export interface ContextItem {
   id: string;
-  type: 'tile' | 'article' | 'chart' | 'chat' | 'custom';
+  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'custom';
   title: string;
   subtitle?: string;
   data: any;
@@ -136,6 +136,33 @@ export const addArticleToContext = (
     title: title,
     subtitle: `Source: ${source}`,
     data: articleData,
+    timestamp: Date.now(),
+  };
+  
+  addToContext(contextItem);
+};
+
+/**
+ * Add a stock to the context window
+ * Used for adding individual stocks from the stock screener
+ */
+export const addStockToContext = (
+  symbol: string,
+  name: string,
+  timeframe: string,
+  stockData: any
+): void => {
+  const contextItem: ContextItem = {
+    id: `stock_${symbol}_${Date.now()}`,
+    type: 'stock_data',
+    title: `${symbol} - ${name}`,
+    subtitle: `${timeframe} • ${stockData.sector || 'Unknown Sector'}`,
+    data: {
+      symbol,
+      name,
+      timeframe,
+      ...stockData,
+    },
     timestamp: Date.now(),
   };
   

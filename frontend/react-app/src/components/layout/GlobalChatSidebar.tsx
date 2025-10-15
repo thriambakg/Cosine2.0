@@ -493,16 +493,31 @@ const GlobalChatSidebar: React.FC = () => {
         console.log(`🔌 Requesting WebSocket connection for session: ${contextData.sessionId}`);
         connectWebSocket(contextData.sessionId);
         
-        // Wait for WebSocket to fully establish
-        // This needs to account for:
-        // 1. Closing old connection (~100ms)
-        // 2. Opening new connection (~500ms)
-        // 3. Receiving connection_established (~500ms)
-        // 4. WebSocket ref stabilization (~100ms)
+        // Wait for WebSocket to fully establish by listening for connection_established event
         console.log('⏳ Waiting for WebSocket connection to establish...');
-        await new Promise(resolve => setTimeout(resolve, 1500));
         
-        console.log('🚀 WebSocket should be ready, sending message');
+        const waitForConnection = new Promise<void>((resolve) => {
+          const checkConnection = () => {
+            if (isConnected) {
+              console.log('✅ WebSocket is connected, proceeding to send message');
+              resolve();
+            } else {
+              // Check again in 100ms
+              setTimeout(checkConnection, 100);
+            }
+          };
+          checkConnection();
+          
+          // Timeout after 5 seconds
+          setTimeout(() => {
+            console.warn('⚠️ WebSocket connection timeout, attempting to send anyway');
+            resolve();
+          }, 5000);
+        });
+        
+        await waitForConnection;
+        
+        console.log('🚀 WebSocket ready, sending message');
         
         // Send the contextualized message
         const messagePayload = {

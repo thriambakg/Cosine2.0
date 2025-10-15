@@ -98,10 +98,10 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
   stock_screener: {
     sizeConstraints: {
       minWidth: 4,
-      maxWidth: 6,
+      maxWidth: 8,
       minHeight: 4,
       maxHeight: 8,
-      defaultWidth: 4,
+      defaultWidth: 6,
       defaultHeight: 6,
     },
     defaultDisplayOptions: {
@@ -109,9 +109,11 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
       showMarketCap: true,
       showVolatility: true,
       showPriceChange: true,
+      showPERatio: true,
+      showDividendYield: true,
       showResultsTable: true,
       showCriteriaSummary: true,
-      maxResults: 10,
+      maxResults: 100000,
     },
     supportsResize: true,
     supportsDrag: true,

@@ -780,6 +780,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         showMarketCap: true,
         showVolatility: true,
         showPriceChange: true,
+        showPERatio: true,
+        showDividendYield: true,
         showResultsTable: true,
         showCriteriaSummary: true,
         maxResults: 100000,  // Get all matching stocks (effectively unlimited, frontend will paginate)

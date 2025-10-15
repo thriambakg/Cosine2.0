@@ -40,9 +40,10 @@ import {
   Business as BusinessIcon,
   AttachMoney as MoneyIcon,
   Speed as SpeedIcon,
+  AddCircleOutline as AddToContextIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
-import { useTilePinning, PinButton } from './common';
+import { useTilePinning, PinButton, addStockToContext } from './common';
 
 interface StockScreenerTileProps {
   id: string;
@@ -66,6 +67,8 @@ interface StockScreenerTileProps {
     showMarketCap: boolean;
     showVolatility: boolean;
     showPriceChange: boolean;
+    showPERatio: boolean;
+    showDividendYield: boolean;
     showResultsTable: boolean;
     showCriteriaSummary: boolean;
     maxResults: number;
@@ -80,6 +83,8 @@ interface StockScreenerCriteria {
   priceChangeRange: [number, number];
   marketCapRange: [number, number];
   priceRange: [number, number];
+  peRatioRange: [number, number];
+  dividendYieldRange: [number, number];
   timeframe: string;
 }
 
@@ -112,6 +117,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     priceChangeRange: [-50, 50],
     marketCapRange: [0, 10000000000000], // $0 to $10 trillion
     priceRange: [0, 1000],
+    peRatioRange: [0, 100],
+    dividendYieldRange: [0, 20],
     timeframe: '1d',
   },
   results = [],
@@ -120,6 +127,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     showMarketCap: true,
     showVolatility: true,
     showPriceChange: true,
+    showPERatio: true,
+    showDividendYield: true,
     showResultsTable: true,
     showCriteriaSummary: true,
     maxResults: 100000, // Get all matching stocks (effectively unlimited)
@@ -138,14 +147,22 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     },
   });
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
-  const [localCriteria, setLocalCriteria] = useState<StockScreenerCriteria>(criteria);
+  // Ensure new criteria fields have defaults for old tiles
+  const [localCriteria, setLocalCriteria] = useState<StockScreenerCriteria>({
+    ...criteria,
+    peRatioRange: criteria.peRatioRange || [0, 100],
+    dividendYieldRange: criteria.dividendYieldRange || [0, 20],
+  });
   // Ensure maxResults is high enough for proper pagination (upgrade old tiles with maxResults: 10)
   const [localDisplayOptions, setLocalDisplayOptions] = useState({
     ...displayOptions,
-    maxResults: Math.max(displayOptions.maxResults || 100000, 100000)
+    maxResults: Math.max(displayOptions.maxResults || 100000, 100000),
+    showPERatio: displayOptions.showPERatio ?? true,
+    showDividendYield: displayOptions.showDividendYield ?? true,
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [stockResults, setStockResults] = useState<StockResult[]>(results);
+  const [selectedStocks, setSelectedStocks] = useState<string[]>([]);
   const tileRef = useRef<HTMLDivElement>(null);
   const lastClickTimeRef = useRef<number>(0);
 
@@ -433,6 +450,64 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     }
   };
 
+  const handleStockSelect = (symbol: string) => {
+    setSelectedStocks(prev => 
+      prev.includes(symbol) 
+        ? prev.filter(s => s !== symbol)
+        : [...prev, symbol]
+    );
+  };
+
+  const handleAddToContext = () => {
+    if (selectedStocks.length === 0) {
+      alert('Please select at least one stock to add to context');
+      return;
+    }
+    
+    // Get the selected stock objects from stockResults state
+    const selectedStockObjects = stockResults.filter(stock => 
+      selectedStocks.includes(stock.symbol)
+    );
+    
+    console.log(`📦 Adding ${selectedStockObjects.length} stock(s) to context`);
+    
+    // Add each selected stock to context with full data
+    selectedStockObjects.forEach(stock => {
+      const stockData = stock as any; // Type assertion for backend compatibility
+      addStockToContext(
+        stock.symbol,
+        stock.name || stock.symbol,
+        localCriteria.timeframe,
+        {
+          symbol: stock.symbol,
+          name: stock.name || stock.symbol,
+          price: stock.price ?? stockData.current_price ?? 0,
+          priceChange: stock.priceChange ?? stockData.price_change ?? 0,
+          priceChangePercent: stock.priceChangePercent ?? stockData.price_change_percent ?? 0,
+          marketCap: stock.marketCap ?? stockData.market_cap ?? 0,
+          volatility: stock.volatility ?? 0,
+          volume: stock.volume ?? 0,
+          avgVolume: stockData.avg_volume ?? 0,
+          industry: stock.industry ?? 'Unknown',
+          sector: stockData.sector ?? 'Unknown',
+          peRatio: stockData.pe_ratio ?? 0,
+          dividendYield: stockData.dividend_yield ?? 0,
+          dayHigh: stockData.day_high ?? 0,
+          dayLow: stockData.day_low ?? 0,
+          yearHigh: stockData.year_high ?? 0,
+          yearLow: stockData.year_low ?? 0,
+          weekReturn: stockData.week_return ?? 0,
+          previousClose: stockData.previous_close ?? 0,
+          timeframe: localCriteria.timeframe,
+        }
+      );
+      console.log(`✅ Added stock to context: ${stock.symbol}`);
+    });
+    
+    // Clear selection after adding
+    setSelectedStocks([]);
+  };
+
   const formatMarketCap = (marketCap: number) => {
     if (marketCap >= 1e12) return `$${(marketCap / 1e12).toFixed(1)}T`;
     if (marketCap >= 1e9) return `$${(marketCap / 1e9).toFixed(1)}B`;
@@ -600,6 +675,23 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
             </IconButton>
           </Tooltip>
 
+          <Tooltip title={`Add ${selectedStocks.length > 0 ? `${selectedStocks.length} stock(s)` : 'selected stocks'} to context`}>
+            <span>
+              <IconButton
+                size="small"
+                onClick={handleAddToContext}
+                disabled={selectedStocks.length === 0}
+                sx={{ 
+                  color: selectedStocks.length > 0 ? '#10b981' : '#9ca3af', 
+                  '&:hover': { color: '#10b981' },
+                  '&:disabled': { color: '#4b5563' }
+                }}
+              >
+                <AddToContextIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            </span>
+          </Tooltip>
+
           <Tooltip title="Settings">
             <IconButton
               size="small"
@@ -720,6 +812,25 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
             }}>
               <TableHead>
                 <TableRow>
+                  <TableCell padding="checkbox" sx={{ width: '48px' }}>
+                    <Checkbox
+                      size="small"
+                      checked={selectedStocks.length === currentResults.length && currentResults.length > 0}
+                      indeterminate={selectedStocks.length > 0 && selectedStocks.length < currentResults.length}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedStocks(currentResults.map(s => s.symbol));
+                        } else {
+                          setSelectedStocks([]);
+                        }
+                      }}
+                      sx={{
+                        color: '#9ca3af',
+                        '&.Mui-checked': { color: '#10b981' },
+                        '&.MuiCheckbox-indeterminate': { color: '#10b981' },
+                      }}
+                    />
+                  </TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Symbol</TableCell>
                   {localDisplayOptions.showIndustry && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Industry</TableCell>
@@ -734,6 +845,12 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                   {localDisplayOptions.showVolatility && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Volatility</TableCell>
                   )}
+                  {localDisplayOptions.showPERatio && (
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>P/E</TableCell>
+                  )}
+                  {localDisplayOptions.showDividendYield && (
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Div Yield</TableCell>
+                  )}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -745,9 +862,34 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                   const marketCap = stock.marketCap ?? stockData.market_cap ?? 0;
                   const volatility = stock.volatility ?? 0;
                   const industry = stock.industry ?? 'Unknown';
+                  const peRatio = stockData.pe_ratio ?? stock.pe ?? 0;
+                  const dividendYield = stockData.dividend_yield ?? 0;
                   
                   return (
-                    <TableRow key={stock.symbol} hover>
+                    <TableRow 
+                      key={stock.symbol} 
+                      hover
+                      selected={selectedStocks.includes(stock.symbol)}
+                      sx={{
+                        '&.Mui-selected': {
+                          backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                        },
+                        '&.Mui-selected:hover': {
+                          backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                        },
+                      }}
+                    >
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          size="small"
+                          checked={selectedStocks.includes(stock.symbol)}
+                          onChange={() => handleStockSelect(stock.symbol)}
+                          sx={{
+                            color: '#9ca3af',
+                            '&.Mui-checked': { color: '#10b981' },
+                          }}
+                        />
+                      </TableCell>
                       <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>{stock.symbol}</TableCell>
                       {localDisplayOptions.showIndustry && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{industry}</TableCell>
@@ -771,6 +913,16 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                       )}
                       {localDisplayOptions.showVolatility && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{volatility.toFixed(1)}%</TableCell>
+                      )}
+                      {localDisplayOptions.showPERatio && (
+                        <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
+                          {peRatio > 0 ? peRatio.toFixed(1) : 'N/A'}
+                        </TableCell>
+                      )}
+                      {localDisplayOptions.showDividendYield && (
+                        <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
+                          {dividendYield > 0 ? `${dividendYield.toFixed(2)}%` : 'N/A'}
+                        </TableCell>
                       )}
                     </TableRow>
                   );
@@ -974,6 +1126,42 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
               />
             </Box>
 
+            {/* P/E Ratio Range */}
+            <Box>
+              <Typography gutterBottom>
+                P/E Ratio Range: {localCriteria.peRatioRange[0].toFixed(1)} - {localCriteria.peRatioRange[1] === 100 ? '100+' : localCriteria.peRatioRange[1].toFixed(1)}
+              </Typography>
+              <Slider
+                value={localCriteria.peRatioRange}
+                onChange={(_, newValue) => {
+                  handleCriteriaChange({ ...localCriteria, peRatioRange: newValue as [number, number] });
+                }}
+                valueLabelDisplay="auto"
+                min={0}
+                max={100}
+                step={0.5}
+                sx={{ color: '#3b82f6' }}
+              />
+            </Box>
+
+            {/* Dividend Yield Range */}
+            <Box>
+              <Typography gutterBottom>
+                Dividend Yield Range: {localCriteria.dividendYieldRange[0].toFixed(1)}% - {localCriteria.dividendYieldRange[1] === 20 ? '20%+' : `${localCriteria.dividendYieldRange[1].toFixed(1)}%`}
+              </Typography>
+              <Slider
+                value={localCriteria.dividendYieldRange}
+                onChange={(_, newValue) => {
+                  handleCriteriaChange({ ...localCriteria, dividendYieldRange: newValue as [number, number] });
+                }}
+                valueLabelDisplay="auto"
+                min={0}
+                max={20}
+                step={0.1}
+                sx={{ color: '#3b82f6' }}
+              />
+            </Box>
+
             {/* Timeframe */}
             <FormControl fullWidth>
               <Select
@@ -1049,6 +1237,24 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                 />
               }
               label="Show Price Change"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={localDisplayOptions.showPERatio}
+                  onChange={() => handleDisplayOptionsChange('showPERatio')}
+                />
+              }
+              label="Show P/E Ratio"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={localDisplayOptions.showDividendYield}
+                  onChange={() => handleDisplayOptionsChange('showDividendYield')}
+                />
+              }
+              label="Show Dividend Yield"
             />
             <FormControlLabel
               control={
