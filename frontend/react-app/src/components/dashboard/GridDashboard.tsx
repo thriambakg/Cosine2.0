@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Analytics as AnalyticsIcon, Dashboard as ContextIcon } from '@mui/icons-material';
+import { Analytics as AnalyticsIcon, Dashboard as ContextIcon, Chat as SidebarChatIcon } from '@mui/icons-material';
 import CryptoTile from '../tiles/CryptoTile';
 import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
@@ -695,6 +695,38 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     handleContextMenuClose();
   }, [selectionState.selectedTiles, tiles, handleContextMenuClose]);
 
+  const handleAddToSidebarContext = useCallback(() => {
+    if (selectionState.selectedTiles.size === 0) {
+      console.log('No tiles selected to add to sidebar context');
+      return;
+    }
+
+    // Get selected tiles data
+    const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
+    
+    // Add each tile to sidebar context
+    selectedTilesData.forEach(tile => {
+      const tileData = extractTileData(tile);
+      
+      // Dispatch event to add to sidebar context
+      const event = new CustomEvent('add-to-sidebar-context', {
+        detail: {
+          id: `tile_${tile.id}_${Date.now()}`,
+          type: 'tile',
+          title: `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} Tile`,
+          subtitle: tile.symbol ? `${tile.symbol} • ${tile.timeframe || '1d'}` : `Tile ${tile.id.substring(0, 8)}`,
+          data: tileData,
+          timestamp: Date.now(),
+        }
+      });
+      window.dispatchEvent(event);
+      console.log(`✅ Added ${tile.type} tile to sidebar context:`, tile.id);
+    });
+    
+    // Close context menu
+    handleContextMenuClose();
+  }, [selectionState.selectedTiles, tiles, handleContextMenuClose]);
+
   // Render tile with grid positioning
   const renderTile = (tile: UnifiedTile) => {
     const { position, size } = getDefaultGridProps(tile);
@@ -1162,7 +1194,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             backgroundColor: 'rgba(15, 23, 42, 0.95)',
             border: '1px solid #374151',
             color: 'white',
-            minWidth: 200,
+            minWidth: 250,
           },
         }}
       >
@@ -1171,13 +1203,22 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             <ContextIcon sx={{ color: '#3b82f6' }} />
           </ListItemIcon>
           <ListItemText>
-            Add to Context ({selectionState.selectedTiles.size} selected)
+            Add to New Chat ({selectionState.selectedTiles.size} selected)
+          </ListItemText>
+        </MenuItem>
+        
+        <MenuItem onClick={handleAddToSidebarContext} disabled={selectionState.selectedTiles.size === 0}>
+          <ListItemIcon>
+            <SidebarChatIcon sx={{ color: '#10b981' }} />
+          </ListItemIcon>
+          <ListItemText>
+            Add to Sidebar Chat ({selectionState.selectedTiles.size} selected)
           </ListItemText>
         </MenuItem>
         
         <MenuItem onClick={handlePerformAnalysis} disabled={selectionState.selectedTiles.size === 0}>
           <ListItemIcon>
-            <AnalyticsIcon sx={{ color: '#10b981' }} />
+            <AnalyticsIcon sx={{ color: '#8b5cf6' }} />
           </ListItemIcon>
           <ListItemText>
             Perform Analysis ({selectionState.selectedTiles.size} selected)

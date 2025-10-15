@@ -6,6 +6,7 @@ import { useChatPersistence } from '@/hooks/useChatPersistence';
 import { useClock } from '@/contexts/ClockContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addChatSessionToContext } from '@/components/tiles/common';
+import { sessionManagementAPI } from '@/services/api';
 import {
   Box,
   Typography,
@@ -28,6 +29,7 @@ import {
   Tooltip,
   Checkbox,
   Menu,
+  Collapse,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -254,6 +256,7 @@ export default function ChatPage() {
   // Context bookmark state
   const [showContextBookmark, setShowContextBookmark] = useState<boolean>(false);
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
+  const [isContextExpanded, setIsContextExpanded] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -330,6 +333,65 @@ export default function ChatPage() {
     
     previousSessionIdRef.current = currentSessionId || null;
   }, [currentSession?.session_id, pendingMessages, addPersistedMessage]);
+
+  // Load session context when session changes
+  useEffect(() => {
+    console.log('🔍 ChatPage: Loading session context:', {
+      sessionId: currentSession?.session_id,
+      hasSessionVariables: !!currentSession?.session_variables,
+      hasContextItems: !!currentSession?.session_variables?.context_items,
+      contextItemsLength: currentSession?.session_variables?.context_items?.length || 0,
+      contextItems: currentSession?.session_variables?.context_items
+    });
+    
+    if (currentSession?.session_variables?.context_items) {
+      setSessionContext(currentSession.session_variables.context_items);
+      console.log('✅ ChatPage: Set session context:', currentSession.session_variables.context_items.length, 'items');
+    } else {
+      setSessionContext([]);
+      console.log('📭 ChatPage: No context items in session');
+    }
+  }, [currentSession?.session_id, currentSession?.session_variables]);
+
+  // Listen for items being added to sidebar context (works for both sidebar and main ChatPage)
+  useEffect(() => {
+    const handleAddToSidebarContext = async (event: CustomEvent) => {
+      const contextItem = event.detail;
+      console.log('📌 ChatPage: Received add-to-sidebar-context event:', contextItem);
+      
+      if (!currentSession?.session_id) {
+        console.warn('⚠️ ChatPage: No active session, cannot add context');
+        return;
+      }
+      
+      // Add to current session context
+      const newContext = [...sessionContext, contextItem];
+      setSessionContext(newContext);
+      console.log('✅ ChatPage: Updated session context, now has', newContext.length, 'items');
+      
+      // Persist the updated context to backend immediately
+      if (user?.id) {
+        try {
+          await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
+            session_variables: {
+              context_items: newContext,
+              context_added_at: Date.now(),
+            }
+          });
+          console.log('✅ ChatPage: Persisted context to backend');
+        } catch (error) {
+          console.error('❌ ChatPage: Failed to persist context to backend:', error);
+        }
+      }
+    };
+
+    console.log('👂 ChatPage: Listening for add-to-sidebar-context events');
+    window.addEventListener('add-to-sidebar-context', handleAddToSidebarContext as EventListener);
+    
+    return () => {
+      window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as EventListener);
+    };
+  }, [currentSession?.session_id, sessionContext, user?.id]);
 
   // Process cached messages immediately when they're added for the current session
   useEffect(() => {
@@ -1303,7 +1365,11 @@ export default function ChatPage() {
         context: {
           currentPage: 'chat',
           sessionId: sessionId // Use the validated sessionId
-        }
+        },
+        // Include context if present
+        ...(sessionContext.length > 0 && {
+          contextItems: sessionContext,
+        }),
       };
 
       try {
@@ -1541,9 +1607,29 @@ export default function ChatPage() {
                         </ListItemIcon>
                         <ListItemText
                           primary={
-                            <Typography variant="caption" color="white" sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
-                              {session.title}
-                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Typography variant="caption" color="white" sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
+                                {session.title}
+                              </Typography>
+                              {session.session_variables?.context_items && session.session_variables.context_items.length > 0 && (
+                                <Chip
+                                  label={`${session.session_variables.context_items.length}`}
+                                  size="small"
+                                  icon={<ContextIcon sx={{ fontSize: '0.7rem !important' }} />}
+                                  sx={{
+                                    height: '16px',
+                                    fontSize: '0.6rem',
+                                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                                    color: '#10b981',
+                                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                                    '& .MuiChip-icon': {
+                                      marginLeft: '2px',
+                                      marginRight: '-4px',
+                                    }
+                                  }}
+                                />
+                              )}
+                            </Box>
                           }
                           secondary={
                             <Typography variant="caption" color="#9ca3af" sx={{ display: 'block', fontSize: '0.7rem' }}>
@@ -2083,6 +2169,99 @@ export default function ChatPage() {
                 </List>
               </Box>
             )}
+          </Box>
+        )}
+
+        {/* Context Items - Collapsible */}
+        {sessionContext.length > 0 && (
+          <Box sx={{ borderTop: '2px solid #374151', backgroundColor: 'rgba(15, 23, 42, 0.95)' }}>
+            <Box
+              sx={{
+                p: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
+              }}
+              onClick={() => setIsContextExpanded(!isContextExpanded)}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <ContextIcon sx={{ color: '#10b981', fontSize: '1rem' }} />
+                <Typography variant="body2" sx={{ color: '#10b981', fontSize: '0.8rem', fontWeight: 600 }}>
+                  Context ({sessionContext.length} {sessionContext.length === 1 ? 'item' : 'items'})
+                </Typography>
+              </Box>
+              {isContextExpanded ? <ExpandLessIcon fontSize="small" sx={{ color: '#9ca3af' }} /> : <ExpandMoreIcon fontSize="small" sx={{ color: '#9ca3af' }} />}
+            </Box>
+            <Collapse in={isContextExpanded}>
+              <List dense sx={{ py: 0, px: 1, maxHeight: 150, overflow: 'auto' }}>
+                {sessionContext.map((item, index) => (
+                  <ListItem 
+                    key={index} 
+                    sx={{ 
+                      py: 0.5, 
+                      px: 1,
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        '& .remove-context-btn': {
+                          opacity: 1,
+                        }
+                      }
+                    }}
+                    secondaryAction={
+                      <IconButton
+                        edge="end"
+                        size="small"
+                        className="remove-context-btn"
+                        onClick={async () => {
+                          const newContext = sessionContext.filter((_, i) => i !== index);
+                          setSessionContext(newContext);
+                          console.log(`🗑️ Removed context item: ${item.title}`);
+                          
+                          // Persist the updated context to backend immediately
+                          if (currentSession?.session_id && user?.id) {
+                            try {
+                              await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
+                                session_variables: {
+                                  context_items: newContext,
+                                  context_added_at: Date.now(),
+                                }
+                              });
+                              console.log('✅ Updated context in backend');
+                            } catch (error) {
+                              console.error('❌ Failed to update context in backend:', error);
+                            }
+                          }
+                        }}
+                        sx={{ 
+                          opacity: 0,
+                          transition: 'opacity 0.2s',
+                          color: '#dc2626',
+                          '&:hover': { color: '#ef4444' }
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    }
+                  >
+                    <ListItemText
+                      primary={item.title}
+                      secondary={item.subtitle}
+                      primaryTypographyProps={{
+                        fontSize: '0.75rem',
+                        color: '#ffffff',
+                      }}
+                      secondaryTypographyProps={{
+                        fontSize: '0.65rem',
+                        color: '#9ca3af',
+                      }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Collapse>
           </Box>
         )}
 

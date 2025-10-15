@@ -84,6 +84,16 @@ def format_tile_context(index: int, item: Dict[str, Any]) -> str:
 
 def format_stock_data(index: int, title: str, stock_data: Dict[str, Any]) -> str:
     """Format stock data from screener"""
+    # Handle both Decimal and float types
+    def safe_float(value, default=0):
+        """Safely convert Decimal or float to float"""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
     symbol = stock_data.get('symbol', 'Unknown')
     name = stock_data.get('name', symbol)
     timeframe = stock_data.get('timeframe', 'Unknown')
@@ -99,69 +109,69 @@ def format_stock_data(index: int, title: str, stock_data: Dict[str, Any]) -> str
     result += "Market Data:\n"
     
     # Price information
-    price = stock_data.get('price', 0)
+    price = safe_float(stock_data.get('price'))
     if price:
-        result += f"  - Current Price: ${float(price):.2f}\n"
+        result += f"  - Current Price: ${price:.2f}\n"
     
     price_change = stock_data.get('priceChange')
     if price_change is not None:
-        result += f"  - Price Change: ${float(price_change):.2f}\n"
+        result += f"  - Price Change: ${safe_float(price_change):.2f}\n"
     
     price_change_percent = stock_data.get('priceChangePercent')
     if price_change_percent is not None:
-        result += f"  - Price Change %: {float(price_change_percent):.2f}%\n"
+        result += f"  - Price Change %: {safe_float(price_change_percent):.2f}%\n"
     
     # Market metrics
-    market_cap = stock_data.get('marketCap', 0)
+    market_cap = safe_float(stock_data.get('marketCap'))
     if market_cap:
         if market_cap >= 1e12:
-            result += f"  - Market Cap: ${float(market_cap)/1e12:.2f}T\n"
+            result += f"  - Market Cap: ${market_cap/1e12:.2f}T\n"
         elif market_cap >= 1e9:
-            result += f"  - Market Cap: ${float(market_cap)/1e9:.2f}B\n"
+            result += f"  - Market Cap: ${market_cap/1e9:.2f}B\n"
         elif market_cap >= 1e6:
-            result += f"  - Market Cap: ${float(market_cap)/1e6:.2f}M\n"
+            result += f"  - Market Cap: ${market_cap/1e6:.2f}M\n"
         else:
-            result += f"  - Market Cap: ${float(market_cap):,.0f}\n"
+            result += f"  - Market Cap: ${market_cap:,.0f}\n"
     
-    volatility = stock_data.get('volatility')
-    if volatility is not None:
-        result += f"  - Volatility: {float(volatility):.2f}%\n"
+    volatility = safe_float(stock_data.get('volatility'))
+    if volatility:
+        result += f"  - Volatility: {volatility:.2f}%\n"
     
-    volume = stock_data.get('volume')
+    volume = safe_float(stock_data.get('volume'))
     if volume:
         result += f"  - Volume: {int(volume):,}\n"
     
-    avg_volume = stock_data.get('avgVolume')
+    avg_volume = safe_float(stock_data.get('avgVolume'))
     if avg_volume:
         result += f"  - Avg Volume: {int(avg_volume):,}\n"
     
     # Fundamental metrics
-    pe_ratio = stock_data.get('peRatio')
+    pe_ratio = safe_float(stock_data.get('peRatio'))
     if pe_ratio and pe_ratio > 0:
-        result += f"  - P/E Ratio: {float(pe_ratio):.2f}\n"
+        result += f"  - P/E Ratio: {pe_ratio:.2f}\n"
     
-    dividend_yield = stock_data.get('dividendYield')
+    dividend_yield = safe_float(stock_data.get('dividendYield'))
     if dividend_yield and dividend_yield > 0:
-        result += f"  - Dividend Yield: {float(dividend_yield):.2f}%\n"
+        result += f"  - Dividend Yield: {dividend_yield:.2f}%\n"
     
     # Price ranges
-    day_high = stock_data.get('dayHigh')
-    day_low = stock_data.get('dayLow')
+    day_high = safe_float(stock_data.get('dayHigh'))
+    day_low = safe_float(stock_data.get('dayLow'))
     if day_high and day_low:
-        result += f"  - Day Range: ${float(day_low):.2f} - ${float(day_high):.2f}\n"
+        result += f"  - Day Range: ${day_low:.2f} - ${day_high:.2f}\n"
     
-    year_high = stock_data.get('yearHigh')
-    year_low = stock_data.get('yearLow')
+    year_high = safe_float(stock_data.get('yearHigh'))
+    year_low = safe_float(stock_data.get('yearLow'))
     if year_high and year_low:
-        result += f"  - 52-Week Range: ${float(year_low):.2f} - ${float(year_high):.2f}\n"
+        result += f"  - 52-Week Range: ${year_low:.2f} - ${year_high:.2f}\n"
     
     week_return = stock_data.get('weekReturn')
     if week_return is not None:
-        result += f"  - Week Return: {float(week_return):.2f}%\n"
+        result += f"  - Week Return: {safe_float(week_return):.2f}%\n"
     
-    previous_close = stock_data.get('previousClose')
+    previous_close = safe_float(stock_data.get('previousClose'))
     if previous_close:
-        result += f"  - Previous Close: ${float(previous_close):.2f}\n"
+        result += f"  - Previous Close: ${previous_close:.2f}\n"
     
     return result
 

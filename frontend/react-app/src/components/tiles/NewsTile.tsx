@@ -37,6 +37,8 @@ import {
   Image as ImageIcon,
   CalendarToday as CalendarIcon,
   Dashboard as ContextIcon,
+  AddComment as NewChatIcon,
+  Chat as SidebarChatIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest } from '../../services/api';
 import { useTilePinning, PinButton, addArticleToContext } from './common';
@@ -145,6 +147,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [newsArticles, setNewsArticles] = useState<NewsArticle[]>(articles);
   const [selectedArticles, setSelectedArticles] = useState<string[]>([]);
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [keywordInputValue, setKeywordInputValue] = useState('');
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [selectedGroupIndex, setSelectedGroupIndex] = useState<number | null>(null);
@@ -1256,18 +1259,27 @@ const NewsTile: React.FC<NewsTileProps> = ({
     window.open(article.source_url, '_blank', 'noopener,noreferrer');
   };
 
-  const handleAddToContext = () => {
+  const handleAddToContextClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (selectedArticles.length === 0) {
       alert('Please select at least one article to add to context');
       return;
     }
+    setContextMenuAnchor(event.currentTarget);
+  };
+
+  const handleContextMenuClose = () => {
+    setContextMenuAnchor(null);
+  };
+
+  const handleAddToContext = (target: 'new' | 'sidebar') => {
+    if (selectedArticles.length === 0) return;
     
     // Get the selected article objects from newsArticles state
     const selectedArticleObjects = newsArticles.filter(article => 
       selectedArticles.includes(article.source_url)
     );
     
-    console.log(`📦 Adding ${selectedArticleObjects.length} article(s) to context`);
+    console.log(`📦 Adding ${selectedArticleObjects.length} article(s) to context (target: ${target})`);
     
     // Add each selected article to context
     selectedArticleObjects.forEach(article => {
@@ -1284,13 +1296,15 @@ const NewsTile: React.FC<NewsTileProps> = ({
           keywords: article.keywords,
           category: article.category,
           image_url: article.image_url,
-        }
+        },
+        target
       );
       console.log(`✅ Added article to context: ${article.title}`);
     });
     
-    // Clear selection after adding
+    // Clear selection and close menu
     setSelectedArticles([]);
+    handleContextMenuClose();
   };
 
   const formatDate = (dateString: string) => {
@@ -1480,7 +1494,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
             <Tooltip title={`Add ${selectedArticles.length} article${selectedArticles.length > 1 ? 's' : ''} to Context`}>
               <IconButton
                 size="small"
-                onClick={handleAddToContext}
+                onClick={handleAddToContextClick}
                 onMouseDown={(e) => e.stopPropagation()}
                 sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
               >
@@ -1806,6 +1820,29 @@ const NewsTile: React.FC<NewsTileProps> = ({
         <MenuItem onClick={handlePinToggle}>
           <PinIcon sx={{ mr: 1, fontSize: 18 }} />
           {pinnedState ? 'Unpin' : 'Pin'} Tile
+        </MenuItem>
+      </Menu>
+
+      {/* Context Target Menu */}
+      <Menu
+        anchorEl={contextMenuAnchor}
+        open={Boolean(contextMenuAnchor)}
+        onClose={handleContextMenuClose}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+            color: 'white',
+          },
+        }}
+      >
+        <MenuItem onClick={() => handleAddToContext('new')}>
+          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
+          Add to New Chat
+        </MenuItem>
+        <MenuItem onClick={() => handleAddToContext('sidebar')}>
+          <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+          Add to Current Sidebar Chat
         </MenuItem>
       </Menu>
 

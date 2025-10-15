@@ -40,6 +40,35 @@ def json_dumps_safe(obj: Any) -> str:
     
     return json.dumps(obj, default=decimal_default)
 
+def convert_floats_to_decimal(obj):
+    """
+    Recursively convert all float values to Decimal for DynamoDB compatibility
+    
+    Args:
+        obj: Object to convert (dict, list, or primitive)
+        
+    Returns:
+        Converted object with Decimals instead of floats
+    """
+    if isinstance(obj, list):
+        return [convert_floats_to_decimal(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_floats_to_decimal(value) for key, value in obj.items()}
+    elif isinstance(obj, float):
+        # Handle special float values (inf, nan)
+        if obj != obj:  # NaN check
+            return None
+        elif obj == float('inf'):
+            return Decimal('999999999')  # Large number
+        elif obj == float('-inf'):
+            return Decimal('-999999999')  # Large negative number
+        else:
+            return Decimal(str(obj))
+    elif isinstance(obj, int):
+        return obj  # Keep integers as-is
+    else:
+        return obj
+
 def lambda_handler(event, context):
     """
     Lambda handler for session management operations
@@ -374,7 +403,8 @@ def update_session_metadata(user_id: str, session_id: str, metadata: Dict[str, A
         
         if 'session_variables' in metadata:
             update_expression_parts.append('session_variables = :session_variables')
-            expression_attribute_values[':session_variables'] = metadata['session_variables']
+            # Convert floats to Decimal for DynamoDB compatibility
+            expression_attribute_values[':session_variables'] = convert_floats_to_decimal(metadata['session_variables'])
         
         if update_expression_parts:
             update_expression_parts.append('last_updated = :timestamp')

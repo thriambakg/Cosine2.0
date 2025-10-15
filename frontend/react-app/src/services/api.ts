@@ -784,9 +784,10 @@ export const sessionManagementAPI = {
     messages?: Array<{ content: string, sender: string, message_type?: string, metadata?: any }>;
     title?: string;
     model?: string;
+    session_variables?: any;
   }): Promise<any> => {
     console.log('📋 API - Updating session:', { sessionId, userId, updateData });
-    return apiRequest<any>(`/session?session_id=${sessionId}&user_id=${userId}`, {
+    return apiRequest<any>(`/session?user_id=${userId}&session_id=${sessionId}`, {
       method: 'PUT',
       body: JSON.stringify(updateData),
     });

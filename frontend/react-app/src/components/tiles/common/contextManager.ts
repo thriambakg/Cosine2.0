@@ -128,7 +128,8 @@ export const addArticleToContext = (
   articleId: string,
   title: string,
   source: string,
-  articleData: any
+  articleData: any,
+  target: 'new' | 'sidebar' = 'new'
 ): void => {
   const contextItem: ContextItem = {
     id: `article_${articleId}_${Date.now()}`,
@@ -139,7 +140,16 @@ export const addArticleToContext = (
     timestamp: Date.now(),
   };
   
-  addToContext(contextItem);
+  if (target === 'sidebar') {
+    // Add to current sidebar session's context
+    const event = new CustomEvent('add-to-sidebar-context', {
+      detail: contextItem
+    });
+    window.dispatchEvent(event);
+  } else {
+    // Add to new chat (existing behavior)
+    addToContext(contextItem);
+  }
 };
 
 /**
@@ -150,7 +160,8 @@ export const addStockToContext = (
   symbol: string,
   name: string,
   timeframe: string,
-  stockData: any
+  stockData: any,
+  target: 'new' | 'sidebar' = 'new'
 ): void => {
   const contextItem: ContextItem = {
     id: `stock_${symbol}_${Date.now()}`,
@@ -166,7 +177,16 @@ export const addStockToContext = (
     timestamp: Date.now(),
   };
   
-  addToContext(contextItem);
+  if (target === 'sidebar') {
+    // Add to current sidebar session's context
+    const event = new CustomEvent('add-to-sidebar-context', {
+      detail: contextItem
+    });
+    window.dispatchEvent(event);
+  } else {
+    // Add to new chat (existing behavior)
+    addToContext(contextItem);
+  }
 };
 
 /**

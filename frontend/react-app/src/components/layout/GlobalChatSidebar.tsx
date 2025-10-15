@@ -555,6 +555,45 @@ const GlobalChatSidebar: React.FC = () => {
     };
   }, [user?.id, activeSessionId, setIsVisible, setActiveSessionId, connectWebSocket, sendMessage]);
 
+  // Listen for items being added to sidebar context
+  useEffect(() => {
+    const handleAddToSidebarContext = async (event: CustomEvent) => {
+      const contextItem = event.detail;
+      console.log('📌 Adding item to sidebar context:', contextItem);
+      
+      if (!activeSessionId) {
+        console.warn('⚠️ No active sidebar session, cannot add context');
+        return;
+      }
+      
+      // Add to current session context
+      const newContext = [...sessionContext, contextItem];
+      setSessionContext(newContext);
+      console.log('✅ Added to sidebar context');
+      
+      // Persist the updated context to backend immediately
+      if (user?.id) {
+        try {
+          await sessionManagementAPI.updateSession(activeSessionId, user.id, {
+            session_variables: {
+              context_items: newContext,
+              context_added_at: Date.now(),
+            }
+          });
+          console.log('✅ Persisted context to backend');
+        } catch (error) {
+          console.error('❌ Failed to persist context to backend:', error);
+        }
+      }
+    };
+
+    window.addEventListener('add-to-sidebar-context', handleAddToSidebarContext as EventListener);
+    
+    return () => {
+      window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as EventListener);
+    };
+  }, [activeSessionId, sessionContext, user?.id]);
+
   // Listen for WebSocket messages
   useEffect(() => {
     if (!isVisible) return;
@@ -737,6 +776,16 @@ const GlobalChatSidebar: React.FC = () => {
       model: selectedModel,
       files: [],
       messageId: messageId,
+      // Include context if present
+      ...(sessionContext.length > 0 && {
+        contextItems: sessionContext,
+        context: {
+          currentPage: window.location.pathname,
+          sessionId: sessionId,
+          hasContext: true,
+          contextItemCount: sessionContext.length,
+        }
+      }),
     };
     
     const sent = sendMessage(messagePayload);
@@ -905,7 +954,54 @@ const GlobalChatSidebar: React.FC = () => {
           <Collapse in={isContextExpanded}>
             <List dense sx={{ py: 0 }}>
               {sessionContext.map((item, index) => (
-                <ListItem key={index} sx={{ py: 0.5, px: 1 }}>
+                <ListItem 
+                  key={index} 
+                  sx={{ 
+                    py: 0.5, 
+                    px: 1,
+                    '&:hover': {
+                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                      '& .remove-context-btn': {
+                        opacity: 1,
+                      }
+                    }
+                  }}
+                  secondaryAction={
+                    <IconButton
+                      edge="end"
+                      size="small"
+                      className="remove-context-btn"
+                      onClick={async () => {
+                        const newContext = sessionContext.filter((_, i) => i !== index);
+                        setSessionContext(newContext);
+                        console.log(`🗑️ Removed context item: ${item.title}`);
+                        
+                        // Persist the updated context to backend immediately
+                        if (activeSessionId && user?.id) {
+                          try {
+                            await sessionManagementAPI.updateSession(activeSessionId, user.id, {
+                              session_variables: {
+                                context_items: newContext,
+                                context_added_at: Date.now(),
+                              }
+                            });
+                            console.log('✅ Updated context in backend');
+                          } catch (error) {
+                            console.error('❌ Failed to update context in backend:', error);
+                          }
+                        }
+                      }}
+                      sx={{ 
+                        opacity: 0,
+                        transition: 'opacity 0.2s',
+                        color: '#dc2626',
+                        '&:hover': { color: '#ef4444' }
+                      }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  }
+                >
                   <ListItemText
                     primary={item.title}
                     secondary={item.subtitle}

@@ -173,7 +173,8 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         messages: (session.messages || []).map((msg: any) => ({
           ...msg,
           timestamp: new Date((msg.timestamp || Date.now()) * 1000) // Convert seconds to milliseconds
-        }))
+        })),
+        session_variables: session.session_variables || {}  // Include session_variables!
       }));
       
       setSessions(transformedSessions);
@@ -298,7 +299,8 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
                 messages: (response.messages || []).map((msg: any) => ({
                   ...msg,
                   timestamp: new Date((msg.timestamp || Date.now()) * 1000)
-                }))
+                })),
+                session_variables: response.session_variables || {}  // Include session_variables!
               };
               
               // Only update sessions list if backend has more messages than local cache
@@ -356,6 +358,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         created_at: response.created_at,
         last_updated: response.last_updated,
         message_count: response.message_count,
+        session_variables: response.session_variables || {},  // Include session_variables!
         messages: (response.messages || []).map((msg: any) => ({
           ...msg,
           timestamp: new Date((msg.timestamp || Date.now()) * 1000) // Convert seconds to milliseconds

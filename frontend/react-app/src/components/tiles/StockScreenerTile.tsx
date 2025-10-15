@@ -40,7 +40,9 @@ import {
   Business as BusinessIcon,
   AttachMoney as MoneyIcon,
   Speed as SpeedIcon,
-  AddCircleOutline as AddToContextIcon,
+  Dashboard as AddToContextIcon,
+  AddComment as NewChatIcon,
+  Chat as SidebarChatIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
 import { useTilePinning, PinButton, addStockToContext } from './common';
@@ -163,6 +165,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [stockResults, setStockResults] = useState<StockResult[]>(results);
   const [selectedStocks, setSelectedStocks] = useState<string[]>([]);
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const tileRef = useRef<HTMLDivElement>(null);
   const lastClickTimeRef = useRef<number>(0);
 
@@ -458,18 +461,27 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     );
   };
 
-  const handleAddToContext = () => {
+  const handleAddToContextClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (selectedStocks.length === 0) {
       alert('Please select at least one stock to add to context');
       return;
     }
+    setContextMenuAnchor(event.currentTarget);
+  };
+
+  const handleContextMenuClose = () => {
+    setContextMenuAnchor(null);
+  };
+
+  const handleAddToContext = (target: 'new' | 'sidebar') => {
+    if (selectedStocks.length === 0) return;
     
     // Get the selected stock objects from stockResults state
     const selectedStockObjects = stockResults.filter(stock => 
       selectedStocks.includes(stock.symbol)
     );
     
-    console.log(`📦 Adding ${selectedStockObjects.length} stock(s) to context`);
+    console.log(`📦 Adding ${selectedStockObjects.length} stock(s) to context (target: ${target})`);
     
     // Add each selected stock to context with full data
     selectedStockObjects.forEach(stock => {
@@ -499,13 +511,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           weekReturn: stockData.week_return ?? 0,
           previousClose: stockData.previous_close ?? 0,
           timeframe: localCriteria.timeframe,
-        }
+        },
+        target  // Pass target to context manager
       );
       console.log(`✅ Added stock to context: ${stock.symbol}`);
     });
     
-    // Clear selection after adding
+    // Clear selection and close menu
     setSelectedStocks([]);
+    handleContextMenuClose();
   };
 
   const formatMarketCap = (marketCap: number) => {
@@ -679,7 +693,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
             <span>
               <IconButton
                 size="small"
-                onClick={handleAddToContext}
+                onClick={handleAddToContextClick}
                 disabled={selectedStocks.length === 0}
                 sx={{ 
                   color: selectedStocks.length > 0 ? '#10b981' : '#9ca3af', 
@@ -1006,6 +1020,29 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         <MenuItem onClick={handlePinToggle}>
           <PinIcon sx={{ mr: 1, fontSize: 18 }} />
           {pinnedState ? 'Unpin' : 'Pin'} Tile
+        </MenuItem>
+      </Menu>
+
+      {/* Context Target Menu */}
+      <Menu
+        anchorEl={contextMenuAnchor}
+        open={Boolean(contextMenuAnchor)}
+        onClose={handleContextMenuClose}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+            color: 'white',
+          },
+        }}
+      >
+        <MenuItem onClick={() => handleAddToContext('new')}>
+          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
+          Add to New Chat
+        </MenuItem>
+        <MenuItem onClick={() => handleAddToContext('sidebar')}>
+          <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+          Add to Current Sidebar Chat
         </MenuItem>
       </Menu>
 
