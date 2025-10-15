@@ -122,7 +122,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     showPriceChange: true,
     showResultsTable: true,
     showCriteriaSummary: true,
-    maxResults: 5000, // Get all matching stocks (backend will return up to this limit)
+    maxResults: 100000, // Get all matching stocks (effectively unlimited)
   },
   autoRefresh = false,
   isPinned = false,
@@ -139,7 +139,11 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   });
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [localCriteria, setLocalCriteria] = useState<StockScreenerCriteria>(criteria);
-  const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
+  // Ensure maxResults is high enough for proper pagination (upgrade old tiles with maxResults: 10)
+  const [localDisplayOptions, setLocalDisplayOptions] = useState({
+    ...displayOptions,
+    maxResults: Math.max(displayOptions.maxResults || 100000, 100000)
+  });
   const [currentPage, setCurrentPage] = useState(1);
   const [stockResults, setStockResults] = useState<StockResult[]>(results);
   const tileRef = useRef<HTMLDivElement>(null);
@@ -339,7 +343,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       
       const requestPayload = {
         criteria: backendCriteria,
-        maxResults: localDisplayOptions.maxResults || 5000  // Get all matching stocks
+        maxResults: localDisplayOptions.maxResults || 100000  // Get all matching stocks (effectively unlimited)
       };
       
       // Use the API hook to fetch data with criteria

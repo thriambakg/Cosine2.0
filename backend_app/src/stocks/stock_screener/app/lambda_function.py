@@ -79,10 +79,10 @@ try:
     if not ALL_AVAILABLE_STOCKS:
         logger.warning("⚠️ CSV loading returned empty list, falling back to predefined list")
         ALL_AVAILABLE_STOCKS = None
-    else:
+        else:
         logger.info(f"✅ Successfully loaded {len(ALL_AVAILABLE_STOCKS)} stock symbols from CSV")
         logger.info(f"✅ Sample symbols: {ALL_AVAILABLE_STOCKS[:20]}")
-except Exception as e:
+    except Exception as e:
     logger.error(f"❌ Failed to load stock symbols from CSV: {str(e)}")
     import traceback
     logger.error(f"Traceback: {traceback.format_exc()}")
@@ -159,7 +159,7 @@ def enforce_yf_rate_limit():
     lock = get_rate_limit_lock()
     
     with lock:
-        current_time = time.time()
+    current_time = time.time()
         time_since_last = current_time - _last_yf_request_time
         
         if time_since_last < RATE_LIMIT_DELAY:
@@ -170,7 +170,7 @@ def enforce_yf_rate_limit():
             
             logger.info(f"🕐 Rate limiting: waiting {total_delay:.2f}s before yfinance call")
             time.sleep(total_delay)
-        
+    
         _last_yf_request_time = time.time()
         logger.info(f"✅ Rate limit check passed, proceeding with yfinance call")
 
@@ -1552,14 +1552,14 @@ def lambda_handler(event, context):
                     'message': 'No stocks match the selected criteria. Try adjusting your filters.'
                 }
             else:
-                logger.info(f"Stock screening completed: {len(results)} results found")
-                response = {
-                    'success': True,
-                    'results': results,
-                    'totalResults': len(results),
-                    'criteria': criteria,
-                    'timestamp': datetime.now().isoformat()
-                }
+            logger.info(f"Stock screening completed: {len(results)} results found")
+            response = {
+                'success': True,
+                'results': results,
+                'totalResults': len(results),
+                'criteria': criteria,
+                'timestamp': datetime.now().isoformat()
+            }
             
             return {
                 'statusCode': 200,
@@ -1604,26 +1604,26 @@ def lambda_handler(event, context):
     except TimeoutError as e:
         logger.warning(f"=== LAMBDA TIMEOUT ===")
         logger.warning(f"Timeout error: {str(e)}")
-        
-        return {
+            
+            return {
             'statusCode': 408,  # Request Timeout
-            'headers': {
-                'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
-                'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Max-Age': '1728000',
-                'Content-Type': 'application/json'
-            },
-            'body': json.dumps({
+                'headers': {
+                    'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
+                    'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Max-Age': '1728000',
+                    'Content-Type': 'application/json'
+                },
+                'body': json.dumps({
                 'success': False,
                 'results': [],
                 'totalResults': 0,
-                'criteria': criteria,
-                'timestamp': datetime.now().isoformat(),
+                    'criteria': criteria,
+                    'timestamp': datetime.now().isoformat(),
                 'error': 'Request timeout',
                 'message': 'The screening request took too long. Please try with fewer criteria.'
-            })
-        }
+                })
+            }
         
     except Exception as e:
         logger.error(f"=== STOCK SCREENER LAMBDA ERROR ===")
