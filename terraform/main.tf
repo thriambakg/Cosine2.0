@@ -919,6 +919,12 @@ resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
   policy_arn = aws_iam_policy.lambda_secrets_policy.arn
 }
 
+# Attach S3 policy for chat files access
+resource "aws_iam_role_policy_attachment" "chat_agent_s3_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
+}
+
 # ECR policy for container image access
 resource "aws_iam_policy" "lambda_ecr_policy" {
   name        = "${var.project_name}-lambda-ecr-policy-${var.environment}"
@@ -1041,6 +1047,9 @@ resource "aws_lambda_function" "chat_agent" {
       SESSION_TTL_DAYS           = "30"
       CONTEXT_TTL_DAYS           = "30"
       MAX_CONTEXT_SIZE           = "100000"
+
+      # S3 Configuration for file uploads
+      CHAT_FILES_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
     }
   }
 

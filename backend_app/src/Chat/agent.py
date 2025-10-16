@@ -905,6 +905,14 @@ Term Structure:
         return f"Error in financial calculation: {str(e)}"
 
 
+# Import S3 file reader tool
+try:
+    from tools.s3_file_reader import read_s3_file_tool
+    logger.info("Successfully imported S3 file reader tool")
+except ImportError as e:
+    logger.error(f"Failed to import S3 file reader tool: {e}")
+    read_s3_file_tool = None
+
 # Define the tools list that Strands can automatically detect
 enhanced_tools = [
     get_financial_data,
@@ -914,7 +922,8 @@ enhanced_tools = [
     calculate_stock_correlation,  # Live correlation analysis
     get_volatility_surface,  # New volatility surface analysis
     python_financial_calculator,  # Advanced financial calculations
-    http_request  # Web request tool
+    http_request,  # Web request tool
+    read_s3_file_tool  # S3 file reader tool
 ]
 
 # Function to create agents with different models
