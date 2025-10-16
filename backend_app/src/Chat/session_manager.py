@@ -181,7 +181,8 @@ class SessionManager:
     def update_session_context(self, session_id: str, user_id: str, 
                              new_message: str, agent_response: str,
                              updated_variables: Optional[Dict[str, Any]] = None,
-                             model: Optional[str] = None) -> bool:
+                             model: Optional[str] = None,
+                             files: Optional[List[Dict[str, Any]]] = None) -> bool:
         """
         Update session context with new conversation data
         
@@ -192,6 +193,7 @@ class SessionManager:
             agent_response: Agent's response
             updated_variables: Updated session variables
             model: Model used to process the message
+            files: Optional list of file metadata for display
             
         Returns:
             success: True if update was successful
@@ -234,6 +236,20 @@ class SessionManager:
                     'timestamp': timestamp,
                     'message_type': 'text'
                 }
+                
+                # Add file information if provided
+                if files:
+                    # Convert uploaded files to frontend format
+                    file_metadata = []
+                    for file_info in files:
+                        file_metadata.append({
+                            'name': file_info.get('filename', 'Unknown'),
+                            'size': file_info.get('file_size', 0),
+                            'type': file_info.get('content_type', 'application/octet-stream')
+                        })
+                    user_message['files'] = file_metadata
+                    logger.info(f"✅ Added {len(file_metadata)} files to user message")
+                
                 messages.append(user_message)
                 logger.info(f"✅ Added user message: {user_message['id']}")
             

@@ -635,8 +635,11 @@ Session Context:
                 message_for_display = original_user_message if original_user_message else user_message
                 logger.info(f"📌 Saving message for display: '{message_for_display[:100]}...'")
                 
+                # Extract file information from event body if available
+                files = event_body.get('uploaded_files', [])
+                
                 update_success = session_manager.update_session_context(
-                    session_id, user_id, message_for_display, response_content, model=model
+                    session_id, user_id, message_for_display, response_content, model=model, files=files
                 )
                 if update_success:
                     logger.info(f"✅ Successfully updated session context for session {session_id}")
