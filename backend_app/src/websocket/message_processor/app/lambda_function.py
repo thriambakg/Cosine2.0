@@ -946,7 +946,7 @@ def get_active_connections_for_user_session(user_id: str, session_id: str) -> Li
 def handle_file_handler_message(event):
     """
     Handle messages sent from File Handler (direct Lambda invocation).
-    These messages already have files uploaded and enriched with S3 references.
+    Use the same flow as regular messages to maintain consistency and real-time responses.
     
     Args:
         event: Event data from File Handler containing message and context
@@ -973,11 +973,62 @@ def handle_file_handler_message(event):
                 'body': json_dumps_safe({'error': 'Missing user_id or session_id'})
             }
         
-        logger.info(f"Processing File Handler message: user={user_id}, session={session_id}, context_items={len(context_items)}")
+        logger.info(f"Processing File Handler message: user={user_id}, session={session_id}, context_items={len(context_items)}, uploaded_files={len(uploaded_files)}")
         
-        # Process the message like a regular WebSocket message
-        # but without needing a connection ID since it's direct invocation
-        result = process_message_direct(user_id, session_id, message_text, message_id, context_items, uploaded_files, model)
+        # Convert uploaded files to context items format for consistency
+        all_context_items = list(context_items)
+        
+        # Add uploaded files as context items (same format as regular context)
+        for file_info in uploaded_files:
+            all_context_items.append({
+                'type': 'file',
+                'title': f"Uploaded File: {file_info['filename']}",
+                'data': {
+                    'original_filename': file_info['filename'],
+                    's3_key': file_info['s3_key'],
+                    's3_url': file_info['s3_url'],
+                    'content_type': file_info['content_type'],
+                    'file_size': file_info['file_size'],
+                    'upload_timestamp': file_info['upload_timestamp']
+                }
+            })
+        
+        # Store uploaded files in session_variables for persistence
+        if uploaded_files:
+            try:
+                uploaded_files_decimal = convert_floats_to_decimal(uploaded_files)
+                chat_sessions_table.update_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    UpdateExpression='SET session_variables = if_not_exists(session_variables, :empty_map) + :files, last_updated = :updated',
+                    ExpressionAttributeValues={
+                        ':empty_map': {},
+                        ':files': {
+                            'uploaded_files': uploaded_files_decimal,
+                            'files_added_at': int(datetime.now().timestamp())
+                        },
+                        ':updated': int(datetime.now().timestamp())
+                    }
+                )
+                logger.info(f"📌 Stored uploaded files in session_variables")
+            except Exception as e:
+                logger.error(f"❌ Failed to store uploaded files: {e}")
+        
+        # Use the same flow as regular messages with context
+        # This ensures real-time responses and proper message handling
+        ai_response = call_chat_agent(
+            user_id, 
+            message_text,  # Original message text
+            model, 
+            [],  # No files parameter needed
+            session_id, 
+            all_context_items if all_context_items else None,  # Combined context items
+            message_text  # Original message for frontend display
+        )
+        
+        logger.info(f"✅ File Handler message processed successfully")
         
         return {
             'statusCode': 200,
