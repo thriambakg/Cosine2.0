@@ -6,6 +6,11 @@ export interface ChatMessage {
   text: string;
   sender: 'user' | 'bot';
   timestamp: Date;
+  files?: Array<{
+    name: string;
+    size: number;
+    type: string;
+  }>;
 }
 
 export interface ChatSession {

@@ -1009,10 +1009,16 @@ def handle_file_handler_message(event):
                 # Get existing session_variables or create empty dict
                 existing_session_vars = response.get('Item', {}).get('session_variables', {})
                 
+                # Get existing uploaded files or create empty list
+                existing_files = existing_session_vars.get('uploaded_files', [])
+                
+                # Merge new files with existing files
+                all_files = existing_files + uploaded_files_decimal
+                
                 # Merge uploaded files into session_variables
                 updated_session_vars = {
                     **existing_session_vars,
-                    'uploaded_files': uploaded_files_decimal,
+                    'uploaded_files': all_files,
                     'files_added_at': int(datetime.now().timestamp())
                 }
                 
@@ -1034,13 +1040,24 @@ def handle_file_handler_message(event):
         
         # Store the original user message in the database first
         try:
+            # Prepare file metadata for message display (without actual file data)
+            file_metadata = []
+            if uploaded_files:
+                for file_info in uploaded_files:
+                    file_metadata.append({
+                        'name': file_info.get('filename', 'Unknown'),
+                        'size': file_info.get('file_size', 0),
+                        'type': file_info.get('content_type', 'application/octet-stream')
+                    })
+            
             # Add user message to conversation history
             user_message_data = {
                 'id': message_id,
                 'role': 'user',
                 'content': message_text,  # Store original message text
                 'timestamp': int(datetime.now().timestamp() * 1000),
-                'model': model
+                'model': model,
+                'files': file_metadata if file_metadata else None  # Include file metadata for display
             }
             
             # Update conversation history in DynamoDB

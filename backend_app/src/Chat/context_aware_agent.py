@@ -264,6 +264,14 @@ Page Type: {session_variables.get('page_type', 'unknown')}
 ==================
 {context.get('webpage_content', 'No webpage content available')}
 
+📁 UPLOADED FILES IN SESSION:
+============================
+{self._format_uploaded_files(session_variables)}
+
+📋 CONTEXT ITEMS IN SESSION:
+============================
+{self._format_context_items(session_variables)}
+
 🎯 SESSION FOCUS:
 ================
 Based on the current webpage and user intent, focus on:
@@ -348,6 +356,87 @@ Based on the current webpage and user intent, focus on:
         }
         
         return focus_map.get(page_type, 'general financial analysis and market insights')
+    
+    def _format_uploaded_files(self, session_variables: Dict[str, Any]) -> str:
+        """Format uploaded files information for the system prompt"""
+        try:
+            uploaded_files = session_variables.get('uploaded_files', [])
+            
+            if not uploaded_files:
+                return "No files uploaded to this session."
+            
+            files_info = f"Total files: {len(uploaded_files)}\n"
+            
+            for i, file_info in enumerate(uploaded_files, 1):
+                filename = file_info.get('filename', 'Unknown')
+                file_size = file_info.get('file_size', 0)
+                content_type = file_info.get('content_type', 'unknown')
+                s3_key = file_info.get('s3_key', '')
+                
+                # Convert bytes to KB/MB for display
+                if file_size > 1024 * 1024:
+                    size_display = f"{file_size / (1024 * 1024):.1f} MB"
+                elif file_size > 1024:
+                    size_display = f"{file_size / 1024:.1f} KB"
+                else:
+                    size_display = f"{file_size} bytes"
+                
+                files_info += f"{i}. {filename} ({size_display}, {content_type})\n"
+                if s3_key:
+                    files_info += f"   S3 Key: {s3_key}\n"
+            
+            files_info += "\n💡 You can use the read_s3_file_tool to read and analyze these files when users ask about them."
+            
+            return files_info
+            
+        except Exception as e:
+            logger.error(f"Error formatting uploaded files: {str(e)}")
+            return "Error loading uploaded files information."
+    
+    def _format_context_items(self, session_variables: Dict[str, Any]) -> str:
+        """Format context items information for the system prompt"""
+        try:
+            context_items = session_variables.get('context_items', [])
+            
+            if not context_items:
+                return "No context items added to this session."
+            
+            context_info = f"Total context items: {len(context_items)}\n"
+            
+            for i, item in enumerate(context_items, 1):
+                item_type = item.get('type', 'unknown')
+                title = item.get('title', 'Untitled')
+                subtitle = item.get('subtitle', '')
+                
+                context_info += f"{i}. [{item_type.upper()}] {title}\n"
+                if subtitle:
+                    context_info += f"   {subtitle}\n"
+                
+                # Add specific information based on item type
+                if item_type == 'stock':
+                    symbol = item.get('data', {}).get('symbol', '')
+                    if symbol:
+                        context_info += f"   Symbol: {symbol}\n"
+                elif item_type == 'news':
+                    source = item.get('data', {}).get('source', '')
+                    if source:
+                        context_info += f"   Source: {source}\n"
+                elif item_type == 'tile':
+                    tile_type = item.get('data', {}).get('tile_type', '')
+                    if tile_type:
+                        context_info += f"   Tile Type: {tile_type}\n"
+                elif item_type == 'file':
+                    filename = item.get('data', {}).get('original_filename', '')
+                    if filename:
+                        context_info += f"   File: {filename}\n"
+            
+            context_info += "\n💡 These context items provide additional information for analysis. Use them to enhance your responses when relevant."
+            
+            return context_info
+            
+        except Exception as e:
+            logger.error(f"Error formatting context items: {str(e)}")
+            return "Error loading context items information."
     
     
     def _get_session_tools(self, session_context: Dict[str, Any]) -> List:
