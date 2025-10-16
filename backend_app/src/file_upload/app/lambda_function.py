@@ -260,23 +260,9 @@ def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_fi
             logger.error("WEBSOCKET_PROCESSOR_FUNCTION_NAME not configured")
             return
         
-        # Create enriched context items with file references
+        # Keep context items separate from file uploads
+        # File uploads will be stored in a separate uploaded_files field
         enriched_context_items = list(context_items)
-        
-        # Add file references to context
-        for file_info in uploaded_files:
-            enriched_context_items.append({
-                'type': 'file',
-                'title': f"Uploaded File: {file_info['filename']}",
-                'data': {
-                    'original_filename': file_info['filename'],
-                    's3_key': file_info['s3_key'],
-                    's3_url': file_info['s3_url'],
-                    'content_type': file_info['content_type'],
-                    'file_size': file_info['file_size'],
-                    'upload_timestamp': file_info['upload_timestamp']
-                }
-            })
         
         # Create message payload for WebSocket processor
         websocket_payload = {
@@ -284,6 +270,7 @@ def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_fi
             'messageId': message['id'],
             'message': message['text'],
             'contextItems': enriched_context_items,
+            'uploadedFiles': uploaded_files,  # Separate file uploads
             'model': 'claude-3-sonnet',  # Default model
             'sessionId': session_id,
             'userId': user_id,

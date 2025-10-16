@@ -1031,6 +1031,7 @@ def handle_file_handler_message(event):
         message_text = event.get('message', '')
         message_id = event.get('messageId')
         context_items = event.get('contextItems', [])
+        uploaded_files = event.get('uploadedFiles', [])  # Separate file uploads
         model = event.get('model', 'claude-3-sonnet')
         
         if not user_id or not session_id:
@@ -1044,7 +1045,7 @@ def handle_file_handler_message(event):
         
         # Process the message like a regular WebSocket message
         # but without needing a connection ID since it's direct invocation
-        result = process_message_direct(user_id, session_id, message_text, message_id, context_items, model)
+        result = process_message_direct(user_id, session_id, message_text, message_id, context_items, uploaded_files, model)
         
         return {
             'statusCode': 200,
@@ -1058,7 +1059,7 @@ def handle_file_handler_message(event):
             'body': json_dumps_safe({'error': f'Failed to process message: {str(e)}'})
         }
 
-def process_message_direct(user_id, session_id, message_text, message_id, context_items, model):
+def process_message_direct(user_id, session_id, message_text, message_id, context_items, uploaded_files, model):
     """
     Process a message directly without WebSocket connection.
     Used for messages from File Handler.
@@ -1068,7 +1069,8 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
         session_id: Session ID
         message_text: Message text
         message_id: Message ID
-        context_items: Context items (including file references)
+        context_items: Context items (excluding file references)
+        uploaded_files: File uploads (separate from context items)
         model: AI model to use
         
     Returns:
@@ -1085,8 +1087,9 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
         
         # Convert floats to Decimal for DynamoDB compatibility
         context_items_decimal = convert_floats_to_decimal(context_items)
+        uploaded_files_decimal = convert_floats_to_decimal(uploaded_files)
         
-        # Store context in session_variables for persistence
+        # Store context and uploaded files separately in session_variables for persistence
         if CONTEXT_BUILDER_AVAILABLE:
             context_summary = extract_context_summary(context_items)
             logger.info(f"📌 Context summary: {context_summary}")
@@ -1095,6 +1098,18 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
             try:
                 context_summary_decimal = convert_floats_to_decimal(context_summary)
                 
+                # Prepare session variables with separate fields
+                session_vars = {
+                    'context_items': context_items_decimal,
+                    'context_added_at': int(datetime.now().timestamp()),
+                    'context_summary': context_summary_decimal,
+                }
+                
+                # Add uploaded files if any
+                if uploaded_files:
+                    session_vars['uploaded_files'] = uploaded_files_decimal
+                    session_vars['files_added_at'] = int(datetime.now().timestamp())
+                
                 chat_sessions_table.update_item(
                     Key={
                         'user_id': user_id,
@@ -1102,22 +1117,36 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
                     },
                     UpdateExpression='SET session_variables = :vars, last_updated = :updated',
                     ExpressionAttributeValues={
-                        ':vars': {
-                            'context_items': context_items_decimal,
-                            'context_added_at': int(datetime.now().timestamp()),
-                            'context_summary': context_summary_decimal,
-                        },
+                        ':vars': session_vars,
                         ':updated': int(datetime.now().timestamp())
                     }
                 )
-                logger.info(f"📌 Stored context in session_variables")
+                logger.info(f"📌 Stored context and uploaded files in session_variables")
             except Exception as e:
                 logger.error(f"❌ Failed to store context in session_variables: {e}")
         
         # Build context prompt for AI
-        if CONTEXT_BUILDER_AVAILABLE and context_items:
-            enriched_message = build_context_prompt(message_text, context_items)
-            logger.info(f"📌 Built enriched message with context")
+        if CONTEXT_BUILDER_AVAILABLE and (context_items or uploaded_files):
+            # Combine context items and uploaded files for the AI prompt
+            all_context_items = list(context_items)
+            
+            # Add uploaded files as context items for the AI
+            for file_info in uploaded_files:
+                all_context_items.append({
+                    'type': 'file',
+                    'title': f"Uploaded File: {file_info['filename']}",
+                    'data': {
+                        'original_filename': file_info['filename'],
+                        's3_key': file_info['s3_key'],
+                        's3_url': file_info['s3_url'],
+                        'content_type': file_info['content_type'],
+                        'file_size': file_info['file_size'],
+                        'upload_timestamp': file_info['upload_timestamp']
+                    }
+                })
+            
+            enriched_message = build_context_prompt(message_text, all_context_items)
+            logger.info(f"📌 Built enriched message with context and uploaded files")
         else:
             enriched_message = message_text
             logger.info(f"📌 Using original message (no context builder or no context items)")
@@ -1137,6 +1166,7 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
                 'message_id': message_id,
                 'model': model,
                 'context_items': context_items_decimal,
+                'uploaded_files': uploaded_files_decimal,  # Include uploaded files
                 'source': 'file_handler'
             }
             
