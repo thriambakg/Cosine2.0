@@ -121,6 +121,7 @@ def lambda_handler(event, context):
                 # Decode base64 data
                 import base64
                 file_content = base64.b64decode(data)
+                file_size = len(file_content)
                 
                 # Upload to S3
                 s3_client.put_object(
@@ -149,6 +150,7 @@ def lambda_handler(event, context):
                     's3_key': s3_key,
                     's3_url': s3_url,
                     'content_type': content_type,
+                    'file_size': file_size,
                     'upload_timestamp': str(int(datetime.utcnow().timestamp()))
                 })
                 
@@ -271,7 +273,7 @@ def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_fi
                     's3_key': file_info['s3_key'],
                     's3_url': file_info['s3_url'],
                     'content_type': file_info['content_type'],
-                    'file_size': len(file_info.get('data', '')),  # This will be 0 since we don't store data
+                    'file_size': file_info['file_size'],
                     'upload_timestamp': file_info['upload_timestamp']
                 }
             })
