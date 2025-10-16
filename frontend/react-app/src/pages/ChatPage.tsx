@@ -930,10 +930,27 @@ export default function ChatPage() {
   const handleFileUpload = async (files: FileList) => {
     const maxFileSize = 50 * 1024 * 1024; // 50MB limit
     const allowedTypes = [
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      // Images
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+      // Documents
       'application/pdf', 'text/plain', 'text/csv',
+      // Data formats
+      'application/json', 'application/ld+json', 'application/xml', 'text/xml',
+      // Office documents
       'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      // Data analysis formats
+      'application/vnd.ms-excel.sheet.macroEnabled.12', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/csv', 'application/csv', 'text/tab-separated-values',
+      // Archive formats
+      'application/zip', 'application/x-zip-compressed', 'application/x-rar-compressed',
+      // Financial data formats
+      'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.text',
+      // Additional text formats
+      'text/html', 'text/css', 'text/javascript', 'application/javascript',
+      // Database exports
+      'application/sql', 'text/sql'
     ];
     
     for (const file of Array.from(files)) {
