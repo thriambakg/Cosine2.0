@@ -1016,17 +1016,80 @@ def handle_file_handler_message(event):
             except Exception as e:
                 logger.error(f"❌ Failed to store uploaded files: {e}")
         
-        # Use the same flow as regular messages with context
-        # This ensures real-time responses and proper message handling
-        ai_response = call_chat_agent(
-            user_id, 
-            message_text,  # Original message text
-            model, 
-            [],  # No files parameter needed
-            session_id, 
-            all_context_items if all_context_items else None,  # Combined context items
-            message_text  # Original message for frontend display
-        )
+        # Store the original user message in the database first
+        try:
+            # Add user message to conversation history
+            user_message_data = {
+                'id': message_id,
+                'role': 'user',
+                'content': message_text,  # Store original message text
+                'timestamp': int(datetime.now().timestamp() * 1000),
+                'model': model
+            }
+            
+            # Update conversation history in DynamoDB
+            chat_sessions_table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression='SET conversation_history = list_append(if_not_exists(conversation_history, :empty_list), :message)',
+                ExpressionAttributeValues={
+                    ':empty_list': [],
+                    ':message': [user_message_data]
+                }
+            )
+            logger.info(f"📌 Stored original user message in conversation history")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to store user message: {e}")
+        
+        # Build enriched message for AI agent
+        if CONTEXT_BUILDER_AVAILABLE and all_context_items:
+            enriched_message = build_context_prompt(message_text, all_context_items)
+            logger.info(f"📌 Built enriched message with context and uploaded files")
+        else:
+            enriched_message = message_text
+            logger.info(f"📌 Using original message (no context builder or no context items)")
+        
+        # Invoke chat agent with enriched message
+        try:
+            chat_agent_function_name = os.environ.get('CHAT_AGENT_FUNCTION_NAME')
+            if not chat_agent_function_name:
+                logger.error("CHAT_AGENT_FUNCTION_NAME not configured")
+                return {
+                    'statusCode': 500,
+                    'body': json_dumps_safe({'error': 'Chat agent not configured'})
+                }
+            
+            # Prepare payload for chat agent
+            agent_payload = {
+                'user_id': user_id,
+                'session_id': session_id,
+                'message': enriched_message,  # Use enriched message for AI
+                'message_id': message_id,
+                'model': model,
+                'context_items': convert_floats_to_decimal(context_items),
+                'uploaded_files': convert_floats_to_decimal(uploaded_files),  # Include uploaded files
+                'source': 'file_handler'
+            }
+            
+            # Invoke chat agent
+            lambda_client = boto3.client('lambda')
+            response = lambda_client.invoke(
+                FunctionName=chat_agent_function_name,
+                InvocationType='Event',  # Async invocation
+                Payload=json_dumps_safe(agent_payload)
+            )
+            
+            logger.info(f"✅ Successfully invoked chat agent: {response['StatusCode']}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to invoke chat agent: {str(e)}")
+            return {
+                'statusCode': 500,
+                'body': json_dumps_safe({'error': f'Failed to invoke chat agent: {str(e)}'})
+            }
         
         logger.info(f"✅ File Handler message processed successfully")
         
