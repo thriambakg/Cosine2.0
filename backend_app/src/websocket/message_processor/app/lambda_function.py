@@ -318,6 +318,84 @@ def process_message(connection_id, user_id, session_id, message_data):
         
         # Process file context items (upload and store files)
         file_context_items = [item for item in context_items if item.get('type') == 'file']
+        file_chunk_items = [item for item in context_items if item.get('type') == 'file_chunk']
+        
+        # Process file chunks first (reassemble them)
+        if file_chunk_items:
+            logger.info(f"📦 Processing {len(file_chunk_items)} file chunks")
+            chunked_files = {}
+            
+            # Group chunks by file_id
+            for chunk_item in file_chunk_items:
+                try:
+                    chunk_data = chunk_item.get('data', {})
+                    file_id = chunk_data.get('file_id')
+                    chunk_index = chunk_data.get('chunk_index', 0)
+                    total_chunks = chunk_data.get('total_chunks', 1)
+                    chunk_data_content = chunk_data.get('chunk_data', '')
+                    
+                    if file_id not in chunked_files:
+                        chunked_files[file_id] = {
+                            'filename': chunk_data.get('filename', 'Unknown'),
+                            'content_type': chunk_data.get('content_type', 'application/octet-stream'),
+                            'original_size': chunk_data.get('original_size', 0),
+                            'compressed_size': chunk_data.get('compressed_size', 0),
+                            'compression_ratio': chunk_data.get('compression_ratio', 0),
+                            'chunks': [''] * total_chunks,
+                            'uploaded_at': chunk_data.get('uploaded_at', datetime.now().isoformat())
+                        }
+                    
+                    # Store chunk in correct position
+                    chunked_files[file_id]['chunks'][chunk_index] = chunk_data_content
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to process file chunk: {str(e)}")
+                    continue
+            
+            # Reassemble chunks into complete files
+            processed_files = []
+            for file_id, file_info in chunked_files.items():
+                try:
+                    # Check if all chunks are present
+                    if all(chunk for chunk in file_info['chunks']):
+                        # Reassemble the compressed data
+                        reassembled_data = ''.join(file_info['chunks'])
+                        
+                        # Create a complete file data structure
+                        complete_file_data = {
+                            'filename': file_info['filename'],
+                            'content_type': file_info['content_type'],
+                            'original_size': file_info['original_size'],
+                            'compressed_size': file_info['compressed_size'],
+                            'compression_ratio': file_info['compression_ratio'],
+                            'compressed_data': reassembled_data
+                        }
+                        
+                        # Process the reassembled file
+                        file_metadata = process_file_upload(
+                            compressed_file_data=complete_file_data,
+                            user_id=user_id,
+                            session_id=session_id
+                        )
+                        processed_files.append(file_metadata)
+                        
+                        logger.info(f"✅ Reassembled and processed file: {file_info['filename']}")
+                    else:
+                        logger.warning(f"⚠️ Missing chunks for file {file_info['filename']}, skipping")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Failed to reassemble file {file_info['filename']}: {str(e)}")
+                    continue
+            
+            # Store processed files in session
+            if processed_files:
+                try:
+                    store_file_metadata_in_session(user_id, session_id, processed_files)
+                    logger.info(f"✅ Stored {len(processed_files)} reassembled files in session")
+                except Exception as e:
+                    logger.error(f"❌ Failed to store reassembled file metadata: {str(e)}")
+        
+        # Process regular file context items (non-chunked)
         if file_context_items:
             logger.info(f"📁 Processing {len(file_context_items)} file context items")
             processed_files = []

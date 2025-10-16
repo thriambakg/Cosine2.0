@@ -873,6 +873,19 @@ export default function ChatPage() {
   // Remove auto-creation - let user start typing first
   // Sessions will be created when user actually sends a message
 
+  // Helper function to convert Uint8Array to base64 without stack overflow
+  const convertUint8ArrayToBase64 = (uint8Array: Uint8Array): string => {
+    const chunkSize = 8192; // Process in 8KB chunks to avoid stack overflow
+    let result = '';
+    
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.slice(i, i + chunkSize);
+      result += btoa(String.fromCharCode.apply(null, Array.from(chunk)));
+    }
+    
+    return result;
+  };
+
   const compressFile = async (file: File): Promise<{compressedData: string, originalSize: number, compressedSize: number}> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -881,18 +894,49 @@ export default function ChatPage() {
           const arrayBuffer = e.target?.result as ArrayBuffer;
           const uint8Array = new Uint8Array(arrayBuffer);
           
-          // Compress using gzip
+          // For small files (< 1MB), skip compression to speed up processing
+          if (file.size < 1024 * 1024) {
+            console.log(`⚡ Skipping compression for small file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+            // Use chunked base64 conversion to avoid stack overflow
+            const base64Data = convertUint8ArrayToBase64(uint8Array);
+            resolve({
+              compressedData: base64Data,
+              originalSize: file.size,
+              compressedSize: file.size
+            });
+            return;
+          }
+          
+          // For larger files, use CompressionStream with timeout
+          const startTime = Date.now();
+          console.log(`🔄 Starting compression for ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+          
           const stream = new CompressionStream('gzip');
           const writer = stream.writable.getWriter();
           const reader = stream.readable.getReader();
           
-          // Write data to compression stream
-          await writer.write(uint8Array);
+          // Write data in larger chunks for better performance
+          const chunkSize = 256 * 1024; // 256KB chunks
+          for (let i = 0; i < uint8Array.length; i += chunkSize) {
+            const chunk = uint8Array.slice(i, i + chunkSize);
+            await writer.write(chunk);
+          }
           await writer.close();
           
-          // Read compressed data
+          // Read compressed data with timeout
           const chunks: Uint8Array[] = [];
           let done = false;
+          const timeout = setTimeout(() => {
+            console.warn(`⚠️ Compression timeout for ${file.name}, falling back to uncompressed`);
+            // Fallback to uncompressed data
+            const base64Data = btoa(String.fromCharCode.apply(null, Array.from(uint8Array)));
+            resolve({
+              compressedData: base64Data,
+              originalSize: file.size,
+              compressedSize: file.size
+            });
+          }, 5000); // 5 second timeout
+          
           while (!done) {
             const { value, done: readerDone } = await reader.read();
             done = readerDone;
@@ -901,7 +945,9 @@ export default function ChatPage() {
             }
           }
           
-          // Combine chunks
+          clearTimeout(timeout);
+          
+          // Combine chunks efficiently
           const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
           const compressedData = new Uint8Array(totalLength);
           let offset = 0;
@@ -910,8 +956,11 @@ export default function ChatPage() {
             offset += chunk.length;
           }
           
-          // Convert to base64
-          const compressedBase64 = btoa(String.fromCharCode(...compressedData));
+          // Optimized base64 conversion
+          const compressedBase64 = convertUint8ArrayToBase64(compressedData);
+          
+          const compressionTime = Date.now() - startTime;
+          console.log(`✅ Compression completed for ${file.name} in ${compressionTime}ms`);
           
           resolve({
             compressedData: compressedBase64,
@@ -919,7 +968,16 @@ export default function ChatPage() {
             compressedSize: compressedData.length
           });
         } catch (error) {
-          reject(error);
+          console.error(`❌ Compression failed for ${file.name}, using uncompressed data:`, error);
+          // Fallback to uncompressed data
+          const arrayBuffer = e.target?.result as ArrayBuffer;
+          const uint8Array = new Uint8Array(arrayBuffer);
+          const base64Data = convertUint8ArrayToBase64(uint8Array);
+          resolve({
+            compressedData: base64Data,
+            originalSize: file.size,
+            compressedSize: file.size
+          });
         }
       };
       reader.onerror = () => reject(new Error('Failed to read file'));
@@ -1366,19 +1424,56 @@ export default function ChatPage() {
       if (uploadedFiles.length > 0) {
         console.log(`📁 Adding ${uploadedFiles.length} files as context items`);
         uploadedFiles.forEach(file => {
-          contextItems.push({
-            type: 'file',
-            title: `Uploaded File: ${file.name}`,
-            data: {
-              filename: file.name,
-              content_type: file.type,
-              compressed_data: file.compressedData,
-              original_size: file.size,
-              compressed_size: file.compressedSize,
-              compression_ratio: file.compressionRatio,
-              uploaded_at: new Date().toISOString()
+          // Check if file needs chunking (compressed data > 100KB to leave room for JSON overhead)
+          const maxChunkSize = 100 * 1024; // 100KB chunks
+          const compressedData = file.compressedData;
+          
+          if (compressedData.length > maxChunkSize) {
+            console.log(`📦 File ${file.name} is large (${(compressedData.length / 1024).toFixed(1)} KB), chunking...`);
+            
+            // Split into chunks
+            const chunks = [];
+            for (let i = 0; i < compressedData.length; i += maxChunkSize) {
+              chunks.push(compressedData.slice(i, i + maxChunkSize));
             }
-          });
+            
+            console.log(`📦 Split into ${chunks.length} chunks`);
+            
+            // Send each chunk as a separate context item
+            chunks.forEach((chunk, index) => {
+              contextItems.push({
+                type: 'file_chunk',
+                title: `Uploaded File: ${file.name} (chunk ${index + 1}/${chunks.length})`,
+                data: {
+                  file_id: file.id,
+                  filename: file.name,
+                  content_type: file.type,
+                  original_size: file.size,
+                  compressed_size: file.compressedSize,
+                  compression_ratio: file.compressionRatio,
+                  chunk_index: index,
+                  total_chunks: chunks.length,
+                  chunk_data: chunk,
+                  uploaded_at: new Date().toISOString()
+                }
+              });
+            });
+          } else {
+            // Small file, send as single item
+            contextItems.push({
+              type: 'file',
+              title: `Uploaded File: ${file.name}`,
+              data: {
+                filename: file.name,
+                content_type: file.type,
+                compressed_data: compressedData,
+                original_size: file.size,
+                compressed_size: file.compressedSize,
+                compression_ratio: file.compressionRatio,
+                uploaded_at: new Date().toISOString()
+              }
+            });
+          }
         });
       }
       
