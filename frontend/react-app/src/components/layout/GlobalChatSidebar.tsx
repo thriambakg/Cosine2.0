@@ -1133,6 +1133,8 @@ const GlobalChatSidebar: React.FC = () => {
                       className="remove-file-btn"
                       onClick={async () => {
                         const newFiles = currentSession.session_variables.uploaded_files.filter((_: any, i: number) => i !== index);
+                        
+                        // Update the local session state
                         const updatedSession = {
                           ...currentSession,
                           session_variables: {

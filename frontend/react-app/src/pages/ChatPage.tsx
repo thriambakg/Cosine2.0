@@ -219,6 +219,7 @@ export default function ChatPage() {
     truncateMessagesAfter,
     loadSessionsFromBackend,
     updateSessionContext,
+    updateSessionFiles,
   } = useChatPersistence(user?.id || '');
   
   // Use messages from current session
@@ -2296,14 +2297,9 @@ export default function ChatPage() {
                       className="remove-file-btn"
                       onClick={async () => {
                         const newFiles = currentSession.session_variables.uploaded_files.filter((_: any, i: number) => i !== index);
-                        const updatedSession = {
-                          ...currentSession,
-                          session_variables: {
-                            ...currentSession.session_variables,
-                            uploaded_files: newFiles
-                          }
-                        };
-                        setCurrentSession(updatedSession);
+                        
+                        // Update the session using the hook function
+                        updateSessionFiles(currentSession.session_id, newFiles);
                         console.log(`🗑️ Removed file: ${file.filename}`);
                         
                         // Persist the updated files to backend immediately

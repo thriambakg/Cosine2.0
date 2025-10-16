@@ -1000,10 +1000,10 @@ class S3FileReader:
         except Exception as e:
             return {'error': str(e)}
 
-@tool
+@tool(name="read_s3_file_tool")
 def read_s3_file_tool(s3_key: str, file_type: str = "auto") -> str:
     """
-    Tool function to read files from S3
+    Read and analyze files uploaded to S3 by users. Use this tool when users ask about uploaded files or when you need to analyze file content.
     
     Args:
         s3_key: The S3 key/path of the file to read

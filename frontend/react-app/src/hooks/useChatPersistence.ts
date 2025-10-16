@@ -819,6 +819,37 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     console.log('✅ Updated session context in local state');
   }, [currentSession?.session_id]);
 
+  const updateSessionFiles = useCallback((sessionId: string, uploadedFiles: any[]) => {
+    console.log('📋 Updating session files:', { sessionId, fileCount: uploadedFiles.length });
+    
+    // Update sessions array
+    setSessions(prev => {
+      const updated = prev.map(s => 
+        s.session_id === sessionId 
+          ? { ...s, session_variables: { ...s.session_variables, uploaded_files: uploadedFiles } }
+          : s
+      );
+      console.log('📋 Updated sessions array, session now has:', updated.find(s => s.session_id === sessionId)?.session_variables?.uploaded_files?.length, 'uploaded files');
+      return updated;
+    });
+    
+    // Update current session if it matches
+    if (currentSession?.session_id === sessionId) {
+      setCurrentSession(prev => {
+        if (!prev) return null;
+        const updated = {
+          ...prev,
+          session_variables: { ...prev.session_variables, uploaded_files: uploadedFiles }
+        };
+        console.log('📋 Updated currentSession, now has:', updated.session_variables?.uploaded_files?.length, 'uploaded files');
+        return updated;
+      });
+    }
+    
+    // Save will happen automatically via the useEffect that watches sessions/currentSession
+    console.log('✅ Updated session files in local state');
+  }, [currentSession?.session_id]);
+
   return {
     // Current session state
     currentSession,
@@ -832,6 +863,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     deleteSession,
     updateSessionTitle,
     updateSessionContext,
+    updateSessionFiles,
     
     // Message management
     addMessage,
