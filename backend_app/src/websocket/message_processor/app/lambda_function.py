@@ -305,17 +305,7 @@ def process_message(connection_id, user_id, session_id, message_data):
         # Note: Files are now handled via REST endpoint, not through WebSocket
         # The WebSocket processor only handles context items (tiles, stocks, etc.)
         
-        # Load any existing uploaded files from session for additional context
-        uploaded_files = load_uploaded_files_from_session(user_id, session_id)
-        if uploaded_files:
-            logger.info(f"📁 Found {len(uploaded_files)} existing uploaded files in session")
-            # Add existing files to context items
-            for file_metadata in uploaded_files:
-                context_items.append({
-                    'type': 'file',
-                    'title': f"Uploaded File: {file_metadata.get('original_filename', 'Unknown')}",
-                    'data': file_metadata
-                })
+        # Note: File uploads are now handled via REST endpoint and passed in context_items
         
         has_context = len(context_items) > 0
         
@@ -876,56 +866,7 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         }
 
 
-def load_uploaded_files_from_session(user_id: str, session_id: str) -> List[Dict[str, Any]]:
-    """
-    Load uploaded files from session for context
-    
-    Args:
-        user_id: User ID
-        session_id: Session ID
-        
-    Returns:
-        List of file metadata with content
-    """
-    try:
-        # Get session from DynamoDB
-        response = chat_sessions_table.get_item(
-            Key={
-                'user_id': user_id,
-                'session_id': session_id
-            }
-        )
-        
-        session_item = response.get('Item', {})
-        uploaded_files = session_item.get('uploaded_files', [])
-        
-        if not uploaded_files:
-            return []
-        
-        # Load file content from S3 for each file
-        files_with_content = []
-        for file_metadata in uploaded_files:
-            try:
-                s3_key = file_metadata.get('s3_key')
-                if s3_key:
-                    # Note: File content loading is now handled by the REST endpoint
-                    # For now, just include the file metadata without content
-                    logger.info(f"📁 File metadata available for: {file_metadata.get('original_filename', 'Unknown')}")
-                    files_with_content.append(file_metadata)
-                else:
-                    # Add file without content if S3 key is missing
-                    files_with_content.append(file_metadata)
-            except Exception as e:
-                logger.error(f"❌ Failed to load content for file {file_metadata.get('original_filename', 'Unknown')}: {str(e)}")
-                # Add file without content
-                files_with_content.append(file_metadata)
-        
-        logger.info(f"📁 Loaded {len(files_with_content)} files with content for context")
-        return files_with_content
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to load uploaded files from session: {str(e)}")
-        return []
+# Note: File loading is now handled by passing S3 keys/URLs in context_items
 
 def handle_agent_file_return(connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
     """

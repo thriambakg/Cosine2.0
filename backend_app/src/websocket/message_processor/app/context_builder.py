@@ -423,7 +423,7 @@ def format_file_context(index: int, file_item: Dict[str, Any]) -> str:
     
     Args:
         index: Context item index
-        file_item: File item with metadata and content
+        file_item: File item with S3 key/URL
         
     Returns:
         Formatted file context string
@@ -432,7 +432,8 @@ def format_file_context(index: int, file_item: Dict[str, Any]) -> str:
         filename = file_item.get('original_filename', 'Unknown File')
         content_type = file_item.get('content_type', '')
         file_size = file_item.get('file_size', 0)
-        content = file_item.get('content', '')
+        s3_key = file_item.get('s3_key', '')
+        s3_url = file_item.get('s3_url', '')
         
         # Format file size
         if file_size > 1024 * 1024:
@@ -447,15 +448,10 @@ def format_file_context(index: int, file_item: Dict[str, Any]) -> str:
             f"File: {filename}",
             f"Type: {content_type}",
             f"Size: {size_str}",
-            f"Content:"
+            f"S3 Key: {s3_key}",
+            f"S3 URL: {s3_url}",
+            f"Content: [Use read_s3_file_tool with S3 key to read file content]"
         ]
-        
-        # Add file content (truncated if too long)
-        max_content_length = 5000  # Limit content to prevent prompt from being too long
-        if len(content) > max_content_length:
-            content = content[:max_content_length] + "\n... [Content truncated]"
-        
-        context_parts.append(content)
         
         return "\n".join(context_parts)
         

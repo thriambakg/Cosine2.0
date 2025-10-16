@@ -3,7 +3,6 @@ import os
 import boto3
 import uuid
 from datetime import datetime
-from decimal import Decimal
 import logging
 import time
 
@@ -14,7 +13,6 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 s3_client = boto3.client('s3')
 sns_client = boto3.client('sns')
-dynamodb = boto3.resource('dynamodb')
 
 def lambda_handler(event, context):
     """
@@ -98,7 +96,6 @@ def lambda_handler(event, context):
         
         # Get environment variables
         bucket_name = os.environ['CHAT_FILES_BUCKET_NAME']
-        sessions_table_name = os.environ['CHAT_SESSIONS_TABLE_NAME']
         sns_topic_arn = os.environ['SNS_TOPIC_ARN']
         
         # Process each file
@@ -143,21 +140,14 @@ def lambda_handler(event, context):
                     }
                 )
                 
-                # Store file metadata in session
-                store_file_metadata_in_session(
-                    sessions_table_name, 
-                    user_id, 
-                    session_id, 
-                    file_id, 
-                    filename, 
-                    s3_key, 
-                    content_type
-                )
+                # Create S3 URL
+                s3_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
                 
                 uploaded_files.append({
                     'file_id': file_id,
                     'filename': filename,
                     's3_key': s3_key,
+                    's3_url': s3_url,
                     'content_type': content_type,
                     'upload_timestamp': str(int(datetime.utcnow().timestamp()))
                 })
@@ -248,54 +238,7 @@ def lambda_handler(event, context):
             })
         }
 
-def store_file_metadata_in_session(table_name, user_id, session_id, file_id, filename, s3_key, content_type):
-    """Store file metadata in the session's uploaded_files column."""
-    try:
-        table = dynamodb.Table(table_name)
-        
-        # Get current session data
-        response = table.get_item(
-            Key={
-                'user_id': user_id,
-                'session_id': session_id
-            }
-        )
-        
-        if 'Item' not in response:
-            logger.error(f"Session not found: {user_id}/{session_id}")
-            return
-        
-        # Get existing uploaded_files or initialize empty list
-        uploaded_files = response['Item'].get('uploaded_files', [])
-        
-        # Add new file metadata
-        file_metadata = {
-            'file_id': file_id,
-            'filename': filename,
-            's3_key': s3_key,
-            'content_type': content_type,
-            'upload_timestamp': int(datetime.utcnow().timestamp())
-        }
-        
-        uploaded_files.append(file_metadata)
-        
-        # Update session with new file metadata
-        table.update_item(
-            Key={
-                'user_id': user_id,
-                'session_id': session_id
-            },
-            UpdateExpression='SET uploaded_files = :files',
-            ExpressionAttributeValues={
-                ':files': uploaded_files
-            }
-        )
-        
-        logger.info(f"Stored file metadata for {filename} in session {session_id}")
-        
-    except Exception as e:
-        logger.error(f"Error storing file metadata: {str(e)}")
-        raise
+# Note: File metadata is now passed in message payload instead of storing in DynamoDB
 
 def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_files, context_items):
     """
@@ -305,7 +248,7 @@ def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_fi
         user_id: User ID
         session_id: Session ID  
         message: Original message data
-        uploaded_files: List of uploaded file metadata
+        uploaded_files: List of uploaded file metadata with S3 keys/URLs
         context_items: Existing context items
     """
     try:
@@ -324,11 +267,12 @@ def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_fi
                 'type': 'file',
                 'title': f"Uploaded File: {file_info['filename']}",
                 'data': {
-                    'file_id': file_info['file_id'],
-                    'filename': file_info['filename'],
+                    'original_filename': file_info['filename'],
                     's3_key': file_info['s3_key'],
+                    's3_url': file_info['s3_url'],
                     'content_type': file_info['content_type'],
-                    'uploaded_at': file_info['upload_timestamp']
+                    'file_size': len(file_info.get('data', '')),  # This will be 0 since we don't store data
+                    'upload_timestamp': file_info['upload_timestamp']
                 }
             })
         
