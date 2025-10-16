@@ -997,18 +997,34 @@ def handle_file_handler_message(event):
         if uploaded_files:
             try:
                 uploaded_files_decimal = convert_floats_to_decimal(uploaded_files)
+                
+                # First, get the current session_variables to merge with uploaded files
+                response = chat_sessions_table.get_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    }
+                )
+                
+                # Get existing session_variables or create empty dict
+                existing_session_vars = response.get('Item', {}).get('session_variables', {})
+                
+                # Merge uploaded files into session_variables
+                updated_session_vars = {
+                    **existing_session_vars,
+                    'uploaded_files': uploaded_files_decimal,
+                    'files_added_at': int(datetime.now().timestamp())
+                }
+                
+                # Update the session with merged session_variables
                 chat_sessions_table.update_item(
                     Key={
                         'user_id': user_id,
                         'session_id': session_id
                     },
-                    UpdateExpression='SET session_variables = if_not_exists(session_variables, :empty_map) + :files, last_updated = :updated',
+                    UpdateExpression='SET session_variables = :vars, last_updated = :updated',
                     ExpressionAttributeValues={
-                        ':empty_map': {},
-                        ':files': {
-                            'uploaded_files': uploaded_files_decimal,
-                            'files_added_at': int(datetime.now().timestamp())
-                        },
+                        ':vars': updated_session_vars,
                         ':updated': int(datetime.now().timestamp())
                     }
                 )
