@@ -41,6 +41,8 @@ interface UseChatPersistenceReturn {
   deleteSession: (sessionId: string) => Promise<void>;
   updateSessionTitle: (sessionId: string, newTitle: string) => Promise<void>;
   updateSessionContext: (sessionId: string, contextItems: any[]) => void;
+  updateSessionFiles: (sessionId: string, uploadedFiles: any[]) => void;
+  updateSessionVariables: (sessionId: string, sessionVariables: any) => void;
   
   // Message management
   addMessage: (message: ChatMessage, targetSessionId?: string) => void;
@@ -855,6 +857,36 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     console.log('✅ Updated session files in local state');
   }, [currentSession?.session_id]);
 
+  const updateSessionVariables = useCallback((sessionId: string, sessionVariables: any) => {
+    console.log('📋 Updating session variables:', { sessionId, sessionVariables });
+    
+    // Update sessions array
+    setSessions(prev => {
+      const updated = prev.map(s => 
+        s.session_id === sessionId 
+          ? { ...s, session_variables: sessionVariables }
+          : s
+      );
+      console.log('📋 Updated sessions array with new session variables');
+      return updated;
+    });
+    
+    // Update current session if it matches
+    if (currentSession?.session_id === sessionId) {
+      setCurrentSession(prev => {
+        if (!prev) return null;
+        const updated = {
+          ...prev,
+          session_variables: sessionVariables
+        };
+        console.log('📋 Updated currentSession with new session variables');
+        return updated;
+      });
+    }
+    
+    console.log('✅ Updated session variables in local state');
+  }, [currentSession?.session_id]);
+
   return {
     // Current session state
     currentSession,
@@ -869,6 +901,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     updateSessionTitle,
     updateSessionContext,
     updateSessionFiles,
+    updateSessionVariables,
     
     // Message management
     addMessage,

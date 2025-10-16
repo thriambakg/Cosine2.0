@@ -58,23 +58,24 @@ interface Message {
 }
 
 interface UploadedFile {
-  id: number;
+  id?: number;
   name: string;
   size: number;
   type: string;
-  compressedData: string;
-  compressedSize: number;
-  compressionRatio: number;
+  compressedData?: string;
+  compressedSize?: number;
+  compressionRatio?: number;
 }
 
 interface WebSocketMessage {
-  type: 'connection_established' | 'message_received' | 'ai_response' | 'error' | 'connection_establish' | 'edit_acknowledged';
+  type: 'connection_established' | 'message_received' | 'ai_response' | 'error' | 'connection_establish' | 'edit_acknowledged' | 'session_updated';
   message_id?: string;
   session_id?: string;
   content?: string;
   message?: string;
   timestamp?: string;
   unchanged?: boolean;
+  session_variables?: any;
 }
 
 
@@ -220,6 +221,7 @@ export default function ChatPage() {
     loadSessionsFromBackend,
     updateSessionContext,
     updateSessionFiles,
+    updateSessionVariables,
   } = useChatPersistence(user?.id || '');
   
   // Use messages from current session
@@ -538,6 +540,28 @@ export default function ChatPage() {
       case 'message_received':
         // Message status tracking is handled by persistence system
         console.log('📨 Message received confirmation:', data.message_id);
+        break;
+
+      case 'session_updated':
+        // Handle session variables updates (e.g., new files uploaded)
+        if (data.session_id && currentSession?.session_id && data.session_id === currentSession.session_id) {
+          console.log('📁 Session variables updated:', data.session_variables);
+          
+          // Update current session with new session variables
+          if (data.session_variables) {
+            updateSessionVariables(data.session_id, data.session_variables);
+            console.log('✅ Updated session variables in real-time');
+            
+            // Notify sidebar about session update
+            const sessionUpdateEvent = new CustomEvent('session-variables-updated', {
+              detail: {
+                sessionId: data.session_id,
+                sessionVariables: data.session_variables
+              }
+            });
+            window.dispatchEvent(sessionUpdateEvent);
+          }
+        }
         break;
 
       case 'ai_response':
@@ -2296,7 +2320,7 @@ export default function ChatPage() {
                       size="small"
                       className="remove-file-btn"
                       onClick={async () => {
-                        const newFiles = currentSession.session_variables.uploaded_files.filter((_: any, i: number) => i !== index);
+                        const newFiles = currentSession.session_variables?.uploaded_files?.filter((_: any, i: number) => i !== index) || [];
                         
                         // Update the session using the hook function
                         updateSessionFiles(currentSession.session_id, newFiles);

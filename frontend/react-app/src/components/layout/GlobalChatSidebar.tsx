@@ -429,6 +429,32 @@ const GlobalChatSidebar: React.FC = () => {
     };
   }, [isVisible, user?.id, setActiveSessionId]);
 
+  // Handle session variables updates (e.g., new files uploaded)
+  useEffect(() => {
+    if (!isVisible) return;
+
+    const handleSessionVariablesUpdate = (event: CustomEvent) => {
+      const { sessionId, sessionVariables } = event.detail;
+      console.log('📁 GlobalChatSidebar: Session variables updated:', sessionId, sessionVariables);
+      
+      if (sessionId === activeSessionId && currentSession) {
+        // Update current session with new session variables
+        setCurrentSession(prev => prev ? {
+          ...prev,
+          session_variables: sessionVariables
+        } : null);
+        
+        console.log('✅ Updated sidebar session variables in real-time');
+      }
+    };
+
+    window.addEventListener('session-variables-updated', handleSessionVariablesUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener('session-variables-updated', handleSessionVariablesUpdate as EventListener);
+    };
+  }, [isVisible, activeSessionId, currentSession]);
+
   // Handle context sessions from global handler
   useEffect(() => {
     const handleContextSessionReady = async (event: CustomEvent) => {

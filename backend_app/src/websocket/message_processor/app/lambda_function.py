@@ -1145,6 +1145,35 @@ def handle_file_handler_message(event):
                             
                             send_message_to_client(connection_id, ai_response_message)
                             logger.info(f"📨 Sent AI response to connection {connection_id}")
+                            
+                            # Send session variables update to frontend
+                            try:
+                                # Get updated session variables from database
+                                session_response = chat_sessions_table.get_item(
+                                    Key={
+                                        'user_id': user_id,
+                                        'session_id': session_id
+                                    }
+                                )
+                                
+                                if 'Item' in session_response:
+                                    session_item = session_response['Item']
+                                    session_variables = session_item.get('session_variables', {})
+                                    
+                                    # Send session update message
+                                    session_update_message = {
+                                        'type': 'session_updated',
+                                        'session_id': session_id,
+                                        'session_variables': session_variables,
+                                        'timestamp': datetime.now().isoformat()
+                                    }
+                                    
+                                    send_message_to_client(connection_id, session_update_message)
+                                    logger.info(f"📁 Sent session variables update to connection {connection_id}")
+                                    
+                            except Exception as e:
+                                logger.error(f"❌ Failed to send session variables update: {str(e)}")
+                                
                     else:
                         logger.warning(f"⚠️ No active connections found for user {user_id}, session {session_id}")
                         
