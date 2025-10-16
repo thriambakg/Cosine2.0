@@ -483,7 +483,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  yujeployment_trigger = "37"
+  deployment_trigger = "37"
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
