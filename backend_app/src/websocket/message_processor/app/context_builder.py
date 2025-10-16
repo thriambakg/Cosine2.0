@@ -44,7 +44,7 @@ def build_context_prompt(user_message: str, context_items: List[Dict[str, Any]])
             prompt_parts.append(format_tile_context(i, item))
         elif item_type == 'file':
             # Handle uploaded files
-            prompt_parts.append(format_file_context(i, item))
+            prompt_parts.append(format_file_context(i, item.get('data', {})))
         else:
             prompt_parts.append(f"[Context Item {i}: Unknown Type]")
     

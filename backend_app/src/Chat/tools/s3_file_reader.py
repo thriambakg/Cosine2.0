@@ -15,6 +15,7 @@ logger = logging.getLogger()
 # Import Strands types (available in Lambda layer)
 try:
     from strands.types.tools import ToolResult, ToolUse
+    from strands import tool
     logger.info("Successfully imported Strands types from layer")
 except ImportError as e:
     logger.error(f"Failed to import Strands types: {e}")
@@ -134,26 +135,21 @@ class S3FileReader:
         except Exception as e:
             return {'error': str(e)}
 
-def read_s3_file_tool(tool_use: ToolUse) -> ToolResult:
+@tool
+def read_s3_file_tool(s3_key: str, file_type: str = "auto") -> str:
     """
     Tool function to read files from S3
     
     Args:
-        tool_use: The tool use request from the agent
+        s3_key: The S3 key/path of the file to read
+        file_type: The type of file (auto-detect if not specified)
         
     Returns:
-        ToolResult with file content or error message
+        String with file content or error message
     """
     try:
-        # Extract parameters
-        s3_key = tool_use.parameters.get('s3_key')
-        file_type = tool_use.parameters.get('file_type', 'auto')
-        
         if not s3_key:
-            return ToolResult(
-                content="Error: s3_key parameter is required",
-                is_error=True
-            )
+            return "Error: s3_key parameter is required"
         
         # Create S3 file reader instance
         reader = S3FileReader()
@@ -177,14 +173,8 @@ File Information:
 - Content Type: {file_info['content_type']}
 - ETag: {file_info['etag']}"""
         
-        return ToolResult(
-            content=result,
-            is_error=False
-        )
+        return result
         
     except Exception as e:
         logger.error(f"Error in read_s3_file_tool: {str(e)}")
-        return ToolResult(
-            content=f"Error reading file: {str(e)}",
-            is_error=True
-        )
+        return f"Error reading file: {str(e)}"
