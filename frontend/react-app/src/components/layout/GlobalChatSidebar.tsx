@@ -67,6 +67,7 @@ const GlobalChatSidebar: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
+  const [isFilesExpanded, setIsFilesExpanded] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   
   // Message editing state
@@ -1076,6 +1077,102 @@ const GlobalChatSidebar: React.FC = () => {
                   <ListItemText
                     primary={item.title}
                     secondary={item.subtitle}
+                    primaryTypographyProps={{
+                      fontSize: '0.75rem',
+                      color: '#ffffff',
+                    }}
+                    secondaryTypographyProps={{
+                      fontSize: '0.65rem',
+                      color: '#9ca3af',
+                    }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Collapse>
+        </Box>
+      )}
+
+      {/* Uploaded Files - Separate Section */}
+      {currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0 && (
+        <Box sx={{ borderBottom: '1px solid #374151' }}>
+          <Box
+            sx={{
+              p: 1,
+              display: 'flex',
+              alignItems: 'center',
+              cursor: 'pointer',
+              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
+            }}
+            onClick={() => setIsFilesExpanded(!isFilesExpanded)}
+          >
+            <Typography variant="body2" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+              Files ({currentSession.session_variables.uploaded_files.length} files)
+            </Typography>
+            {isFilesExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+          </Box>
+          <Collapse in={isFilesExpanded}>
+            <List dense sx={{ py: 0 }}>
+              {currentSession.session_variables.uploaded_files.map((file: any, index: number) => (
+                <ListItem 
+                  key={index} 
+                  sx={{ 
+                    py: 0.5, 
+                    px: 1,
+                    '&:hover': {
+                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                      '& .remove-file-btn': {
+                        opacity: 1,
+                      }
+                    }
+                  }}
+                  secondaryAction={
+                    <IconButton
+                      edge="end"
+                      size="small"
+                      className="remove-file-btn"
+                      onClick={async () => {
+                        const newFiles = currentSession.session_variables.uploaded_files.filter((_: any, i: number) => i !== index);
+                        const updatedSession = {
+                          ...currentSession,
+                          session_variables: {
+                            ...currentSession.session_variables,
+                            uploaded_files: newFiles
+                          }
+                        };
+                        setCurrentSession(updatedSession);
+                        console.log(`🗑️ Removed file: ${file.filename}`);
+                        
+                        // Persist the updated files to backend immediately
+                        if (activeSessionId && user?.id) {
+                          try {
+                            await sessionManagementAPI.updateSession(activeSessionId, user.id, {
+                              session_variables: {
+                                ...currentSession.session_variables,
+                                uploaded_files: newFiles,
+                                files_added_at: Date.now(),
+                              }
+                            });
+                            console.log('✅ Updated files in backend');
+                          } catch (error) {
+                            console.error('❌ Failed to update files in backend:', error);
+                          }
+                        }
+                      }}
+                      sx={{ 
+                        opacity: 0,
+                        transition: 'opacity 0.2s',
+                        color: '#dc2626',
+                        '&:hover': { color: '#ef4444' }
+                      }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  }
+                >
+                  <ListItemText
+                    primary={file.filename}
+                    secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type}`}
                     primaryTypographyProps={{
                       fontSize: '0.75rem',
                       color: '#ffffff',

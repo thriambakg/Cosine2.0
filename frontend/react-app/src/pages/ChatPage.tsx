@@ -257,6 +257,7 @@ export default function ChatPage() {
   // Context state
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
+  const [isFilesExpanded, setIsFilesExpanded] = useState(false);
   
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -2232,6 +2233,110 @@ export default function ChatPage() {
                     <ListItemText
                       primary={item.title}
                       secondary={item.subtitle}
+                      primaryTypographyProps={{
+                        fontSize: '0.75rem',
+                        color: '#ffffff',
+                      }}
+                      secondaryTypographyProps={{
+                        fontSize: '0.65rem',
+                        color: '#9ca3af',
+                      }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Collapse>
+          </Box>
+        )}
+
+        {/* Uploaded Files - Separate Section */}
+        {currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0 && (
+          <Box sx={{ borderTop: '2px solid #374151', backgroundColor: 'rgba(15, 23, 42, 0.95)' }}>
+            <Box
+              sx={{
+                p: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
+              }}
+              onClick={() => setIsFilesExpanded(!isFilesExpanded)}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <FileIcon sx={{ color: '#3b82f6', fontSize: '1rem' }} />
+                <Typography variant="body2" sx={{ color: '#3b82f6', fontSize: '0.8rem', fontWeight: 600 }}>
+                  Files ({currentSession.session_variables.uploaded_files.length} {currentSession.session_variables.uploaded_files.length === 1 ? 'file' : 'files'})
+                </Typography>
+              </Box>
+              {isFilesExpanded ? <ExpandLessIcon fontSize="small" sx={{ color: '#9ca3af' }} /> : <ExpandMoreIcon fontSize="small" sx={{ color: '#9ca3af' }} />}
+            </Box>
+            <Collapse in={isFilesExpanded}>
+              <List dense sx={{ py: 0, px: 1, maxHeight: 150, overflow: 'auto' }}>
+                {currentSession.session_variables.uploaded_files.map((file: any, index: number) => (
+                  <ListItem 
+                    key={index} 
+                    sx={{ 
+                      py: 0.5, 
+                      px: 1,
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        '& .remove-file-btn': {
+                          opacity: 1,
+                        }
+                      }
+                    }}
+                  >
+                    {/* Delete button on the left */}
+                    <IconButton
+                      size="small"
+                      className="remove-file-btn"
+                      onClick={async () => {
+                        const newFiles = currentSession.session_variables.uploaded_files.filter((_: any, i: number) => i !== index);
+                        const updatedSession = {
+                          ...currentSession,
+                          session_variables: {
+                            ...currentSession.session_variables,
+                            uploaded_files: newFiles
+                          }
+                        };
+                        setCurrentSession(updatedSession);
+                        console.log(`🗑️ Removed file: ${file.filename}`);
+                        
+                        // Persist the updated files to backend immediately
+                        if (currentSession?.session_id && user?.id) {
+                          try {
+                            await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
+                              session_variables: {
+                                ...currentSession.session_variables,
+                                uploaded_files: newFiles,
+                                files_added_at: Date.now(),
+                              }
+                            });
+                            console.log('✅ Updated files in backend');
+                          } catch (error) {
+                            console.error('❌ Failed to update files in backend:', error);
+                          }
+                        }
+                      }}
+                      sx={{ 
+                        opacity: 0,
+                        transition: 'opacity 0.2s',
+                        color: '#dc2626',
+                        mr: 1,
+                        '&:hover': { color: '#ef4444' }
+                      }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                    
+                    {/* Content on the right */}
+                    <ListItemText
+                      primary={file.filename}
+                      secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type}`}
                       primaryTypographyProps={{
                         fontSize: '0.75rem',
                         color: '#ffffff',
