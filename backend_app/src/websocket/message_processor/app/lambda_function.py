@@ -29,20 +29,7 @@ except ImportError as e:
     def extract_context_summary(context_items):
         return {'total_items': len(context_items) if context_items else 0}
 
-# Import file upload handler
-try:
-    from file_upload_handler import (
-        process_file_upload, 
-        validate_file_upload, 
-        store_file_metadata_in_session,
-        upload_agent_generated_file,
-        store_agent_file_in_session
-    )
-    logger.info("✅ Successfully imported file_upload_handler")
-    FILE_UPLOAD_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import file_upload_handler: {e}")
-    FILE_UPLOAD_AVAILABLE = False
+# Note: File uploads are now handled via REST endpoint, not WebSocket
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
@@ -264,10 +251,7 @@ def process_message(connection_id, user_id, session_id, message_data):
                 'body': json_dumps_safe({'message': 'Connection established'})
             }
         
-        # Handle file uploads
-        if message_type == 'file_upload':
-            logger.info(f"Processing file upload for connection {connection_id}")
-            return handle_file_upload(connection_id, user_id, session_id, message_data)
+        # Note: File uploads are now handled via REST endpoint, not WebSocket
         
         # Handle agent file returns
         if message_type == 'agent_file_return':
@@ -316,125 +300,8 @@ def process_message(connection_id, user_id, session_id, message_data):
         # Extract context items from message data (if present)
         context_items = message_data.get('contextItems', [])
         
-        # Process file context items (upload and store files)
-        file_context_items = [item for item in context_items if item.get('type') == 'file']
-        file_chunk_items = [item for item in context_items if item.get('type') == 'file_chunk']
-        
-        # Process file chunks first (reassemble them)
-        if file_chunk_items:
-            logger.info(f"📦 Processing {len(file_chunk_items)} file chunks")
-            chunked_files = {}
-            
-            # Group chunks by file_id
-            for chunk_item in file_chunk_items:
-                try:
-                    chunk_data = chunk_item.get('data', {})
-                    file_id = chunk_data.get('file_id')
-                    chunk_index = chunk_data.get('chunk_index', 0)
-                    total_chunks = chunk_data.get('total_chunks', 1)
-                    chunk_data_content = chunk_data.get('chunk_data', '')
-                    
-                    if file_id not in chunked_files:
-                        chunked_files[file_id] = {
-                            'filename': chunk_data.get('filename', 'Unknown'),
-                            'content_type': chunk_data.get('content_type', 'application/octet-stream'),
-                            'original_size': chunk_data.get('original_size', 0),
-                            'compressed_size': chunk_data.get('compressed_size', 0),
-                            'compression_ratio': chunk_data.get('compression_ratio', 0),
-                            'chunks': [''] * total_chunks,
-                            'uploaded_at': chunk_data.get('uploaded_at', datetime.now().isoformat())
-                        }
-                    
-                    # Store chunk in correct position
-                    chunked_files[file_id]['chunks'][chunk_index] = chunk_data_content
-                    
-                except Exception as e:
-                    logger.error(f"❌ Failed to process file chunk: {str(e)}")
-                    continue
-            
-            # Reassemble chunks into complete files
-            processed_files = []
-            for file_id, file_info in chunked_files.items():
-                try:
-                    # Check if all chunks are present
-                    if all(chunk for chunk in file_info['chunks']):
-                        # Reassemble the compressed data
-                        reassembled_data = ''.join(file_info['chunks'])
-                        
-                        # Create a complete file data structure
-                        complete_file_data = {
-                            'filename': file_info['filename'],
-                            'content_type': file_info['content_type'],
-                            'original_size': file_info['original_size'],
-                            'compressed_size': file_info['compressed_size'],
-                            'compression_ratio': file_info['compression_ratio'],
-                            'compressed_data': reassembled_data
-                        }
-                        
-                        # Process the reassembled file
-                        file_metadata = process_file_upload(
-                            compressed_file_data=complete_file_data,
-                            user_id=user_id,
-                            session_id=session_id
-                        )
-                        processed_files.append(file_metadata)
-                        
-                        logger.info(f"✅ Reassembled and processed file: {file_info['filename']}")
-                    else:
-                        logger.warning(f"⚠️ Missing chunks for file {file_info['filename']}, skipping")
-                        
-                except Exception as e:
-                    logger.error(f"❌ Failed to reassemble file {file_info['filename']}: {str(e)}")
-                    continue
-            
-            # Store processed files in session
-            if processed_files:
-                try:
-                    store_file_metadata_in_session(user_id, session_id, processed_files)
-                    logger.info(f"✅ Stored {len(processed_files)} reassembled files in session")
-                except Exception as e:
-                    logger.error(f"❌ Failed to store reassembled file metadata: {str(e)}")
-        
-        # Process regular file context items (non-chunked)
-        if file_context_items:
-            logger.info(f"📁 Processing {len(file_context_items)} file context items")
-            processed_files = []
-            
-            for file_item in file_context_items:
-                try:
-                    file_data = file_item.get('data', {})
-                    if file_data.get('compressed_data'):
-                        # Process the file upload
-                        file_metadata = process_file_upload(
-                            compressed_file_data=file_data,
-                            user_id=user_id,
-                            session_id=session_id
-                        )
-                        processed_files.append(file_metadata)
-                        
-                        # Update the context item with processed file metadata
-                        file_item['data'] = {
-                            **file_data,
-                            's3_key': file_metadata.get('s3_key'),
-                            's3_url': file_metadata.get('s3_url'),
-                            'file_id': file_metadata.get('file_id'),
-                            'uploaded_at': file_metadata.get('uploaded_at')
-                        }
-                        
-                        logger.info(f"✅ Processed file: {file_data.get('filename', 'Unknown')}")
-                    else:
-                        logger.warning(f"⚠️ File context item missing compressed_data: {file_data.get('filename', 'Unknown')}")
-                except Exception as e:
-                    logger.error(f"❌ Failed to process file context item: {str(e)}")
-                    continue
-            
-            # Store processed files in session
-            if processed_files:
-                try:
-                    store_file_metadata_in_session(user_id, session_id, processed_files)
-                    logger.info(f"✅ Stored {len(processed_files)} files in session")
-                except Exception as e:
-                    logger.error(f"❌ Failed to store file metadata: {str(e)}")
+        # Note: Files are now handled via REST endpoint, not through WebSocket
+        # The WebSocket processor only handles context items (tiles, stocks, etc.)
         
         # Load any existing uploaded files from session for additional context
         uploaded_files = load_uploaded_files_from_session(user_id, session_id)
@@ -1136,15 +1003,11 @@ def load_uploaded_files_from_session(user_id: str, session_id: str) -> List[Dict
         for file_metadata in uploaded_files:
             try:
                 s3_key = file_metadata.get('s3_key')
-                if s3_key and FILE_UPLOAD_AVAILABLE:
-                    # Import here to avoid circular imports
-                    from file_upload_handler import get_file_content_from_s3
-                    content = get_file_content_from_s3(s3_key)
-                    if content:
-                        file_metadata['content'] = content
-                        files_with_content.append(file_metadata)
-                    else:
-                        logger.warning(f"⚠️ Could not load content for file: {file_metadata.get('original_filename', 'Unknown')}")
+                if s3_key:
+                    # Note: File content loading is now handled by the REST endpoint
+                    # For now, just include the file metadata without content
+                    logger.info(f"📁 File metadata available for: {file_metadata.get('original_filename', 'Unknown')}")
+                    files_with_content.append(file_metadata)
                 else:
                     # Add file without content if S3 key is missing
                     files_with_content.append(file_metadata)
@@ -1174,64 +1037,336 @@ def handle_agent_file_return(connection_id: str, user_id: str, session_id: str, 
         API Gateway response
     """
     try:
-        if not FILE_UPLOAD_AVAILABLE:
-            logger.error("❌ File upload handler not available")
-            return {
-                'statusCode': 500,
-                'body': json_dumps_safe({'error': 'File upload handler not available'})
-            }
-        
-        # Extract file data from message
-        file_data = message_data.get('file', {})
-        filename = file_data.get('filename', 'agent_generated_file')
-        content_type = file_data.get('content_type', 'text/plain')
-        file_content = file_data.get('content', '')
-        file_description = file_data.get('description', 'Generated by AI agent')
-        
-        # Convert content to bytes if it's a string
-        if isinstance(file_content, str):
-            file_content = file_content.encode('utf-8')
-        
-        # Upload agent-generated file to S3
-        file_metadata = upload_agent_generated_file(
-            file_content=file_content,
-            filename=filename,
-            content_type=content_type,
-            user_id=user_id,
-            session_id=session_id,
-            file_description=file_description
-        )
-        
-        # Store file metadata in session
-        store_agent_file_in_session(user_id, session_id, file_metadata)
-        
-        # Send success response to client
-        success_message = {
-            'type': 'agent_file_return_success',
-            'file': file_metadata,
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        send_message_to_client(connection_id, success_message)
-        
+        # Note: Agent file returns are now handled via REST endpoint
+        logger.warning("⚠️ Agent file returns should be handled via REST endpoint")
         return {
-            'statusCode': 200,
-            'body': json_dumps_safe({'message': 'Agent file uploaded successfully', 'file': file_metadata})
+            'statusCode': 501,
+            'body': json_dumps_safe({'error': 'Agent file returns not implemented via WebSocket'})
         }
         
     except Exception as e:
         logger.error(f"❌ Error handling agent file return: {str(e)}")
-        
-        # Send error response to client
-        error_message = {
-            'type': 'agent_file_return_error',
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        send_message_to_client(connection_id, error_message)
-        
         return {
             'statusCode': 500,
             'body': json_dumps_safe({'error': 'Failed to process agent file return'})
+        }
+
+def handle_s3_event_notification(event):
+    """
+    Handle S3 event notifications for file upload success
+    
+    Args:
+        event: S3 event notification from SNS
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        logger.info(f"📦 Processing S3 event notification: {json_dumps_safe(event)}")
+        
+        for record in event['Records']:
+            # Parse S3 event
+            s3_event = record.get('s3', {})
+            bucket_name = s3_event.get('bucket', {}).get('name')
+            s3_key = s3_event.get('object', {}).get('key')
+            
+            if not s3_key:
+                logger.warning("⚠️ No S3 key found in event record")
+                continue
+            
+            logger.info(f"📦 S3 Object Created: {bucket_name}/{s3_key}")
+            
+            # Parse S3 key to extract user_id and session_id
+            # Expected format: users/{user_id}/sessions/{session_id}/files/{filename}
+            path_parts = s3_key.split('/')
+            if len(path_parts) >= 4 and path_parts[0] == 'users':
+                user_id = path_parts[1]
+                session_id = path_parts[3]  # sessions/{session_id}
+                
+                logger.info(f"📦 File upload for user {user_id}, session {session_id}")
+                
+                # Get S3 object metadata for additional correlation info
+                try:
+                    s3_client = boto3.client('s3')
+                    response = s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+                    metadata = response.get('Metadata', {})
+                    
+                    original_filename = metadata.get('original_filename', 'Unknown')
+                    file_type = metadata.get('file_type', 'unknown')
+                    
+                    # Only process chat upload files
+                    if file_type == 'chat_upload':
+                        logger.info(f"📦 Processing chat file upload: {original_filename}")
+                        
+                        # Find active WebSocket connections for this user/session
+                        active_connections = get_active_connections_for_user_session(user_id, session_id)
+                        
+                        if active_connections:
+                            # Send file upload confirmation to all active connections
+                            confirmation_message = {
+                                'type': 'file_upload_success',
+                                's3_key': s3_key,
+                                'filename': original_filename,
+                                'session_id': session_id,
+                                'timestamp': datetime.now().isoformat()
+                            }
+                            
+                            for connection_id in active_connections:
+                                send_message_to_client(connection_id, confirmation_message)
+                                logger.info(f"📦 Sent file upload confirmation to connection {connection_id}")
+                        else:
+                            logger.warning(f"⚠️ No active connections found for user {user_id}, session {session_id}")
+                    else:
+                        logger.info(f"📦 Skipping non-chat file: {file_type}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Failed to get S3 object metadata: {str(e)}")
+                    continue
+            else:
+                logger.warning(f"⚠️ Unexpected S3 key format: {s3_key}")
+                continue
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({'message': 'S3 event processed successfully'})
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error processing S3 event notification: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': 'Failed to process S3 event'})
+        }
+
+def get_active_connections_for_user_session(user_id: str, session_id: str) -> List[str]:
+    """
+    Get active WebSocket connections for a specific user and session
+    
+    Args:
+        user_id: User ID
+        session_id: Session ID
+        
+    Returns:
+        List of active connection IDs
+    """
+    try:
+        # Query the connections table for active connections
+        response = chat_connections_table.query(
+            IndexName='user_id-session_id-index',  # Assuming this GSI exists
+            KeyConditionExpression=Key('user_id').eq(user_id) & Key('session_id').eq(session_id),
+            FilterExpression=Attr('connection_status').eq('active')
+        )
+        
+        connection_ids = [item['connection_id'] for item in response['Items']]
+        logger.info(f"📦 Found {len(connection_ids)} active connections for user {user_id}, session {session_id}")
+        
+        return connection_ids
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get active connections: {str(e)}")
+        return []
+
+def handle_file_handler_message(event):
+    """
+    Handle messages sent from File Handler (direct Lambda invocation).
+    These messages already have files uploaded and enriched with S3 references.
+    
+    Args:
+        event: Event data from File Handler containing message and context
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        logger.info("Processing message from File Handler")
+        
+        # Extract message data
+        user_id = event.get('userId')
+        session_id = event.get('sessionId')
+        message_text = event.get('message', '')
+        message_id = event.get('messageId')
+        context_items = event.get('contextItems', [])
+        model = event.get('model', 'claude-3-sonnet')
+        
+        if not user_id or not session_id:
+            logger.error("Missing user_id or session_id in File Handler message")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Missing user_id or session_id'})
+            }
+        
+        logger.info(f"Processing File Handler message: user={user_id}, session={session_id}, context_items={len(context_items)}")
+        
+        # Process the message like a regular WebSocket message
+        # but without needing a connection ID since it's direct invocation
+        result = process_message_direct(user_id, session_id, message_text, message_id, context_items, model)
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({'message': 'Message processed successfully'})
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing File Handler message: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': f'Failed to process message: {str(e)}'})
+        }
+
+def process_message_direct(user_id, session_id, message_text, message_id, context_items, model):
+    """
+    Process a message directly without WebSocket connection.
+    Used for messages from File Handler.
+    
+    Args:
+        user_id: User ID
+        session_id: Session ID
+        message_text: Message text
+        message_id: Message ID
+        context_items: Context items (including file references)
+        model: AI model to use
+        
+    Returns:
+        Processing result
+    """
+    try:
+        logger.info(f"Processing direct message: {message_id}")
+        
+        # Check if session exists, create if needed
+        session_exists = check_session_exists(user_id, session_id)
+        if not session_exists:
+            logger.info(f"🔍 Session {session_id} doesn't exist, creating it for first message")
+            create_session_for_first_message(user_id, session_id, model)
+        
+        # Convert floats to Decimal for DynamoDB compatibility
+        context_items_decimal = convert_floats_to_decimal(context_items)
+        
+        # Store context in session_variables for persistence
+        if CONTEXT_BUILDER_AVAILABLE:
+            context_summary = extract_context_summary(context_items)
+            logger.info(f"📌 Context summary: {context_summary}")
+            
+            # Update session variables in DynamoDB
+            try:
+                context_summary_decimal = convert_floats_to_decimal(context_summary)
+                
+                chat_sessions_table.update_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    UpdateExpression='SET session_variables = :vars, last_updated = :updated',
+                    ExpressionAttributeValues={
+                        ':vars': {
+                            'context_items': context_items_decimal,
+                            'context_added_at': int(datetime.now().timestamp()),
+                            'context_summary': context_summary_decimal,
+                        },
+                        ':updated': int(datetime.now().timestamp())
+                    }
+                )
+                logger.info(f"📌 Stored context in session_variables")
+            except Exception as e:
+                logger.error(f"❌ Failed to store context in session_variables: {e}")
+        
+        # Build context prompt for AI
+        if CONTEXT_BUILDER_AVAILABLE and context_items:
+            enriched_message = build_context_prompt(message_text, context_items)
+            logger.info(f"📌 Built enriched message with context")
+        else:
+            enriched_message = message_text
+            logger.info(f"📌 Using original message (no context builder or no context items)")
+        
+        # Invoke chat agent with enriched message
+        try:
+            chat_agent_function_name = os.environ.get('CHAT_AGENT_FUNCTION_NAME')
+            if not chat_agent_function_name:
+                logger.error("CHAT_AGENT_FUNCTION_NAME not configured")
+                return
+            
+            # Prepare payload for chat agent
+            agent_payload = {
+                'user_id': user_id,
+                'session_id': session_id,
+                'message': enriched_message,
+                'message_id': message_id,
+                'model': model,
+                'context_items': context_items_decimal,
+                'source': 'file_handler'
+            }
+            
+            # Invoke chat agent
+            lambda_client = boto3.client('lambda')
+            response = lambda_client.invoke(
+                FunctionName=chat_agent_function_name,
+                InvocationType='Event',  # Async invocation
+                Payload=json.dumps(agent_payload)
+            )
+            
+            logger.info(f"✅ Successfully invoked chat agent: {response['StatusCode']}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to invoke chat agent: {str(e)}")
+            raise
+        
+        return {'status': 'success'}
+        
+    except Exception as e:
+        logger.error(f"❌ Error in process_message_direct: {str(e)}")
+        raise
+
+def lambda_handler(event, context):
+    """
+    Lambda handler for WebSocket message processing, S3 event notifications, and File Handler invocations
+    """
+    try:
+        # Log the incoming event for debugging
+        logger.info(f"Received event: {json_dumps_safe(event)}")
+        
+        # Check if this is a direct Lambda invocation from File Handler
+        if 'type' in event and event.get('type') == 'chat':
+            logger.info("Processing message from File Handler")
+            return handle_file_handler_message(event)
+        
+        # Check if this is an S3 event notification (SNS)
+        if 'Records' in event and event['Records'][0].get('EventSource') == 'aws:s3':
+            logger.info("Processing S3 event notification")
+            return handle_s3_event_notification(event)
+        
+        # Extract connection ID from the request context
+        connection_id = event.get('requestContext', {}).get('connectionId')
+        if not connection_id:
+            logger.error("No connection ID found in request context")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'No connection ID'})
+            }
+        
+        # Extract user ID from query parameters or headers
+        user_id = event.get('queryStringParameters', {}).get('userId')
+        if not user_id:
+            logger.error("No user ID found in query parameters")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'No user ID'})
+            }
+        
+        # Extract session ID from query parameters
+        session_id = event.get('queryStringParameters', {}).get('sessionId')
+        
+        # Handle different event types
+        if 'Records' in event:
+            # This is an SNS event (S3 notification)
+            logger.info(f"Processing SNS event for connection {connection_id}")
+            return handle_sns_event(connection_id, user_id, session_id, event)
+        else:
+            # This is a WebSocket message
+            logger.info(f"Processing WebSocket message for connection {connection_id}")
+            return handle_websocket_message(connection_id, user_id, session_id, event)
+            
+    except Exception as e:
+        logger.error(f"Error in lambda_handler: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': 'Internal server error'})
         }

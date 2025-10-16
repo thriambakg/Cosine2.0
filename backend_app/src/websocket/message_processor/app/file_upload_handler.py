@@ -108,7 +108,7 @@ def upload_file_to_s3(
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         s3_key = f"users/{user_id}/sessions/{session_id}/files/{unique_filename}"
         
-        # Upload to S3 with TTL metadata
+        # Upload to S3 with enhanced metadata for correlation
         s3_client.put_object(
             Bucket=bucket_name,
             Key=s3_key,
@@ -120,7 +120,9 @@ def upload_file_to_s3(
                 'session_id': session_id,
                 'uploaded_at': datetime.utcnow().isoformat(),
                 'ttl_days': '90',  # TTL for automatic deletion
-                'auto_delete': 'true'  # Flag for automatic cleanup
+                'auto_delete': 'true',  # Flag for automatic cleanup
+                'file_type': 'chat_upload',  # Identifier for chat files
+                'correlation_id': str(uuid.uuid4())  # Unique correlation ID
             }
         )
         

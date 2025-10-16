@@ -1162,6 +1162,46 @@ export default function ChatPage() {
     setEditText('');
   };
 
+  // Send message with files to File Handler
+  const sendMessageWithFilesToFileHandler = async (message: any, files: any[], sessionId: string, userId: string) => {
+    try {
+      const filesData = files.map(file => ({
+        filename: file.name,
+        content_type: file.type,
+        data: file.compressedData // Already base64 encoded from compression
+      }));
+
+      const response = await fetch(`${process.env.REACT_APP_API_GATEWAY_URL}/files`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          session_id: sessionId,
+          message: {
+            id: message.id,
+            text: message.text,
+            timestamp: message.timestamp
+          },
+          files: filesData,
+          context_items: sessionContext // Include existing context
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('📁 Message with files sent to File Handler:', result);
+      return result;
+    } catch (error) {
+      console.error('❌ Error sending message with files to File Handler:', error);
+      throw error;
+    }
+  };
+
   const handleDeleteSession = async (sessionId: string, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent triggering the session load
     try {
@@ -1358,11 +1398,26 @@ export default function ChatPage() {
     
     // Also check if we've already sent a message with the same content recently
     const recentMessages = currentSession?.messages?.slice(-5) || [];
-    const isDuplicateContent = recentMessages.some(msg => 
-      msg.text === inputMessage.trim() && 
-      msg.sender === 'user' && 
-      (Date.now() - msg.timestamp.getTime()) < 5000 // Within last 5 seconds
-    );
+    const isDuplicateContent = recentMessages.some(msg => {
+      if (msg.text !== inputMessage.trim() || msg.sender !== 'user') {
+        return false;
+      }
+      
+      // Handle different timestamp formats
+      let msgTime;
+      if (msg.timestamp instanceof Date) {
+        msgTime = msg.timestamp.getTime();
+      } else if (typeof msg.timestamp === 'number') {
+        msgTime = msg.timestamp;
+      } else if (typeof msg.timestamp === 'string') {
+        msgTime = new Date(msg.timestamp).getTime();
+      } else {
+        // If timestamp is invalid, assume it's recent to be safe
+        msgTime = Date.now();
+      }
+      
+      return (Date.now() - msgTime) < 5000; // Within last 5 seconds
+    });
     
     if (isDuplicateContent) {
       console.log('📤 Duplicate content message prevented:', inputMessage.trim());
@@ -1417,65 +1472,22 @@ export default function ChatPage() {
     }
 
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-      // Prepare context items (files + existing context)
-      const contextItems = [...sessionContext];
-      
-      // Add uploaded files as context items
+      // Route messages with files to File Handler, messages without files to WebSocket
       if (uploadedFiles.length > 0) {
-        console.log(`📁 Adding ${uploadedFiles.length} files as context items`);
-        uploadedFiles.forEach(file => {
-          // Check if file needs chunking (compressed data > 100KB to leave room for JSON overhead)
-          const maxChunkSize = 100 * 1024; // 100KB chunks
-          const compressedData = file.compressedData;
-          
-          if (compressedData.length > maxChunkSize) {
-            console.log(`📦 File ${file.name} is large (${(compressedData.length / 1024).toFixed(1)} KB), chunking...`);
-            
-            // Split into chunks
-            const chunks = [];
-            for (let i = 0; i < compressedData.length; i += maxChunkSize) {
-              chunks.push(compressedData.slice(i, i + maxChunkSize));
-            }
-            
-            console.log(`📦 Split into ${chunks.length} chunks`);
-            
-            // Send each chunk as a separate context item
-            chunks.forEach((chunk, index) => {
-              contextItems.push({
-                type: 'file_chunk',
-                title: `Uploaded File: ${file.name} (chunk ${index + 1}/${chunks.length})`,
-                data: {
-                  file_id: file.id,
-                  filename: file.name,
-                  content_type: file.type,
-                  original_size: file.size,
-                  compressed_size: file.compressedSize,
-                  compression_ratio: file.compressionRatio,
-                  chunk_index: index,
-                  total_chunks: chunks.length,
-                  chunk_data: chunk,
-                  uploaded_at: new Date().toISOString()
-                }
-              });
-            });
-          } else {
-            // Small file, send as single item
-            contextItems.push({
-              type: 'file',
-              title: `Uploaded File: ${file.name}`,
-              data: {
-                filename: file.name,
-                content_type: file.type,
-                compressed_data: compressedData,
-                original_size: file.size,
-                compressed_size: file.compressedSize,
-                compression_ratio: file.compressionRatio,
-                uploaded_at: new Date().toISOString()
-              }
-            });
-          }
-        });
+        console.log(`📁 Message has ${uploadedFiles.length} files, routing to File Handler...`);
+        try {
+          await sendMessageWithFilesToFileHandler(userMessage, uploadedFiles, sessionToUse?.session_id, user?.id);
+          console.log('✅ Message with files sent to File Handler');
+          return; // Exit early, File Handler will orchestrate the rest
+        } catch (error) {
+          console.error('❌ Error sending message with files to File Handler:', error);
+          // Fall back to WebSocket without files
+          console.log('🔄 Falling back to WebSocket without files');
+        }
       }
+      
+      // Prepare context items for WebSocket (no files)
+      const contextItems = [...sessionContext];
       
       // Send the chat message with context items
       const messageData = {

@@ -151,6 +151,9 @@ module "api_gateway" {
     news = {
       path_part = "news"
     }
+    files = {
+      path_part = "files"
+    }
   }
 
   # Methods configuration
@@ -343,6 +346,15 @@ module "api_gateway" {
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
       lambda_arn              = module.news_search_lambda.function_arn
+      request_parameters      = {}
+    }
+    # POST method for file uploads
+    files_upload_post = {
+      resource_key            = "files"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.file_upload_lambda.function_arn
       request_parameters      = {}
     }
     # OPTIONS methods are now automatically created by the API Gateway module
@@ -1487,6 +1499,44 @@ module "news_search_lambda" {
   additional_policy_arns = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# File Upload Lambda Function
+module "file_upload_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-file-upload-${var.environment}"
+  description   = "Lambda function for handling file uploads to S3"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/file_upload/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT                       = var.environment
+    LOG_LEVEL                         = var.environment == "development" ? "DEBUG" : "INFO"
+    CHAT_FILES_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    CHAT_SESSIONS_TABLE_NAME          = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    SNS_TOPIC_ARN                     = data.terraform_remote_state.base_infra.outputs.chat_file_upload_notifications_topic_arn
+    WEBSOCKET_PROCESSOR_FUNCTION_NAME = module.websocket_message_lambda.function_name
+  }
+
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_invoke_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
 
   tags = var.common_tags
