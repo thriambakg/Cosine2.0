@@ -1204,7 +1204,7 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
             response = lambda_client.invoke(
                 FunctionName=chat_agent_function_name,
                 InvocationType='Event',  # Async invocation
-                Payload=json.dumps(agent_payload)
+                Payload=json_dumps_safe(agent_payload)
             )
             
             logger.info(f"✅ Successfully invoked chat agent: {response['StatusCode']}")
