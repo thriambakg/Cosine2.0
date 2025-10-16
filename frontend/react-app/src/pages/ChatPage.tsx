@@ -953,27 +953,34 @@ export default function ChatPage() {
       'application/sql', 'text/sql'
     ];
     
+    console.log(`📁 User selected ${files.length} file(s) for upload`);
+    
     for (const file of Array.from(files)) {
+      console.log(`📁 Processing file: ${file.name} (${file.type}, ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+      
       // Validate file size
       if (file.size > maxFileSize) {
+        console.error(`❌ File ${file.name} is too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max: 50 MB)`);
         alert(`File ${file.name} is too large. Maximum size is 50MB.`);
         continue;
       }
       
       // Validate file type
       if (!allowedTypes.includes(file.type)) {
+        console.error(`❌ Unsupported file type: ${file.type} for ${file.name}`);
         alert(`File type ${file.type} is not supported.`);
         continue;
       }
       
       try {
+        console.log(`🔄 Compressing file: ${file.name}`);
         // Compress the file
         const { compressedData, originalSize, compressedSize } = await compressFile(file);
         
         const compressionRatio = compressedSize / originalSize;
         console.log(`📦 File compression: ${file.name} - ${originalSize} -> ${compressedSize} bytes (${(compressionRatio * 100).toFixed(1)}%)`);
         
-        setUploadedFiles(prev => [...prev, {
+        const uploadedFile = {
           id: Date.now() + Math.random(),
           name: file.name,
           size: originalSize,
@@ -981,7 +988,13 @@ export default function ChatPage() {
           compressedData,
           compressedSize,
           compressionRatio
-        }]);
+        };
+        
+        setUploadedFiles(prev => {
+          const newFiles = [...prev, uploadedFile];
+          console.log(`✅ File added to upload queue: ${file.name} (${newFiles.length} total files)`);
+          return newFiles;
+        });
       } catch (error) {
         console.error(`❌ Failed to compress file ${file.name}:`, error);
         alert(`Failed to process file ${file.name}. Please try again.`);
@@ -990,7 +1003,12 @@ export default function ChatPage() {
   };
 
   const handleFileRemove = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+    setUploadedFiles(prev => {
+      const fileToRemove = prev[index];
+      const newFiles = prev.filter((_, i) => i !== index);
+      console.log(`🗑️ File removed from upload queue: ${fileToRemove?.name} (${newFiles.length} files remaining)`);
+      return newFiles;
+    });
   };
 
   const handleEditMessage = (message: Message, messageIndex: number) => {
@@ -1341,31 +1359,30 @@ export default function ChatPage() {
     }
 
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-      // Send files first if any
+      // Prepare context items (files + existing context)
+      const contextItems = [...sessionContext];
+      
+      // Add uploaded files as context items
       if (uploadedFiles.length > 0) {
-        try {
-          const fileUploadData = {
-            type: 'file_upload',
-            sessionId: sessionId,
-            userId: user?.id,
-            files: uploadedFiles.map(file => ({
+        console.log(`📁 Adding ${uploadedFiles.length} files as context items`);
+        uploadedFiles.forEach(file => {
+          contextItems.push({
+            type: 'file',
+            title: `Uploaded File: ${file.name}`,
+            data: {
               filename: file.name,
               content_type: file.type,
               compressed_data: file.compressedData,
               original_size: file.size,
               compressed_size: file.compressedSize,
-              compression_ratio: file.compressionRatio
-            }))
-          };
-          
-          console.log(`📤 Sending ${uploadedFiles.length} files to WebSocket`);
-          websocketRef.current.send(JSON.stringify(fileUploadData));
-        } catch (error) {
-          console.error('Error sending files:', error);
-        }
+              compression_ratio: file.compressionRatio,
+              uploaded_at: new Date().toISOString()
+            }
+          });
+        });
       }
       
-      // Send the chat message
+      // Send the chat message with context items
       const messageData = {
         type: 'chat',
         messageId: userMessage.id, // Include the message ID from frontend
@@ -1373,6 +1390,7 @@ export default function ChatPage() {
         model: selectedModel,
         sessionId: sessionId, // Use the validated sessionId
         userId: user?.id,
+        contextItems: contextItems, // Include files and other context
         context: {
           currentPage: 'chat',
           sessionId: sessionId // Use the validated sessionId

@@ -316,11 +316,53 @@ def process_message(connection_id, user_id, session_id, message_data):
         # Extract context items from message data (if present)
         context_items = message_data.get('contextItems', [])
         
-        # Load uploaded files from session for context
+        # Process file context items (upload and store files)
+        file_context_items = [item for item in context_items if item.get('type') == 'file']
+        if file_context_items:
+            logger.info(f"📁 Processing {len(file_context_items)} file context items")
+            processed_files = []
+            
+            for file_item in file_context_items:
+                try:
+                    file_data = file_item.get('data', {})
+                    if file_data.get('compressed_data'):
+                        # Process the file upload
+                        file_metadata = process_file_upload(
+                            compressed_file_data=file_data,
+                            user_id=user_id,
+                            session_id=session_id
+                        )
+                        processed_files.append(file_metadata)
+                        
+                        # Update the context item with processed file metadata
+                        file_item['data'] = {
+                            **file_data,
+                            's3_key': file_metadata.get('s3_key'),
+                            's3_url': file_metadata.get('s3_url'),
+                            'file_id': file_metadata.get('file_id'),
+                            'uploaded_at': file_metadata.get('uploaded_at')
+                        }
+                        
+                        logger.info(f"✅ Processed file: {file_data.get('filename', 'Unknown')}")
+                    else:
+                        logger.warning(f"⚠️ File context item missing compressed_data: {file_data.get('filename', 'Unknown')}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to process file context item: {str(e)}")
+                    continue
+            
+            # Store processed files in session
+            if processed_files:
+                try:
+                    store_file_metadata_in_session(user_id, session_id, processed_files)
+                    logger.info(f"✅ Stored {len(processed_files)} files in session")
+                except Exception as e:
+                    logger.error(f"❌ Failed to store file metadata: {str(e)}")
+        
+        # Load any existing uploaded files from session for additional context
         uploaded_files = load_uploaded_files_from_session(user_id, session_id)
         if uploaded_files:
-            logger.info(f"📁 Found {len(uploaded_files)} uploaded files in session")
-            # Add files to context items
+            logger.info(f"📁 Found {len(uploaded_files)} existing uploaded files in session")
+            # Add existing files to context items
             for file_metadata in uploaded_files:
                 context_items.append({
                     'type': 'file',
