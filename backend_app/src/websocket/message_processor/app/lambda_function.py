@@ -1057,7 +1057,35 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
             except Exception as e:
                 logger.error(f"❌ Failed to store context in session_variables: {e}")
         
-        # Build context prompt for AI
+        # Store the original user message in the database first
+        try:
+            # Add user message to conversation history
+            user_message_data = {
+                'id': message_id,
+                'role': 'user',
+                'content': message_text,  # Store original message text
+                'timestamp': int(datetime.now().timestamp() * 1000),
+                'model': model
+            }
+            
+            # Update conversation history in DynamoDB
+            chat_sessions_table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression='SET conversation_history = list_append(if_not_exists(conversation_history, :empty_list), :message)',
+                ExpressionAttributeValues={
+                    ':empty_list': [],
+                    ':message': [user_message_data]
+                }
+            )
+            logger.info(f"📌 Stored original user message in conversation history")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to store user message: {e}")
+        
+        # Build context prompt for AI (but don't store this as the user message)
         if CONTEXT_BUILDER_AVAILABLE and (context_items or uploaded_files):
             # Combine context items and uploaded files for the AI prompt
             all_context_items = list(context_items)
@@ -1094,7 +1122,7 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
             agent_payload = {
                 'user_id': user_id,
                 'session_id': session_id,
-                'message': enriched_message,
+                'message': enriched_message,  # Use enriched message for AI
                 'message_id': message_id,
                 'model': model,
                 'context_items': context_items_decimal,
