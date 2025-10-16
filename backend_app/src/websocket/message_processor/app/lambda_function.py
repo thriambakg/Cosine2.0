@@ -10,6 +10,8 @@ import uuid
 import boto3
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import List, Dict, Any
+from boto3.dynamodb.conditions import Key, Attr
 
 # Configure logging
 logger = logging.getLogger()
@@ -873,104 +875,6 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
             'body': json_dumps_safe({'error': 'Failed to process edit message'})
         }
 
-def handle_file_upload(connection_id, user_id, session_id, message_data):
-    """
-    Handle file upload processing
-    
-    Args:
-        connection_id: WebSocket connection ID
-        user_id: User ID
-        session_id: Session ID
-        message_data: File upload data
-        
-    Returns:
-        API Gateway response
-    """
-    try:
-        if not FILE_UPLOAD_AVAILABLE:
-            logger.error("❌ File upload handler not available")
-            return {
-                'statusCode': 500,
-                'body': json_dumps_safe({'error': 'File upload not available'})
-            }
-        
-        # Extract file data from message
-        files = message_data.get('files', [])
-        if not files:
-            logger.warning("⚠️ No files provided in upload message")
-            return {
-                'statusCode': 400,
-                'body': json_dumps_safe({'error': 'No files provided'})
-            }
-        
-        processed_files = []
-        
-        for file_data in files:
-            try:
-                # Validate file upload
-                if not validate_file_upload(file_data):
-                    logger.warning(f"⚠️ Invalid file upload: {file_data.get('filename', 'unknown')}")
-                    continue
-                
-                # Process file upload (decompress and upload to S3)
-                file_metadata = process_file_upload(
-                    compressed_file_data=file_data,
-                    user_id=user_id,
-                    session_id=session_id
-                )
-                
-                processed_files.append(file_metadata)
-                logger.info(f"✅ File processed successfully: {file_metadata['original_filename']}")
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to process file {file_data.get('filename', 'unknown')}: {str(e)}")
-                continue
-        
-        if not processed_files:
-            logger.error("❌ No files were successfully processed")
-            return {
-                'statusCode': 400,
-                'body': json_dumps_safe({'error': 'No files were successfully processed'})
-            }
-        
-        # Store file metadata in session for chat agent access
-        try:
-            store_file_metadata_in_session(user_id, session_id, processed_files)
-            logger.info(f"✅ Stored {len(processed_files)} files in session {session_id}")
-        except Exception as e:
-            logger.error(f"❌ Failed to store file metadata in session: {str(e)}")
-            # Continue anyway - files are uploaded to S3
-        
-        # Send success response to client
-        success_message = {
-            'type': 'file_upload_success',
-            'files': processed_files,
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        send_message_to_client(connection_id, success_message)
-        
-        return {
-            'statusCode': 200,
-            'body': json_dumps_safe({'message': 'Files uploaded successfully', 'files': processed_files})
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Error handling file upload: {str(e)}")
-        
-        # Send error response to client
-        error_message = {
-            'type': 'file_upload_error',
-            'error': 'Failed to process file upload',
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        send_message_to_client(connection_id, error_message)
-        
-        return {
-            'statusCode': 500,
-            'body': json_dumps_safe({'error': 'Failed to process file upload'})
-        }
 
 def load_uploaded_files_from_session(user_id: str, session_id: str) -> List[Dict[str, Any]]:
     """
@@ -1358,11 +1262,11 @@ def lambda_handler(event, context):
         if 'Records' in event:
             # This is an SNS event (S3 notification)
             logger.info(f"Processing SNS event for connection {connection_id}")
-            return handle_sns_event(connection_id, user_id, session_id, event)
+            return handle_s3_event_notification(event)
         else:
             # This is a WebSocket message
             logger.info(f"Processing WebSocket message for connection {connection_id}")
-            return handle_websocket_message(connection_id, user_id, session_id, event)
+            return process_message(connection_id, user_id, session_id, event)
             
     except Exception as e:
         logger.error(f"Error in lambda_handler: {str(e)}")
