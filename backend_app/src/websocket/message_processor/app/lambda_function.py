@@ -1083,6 +1083,7 @@ def handle_file_handler_message(event):
                 'user_id': user_id,
                 'session_id': session_id,
                 'message': enriched_message,  # Use enriched message for AI
+                'originalMessage': message_text,  # Pass original message for storage (camelCase to match handler)
                 'message_id': message_id,
                 'model': model,
                 'context_items': convert_floats_to_decimal(context_items),
