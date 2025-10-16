@@ -99,74 +99,6 @@ lambda_client = boto3.client('lambda')
 chat_connections_table = dynamodb.Table(os.environ['CHAT_CONNECTIONS_TABLE_NAME'])
 chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
 
-def lambda_handler(event, context):
-    """
-    Main Lambda handler for WebSocket message processing
-    
-    Args:
-        event: WebSocket message event from API Gateway
-        context: Lambda context
-        
-    Returns:
-        API Gateway response
-    """
-    try:
-        logger.info(f"Received event: {json_dumps_safe(event)}")
-        
-        # Extract connection ID and message body
-        connection_id = event.get('requestContext', {}).get('connectionId')
-        body = event.get('body', '{}')
-        
-        if isinstance(body, str):
-            message_data = json.loads(body)
-        else:
-            message_data = body
-        
-        logger.info(f"Processing message for connection {connection_id}: {message_data}")
-        
-        # Get connection info from DynamoDB
-        connection_info = get_connection_info(connection_id)
-        if not connection_info:
-            logger.error(f"Connection {connection_id} not found")
-            return {
-                'statusCode': 400,
-                'body': json_dumps_safe({'error': 'Connection not found'})
-            }
-        
-        user_id = connection_info['user_id']
-        
-        # Get session_id from message data (sent by frontend)
-        logger.info(f"🔍 DEBUG: Full message_data received: {json_dumps_safe(message_data)}")
-        logger.info(f"🔍 DEBUG: message_data keys: {list(message_data.keys()) if message_data else 'None'}")
-        
-        message_type = message_data.get('type', 'chat')
-        session_id = message_data.get('sessionId')
-        logger.info(f"🔍 DEBUG: Message type: {message_type}, Extracted sessionId: {session_id}")
-        
-        # Session ID is required for all message types except connection_establish
-        if not session_id and message_type != 'connection_establish':
-            logger.error(f"❌ No sessionId provided in message data for message type: {message_type}")
-            logger.error(f"❌ Available keys in message_data: {list(message_data.keys()) if message_data else 'None'}")
-            logger.error(f"❌ Full message_data: {json_dumps_safe(message_data)}")
-            return {
-                'statusCode': 400,
-                'body': json_dumps_safe({'error': 'Session ID required'})
-            }
-        
-        # Update connection record with session_id for future reference
-        # Only update if session_id field doesn't exist or is None, and we have a session_id
-        if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
-            update_connection_session(connection_id, session_id)
-        
-        # Process the message
-        return process_message(connection_id, user_id, session_id, message_data)
-        
-    except Exception as e:
-        logger.error(f"Error in message processor: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': json_dumps_safe({'error': 'Internal server error'})
-        }
 
 def get_connection_info(connection_id):
     """
@@ -1217,27 +1149,43 @@ def lambda_handler(event, context):
                 'body': json_dumps_safe({'error': 'No connection ID'})
             }
         
-        # Extract user ID from query parameters or headers
-        user_id = event.get('queryStringParameters', {}).get('userId')
-        if not user_id:
-            logger.error("No user ID found in query parameters")
+        # For WebSocket messages, get user ID from connection info in DynamoDB
+        connection_info = get_connection_info(connection_id)
+        if not connection_info:
+            logger.error(f"Connection {connection_id} not found")
             return {
                 'statusCode': 400,
-                'body': json_dumps_safe({'error': 'No user ID'})
+                'body': json_dumps_safe({'error': 'Connection not found'})
             }
         
-        # Extract session ID from query parameters
-        session_id = event.get('queryStringParameters', {}).get('sessionId')
+        user_id = connection_info['user_id']
         
-        # Handle different event types
-        if 'Records' in event:
-            # This is an SNS event (S3 notification)
-            logger.info(f"Processing SNS event for connection {connection_id}")
-            return handle_s3_event_notification(event)
+        # Extract message body and parse it
+        body = event.get('body', '{}')
+        if isinstance(body, str):
+            message_data = json.loads(body)
         else:
-            # This is a WebSocket message
-            logger.info(f"Processing WebSocket message for connection {connection_id}")
-            return process_message(connection_id, user_id, session_id, event)
+            message_data = body
+        
+        # Get session_id from message data (sent by frontend)
+        session_id = message_data.get('sessionId')
+        logger.info(f"🔍 DEBUG: Message type: {message_data.get('type', 'chat')}, Extracted sessionId: {session_id}")
+        
+        # Session ID is required for all message types except connection_establish
+        if not session_id and message_data.get('type') != 'connection_establish':
+            logger.error(f"❌ No sessionId provided in message data for message type: {message_data.get('type', 'chat')}")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Session ID required'})
+            }
+        
+        # Update connection record with session_id for future reference
+        if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
+            update_connection_session(connection_id, session_id)
+        
+        # Process the WebSocket message
+        logger.info(f"Processing WebSocket message for connection {connection_id}")
+        return process_message(connection_id, user_id, session_id, message_data)
             
     except Exception as e:
         logger.error(f"Error in lambda_handler: {str(e)}")
