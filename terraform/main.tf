@@ -473,6 +473,11 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "news"
     }
+    files_upload_post = {
+      function_arn  = module.file_upload_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "files"
+    }
   }
 
   tags = var.common_tags

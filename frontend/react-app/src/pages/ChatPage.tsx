@@ -1171,7 +1171,7 @@ export default function ChatPage() {
         data: file.compressedData // Already base64 encoded from compression
       }));
 
-      const response = await fetch(`${process.env.REACT_APP_API_GATEWAY_URL}/files`, {
+      const response = await fetch(`${ENV_CONFIG.apiGatewayUrl}/files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1476,7 +1476,7 @@ export default function ChatPage() {
       if (uploadedFiles.length > 0) {
         console.log(`📁 Message has ${uploadedFiles.length} files, routing to File Handler...`);
         try {
-          await sendMessageWithFilesToFileHandler(userMessage, uploadedFiles, sessionToUse?.session_id, user?.id);
+          await sendMessageWithFilesToFileHandler(userMessage, uploadedFiles, sessionToUse?.session_id || '', user?.id || '');
           console.log('✅ Message with files sent to File Handler');
           return; // Exit early, File Handler will orchestrate the rest
         } catch (error) {
