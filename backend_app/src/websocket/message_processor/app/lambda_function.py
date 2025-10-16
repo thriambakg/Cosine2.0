@@ -1108,15 +1108,51 @@ def handle_file_handler_message(event):
                 'source': 'file_handler'
             }
             
-            # Invoke chat agent
+            # Invoke chat agent synchronously to get response
             lambda_client = boto3.client('lambda')
             response = lambda_client.invoke(
                 FunctionName=chat_agent_function_name,
-                InvocationType='Event',  # Async invocation
+                InvocationType='RequestResponse',  # Synchronous invocation
                 Payload=json_dumps_safe(agent_payload)
             )
             
             logger.info(f"✅ Successfully invoked chat agent: {response['StatusCode']}")
+            
+            # Parse the response
+            response_payload = json.loads(response['Payload'].read().decode('utf-8'))
+            logger.info(f"📨 Chat agent response: {json_dumps_safe(response_payload)}")
+            
+            if response_payload.get('statusCode') == 200:
+                response_body = json.loads(response_payload.get('body', '{}'))
+                ai_response = response_body.get('response', 'I apologize, but I encountered an error processing your request.')
+                
+                # Send AI response back to frontend via WebSocket
+                try:
+                    # Find active WebSocket connections for this user/session
+                    active_connections = get_active_connections_for_user_session(user_id, session_id)
+                    
+                    if active_connections:
+                        ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+                        
+                        for connection_id in active_connections:
+                            ai_response_message = {
+                                'type': 'ai_response',
+                                'message_id': ai_message_id,
+                                'content': ai_response,
+                                'session_id': session_id,
+                                'timestamp': datetime.now().isoformat()
+                            }
+                            
+                            send_message_to_client(connection_id, ai_response_message)
+                            logger.info(f"📨 Sent AI response to connection {connection_id}")
+                    else:
+                        logger.warning(f"⚠️ No active connections found for user {user_id}, session {session_id}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Failed to send AI response via WebSocket: {str(e)}")
+            else:
+                logger.error(f"❌ Chat agent returned error: {response_payload}")
+                ai_response = 'I apologize, but I encountered an error processing your request.'
             
         except Exception as e:
             logger.error(f"❌ Failed to invoke chat agent: {str(e)}")
