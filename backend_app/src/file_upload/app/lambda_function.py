@@ -158,7 +158,8 @@ def lambda_handler(event, context):
                     'file_id': file_id,
                     'filename': filename,
                     's3_key': s3_key,
-                    'content_type': content_type
+                    'content_type': content_type,
+                    'upload_timestamp': str(int(datetime.utcnow().timestamp()))
                 })
                 
                 logger.info(f"Successfully uploaded file: {filename} to {s3_key}")
