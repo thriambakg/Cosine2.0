@@ -973,11 +973,6 @@ resource "aws_iam_role_policy_attachment" "chat_agent_kms_policy" {
   policy_arn = aws_iam_policy.lambda_kms_policy.arn
 }
 
-# Attach S3 policy for chat files access
-resource "aws_iam_role_policy_attachment" "chat_agent_s3_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.lambda_s3_chat_files_policy.arn
-}
 
 # Bedrock policy for chat agent
 resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
