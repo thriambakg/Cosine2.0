@@ -1556,10 +1556,8 @@ module "file_upload_lambda" {
     LOG_LEVEL                         = var.environment == "development" ? "DEBUG" : "INFO"
     CHAT_FILES_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
     CHAT_SESSIONS_TABLE_NAME          = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    CONNECTIONS_TABLE_NAME            = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name
     SNS_TOPIC_ARN                     = data.terraform_remote_state.base_infra.outputs.chat_file_upload_notifications_topic_arn
     WEBSOCKET_PROCESSOR_FUNCTION_NAME = module.websocket_message_lambda.function_name
-    WEBSOCKET_API_URL                 = module.websocket_api.stage_url
   }
 
   # Attach core layer
@@ -1571,7 +1569,6 @@ module "file_upload_lambda" {
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
     aws_iam_policy.lambda_sns_policy.arn,
-    aws_iam_policy.lambda_websocket_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
 

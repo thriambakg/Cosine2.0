@@ -5,7 +5,6 @@ import uuid
 from datetime import datetime
 import logging
 import time
-from boto3.dynamodb.conditions import Key
 
 # Configure logging
 logger = logging.getLogger()
@@ -202,24 +201,12 @@ def lambda_handler(event, context):
         logger.info("Waiting for SNS confirmation...")
         time.sleep(2)  # Give SNS time to process
         
-        # Now send enriched message to WebSocket processor
+        # Now send enriched message to WebSocket processor via direct Lambda invocation
+        # The WebSocket processor will handle storing the message and sending responses
         try:
-            # Check if there are active WebSocket connections for this user/session
-            active_connections = get_active_connections_for_user_session(user_id, session_id)
-            
-            if active_connections:
-                logger.info(f"Found {len(active_connections)} active connections for user {user_id}, session {session_id}")
-                # Send message through WebSocket for real-time response
-                send_message_through_websocket(
-                    user_id, session_id, message, uploaded_files, context_items, active_connections
-                )
-            else:
-                logger.warning(f"No active WebSocket connections found for user {user_id}, session {session_id}")
-                # Fallback to direct Lambda invocation
-                send_enriched_message_to_websocket(
-                    user_id, session_id, message, uploaded_files, context_items
-                )
-            
+            send_enriched_message_to_websocket(
+                user_id, session_id, message, uploaded_files, context_items
+            )
             logger.info("Successfully sent enriched message to WebSocket processor")
         except Exception as e:
             logger.error(f"Error sending enriched message to WebSocket processor: {str(e)}")
@@ -303,121 +290,4 @@ def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_fi
         
     except Exception as e:
         logger.error(f"Error invoking WebSocket processor: {str(e)}")
-        raise
-
-def get_active_connections_for_user_session(user_id, session_id):
-    """
-    Get active WebSocket connections for a user and session.
-    
-    Args:
-        user_id: User ID
-        session_id: Session ID
-        
-    Returns:
-        List of active connection IDs
-    """
-    try:
-        dynamodb = boto3.resource('dynamodb')
-        connections_table = dynamodb.Table(os.environ.get('CONNECTIONS_TABLE_NAME', 'cosine-connections-production'))
-        
-        # Query connections for this user
-        response = connections_table.query(
-            IndexName='user_id-index',
-            KeyConditionExpression=Key('user_id').eq(user_id)
-        )
-        
-        active_connections = []
-        for connection in response.get('Items', []):
-            if connection.get('session_id') == session_id and connection.get('status') == 'active':
-                active_connections.append(connection['connection_id'])
-        
-        logger.info(f"Found {len(active_connections)} active connections for user {user_id}, session {session_id}")
-        return active_connections
-        
-    except Exception as e:
-        logger.error(f"Error getting active connections: {str(e)}")
-        return []
-
-def send_message_through_websocket(user_id, session_id, message, uploaded_files, context_items, active_connections):
-    """
-    Send message through WebSocket for real-time response.
-    
-    Args:
-        user_id: User ID
-        session_id: Session ID
-        message: Message data
-        uploaded_files: List of uploaded files
-        context_items: Context items
-        active_connections: List of active connection IDs
-    """
-    try:
-        # Convert uploaded files to context items format
-        all_context_items = list(context_items)
-        
-        # Add uploaded files as context items
-        for file_info in uploaded_files:
-            all_context_items.append({
-                'type': 'file',
-                'title': f"Uploaded File: {file_info['filename']}",
-                'data': {
-                    'original_filename': file_info['filename'],
-                    's3_key': file_info['s3_key'],
-                    's3_url': file_info['s3_url'],
-                    'content_type': file_info['content_type'],
-                    'file_size': file_info['file_size'],
-                    'upload_timestamp': file_info['upload_timestamp']
-                }
-            })
-        
-        # Create message data for WebSocket
-        message_data = {
-            'type': 'chat',
-            'sessionId': session_id,
-            'message': message['text'],
-            'messageId': message['id'],
-            'contextItems': all_context_items,
-            'timestamp': message.get('timestamp', int(datetime.utcnow().timestamp() * 1000))
-        }
-        
-        # Send message to each active connection
-        for connection_id in active_connections:
-            try:
-                # Send message through WebSocket
-                send_websocket_message(connection_id, message_data)
-                logger.info(f"Sent message to connection {connection_id}")
-            except Exception as e:
-                logger.error(f"Error sending message to connection {connection_id}: {str(e)}")
-        
-    except Exception as e:
-        logger.error(f"Error sending message through WebSocket: {str(e)}")
-        raise
-
-def send_websocket_message(connection_id, message_data):
-    """
-    Send message through WebSocket connection.
-    
-    Args:
-        connection_id: WebSocket connection ID
-        message_data: Message data to send
-    """
-    try:
-        # Get WebSocket API Gateway URL from environment
-        websocket_url = os.environ.get('WEBSOCKET_API_URL')
-        if not websocket_url:
-            logger.error("WEBSOCKET_API_URL not configured")
-            return
-        
-        # Create WebSocket client
-        websocket_client = boto3.client('apigatewaymanagementapi', endpoint_url=websocket_url)
-        
-        # Send message
-        response = websocket_client.post_to_connection(
-            ConnectionId=connection_id,
-            Data=json.dumps(message_data)
-        )
-        
-        logger.info(f"Successfully sent message to connection {connection_id}")
-        
-    except Exception as e:
-        logger.error(f"Error sending WebSocket message: {str(e)}")
         raise
