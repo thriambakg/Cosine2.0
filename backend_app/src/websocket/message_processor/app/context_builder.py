@@ -42,6 +42,9 @@ def build_context_prompt(user_message: str, context_items: List[Dict[str, Any]])
         elif item_type == 'custom':
             # Handle other custom types
             prompt_parts.append(format_tile_context(i, item))
+        elif item_type == 'file':
+            # Handle uploaded files
+            prompt_parts.append(format_file_context(i, item))
         else:
             prompt_parts.append(f"[Context Item {i}: Unknown Type]")
     
@@ -412,3 +415,49 @@ def extract_context_summary(context_items: List[Dict[str, Any]]) -> Dict[str, An
             summary['article_count'] += len(articles)
     
     return summary
+
+
+def format_file_context(index: int, file_item: Dict[str, Any]) -> str:
+    """
+    Format uploaded file context for AI prompt
+    
+    Args:
+        index: Context item index
+        file_item: File item with metadata and content
+        
+    Returns:
+        Formatted file context string
+    """
+    try:
+        filename = file_item.get('original_filename', 'Unknown File')
+        content_type = file_item.get('content_type', '')
+        file_size = file_item.get('file_size', 0)
+        content = file_item.get('content', '')
+        
+        # Format file size
+        if file_size > 1024 * 1024:
+            size_str = f"{file_size / (1024 * 1024):.1f} MB"
+        elif file_size > 1024:
+            size_str = f"{file_size / 1024:.1f} KB"
+        else:
+            size_str = f"{file_size} bytes"
+        
+        context_parts = [
+            f"[Context Item {index}: Uploaded File]",
+            f"File: {filename}",
+            f"Type: {content_type}",
+            f"Size: {size_str}",
+            f"Content:"
+        ]
+        
+        # Add file content (truncated if too long)
+        max_content_length = 5000  # Limit content to prevent prompt from being too long
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "\n... [Content truncated]"
+        
+        context_parts.append(content)
+        
+        return "\n".join(context_parts)
+        
+    except Exception as e:
+        return f"[Context Item {index}: File Error - {str(e)}]"

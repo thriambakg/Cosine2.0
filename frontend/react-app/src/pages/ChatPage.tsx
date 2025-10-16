@@ -58,9 +58,13 @@ interface Message {
 }
 
 interface UploadedFile {
+  id: number;
   name: string;
   size: number;
-  content: string;
+  type: string;
+  compressedData: string;
+  compressedSize: number;
+  compressionRatio: number;
 }
 
 interface WebSocketMessage {
@@ -869,19 +873,103 @@ export default function ChatPage() {
   // Remove auto-creation - let user start typing first
   // Sessions will be created when user actually sends a message
 
-  const handleFileUpload = (files: FileList) => {
-    Array.from(files).forEach((file) => {
+  const compressFile = async (file: File): Promise<{compressedData: string, originalSize: number, compressedSize: number}> => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target?.result as string;
-        setUploadedFiles(prev => [...prev, {
-          name: file.name,
-          size: file.size,
-          content
-        }]);
+      reader.onload = async (e) => {
+        try {
+          const arrayBuffer = e.target?.result as ArrayBuffer;
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          // Compress using gzip
+          const stream = new CompressionStream('gzip');
+          const writer = stream.writable.getWriter();
+          const reader = stream.readable.getReader();
+          
+          // Write data to compression stream
+          await writer.write(uint8Array);
+          await writer.close();
+          
+          // Read compressed data
+          const chunks: Uint8Array[] = [];
+          let done = false;
+          while (!done) {
+            const { value, done: readerDone } = await reader.read();
+            done = readerDone;
+            if (value) {
+              chunks.push(value);
+            }
+          }
+          
+          // Combine chunks
+          const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+          const compressedData = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of chunks) {
+            compressedData.set(chunk, offset);
+            offset += chunk.length;
+          }
+          
+          // Convert to base64
+          const compressedBase64 = btoa(String.fromCharCode(...compressedData));
+          
+          resolve({
+            compressedData: compressedBase64,
+            originalSize: file.size,
+            compressedSize: compressedData.length
+          });
+        } catch (error) {
+          reject(error);
+        }
       };
-      reader.readAsText(file);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsArrayBuffer(file);
     });
+  };
+
+  const handleFileUpload = async (files: FileList) => {
+    const maxFileSize = 50 * 1024 * 1024; // 50MB limit
+    const allowedTypes = [
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'application/pdf', 'text/plain', 'text/csv',
+      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    
+    for (const file of Array.from(files)) {
+      // Validate file size
+      if (file.size > maxFileSize) {
+        alert(`File ${file.name} is too large. Maximum size is 50MB.`);
+        continue;
+      }
+      
+      // Validate file type
+      if (!allowedTypes.includes(file.type)) {
+        alert(`File type ${file.type} is not supported.`);
+        continue;
+      }
+      
+      try {
+        // Compress the file
+        const { compressedData, originalSize, compressedSize } = await compressFile(file);
+        
+        const compressionRatio = compressedSize / originalSize;
+        console.log(`📦 File compression: ${file.name} - ${originalSize} -> ${compressedSize} bytes (${(compressionRatio * 100).toFixed(1)}%)`);
+        
+        setUploadedFiles(prev => [...prev, {
+          id: Date.now() + Math.random(),
+          name: file.name,
+          size: originalSize,
+          type: file.type,
+          compressedData,
+          compressedSize,
+          compressionRatio
+        }]);
+      } catch (error) {
+        console.error(`❌ Failed to compress file ${file.name}:`, error);
+        alert(`Failed to process file ${file.name}. Please try again.`);
+      }
+    }
   };
 
   const handleFileRemove = (index: number) => {
@@ -1236,12 +1324,36 @@ export default function ChatPage() {
     }
 
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      // Send files first if any
+      if (uploadedFiles.length > 0) {
+        try {
+          const fileUploadData = {
+            type: 'file_upload',
+            sessionId: sessionId,
+            userId: user?.id,
+            files: uploadedFiles.map(file => ({
+              filename: file.name,
+              content_type: file.type,
+              compressed_data: file.compressedData,
+              original_size: file.size,
+              compressed_size: file.compressedSize,
+              compression_ratio: file.compressionRatio
+            }))
+          };
+          
+          console.log(`📤 Sending ${uploadedFiles.length} files to WebSocket`);
+          websocketRef.current.send(JSON.stringify(fileUploadData));
+        } catch (error) {
+          console.error('Error sending files:', error);
+        }
+      }
+      
+      // Send the chat message
       const messageData = {
         type: 'chat',
         messageId: userMessage.id, // Include the message ID from frontend
         message: userMessage.text,
         model: selectedModel,
-        files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
         sessionId: sessionId, // Use the validated sessionId
         userId: user?.id,
         context: {

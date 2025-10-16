@@ -507,6 +507,40 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
   tags = var.common_tags
 }
 
+# IAM Policy for Lambda functions to access S3 chat files bucket
+resource "aws_iam_policy" "lambda_s3_chat_files_policy" {
+  name        = "${var.project_name}-lambda-s3-chat-files-policy-${var.environment}"
+  description = "Policy for Lambda functions to access S3 chat files bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = [
+          "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
 # IAM Policy for Lambda functions to invoke other Lambda functions
 resource "aws_iam_policy" "lambda_invoke_policy" {
   name        = "${var.project_name}-lambda-invoke-policy-${var.environment}"
@@ -893,6 +927,12 @@ resource "aws_iam_role_policy_attachment" "chat_agent_kms_policy" {
   policy_arn = aws_iam_policy.lambda_kms_policy.arn
 }
 
+# Attach S3 policy for chat files access
+resource "aws_iam_role_policy_attachment" "chat_agent_s3_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.lambda_s3_chat_files_policy.arn
+}
+
 # Bedrock policy for chat agent
 resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
   name = "${var.project_name}-chat-agent-bedrock-policy-${var.environment}"
@@ -1031,6 +1071,7 @@ module "websocket_message_lambda" {
     CHAT_AGENT_FUNCTION_NAME    = "${var.project_name}-chat-agent-${var.environment}"
     WEBSOCKET_ENDPOINT          = module.websocket_api.stage_url
     WEBSOCKET_API_ID            = module.websocket_api.api_id
+    CHAT_FILES_BUCKET_NAME      = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
     ENVIRONMENT                 = var.environment
     LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
   }
@@ -1043,7 +1084,8 @@ module "websocket_message_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
-    aws_iam_policy.lambda_websocket_policy.arn
+    aws_iam_policy.lambda_websocket_policy.arn,
+    aws_iam_policy.lambda_s3_chat_files_policy.arn
   ]
 
   tags = var.common_tags
@@ -1413,7 +1455,8 @@ module "session_management_lambda" {
   additional_policy_arns = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
-    aws_iam_policy.lambda_invoke_policy.arn
+    aws_iam_policy.lambda_invoke_policy.arn,
+    aws_iam_policy.lambda_s3_chat_files_policy.arn
   ]
 
   tags = var.common_tags

@@ -29,6 +29,21 @@ except ImportError as e:
     def extract_context_summary(context_items):
         return {'total_items': len(context_items) if context_items else 0}
 
+# Import file upload handler
+try:
+    from file_upload_handler import (
+        process_file_upload, 
+        validate_file_upload, 
+        store_file_metadata_in_session,
+        upload_agent_generated_file,
+        store_agent_file_in_session
+    )
+    logger.info("✅ Successfully imported file_upload_handler")
+    FILE_UPLOAD_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import file_upload_handler: {e}")
+    FILE_UPLOAD_AVAILABLE = False
+
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 
@@ -249,6 +264,16 @@ def process_message(connection_id, user_id, session_id, message_data):
                 'body': json_dumps_safe({'message': 'Connection established'})
             }
         
+        # Handle file uploads
+        if message_type == 'file_upload':
+            logger.info(f"Processing file upload for connection {connection_id}")
+            return handle_file_upload(connection_id, user_id, session_id, message_data)
+        
+        # Handle agent file returns
+        if message_type == 'agent_file_return':
+            logger.info(f"Processing agent file return for connection {connection_id}")
+            return handle_agent_file_return(connection_id, user_id, session_id, message_data)
+        
         # Handle message editing
         if message_type == 'edit_message':
             logger.info(f"Processing edit message for connection {connection_id}")
@@ -290,6 +315,19 @@ def process_message(connection_id, user_id, session_id, message_data):
         
         # Extract context items from message data (if present)
         context_items = message_data.get('contextItems', [])
+        
+        # Load uploaded files from session for context
+        uploaded_files = load_uploaded_files_from_session(user_id, session_id)
+        if uploaded_files:
+            logger.info(f"📁 Found {len(uploaded_files)} uploaded files in session")
+            # Add files to context items
+            for file_metadata in uploaded_files:
+                context_items.append({
+                    'type': 'file',
+                    'title': f"Uploaded File: {file_metadata.get('original_filename', 'Unknown')}",
+                    'data': file_metadata
+                })
+        
         has_context = len(context_items) > 0
         
         # Store the original user message (without context prompt) for frontend display
@@ -846,4 +884,234 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         return {
             'statusCode': 500,
             'body': json_dumps_safe({'error': 'Failed to process edit message'})
+        }
+
+def handle_file_upload(connection_id, user_id, session_id, message_data):
+    """
+    Handle file upload processing
+    
+    Args:
+        connection_id: WebSocket connection ID
+        user_id: User ID
+        session_id: Session ID
+        message_data: File upload data
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        if not FILE_UPLOAD_AVAILABLE:
+            logger.error("❌ File upload handler not available")
+            return {
+                'statusCode': 500,
+                'body': json_dumps_safe({'error': 'File upload not available'})
+            }
+        
+        # Extract file data from message
+        files = message_data.get('files', [])
+        if not files:
+            logger.warning("⚠️ No files provided in upload message")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'No files provided'})
+            }
+        
+        processed_files = []
+        
+        for file_data in files:
+            try:
+                # Validate file upload
+                if not validate_file_upload(file_data):
+                    logger.warning(f"⚠️ Invalid file upload: {file_data.get('filename', 'unknown')}")
+                    continue
+                
+                # Process file upload (decompress and upload to S3)
+                file_metadata = process_file_upload(
+                    compressed_file_data=file_data,
+                    user_id=user_id,
+                    session_id=session_id
+                )
+                
+                processed_files.append(file_metadata)
+                logger.info(f"✅ File processed successfully: {file_metadata['original_filename']}")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to process file {file_data.get('filename', 'unknown')}: {str(e)}")
+                continue
+        
+        if not processed_files:
+            logger.error("❌ No files were successfully processed")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'No files were successfully processed'})
+            }
+        
+        # Store file metadata in session for chat agent access
+        try:
+            store_file_metadata_in_session(user_id, session_id, processed_files)
+            logger.info(f"✅ Stored {len(processed_files)} files in session {session_id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to store file metadata in session: {str(e)}")
+            # Continue anyway - files are uploaded to S3
+        
+        # Send success response to client
+        success_message = {
+            'type': 'file_upload_success',
+            'files': processed_files,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        send_message_to_client(connection_id, success_message)
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({'message': 'Files uploaded successfully', 'files': processed_files})
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error handling file upload: {str(e)}")
+        
+        # Send error response to client
+        error_message = {
+            'type': 'file_upload_error',
+            'error': 'Failed to process file upload',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        send_message_to_client(connection_id, error_message)
+        
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': 'Failed to process file upload'})
+        }
+
+def load_uploaded_files_from_session(user_id: str, session_id: str) -> List[Dict[str, Any]]:
+    """
+    Load uploaded files from session for context
+    
+    Args:
+        user_id: User ID
+        session_id: Session ID
+        
+    Returns:
+        List of file metadata with content
+    """
+    try:
+        # Get session from DynamoDB
+        response = chat_sessions_table.get_item(
+            Key={
+                'user_id': user_id,
+                'session_id': session_id
+            }
+        )
+        
+        session_item = response.get('Item', {})
+        uploaded_files = session_item.get('uploaded_files', [])
+        
+        if not uploaded_files:
+            return []
+        
+        # Load file content from S3 for each file
+        files_with_content = []
+        for file_metadata in uploaded_files:
+            try:
+                s3_key = file_metadata.get('s3_key')
+                if s3_key and FILE_UPLOAD_AVAILABLE:
+                    # Import here to avoid circular imports
+                    from file_upload_handler import get_file_content_from_s3
+                    content = get_file_content_from_s3(s3_key)
+                    if content:
+                        file_metadata['content'] = content
+                        files_with_content.append(file_metadata)
+                    else:
+                        logger.warning(f"⚠️ Could not load content for file: {file_metadata.get('original_filename', 'Unknown')}")
+                else:
+                    # Add file without content if S3 key is missing
+                    files_with_content.append(file_metadata)
+            except Exception as e:
+                logger.error(f"❌ Failed to load content for file {file_metadata.get('original_filename', 'Unknown')}: {str(e)}")
+                # Add file without content
+                files_with_content.append(file_metadata)
+        
+        logger.info(f"📁 Loaded {len(files_with_content)} files with content for context")
+        return files_with_content
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to load uploaded files from session: {str(e)}")
+        return []
+
+def handle_agent_file_return(connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle agent-generated file returns
+    
+    Args:
+        connection_id: WebSocket connection ID
+        user_id: User ID
+        session_id: Session ID
+        message_data: Message data containing file information
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        if not FILE_UPLOAD_AVAILABLE:
+            logger.error("❌ File upload handler not available")
+            return {
+                'statusCode': 500,
+                'body': json_dumps_safe({'error': 'File upload handler not available'})
+            }
+        
+        # Extract file data from message
+        file_data = message_data.get('file', {})
+        filename = file_data.get('filename', 'agent_generated_file')
+        content_type = file_data.get('content_type', 'text/plain')
+        file_content = file_data.get('content', '')
+        file_description = file_data.get('description', 'Generated by AI agent')
+        
+        # Convert content to bytes if it's a string
+        if isinstance(file_content, str):
+            file_content = file_content.encode('utf-8')
+        
+        # Upload agent-generated file to S3
+        file_metadata = upload_agent_generated_file(
+            file_content=file_content,
+            filename=filename,
+            content_type=content_type,
+            user_id=user_id,
+            session_id=session_id,
+            file_description=file_description
+        )
+        
+        # Store file metadata in session
+        store_agent_file_in_session(user_id, session_id, file_metadata)
+        
+        # Send success response to client
+        success_message = {
+            'type': 'agent_file_return_success',
+            'file': file_metadata,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        send_message_to_client(connection_id, success_message)
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({'message': 'Agent file uploaded successfully', 'file': file_metadata})
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error handling agent file return: {str(e)}")
+        
+        # Send error response to client
+        error_message = {
+            'type': 'agent_file_return_error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        send_message_to_client(connection_id, error_message)
+        
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': 'Failed to process agent file return'})
         }
