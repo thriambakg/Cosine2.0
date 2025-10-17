@@ -488,6 +488,12 @@ export default function ChatPage() {
           const data: WebSocketMessage = JSON.parse(event.data);
           console.log('📨 Received WebSocket message:', data);
           handleWebSocketMessage(data);
+          
+          // Dispatch WebSocket message as custom event for sidebar to listen
+          const websocketEvent = new CustomEvent('websocket-message', {
+            detail: data
+          });
+          window.dispatchEvent(websocketEvent);
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
         }
@@ -788,7 +794,8 @@ export default function ChatPage() {
           id: messageData.messageId,
           text: messageData.message,
           sender: 'user',
-          timestamp: new Date(messageData.timestamp),
+          timestamp: new Date(messageData.timestamp || Date.now()),
+          files: messageData.files || undefined, // Include file attachments if present
         };
         addPersistedMessage(userMessage);
         console.log('✅ Added sidebar message to ChatPage UI');
@@ -808,9 +815,36 @@ export default function ChatPage() {
           setSelectedModel(messageData.model);
         }
         
-        // Don't re-send the message - sidebar already sent it via WebSocket
-        // ChatPage just mirrors the UI state
-        console.log('📋 ChatPage mirrored sidebar message (sidebar already sent via WebSocket)');
+        // Handle file messages vs regular messages differently
+        if (messageData.files && messageData.files.length > 0) {
+          // File message - route to File Handler (like ChatPage does)
+          console.log('📁 ChatPage routing sidebar file message to File Handler');
+          // The sidebar already sent it to File Handler, so we just need to wait for WebSocket responses
+        } else {
+          // Regular message - send via WebSocket
+          if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+            const messagePayload = {
+              action: 'chat',
+              type: 'chat_message',
+              message: messageData.message,
+              userId: messageData.userId,
+              sessionId: messageData.sessionId,
+              model: messageData.model,
+              files: [],
+              messageId: messageData.messageId,
+              // Include context if present
+              ...(messageData.contextItems && messageData.contextItems.length > 0 && {
+                contextItems: messageData.contextItems,
+                context: messageData.context
+              })
+            };
+            
+            websocketRef.current.send(JSON.stringify(messagePayload));
+            console.log('📤 ChatPage sent sidebar regular message via WebSocket');
+          } else {
+            console.error('❌ WebSocket not connected, cannot send sidebar message');
+          }
+        }
       }
     };
     

@@ -479,6 +479,7 @@ const GlobalChatSidebar: React.FC = () => {
           sender: msg.sender,
           text: msg.text,
           timestamp: msg.timestamp || Date.now(),
+          files: msg.files || undefined, // Preserve file attachments
         }));
         setMessages(loadedMessages);
 
@@ -939,7 +940,7 @@ const GlobalChatSidebar: React.FC = () => {
     };
   }, [isVisible, activeSessionId]);
 
-  // Listen for WebSocket messages
+  // Listen for WebSocket messages from ChatPage
   useEffect(() => {
     if (!isVisible) return;
 
@@ -1185,7 +1186,7 @@ const GlobalChatSidebar: React.FC = () => {
         }))
       };
 
-      // Add user message to sidebar immediately (without files - they'll be added via WebSocket)
+      // Add user message to sidebar immediately (with files for immediate display)
       setMessages(prev => [
         ...prev,
         {
@@ -1193,7 +1194,12 @@ const GlobalChatSidebar: React.FC = () => {
           sender: 'user',
           text: userMessage,
           timestamp: Date.now(),
-          status: 'sending'
+          status: 'sending',
+          files: uploadedFiles.map(file => ({
+            name: file.name,
+            size: file.size,
+            type: file.type
+          }))
         }
       ]);
 
@@ -1208,8 +1214,34 @@ const GlobalChatSidebar: React.FC = () => {
         await (sendMessageWithFilesToFileHandler as any)(userMessageWithFiles, uploadedFiles, sessionId, user.id);
         console.log('✅ Sidebar: Message with files sent to File Handler');
         
-        // Note: No need to dispatch event to ChatPage for file messages
-        // The File Handler will send WebSocket messages that both components will receive
+        // Clear uploaded files after sending (like ChatPage)
+        setUploadedFiles([]);
+        
+        // Dispatch file message to ChatPage so it can add it to UI immediately
+        const fileMessageEvent = new CustomEvent('sidebar-send-message', {
+          detail: {
+            message: userMessage,
+            userId: user.id,
+            sessionId: sessionId,
+            model: selectedModel,
+            messageId: messageId,
+            timestamp: Date.now(),
+            files: uploadedFiles.map(file => ({
+              name: file.name,
+              size: file.size,
+              type: file.type
+            })),
+            contextItems: sessionContext.length > 0 ? sessionContext : undefined,
+            context: sessionContext.length > 0 ? {
+              currentPage: window.location.pathname,
+              sessionId: sessionId,
+              hasContext: true,
+              contextCount: sessionContext.length
+            } : undefined
+          }
+        });
+        window.dispatchEvent(fileMessageEvent);
+        console.log('📡 Sidebar dispatched file message to ChatPage');
       } catch (error) {
         console.error('❌ Sidebar: Failed to send message with files:', error);
         setIsLoadingMessage(false);
@@ -1230,60 +1262,33 @@ const GlobalChatSidebar: React.FC = () => {
       ]);
 
       setInputMessage('');
+      setUploadedFiles([]); // Clear uploaded files for regular messages too
       setIsLoadingMessage(true);
 
-      // Ensure WebSocket is connected for this session
-      if (!isConnected && sessionId) {
-        console.log('🔌 WebSocket not connected, connecting to session:', sessionId);
-        connectWebSocket(sessionId);
-        // Wait a moment for connection
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
+      // Note: Sidebar uses ChatPage's WebSocket connection, no need to connect separately
 
-      // Send message directly via WebSocket
-      const messagePayload = {
-        action: 'chat',
-        type: 'chat_message',
-        message: userMessage,
-        userId: user.id,
-        sessionId: sessionId,
-        model: selectedModel,
-        files: [],
-        messageId: messageId,
-        // Include context if present
-        ...(sessionContext.length > 0 && {
-          contextItems: sessionContext,
-          context: {
+      // Dispatch message to ChatPage to send via its WebSocket connection
+      const messageEvent = new CustomEvent('sidebar-send-message', {
+        detail: {
+          message: userMessage,
+          userId: user.id,
+          sessionId: sessionId,
+          model: selectedModel,
+          messageId: messageId,
+          timestamp: Date.now(),
+          contextItems: sessionContext.length > 0 ? sessionContext : undefined,
+          context: sessionContext.length > 0 ? {
             currentPage: window.location.pathname,
             sessionId: sessionId,
             hasContext: true,
-            contextItemCount: sessionContext.length,
-          }
-        }),
-      };
-      
-      const sent = sendMessage(messagePayload);
-      if (sent) {
-        console.log('✅ Sent message via WebSocket with model:', selectedModel, 'Message:', userMessage.substring(0, 50));
-        
-        // Also dispatch event for ChatPage to mirror if it's open
-        const sidebarMessageEvent = new CustomEvent('sidebar-send-message', {
-          detail: {
-            message: userMessage,
-            sessionId: sessionId,
-            model: selectedModel,
-            userId: user.id,
-            messageId: messageId,
-            timestamp: Date.now()
-          }
-        });
-        window.dispatchEvent(sidebarMessageEvent);
-      } else {
-        console.error('❌ Failed to send message via WebSocket');
-        setIsLoadingMessage(false);
-      }
+            contextCount: sessionContext.length
+          } : undefined
+        }
+      });
+      window.dispatchEvent(messageEvent);
+      console.log('📡 Sidebar dispatched message to ChatPage for sending');
     }
-  }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId, connectWebSocket, sendMessage, isConnected, uploadedFiles, sessionContext]);
+  }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId, uploadedFiles, sessionContext]);
 
   const handleKeyPress = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -1766,20 +1771,18 @@ const GlobalChatSidebar: React.FC = () => {
                             alignItems: 'center',
                             gap: 1,
                             p: 1,
-                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                            borderRadius: 1,
-                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                            borderRadius: '4px',
+                            border: '1px solid #374151',
                           }}
                         >
-                          <FileIcon sx={{ color: '#22c55e', fontSize: '1rem' }} />
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Typography variant="caption" sx={{ color: '#ffffff', fontWeight: 600, display: 'block' }}>
-                              {file.name}
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.65rem' }}>
-                              {(file.size / 1024).toFixed(1)} KB
-                            </Typography>
-                          </Box>
+                          <FileIcon sx={{ color: '#22c55e' }} />
+                          <Typography variant="body2" color="white">
+                            {file.name}
+                          </Typography>
+                          <Typography variant="caption" color="#9ca3af">
+                            ({(file.size / 1024).toFixed(1)} KB)
+                          </Typography>
                         </Box>
                       ))}
                     </Box>
@@ -1844,6 +1847,58 @@ const GlobalChatSidebar: React.FC = () => {
           backgroundColor: 'rgba(15, 23, 42, 0.95)',
         }}
       >
+        {/* Show file processing indicator */}
+        {isProcessingFiles && (
+          <Box sx={{ mb: 1, p: 1, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: 1, border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={16} sx={{ color: '#3b82f6' }} />
+              <Typography variant="caption" sx={{ color: '#3b82f6', fontWeight: 600 }}>
+                Processing files...
+              </Typography>
+            </Box>
+          </Box>
+        )}
+
+        {/* Show uploaded files - positioned above model selector */}
+        {uploadedFiles.length > 0 && (
+          <Box sx={{ mb: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+            {uploadedFiles.map((file, index) => (
+              <Box 
+                key={index} 
+                sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: 0.5,
+                  px: 1,
+                  py: 0.5,
+                  backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                  borderRadius: '12px',
+                  border: '1px solid #374151',
+                }}
+              >
+                <FileIcon sx={{ color: '#22c55e', fontSize: '0.875rem' }} />
+                <Typography variant="caption" color="white" sx={{ fontSize: '0.75rem' }}>
+                  {file.name}
+                </Typography>
+                <IconButton
+                  size="small"
+                  onClick={() => setUploadedFiles(prev => prev.filter((_, i) => i !== index))}
+                  sx={{ 
+                    color: '#9ca3af', 
+                    '&:hover': { color: '#ef4444' }, 
+                    p: 0.25,
+                    minWidth: 'auto',
+                    width: '16px',
+                    height: '16px'
+                  }}
+                >
+                  <CloseIcon sx={{ fontSize: '0.75rem' }} />
+                </IconButton>
+              </Box>
+            ))}
+          </Box>
+        )}
+
         {/* Model Selection */}
         <FormControl fullWidth size="small" sx={{ mb: 1 }}>
           <Select
@@ -1948,44 +2003,6 @@ const GlobalChatSidebar: React.FC = () => {
           </IconButton>
         </Box>
 
-        {/* Show file processing indicator */}
-        {isProcessingFiles && (
-          <Box sx={{ mt: 1, p: 1, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: 1, border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <CircularProgress size={16} sx={{ color: '#3b82f6' }} />
-              <Typography variant="caption" sx={{ color: '#3b82f6', fontWeight: 600 }}>
-                Processing files...
-              </Typography>
-            </Box>
-          </Box>
-        )}
-
-        {/* Show uploaded files */}
-        {uploadedFiles.length > 0 && (
-          <Box sx={{ mt: 1, p: 1, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: 1, border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-            <Typography variant="caption" sx={{ color: '#3b82f6', fontWeight: 600, display: 'block', mb: 0.5 }}>
-              Files to upload ({uploadedFiles.length}):
-            </Typography>
-            {uploadedFiles.map((file, index) => (
-              <Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <FileIcon sx={{ color: '#22c55e', fontSize: '1rem' }} />
-                <Typography variant="caption" sx={{ color: '#ffffff', flex: 1 }}>
-                  {file.name}
-                </Typography>
-                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                  ({(file.size / 1024).toFixed(1)} KB)
-                </Typography>
-                <IconButton
-                  size="small"
-                  onClick={() => setUploadedFiles(prev => prev.filter((_, i) => i !== index))}
-                  sx={{ color: '#dc2626', '&:hover': { color: '#ef4444' } }}
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </Box>
-            ))}
-          </Box>
-        )}
       </Box>
     </Box>
   );
