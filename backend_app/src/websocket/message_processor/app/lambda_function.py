@@ -927,11 +927,12 @@ def get_active_connections_for_user_session(user_id: str, session_id: str) -> Li
         List of active connection IDs
     """
     try:
-        # Query the connections table for active connections
+        # Query the connections table for active connections using the UserConnectionsIndex
+        # Then filter by session_id in the application
         response = chat_connections_table.query(
-            IndexName='user_id-session_id-index',  # Assuming this GSI exists
-            KeyConditionExpression=Key('user_id').eq(user_id) & Key('session_id').eq(session_id),
-            FilterExpression=Attr('connection_status').eq('active')
+            IndexName='UserConnectionsIndex',
+            KeyConditionExpression=Key('user_id').eq(user_id),
+            FilterExpression=Attr('session_id').eq(session_id) & Attr('connection_status').eq('active')
         )
         
         connection_ids = [item['connection_id'] for item in response['Items']]
