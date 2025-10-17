@@ -995,6 +995,27 @@ def handle_file_handler_message(event):
         
         logger.info(f"Processing File Handler message: user={user_id}, session={session_id}, context_items={len(context_items)}, uploaded_files={len(uploaded_files)}")
         
+        # CRITICAL: Update any active connections with the session_id
+        # This ensures that get_active_connections_for_user_session can find them
+        try:
+            # Find all active connections for this user (regardless of session_id)
+            current_time = int(datetime.now().timestamp())
+            all_connections_response = chat_connections_table.query(
+                IndexName='UserConnectionsIndex',
+                KeyConditionExpression=Key('user_id').eq(user_id),
+                FilterExpression=Attr('expires_at').gt(current_time)
+            )
+            
+            # Update each connection with the session_id
+            for conn in all_connections_response['Items']:
+                connection_id = conn['connection_id']
+                logger.info(f"🔗 Updating connection {connection_id} with session_id {session_id}")
+                update_connection_session(connection_id, session_id)
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to update connections with session_id: {str(e)}")
+            # Continue processing even if connection update fails
+        
         # Convert uploaded files to context items format for consistency
         all_context_items = list(context_items)
         
