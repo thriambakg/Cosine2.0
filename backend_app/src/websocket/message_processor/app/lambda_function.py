@@ -928,11 +928,30 @@ def get_active_connections_for_user_session(user_id: str, session_id: str) -> Li
     """
     try:
         # Query the connections table for active connections using the UserConnectionsIndex
-        # Then filter by session_id in the application
+        # Filter by session_id and check if connection is still active (not expired)
+        current_time = int(datetime.now().timestamp())
+        
+        logger.info(f"🔍 DEBUG: Looking for connections for user {user_id}, session {session_id}")
+        logger.info(f"🔍 DEBUG: Current time: {current_time}")
+        
+        # First, let's see all connections for this user
+        all_connections_response = chat_connections_table.query(
+            IndexName='UserConnectionsIndex',
+            KeyConditionExpression=Key('user_id').eq(user_id)
+        )
+        
+        logger.info(f"🔍 DEBUG: Found {len(all_connections_response['Items'])} total connections for user {user_id}")
+        for conn in all_connections_response['Items']:
+            conn_session_id = conn.get('session_id', 'NO_SESSION_ID')
+            expires_at = conn.get('expires_at', 0)
+            is_expired = expires_at <= current_time
+            logger.info(f"🔍 DEBUG: Connection {conn['connection_id']}: session_id={conn_session_id}, expires_at={expires_at}, is_expired={is_expired}")
+        
+        # Now filter by session_id and expiration
         response = chat_connections_table.query(
             IndexName='UserConnectionsIndex',
             KeyConditionExpression=Key('user_id').eq(user_id),
-            FilterExpression=Attr('session_id').eq(session_id) & Attr('connection_status').eq('active')
+            FilterExpression=Attr('session_id').eq(session_id) & Attr('expires_at').gt(current_time)
         )
         
         connection_ids = [item['connection_id'] for item in response['Items']]
