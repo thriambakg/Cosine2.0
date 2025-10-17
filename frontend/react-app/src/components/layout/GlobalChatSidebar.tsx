@@ -4,10 +4,9 @@ import {
   Typography,
   IconButton,
   TextField,
-  CircularProgress,
-  Chip,
-  InputAdornment,
-  FormControl,
+    CircularProgress,
+    Chip,
+    FormControl,
   Select,
   MenuItem,
   SelectChangeEvent,
@@ -25,6 +24,8 @@ import {
   ExpandLess as ExpandLessIcon,
   ExpandMore as ExpandMoreIcon,
   Edit as EditIcon,
+  AttachFile as AttachFileIcon,
+  InsertDriveFile as FileIcon,
 } from '@mui/icons-material';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -37,6 +38,22 @@ interface Message {
   sender: 'user' | 'ai';
   text: string;
   timestamp: number;
+  status?: 'sending' | 'sent' | 'error';
+  files?: Array<{
+    name: string;
+    size: number;
+    type: string;
+  }>;
+}
+
+interface UploadedFile {
+  id?: number;
+  name: string;
+  size: number;
+  type: string;
+  compressedData?: string;
+  compressedSize?: number;
+  compressionRatio?: number;
 }
 
 interface ChatSession {
@@ -70,6 +87,11 @@ const GlobalChatSidebar: React.FC = () => {
   const [isFilesExpanded, setIsFilesExpanded] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   
+  // File upload state
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   // Message editing state
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
@@ -93,6 +115,14 @@ const GlobalChatSidebar: React.FC = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Debug uploaded files changes
+  useEffect(() => {
+    console.log(`📁 Sidebar: uploadedFiles state changed:`, uploadedFiles.length, 'files');
+    if (uploadedFiles.length > 0) {
+      console.log(`📁 Sidebar: Files in state:`, uploadedFiles.map(f => f.name));
+    }
+  }, [uploadedFiles]);
 
   // Typewriter effect for AI responses (same speed as ChatPage)
   const typewriterEffect = (messageId: string, fullText: string, speed: number = 2) => {
@@ -227,6 +257,201 @@ const GlobalChatSidebar: React.FC = () => {
     setEditingMessage(null);
     setEditingMessageIndex(null);
     setEditText('');
+  };
+
+  // File upload handlers (same as ChatPage)
+  const convertUint8ArrayToBase64 = (uint8Array: Uint8Array): string => {
+    const chunkSize = 8192;
+    let binary = '';
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.slice(i, i + chunkSize);
+      binary += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    return btoa(binary);
+  };
+
+  const compressFile = (file: File): Promise<{ compressedData: string; originalSize: number; compressedSize: number }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const arrayBuffer = e.target?.result as ArrayBuffer;
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          // For small files (< 1MB), skip compression to speed up processing
+          if (file.size < 1024 * 1024) {
+            console.log(`⚡ Skipping compression for small file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+            // Use chunked base64 conversion to avoid stack overflow
+            const base64Data = convertUint8ArrayToBase64(uint8Array);
+            resolve({
+              compressedData: base64Data,
+              originalSize: file.size,
+              compressedSize: file.size
+            });
+            return;
+          }
+          
+          // For larger files, use CompressionStream with timeout
+          const startTime = Date.now();
+          console.log(`🔄 Starting compression for ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+          
+          const stream = new CompressionStream('gzip');
+          const writer = stream.writable.getWriter();
+          const reader_stream = stream.readable.getReader();
+          
+          // Write data in larger chunks for better performance
+          const chunkSize = 256 * 1024; // 256KB chunks
+          for (let i = 0; i < uint8Array.length; i += chunkSize) {
+            const chunk = uint8Array.slice(i, i + chunkSize);
+            await writer.write(chunk);
+          }
+          await writer.close();
+          
+          // Read compressed data with timeout
+          const chunks: Uint8Array[] = [];
+          let done = false;
+          const timeout = setTimeout(() => {
+            console.warn(`⚠️ Compression timeout for ${file.name}, falling back to uncompressed`);
+            // Fallback to uncompressed data
+            const base64Data = btoa(String.fromCharCode.apply(null, Array.from(uint8Array)));
+            resolve({
+              compressedData: base64Data,
+              originalSize: file.size,
+              compressedSize: file.size
+            });
+          }, 5000); // 5 second timeout
+          
+          while (!done) {
+            const { value, done: readerDone } = await reader_stream.read();
+            done = readerDone;
+            if (value) {
+              chunks.push(value);
+            }
+          }
+          
+          clearTimeout(timeout);
+          
+          // Combine chunks efficiently
+          const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+          const compressedData = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of chunks) {
+            compressedData.set(chunk, offset);
+            offset += chunk.length;
+          }
+          
+          // Optimized base64 conversion
+          const compressedBase64 = convertUint8ArrayToBase64(compressedData);
+          
+          const compressionTime = Date.now() - startTime;
+          console.log(`✅ Compression completed for ${file.name} in ${compressionTime}ms`);
+          
+          resolve({
+            compressedData: compressedBase64,
+            originalSize: file.size,
+            compressedSize: compressedData.length
+          });
+        } catch (error) {
+          console.error(`❌ Compression failed for ${file.name}, using uncompressed data:`, error);
+          // Fallback to uncompressed data
+          const arrayBuffer = e.target?.result as ArrayBuffer;
+          const uint8Array = new Uint8Array(arrayBuffer);
+          const base64Data = convertUint8ArrayToBase64(uint8Array);
+          resolve({
+            compressedData: base64Data,
+            originalSize: file.size,
+            compressedSize: file.size
+          });
+        }
+      };
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsArrayBuffer(file);
+    });
+  };
+
+  const handleFileUpload = async (files: FileList) => {
+    const maxFileSize = 50 * 1024 * 1024; // 50MB limit
+    const allowedTypes = [
+      // Images
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+      // Documents
+      'application/pdf', 'text/plain', 'text/csv',
+      // Data formats
+      'application/json', 'application/ld+json', 'application/xml', 'text/xml',
+      // Office documents
+      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      // Data analysis formats
+      'application/vnd.ms-excel.sheet.macroEnabled.12', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/csv', 'application/csv', 'text/tab-separated-values',
+      // Archive formats
+      'application/zip', 'application/x-zip-compressed', 'application/x-rar-compressed',
+      // Financial data formats
+      'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.text',
+      // Additional text formats
+      'text/html', 'text/css', 'text/javascript', 'application/javascript',
+      // Database exports
+      'application/sql', 'text/sql'
+    ];
+    
+    console.log(`📁 Sidebar: User selected ${files.length} file(s) for upload`);
+    setIsProcessingFiles(true);
+    
+    try {
+      for (const file of Array.from(files)) {
+        console.log(`📁 Sidebar: Processing file: ${file.name} (${file.type}, ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+        
+        // Validate file size
+        if (file.size > maxFileSize) {
+          console.error(`❌ File ${file.name} is too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max: 50 MB)`);
+          alert(`File ${file.name} is too large. Maximum size is 50MB.`);
+          continue;
+        }
+        
+        // Validate file type
+        if (!allowedTypes.includes(file.type)) {
+          console.error(`❌ Unsupported file type: ${file.type} for ${file.name}`);
+          alert(`File type ${file.type} is not supported.`);
+          continue;
+        }
+        
+        try {
+          console.log(`🔄 Sidebar: Compressing file: ${file.name}`);
+          // Compress the file
+          const { compressedData, originalSize, compressedSize } = await compressFile(file);
+          
+          const compressionRatio = compressedSize / originalSize;
+          console.log(`📦 Sidebar: File compression: ${file.name} - ${originalSize} -> ${compressedSize} bytes (${(compressionRatio * 100).toFixed(1)}%)`);
+          
+          const uploadedFile = {
+            id: Date.now() + Math.random(),
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            compressedData,
+            compressedSize,
+            compressionRatio
+          };
+          
+          setUploadedFiles(prev => {
+            const newFiles = [...prev, uploadedFile];
+            console.log(`✅ Sidebar: File added to upload queue: ${file.name}. Total files: ${newFiles.length}`);
+            return newFiles;
+          });
+        } catch (error) {
+          console.error(`❌ Sidebar: Error processing file ${file.name}:`, error);
+          alert(`Error processing file ${file.name}. Please try again.`);
+        }
+      }
+    } finally {
+      setIsProcessingFiles(false);
+      // Use a timeout to ensure state has updated
+      setTimeout(() => {
+        console.log(`📁 Sidebar: File processing complete. Total uploaded files: ${uploadedFiles.length}`);
+        console.log(`📁 Sidebar: Current uploadedFiles state:`, uploadedFiles);
+      }, 100);
+    }
   };
 
   // Load session from database
@@ -436,8 +661,9 @@ const GlobalChatSidebar: React.FC = () => {
     const handleSessionVariablesUpdate = (event: CustomEvent) => {
       const { sessionId, sessionVariables } = event.detail;
       console.log('📁 GlobalChatSidebar: Session variables updated:', sessionId, sessionVariables);
+      console.log('📁 Sidebar: Uploaded files count:', sessionVariables?.uploaded_files?.length || 0);
       
-      if (sessionId === activeSessionId && currentSession) {
+      if (sessionId === activeSessionId) {
         // Update current session with new session variables
         setCurrentSession(prev => prev ? {
           ...prev,
@@ -445,6 +671,7 @@ const GlobalChatSidebar: React.FC = () => {
         } : null);
         
         console.log('✅ Updated sidebar session variables in real-time');
+        console.log('📁 Sidebar: Files section should now show', sessionVariables?.uploaded_files?.length || 0, 'files');
       }
     };
 
@@ -453,7 +680,7 @@ const GlobalChatSidebar: React.FC = () => {
     return () => {
       window.removeEventListener('session-variables-updated', handleSessionVariablesUpdate as EventListener);
     };
-  }, [isVisible, activeSessionId, currentSession]);
+  }, [isVisible, activeSessionId]);
 
   // Handle context sessions from global handler
   useEffect(() => {
@@ -684,6 +911,34 @@ const GlobalChatSidebar: React.FC = () => {
     };
   }, [activeSessionId]);
 
+  // Handle session variables updates (e.g., new files uploaded)
+  useEffect(() => {
+    if (!isVisible) return;
+
+    const handleSessionVariablesUpdate = (event: CustomEvent) => {
+      const { sessionId, sessionVariables } = event.detail;
+      console.log('📁 GlobalChatSidebar: Session variables updated:', sessionId, sessionVariables);
+      console.log('📁 Sidebar: Uploaded files count:', sessionVariables?.uploaded_files?.length || 0);
+      
+      if (sessionId === activeSessionId) {
+        // Update current session with new session variables
+        setCurrentSession(prev => prev ? {
+          ...prev,
+          session_variables: sessionVariables
+        } : null);
+        
+        console.log('✅ Updated sidebar session variables in real-time');
+        console.log('📁 Sidebar: Files section should now show', sessionVariables?.uploaded_files?.length || 0, 'files');
+      }
+    };
+
+    window.addEventListener('session-variables-updated', handleSessionVariablesUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener('session-variables-updated', handleSessionVariablesUpdate as EventListener);
+    };
+  }, [isVisible, activeSessionId]);
+
   // Listen for WebSocket messages
   useEffect(() => {
     if (!isVisible) return;
@@ -778,6 +1033,46 @@ const GlobalChatSidebar: React.FC = () => {
           }
           break;
           
+        case 'user_message_with_files':
+          // Handle user message with files from File Handler
+          if (data.session_id && data.session_id === activeSessionId) {
+            console.log('📁 Sidebar: User message with files received:', data.message_id, data.files);
+            
+            // Update the existing user message with file information
+            if (data.message_id && data.files) {
+              setMessages(prev => prev.map(msg => 
+                msg.id === data.message_id 
+                  ? { ...msg, files: data.files, status: 'sent' }
+                  : msg
+              ));
+              
+              // Clear uploaded files after successful processing
+              setUploadedFiles([]);
+              
+              console.log('✅ Sidebar: Updated user message with files in real-time');
+            }
+          }
+          break;
+          
+        case 'session_updated':
+          // Handle session variables updates (e.g., new files uploaded)
+          if (data.session_id && data.session_id === activeSessionId) {
+            console.log('📁 Sidebar: Session variables updated:', data.session_variables);
+            console.log('📁 Sidebar: Uploaded files count:', data.session_variables?.uploaded_files?.length || 0);
+            
+            // Update current session with new session variables
+            if (data.session_variables) {
+              setCurrentSession(prev => prev ? {
+                ...prev,
+                session_variables: data.session_variables
+              } : null);
+              
+              console.log('✅ Sidebar: Updated session variables in real-time');
+              console.log('📁 Sidebar: Files section should now show', data.session_variables?.uploaded_files?.length || 0, 'files');
+            }
+          }
+          break;
+          
         case 'error':
           console.error('❌ WebSocket error:', data.message);
           setIsLoadingMessage(false);
@@ -792,9 +1087,49 @@ const GlobalChatSidebar: React.FC = () => {
     };
   }, [isVisible, activeSessionId, typewriterEffect, user?.id]);
 
-  // Send message - uses WebSocket directly
+  // Send message with files to File Handler (same as ChatPage)
+  const sendMessageWithFilesToFileHandler = async (message: any, files: any[], sessionId: string, userId: string) => {
+    try {
+      const filesData = files.map(file => ({
+        filename: file.name,
+        content_type: file.type,
+        data: file.compressedData // Already base64 encoded from compression
+      }));
+
+      const response = await fetch(`${process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'}/files`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          session_id: sessionId,
+          message: {
+            id: message.id,
+            text: message.text,
+            timestamp: message.timestamp
+          },
+          files: filesData,
+          context_items: sessionContext // Include existing context
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('📁 Sidebar: Message with files sent to File Handler:', result);
+      return result;
+    } catch (error) {
+      console.error('❌ Sidebar: Error sending message with files to File Handler:', error);
+      throw error;
+    }
+  };
+
+  // Send message - uses WebSocket directly or File Handler for files
   const handleSendMessage = useCallback(async () => {
-    if (!inputMessage.trim() || !user?.id) return;
+    if ((!inputMessage.trim() && uploadedFiles.length === 0) || !user?.id) return;
 
     const userMessage = inputMessage.trim();
     let sessionId = activeSessionId;
@@ -834,71 +1169,121 @@ const GlobalChatSidebar: React.FC = () => {
 
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Add user message to sidebar immediately
-    setMessages(prev => [
-      ...prev,
-      {
+    // Check if we have files to upload
+    if (uploadedFiles.length > 0) {
+      console.log('📁 Sidebar: Sending message with files:', uploadedFiles.length);
+      
+      // Create user message with files
+      const userMessageWithFiles = {
         id: messageId,
-        sender: 'user',
         text: userMessage,
         timestamp: Date.now(),
+        files: uploadedFiles.map(file => ({
+          name: file.name,
+          size: file.size,
+          type: file.type
+        }))
+      };
+
+      // Add user message to sidebar immediately (without files - they'll be added via WebSocket)
+      setMessages(prev => [
+        ...prev,
+        {
+          id: messageId,
+          sender: 'user',
+          text: userMessage,
+          timestamp: Date.now(),
+          status: 'sending'
+        }
+      ]);
+
+      setInputMessage('');
+      setIsLoadingMessage(true);
+
+      try {
+        // Send to File Handler
+        if (!user?.id) {
+          throw new Error('User ID is required for file upload');
+        }
+        await (sendMessageWithFilesToFileHandler as any)(userMessageWithFiles, uploadedFiles, sessionId, user.id);
+        console.log('✅ Sidebar: Message with files sent to File Handler');
+        
+        // Note: No need to dispatch event to ChatPage for file messages
+        // The File Handler will send WebSocket messages that both components will receive
+      } catch (error) {
+        console.error('❌ Sidebar: Failed to send message with files:', error);
+        setIsLoadingMessage(false);
       }
-    ]);
-
-    setInputMessage('');
-    setIsLoadingMessage(true);
-
-    // Ensure WebSocket is connected for this session
-    if (!isConnected && sessionId) {
-      console.log('🔌 WebSocket not connected, connecting to session:', sessionId);
-      connectWebSocket(sessionId);
-      // Wait a moment for connection
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    // Send message directly via WebSocket
-    const messagePayload = {
-      action: 'chat',
-      type: 'chat_message',
-      message: userMessage,
-      userId: user.id,
-      sessionId: sessionId,
-      model: selectedModel,
-      files: [],
-      messageId: messageId,
-      // Include context if present
-      ...(sessionContext.length > 0 && {
-        contextItems: sessionContext,
-        context: {
-          currentPage: window.location.pathname,
-          sessionId: sessionId,
-          hasContext: true,
-          contextItemCount: sessionContext.length,
-        }
-      }),
-    };
-    
-    const sent = sendMessage(messagePayload);
-    if (sent) {
-      console.log('✅ Sent message via WebSocket with model:', selectedModel, 'Message:', userMessage.substring(0, 50));
-      
-      // Also dispatch event for ChatPage to mirror if it's open
-      const sidebarMessageEvent = new CustomEvent('sidebar-send-message', {
-        detail: {
-          message: userMessage,
-          sessionId: sessionId,
-          model: selectedModel,
-          userId: user.id,
-          messageId: messageId,
-          timestamp: Date.now()
-        }
-      });
-      window.dispatchEvent(sidebarMessageEvent);
     } else {
-      console.error('❌ Failed to send message via WebSocket');
-      setIsLoadingMessage(false);
+      // Regular message without files - use WebSocket
+      console.log('📤 Sidebar: Sending regular message via WebSocket');
+      
+      // Add user message to sidebar immediately
+      setMessages(prev => [
+        ...prev,
+        {
+          id: messageId,
+          sender: 'user',
+          text: userMessage,
+          timestamp: Date.now(),
+        }
+      ]);
+
+      setInputMessage('');
+      setIsLoadingMessage(true);
+
+      // Ensure WebSocket is connected for this session
+      if (!isConnected && sessionId) {
+        console.log('🔌 WebSocket not connected, connecting to session:', sessionId);
+        connectWebSocket(sessionId);
+        // Wait a moment for connection
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Send message directly via WebSocket
+      const messagePayload = {
+        action: 'chat',
+        type: 'chat_message',
+        message: userMessage,
+        userId: user.id,
+        sessionId: sessionId,
+        model: selectedModel,
+        files: [],
+        messageId: messageId,
+        // Include context if present
+        ...(sessionContext.length > 0 && {
+          contextItems: sessionContext,
+          context: {
+            currentPage: window.location.pathname,
+            sessionId: sessionId,
+            hasContext: true,
+            contextItemCount: sessionContext.length,
+          }
+        }),
+      };
+      
+      const sent = sendMessage(messagePayload);
+      if (sent) {
+        console.log('✅ Sent message via WebSocket with model:', selectedModel, 'Message:', userMessage.substring(0, 50));
+        
+        // Also dispatch event for ChatPage to mirror if it's open
+        const sidebarMessageEvent = new CustomEvent('sidebar-send-message', {
+          detail: {
+            message: userMessage,
+            sessionId: sessionId,
+            model: selectedModel,
+            userId: user.id,
+            messageId: messageId,
+            timestamp: Date.now()
+          }
+        });
+        window.dispatchEvent(sidebarMessageEvent);
+      } else {
+        console.error('❌ Failed to send message via WebSocket');
+        setIsLoadingMessage(false);
+      }
     }
-  }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId, connectWebSocket, sendMessage, isConnected]);
+  }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId, connectWebSocket, sendMessage, isConnected, uploadedFiles, sessionContext]);
 
   const handleKeyPress = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -1158,7 +1543,7 @@ const GlobalChatSidebar: React.FC = () => {
                       size="small"
                       className="remove-file-btn"
                       onClick={async () => {
-                        const newFiles = currentSession.session_variables.uploaded_files.filter((_: any, i: number) => i !== index);
+                        const newFiles = currentSession.session_variables?.uploaded_files?.filter((_: any, i: number) => i !== index) || [];
                         
                         // Update the local session state
                         const updatedSession = {
@@ -1340,35 +1725,66 @@ const GlobalChatSidebar: React.FC = () => {
                   </Box>
                 </Box>
               ) : (
-                <Typography
-                  variant="body2"
-                  sx={{
-                    color: '#ffffff',
-                    fontSize: '0.875rem',
-                    lineHeight: 1.4,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {message.text}
-                  {streamingMessageId === message.id && (
-                    <Box
-                      component="span"
-                      sx={{
-                        display: 'inline-block',
-                        width: '8px',
-                        height: '16px',
-                        backgroundColor: '#60a5fa',
-                        marginLeft: '2px',
-                        animation: 'blink 1s infinite',
-                        '@keyframes blink': {
-                          '0%, 50%': { opacity: 1 },
-                          '51%, 100%': { opacity: 0 },
-                        },
-                      }}
-                    />
+                <>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: '#ffffff',
+                      fontSize: '0.875rem',
+                      lineHeight: 1.4,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {message.text}
+                    {streamingMessageId === message.id && (
+                      <Box
+                        component="span"
+                        sx={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '16px',
+                          backgroundColor: '#60a5fa',
+                          marginLeft: '2px',
+                          animation: 'blink 1s infinite',
+                          '@keyframes blink': {
+                            '0%, 50%': { opacity: 1 },
+                            '51%, 100%': { opacity: 0 },
+                          },
+                        }}
+                      />
+                    )}
+                  </Typography>
+                  {/* File attachments */}
+                  {(message as any).files && (message as any).files.length > 0 && (
+                    <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      {(message as any).files.map((file: any, fileIndex: number) => (
+                        <Box
+                          key={fileIndex}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1,
+                            p: 1,
+                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                            borderRadius: 1,
+                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                          }}
+                        >
+                          <FileIcon sx={{ color: '#22c55e', fontSize: '1rem' }} />
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            <Typography variant="caption" sx={{ color: '#ffffff', fontWeight: 600, display: 'block' }}>
+                              {file.name}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.65rem' }}>
+                              {(file.size / 1024).toFixed(1)} KB
+                            </Typography>
+                          </Box>
+                        </Box>
+                      ))}
+                    </Box>
                   )}
-                </Typography>
+                </>
               )}
             </Box>
             
@@ -1459,56 +1875,117 @@ const GlobalChatSidebar: React.FC = () => {
           </Select>
         </FormControl>
 
-        {/* Message Input */}
-        <TextField
-          fullWidth
-          multiline
-          maxRows={4}
-          placeholder="Type your message..."
-          value={inputMessage}
-          onChange={(e) => setInputMessage(e.target.value)}
-          onKeyPress={handleKeyPress}
-          disabled={isLoadingMessage}
-          sx={{
-            '& .MuiOutlinedInput-root': {
-              backgroundColor: 'rgba(31, 41, 55, 0.8)',
-              border: '1px solid #374151',
-              borderRadius: 2,
-              '&:hover': {
-                borderColor: '#6b7280',
-              },
-              '&.Mui-focused': {
-                borderColor: '#3b82f6',
-              },
-            },
-            '& .MuiOutlinedInput-input': {
-              color: '#ffffff',
-              fontSize: '0.875rem',
-              '&::placeholder': {
+        {/* Input Area - Compact with Paperclip */}
+        <Box display="flex" alignItems="flex-end" gap={1}>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={(e) => handleFileUpload(e.target.files!)}
+            multiple
+            style={{ display: 'none' }}
+          />
+          <Tooltip title="Upload files">
+            <IconButton
+              onClick={() => fileInputRef.current?.click()}
+              sx={{
                 color: '#9ca3af',
-                opacity: 1,
+                '&:hover': {
+                  color: '#3b82f6',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+              }}
+            >
+              <AttachFileIcon />
+            </IconButton>
+          </Tooltip>
+          <TextField
+            fullWidth
+            multiline
+            maxRows={3}
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="Type your message..."
+            disabled={isLoadingMessage}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                backgroundColor: 'rgba(31, 41, 55, 0.8)',
+                border: '1px solid #374151',
+                borderRadius: 2,
+                '&:hover': {
+                  borderColor: '#6b7280',
+                },
+                '&.Mui-focused': {
+                  borderColor: '#3b82f6',
+                },
               },
-            },
-          }}
-          InputProps={{
-            endAdornment: (
-              <InputAdornment position="end">
+              '& .MuiOutlinedInput-input': {
+                color: '#ffffff',
+                fontSize: '0.875rem',
+                '&::placeholder': {
+                  color: '#9ca3af',
+                  opacity: 1,
+                },
+              },
+            }}
+          />
+          <IconButton
+            onClick={handleSendMessage}
+            disabled={isLoadingMessage || (!inputMessage.trim() && uploadedFiles.length === 0)}
+            sx={{
+              color: '#3b82f6',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              '&:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+              },
+              '&:disabled': {
+                color: '#6b7280',
+                backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              },
+            }}
+          >
+            <SendIcon />
+          </IconButton>
+        </Box>
+
+        {/* Show file processing indicator */}
+        {isProcessingFiles && (
+          <Box sx={{ mt: 1, p: 1, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: 1, border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size={16} sx={{ color: '#3b82f6' }} />
+              <Typography variant="caption" sx={{ color: '#3b82f6', fontWeight: 600 }}>
+                Processing files...
+              </Typography>
+            </Box>
+          </Box>
+        )}
+
+        {/* Show uploaded files */}
+        {uploadedFiles.length > 0 && (
+          <Box sx={{ mt: 1, p: 1, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: 1, border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+            <Typography variant="caption" sx={{ color: '#3b82f6', fontWeight: 600, display: 'block', mb: 0.5 }}>
+              Files to upload ({uploadedFiles.length}):
+            </Typography>
+            {uploadedFiles.map((file, index) => (
+              <Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                <FileIcon sx={{ color: '#22c55e', fontSize: '1rem' }} />
+                <Typography variant="caption" sx={{ color: '#ffffff', flex: 1 }}>
+                  {file.name}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  ({(file.size / 1024).toFixed(1)} KB)
+                </Typography>
                 <IconButton
-                  onClick={handleSendMessage}
-                  disabled={!inputMessage.trim() || isLoadingMessage}
-                  sx={{
-                    color: inputMessage.trim() ? '#3b82f6' : '#6b7280',
-                    '&:hover': {
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                  }}
+                  size="small"
+                  onClick={() => setUploadedFiles(prev => prev.filter((_, i) => i !== index))}
+                  sx={{ color: '#dc2626', '&:hover': { color: '#ef4444' } }}
                 >
-                  <SendIcon fontSize="small" />
+                  <DeleteIcon fontSize="small" />
                 </IconButton>
-              </InputAdornment>
-            ),
-          }}
-        />
+              </Box>
+            ))}
+          </Box>
+        )}
       </Box>
     </Box>
   );

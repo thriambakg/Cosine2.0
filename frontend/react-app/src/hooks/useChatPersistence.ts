@@ -858,7 +858,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
   }, [currentSession?.session_id]);
 
   const updateSessionVariables = useCallback((sessionId: string, sessionVariables: any) => {
-    console.log('📋 Updating session variables:', { sessionId, sessionVariables });
+    console.log('📋 Updating session variables:', { sessionId, fileCount: sessionVariables?.uploaded_files?.length || 0 });
     
     // Update sessions array
     setSessions(prev => {
@@ -867,7 +867,6 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
           ? { ...s, session_variables: sessionVariables }
           : s
       );
-      console.log('📋 Updated sessions array with new session variables');
       return updated;
     });
     

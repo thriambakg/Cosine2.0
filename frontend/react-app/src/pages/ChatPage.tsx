@@ -575,7 +575,7 @@ export default function ChatPage() {
       case 'session_updated':
         // Handle session variables updates (e.g., new files uploaded)
         if (data.session_id && currentSession?.session_id && data.session_id === currentSession.session_id) {
-          console.log('📁 Session variables updated:', data.session_variables);
+          console.log('📁 Session variables updated:', { fileCount: data.session_variables?.uploaded_files?.length || 0 });
           
           // Update current session with new session variables
           if (data.session_variables) {
@@ -590,6 +590,7 @@ export default function ChatPage() {
               }
             });
             window.dispatchEvent(sessionUpdateEvent);
+            console.log('📡 Dispatched session-variables-updated event to sidebar');
           }
         }
         break;
