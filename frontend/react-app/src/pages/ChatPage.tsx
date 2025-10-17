@@ -68,7 +68,7 @@ interface UploadedFile {
 }
 
 interface WebSocketMessage {
-  type: 'connection_established' | 'message_received' | 'ai_response' | 'error' | 'connection_establish' | 'edit_acknowledged' | 'session_updated';
+  type: 'connection_established' | 'message_received' | 'ai_response' | 'error' | 'connection_establish' | 'edit_acknowledged' | 'session_updated' | 'user_message_with_files';
   message_id?: string;
   session_id?: string;
   content?: string;
@@ -76,6 +76,11 @@ interface WebSocketMessage {
   timestamp?: string;
   unchanged?: boolean;
   session_variables?: any;
+  files?: Array<{
+    name: string;
+    size: number;
+    type: string;
+  }>;
 }
 
 
@@ -540,6 +545,31 @@ export default function ChatPage() {
       case 'message_received':
         // Message status tracking is handled by persistence system
         console.log('📨 Message received confirmation:', data.message_id);
+        break;
+
+      case 'user_message_with_files':
+        // Handle user message with files from File Handler
+        if (data.session_id && currentSession?.session_id && data.session_id === currentSession.session_id) {
+          console.log('📁 User message with files received:', data.message_id, data.files);
+          
+          // Update the existing user message with file information
+          if (data.message_id && data.files) {
+            // Update the message in the persistence system
+            const updatedMessage = {
+              id: data.message_id,
+              text: data.content || '',
+              sender: 'user' as const,
+              timestamp: new Date(data.timestamp || Date.now()),
+              files: data.files,
+              status: 'sent' as const
+            };
+            
+            // Add the updated message to persistence system
+            addPersistedMessage(updatedMessage);
+            
+            console.log('✅ Updated user message with files in real-time');
+          }
+        }
         break;
 
       case 'session_updated':

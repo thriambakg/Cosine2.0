@@ -1135,6 +1135,31 @@ def handle_file_handler_message(event):
                         ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
                         
                         for connection_id in active_connections:
+                            # Send user message confirmation first
+                            user_message_confirmation = {
+                                'type': 'message_received',
+                                'message_id': message_id,
+                                'session_id': session_id,
+                                'timestamp': datetime.now().isoformat()
+                            }
+                            
+                            send_message_to_client(connection_id, user_message_confirmation)
+                            logger.info(f"📨 Sent user message confirmation to connection {connection_id}")
+                            
+                            # Send user message with files for display
+                            user_message_display = {
+                                'type': 'user_message_with_files',
+                                'message_id': message_id,
+                                'content': message_text,
+                                'session_id': session_id,
+                                'timestamp': datetime.now().isoformat(),
+                                'files': file_metadata if file_metadata else []
+                            }
+                            
+                            send_message_to_client(connection_id, user_message_display)
+                            logger.info(f"📨 Sent user message with files to connection {connection_id}")
+                            
+                            # Send AI response
                             ai_response_message = {
                                 'type': 'ai_response',
                                 'message_id': ai_message_id,
