@@ -99,7 +99,23 @@ const parseAgentFileReturns = (content: string) => {
     createdBy?: string;
   }> = [];
 
-  // Look for file return patterns in the message content
+  // Try to parse as JSON first (new structured format)
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed.file_data && Array.isArray(parsed.file_data)) {
+      return parsed.file_data.map((file: any) => ({
+        filename: file.filename,
+        fileType: file.file_type,
+        fileSize: file.file_size,
+        downloadUrl: file.download_url,
+        createdBy: file.created_by || 'agent'
+      }));
+    }
+  } catch (e) {
+    // Not JSON, fall back to text pattern matching
+  }
+
+  // Look for file return patterns in the message content (legacy format)
   const filePattern = /📄 File \d+: (.+?)\n   Type: (.+?)\n   Size: (.+?) bytes\n   Download: (.+?)(?:\n|$)/g;
   let match;
   

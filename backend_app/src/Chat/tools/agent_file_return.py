@@ -230,21 +230,12 @@ def return_session_files_tool(session_id: str, user_id: str, file_indices: str =
         if not result["success"]:
             return f"Error returning files: {result['error']}"
         
-        # Format response for AI
-        response_parts = [
-            f"📁 {result['message']}",
-            f"Total files: {result['total_files']}",
-            ""
-        ]
-        
-        for i, file_data in enumerate(result['files']):
-            response_parts.append(f"📄 File {i+1}: {file_data['filename']}")
-            response_parts.append(f"   Type: {file_data['file_type']}")
-            response_parts.append(f"   Size: {file_data['file_size']:,} bytes")
-            response_parts.append(f"   Download: {file_data['download_url']}")
-            response_parts.append("")
-        
-        return "\n".join(response_parts)
+        # Return JSON string with structured data for frontend parsing
+        import json
+        return json.dumps({
+            "message": f"📁 {result['message']} - {result['total_files']} file(s) returned",
+            "file_data": result['files']
+        })
         
     except Exception as e:
         logger.error(f"Error in return_session_files_tool: {str(e)}")
@@ -275,18 +266,12 @@ def create_agent_file_tool(session_id: str, user_id: str, filename: str, content
         if not result["success"]:
             return f"Error creating file: {result['error']}"
         
-        # Format response for AI
-        file_data = result['file']
-        response_parts = [
-            f"📁 {result['message']}",
-            f"Filename: {file_data['filename']}",
-            f"Type: {file_data['file_type']}",
-            f"Size: {file_data['file_size']:,} bytes",
-            f"Download: {file_data['download_url']}",
-            f"Created: {file_data['created_at']}"
-        ]
-        
-        return "\n".join(response_parts)
+        # Return JSON string with structured data for frontend parsing
+        import json
+        return json.dumps({
+            "message": f"📁 {result['message']}",
+            "file_data": [result['file']]
+        })
         
     except Exception as e:
         logger.error(f"Error in create_agent_file_tool: {str(e)}")
