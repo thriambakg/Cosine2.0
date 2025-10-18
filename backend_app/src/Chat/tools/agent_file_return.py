@@ -8,6 +8,7 @@ import logging
 import boto3
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 # Configure logging
 logger = logging.getLogger()
@@ -29,6 +30,17 @@ except ImportError as e:
         def __init__(self, name: str, arguments: Dict[str, Any]):
             self.name = name
             self.arguments = arguments
+
+def convert_decimals(obj):
+    """Convert Decimal objects to regular numbers for JSON serialization"""
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimals(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimals(item) for item in obj]
+    else:
+        return obj
 
 class AgentFileReturn:
     """
@@ -232,9 +244,11 @@ def return_session_files_tool(session_id: str, user_id: str, file_indices: str =
         
         # Return JSON string with structured data for frontend parsing
         import json
+        # Convert Decimal objects to regular numbers for JSON serialization
+        converted_result = convert_decimals(result)
         return json.dumps({
-            "message": f"📁 {result['message']} - {result['total_files']} file(s) returned",
-            "file_data": result['files']
+            "message": f"📁 {converted_result['message']} - {converted_result['total_files']} file(s) returned",
+            "file_data": converted_result['files']
         })
         
     except Exception as e:
@@ -268,9 +282,11 @@ def create_agent_file_tool(session_id: str, user_id: str, filename: str, content
         
         # Return JSON string with structured data for frontend parsing
         import json
+        # Convert Decimal objects to regular numbers for JSON serialization
+        converted_result = convert_decimals(result)
         return json.dumps({
-            "message": f"📁 {result['message']}",
-            "file_data": [result['file']]
+            "message": f"📁 {converted_result['message']}",
+            "file_data": [converted_result['file']]
         })
         
     except Exception as e:
