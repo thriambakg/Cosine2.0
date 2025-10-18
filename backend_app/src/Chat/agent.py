@@ -113,6 +113,7 @@ import financial_calculator
 # Import our custom session database access tool
 from tools.session_database_access import get_session_files_tool, get_session_context_tool
 from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
+from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -634,6 +635,8 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 10. get_session_context_tool(session_id, user_id) - Get complete session context including files and context items
 11. get_crypto_data_tool(symbol, timeframe) - Get real-time cryptocurrency data for analysis
 12. compare_crypto_tool(symbols, timeframe) - Compare multiple cryptocurrencies side by side
+13. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
+14. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
 
 🚨 MANDATORY BEHAVIOR:
 - You MUST use tools for EVERY financial query - NO EXCEPTIONS
@@ -673,6 +676,14 @@ FOR CRYPTOCURRENCY QUESTIONS:
 3. Use timeframe options: '1d', '7d', '30d', '1y' for different analysis periods
 4. Provide analysis based on REAL crypto data including price, returns, and volatility
 5. Compare crypto performance against traditional assets when relevant
+
+FOR PDF FILE ANALYSIS:
+1. read_pdf_tool(s3_key) → Read and extract text from PDF files stored in S3
+2. analyze_pdf_content_tool(s3_key, analysis_type) → Perform specific analysis on PDF content
+3. Use analysis_type options: 'summary', 'financial', 'legal', 'technical'
+4. Extract key information like dates, monetary amounts, percentages, emails, phone numbers
+5. Detect document type (financial, legal, technical, academic, report) automatically
+6. Provide comprehensive analysis including word count, page estimates, and content preview
 
 FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 1. Context items now contain only metadata (not full data) for performance
@@ -1075,6 +1086,8 @@ enhanced_tools = [
     get_session_context_tool,  # Complete session context tool
     get_crypto_data_tool,  # Real-time cryptocurrency data tool
     compare_crypto_tool,  # Cryptocurrency comparison tool
+    read_pdf_tool,  # PDF file reader tool
+    analyze_pdf_content_tool,  # PDF content analysis tool
 ]
 
 # Function to create agents with different models
