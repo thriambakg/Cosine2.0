@@ -10,6 +10,14 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+# Custom exception for direct file return
+class DirectFileReturn(Exception):
+    """Exception that carries file data to bypass agent processing"""
+    def __init__(self, message: str, file_data: List[Dict[str, Any]]):
+        self.message = message
+        self.file_data = file_data
+        super().__init__(message)
+
 # Configure logging
 logger = logging.getLogger()
 
@@ -247,14 +255,11 @@ def return_session_files_tool(session_id: str, user_id: str, file_indices: str =
         # Convert Decimal objects to regular numbers for JSON serialization
         converted_result = convert_decimals(result)
         
-        # Create the JSON data
-        json_data = {
-            "message": f"📁 {converted_result['total_files']} file(s) ready for download",
-            "file_data": converted_result['files']
-        }
-        
-        # Return ONLY JSON data - no URLs in text to avoid truncation
-        return f"JSON_DATA: {json.dumps(json_data)}"
+        # Raise exception to bypass agent processing entirely
+        raise DirectFileReturn(
+            message=f"📁 {converted_result['total_files']} file(s) ready for download",
+            file_data=converted_result['files']
+        )
         
     except Exception as e:
         logger.error(f"Error in return_session_files_tool: {str(e)}")
@@ -290,14 +295,11 @@ def create_agent_file_tool(session_id: str, user_id: str, filename: str, content
         # Convert Decimal objects to regular numbers for JSON serialization
         converted_result = convert_decimals(result)
         
-        # Create the JSON data
-        json_data = {
-            "message": f"📁 File created and ready for download",
-            "file_data": [converted_result['file']]
-        }
-        
-        # Return ONLY JSON data - no URLs in text to avoid truncation
-        return f"JSON_DATA: {json.dumps(json_data)}"
+        # Raise exception to bypass agent processing entirely
+        raise DirectFileReturn(
+            message=f"📁 File '{filename}' created and ready for download",
+            file_data=[converted_result['file']]
+        )
         
     except Exception as e:
         logger.error(f"Error in create_agent_file_tool: {str(e)}")

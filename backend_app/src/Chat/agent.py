@@ -704,11 +704,13 @@ FOR FILE RETURNS:
 3. Use file_indices parameter: "all" for all files, or "0,2,3" for specific files
 4. Files will appear as clickable attachments in the chat interface
 5. Use when users ask for files, want to share files, or need file downloads
-6. CRITICAL: When using file return tools, output ONLY the tool result - nothing else
-7. The tools return "JSON_DATA: {...}" - output this EXACTLY as returned by the tool
-8. DO NOT add any text before or after the tool output
-9. DO NOT include URLs in your response - they are in the JSON_DATA
-10. DO NOT say "here is the file" or "download link" - just output the tool result
+6. CRITICAL: When using file return tools, the tools will handle the response automatically
+7. The tools will raise a DirectFileReturn exception that bypasses normal agent processing
+8. DO NOT add any text before or after calling the tool
+9. DO NOT include URLs in your response - the tool handles file delivery
+10. DO NOT say "here is the file" or "download link" - just call the tool
+11. EXAMPLE: Simply call return_session_files_tool() or create_agent_file_tool() - no additional text needed
+12. The tool will automatically handle the file return and display
 
 FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 1. Context items now contain only metadata (not full data) for performance
