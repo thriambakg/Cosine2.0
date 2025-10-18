@@ -624,18 +624,18 @@ Session Context:
         # Extract the actual response content from AgentResult
         response_content = ""
         if hasattr(agent_response, 'message') and hasattr(agent_response.message, 'content'):
-                # Handle structured content (list of content blocks)
-                if isinstance(agent_response.message.content, list):
-                    for content_block in agent_response.message.content:
-                        if hasattr(content_block, 'text'):
-                            response_content += content_block.text
-                        elif isinstance(content_block, str):
-                            response_content += content_block
-                else:
-                    response_content = str(agent_response.message.content)
+            # Handle structured content (list of content blocks)
+            if isinstance(agent_response.message.content, list):
+                for content_block in agent_response.message.content:
+                    if hasattr(content_block, 'text'):
+                        response_content += content_block.text
+                    elif isinstance(content_block, str):
+                        response_content += content_block
             else:
-                # Fallback: convert to string
-                response_content = str(agent_response)
+                response_content = str(agent_response.message.content)
+        else:
+            # Fallback: convert to string
+            response_content = str(agent_response)
             
             # Clean up response content by removing metadata
             def clean_response_content(content):
