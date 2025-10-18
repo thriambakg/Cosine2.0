@@ -95,71 +95,6 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
   </Box>
 );
 
-// Function to parse agent file returns from message content
-const parseAgentFileReturns = (content: string) => {
-  const fileReturns: Array<{
-    filename: string;
-    fileType: string;
-    fileSize: number;
-    downloadUrl: string;
-    uploadedAt?: string;
-    createdBy?: string;
-  }> = [];
-
-  // Try to parse JSON_DATA pattern first (new structured format)
-  const jsonDataMatch = content.match(/JSON_DATA:\s*({.*})/);
-  if (jsonDataMatch) {
-    try {
-      const parsed = JSON.parse(jsonDataMatch[1]);
-      if (parsed.file_data && Array.isArray(parsed.file_data)) {
-        return parsed.file_data.map((file: any) => ({
-          filename: file.filename,
-          fileType: file.file_type,
-          fileSize: file.file_size,
-          downloadUrl: file.download_url,
-          createdBy: file.created_by || 'agent'
-        }));
-      }
-    } catch (e) {
-      // JSON parsing failed, fall back to other methods
-    }
-  }
-
-  // Try to parse as JSON first (legacy structured format)
-  try {
-    const parsed = JSON.parse(content);
-    if (parsed.file_data && Array.isArray(parsed.file_data)) {
-      return parsed.file_data.map((file: any) => ({
-        filename: file.filename,
-        fileType: file.file_type,
-        fileSize: file.file_size,
-        downloadUrl: file.download_url,
-        createdBy: file.created_by || 'agent'
-      }));
-    }
-  } catch (e) {
-    // Not JSON, fall back to text pattern matching
-  }
-
-  // Look for file return patterns in the message content (legacy format)
-  const filePattern = /📄 File \d+: (.+?)\n   Type: (.+?)\n   Size: (.+?) bytes\n   Download: (.+?)(?:\n|$)/g;
-  let match;
-  
-  while ((match = filePattern.exec(content)) !== null) {
-    const [, filename, fileType, sizeStr, downloadUrl] = match;
-    const fileSize = parseInt(sizeStr.replace(/,/g, ''));
-    
-    fileReturns.push({
-      filename,
-      fileType,
-      fileSize,
-      downloadUrl,
-      createdBy: 'agent'
-    });
-  }
-
-  return fileReturns;
-};
 
 const MessageBubble = ({ isUser, children, status, ...props }: any) => (
   <Box
@@ -1521,27 +1456,6 @@ export default function ChatPage() {
                                 );
                               }
                               
-                              // Fallback to parsing text content
-                              const agentFiles = parseAgentFileReturns(message.text);
-                              if (agentFiles.length > 0) {
-                                return (
-                                  <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                    <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-                                      📁 Files returned by AI:
-                                    </Typography>
-                                    {agentFiles.map((file: any, index: number) => (
-                                      <AgentFileAttachment
-                                        key={index}
-                                        filename={file.filename}
-                                        fileType={file.fileType}
-                                        fileSize={file.fileSize}
-                                        downloadUrl={file.downloadUrl}
-                                        createdBy={file.createdBy}
-                                      />
-                                    ))}
-                                  </Box>
-                                );
-                              }
                               return null;
                             })()}
                           </>

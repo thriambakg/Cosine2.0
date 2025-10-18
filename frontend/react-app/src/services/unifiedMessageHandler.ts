@@ -524,6 +524,9 @@ class UnifiedMessageHandlerService {
       case 'ai_response':
         this.handleAIResponse(sessionId, data);
         break;
+      case 'agent_file_return':
+        this.handleAgentFileReturn(sessionId, data);
+        break;
       case 'session_updated':
         this.handleSessionUpdate(sessionId, data);
         break;
@@ -533,6 +536,40 @@ class UnifiedMessageHandlerService {
       default:
         console.log('📨 UnifiedMessageHandler: Unknown message type:', data.type);
     }
+  }
+
+  /**
+   * Handle agent file return
+   */
+  private handleAgentFileReturn(sessionId: string, data: any): void {
+    const { message, file_data, timestamp } = data;
+    
+    console.log('📁 UnifiedMessageHandler: Received agent file return for session:', sessionId);
+    console.log('📁 UnifiedMessageHandler: File data:', file_data?.length || 0, 'files');
+    
+    // Clear loading state for all interfaces
+    this.broadcastLoadingState(sessionId, false, 'chatpage');
+    
+    const aiMessage: SharedMessage = {
+      id: `agent_file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      sender: 'ai',
+      text: message || 'Files ready for download',
+      timestamp: timestamp || Date.now(),
+      sessionId: sessionId,
+      source: 'chatpage',
+      file_data: file_data || undefined
+    };
+
+    // Add to local cache
+    if (!this.localCache.has(sessionId)) {
+      this.localCache.set(sessionId, []);
+    }
+    this.localCache.get(sessionId)!.push(aiMessage);
+
+    // Notify listeners of message update
+    this.notifyMessageUpdate(sessionId, this.localCache.get(sessionId)!);
+    
+    console.log('✅ UnifiedMessageHandler: Added agent file return to cache');
   }
 
   /**

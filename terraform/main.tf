@@ -154,6 +154,9 @@ module "api_gateway" {
     files = {
       path_part = "files"
     }
+    file_return = {
+      path_part = "file-return"
+    }
   }
 
   # Methods configuration
@@ -357,6 +360,15 @@ module "api_gateway" {
       lambda_arn              = module.file_upload_lambda.function_arn
       request_parameters      = {}
     }
+    # POST method for file returns
+    file_return_post = {
+      resource_key            = "file_return"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.file_return_lambda.function_arn
+      request_parameters      = {}
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -478,6 +490,11 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "files"
     }
+    file_return_post = {
+      function_arn  = module.file_return_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "file-return"
+    }
   }
 
   tags = var.common_tags
@@ -548,39 +565,7 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
 }
 
 # IAM Policy for Lambda functions to access S3 chat files bucket
-resource "aws_iam_policy" "lambda_s3_chat_files_policy" {
-  name        = "${var.project_name}-lambda-s3-chat-files-policy-${var.environment}"
-  description = "Policy for Lambda functions to access S3 chat files bucket"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:GeneratePresignedUrl"
-        ]
-        Resource = [
-          "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:ListBucket"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn
-        ]
-      }
-    ]
-  })
-
-  tags = var.common_tags
-}
+# Using base infrastructure policy instead of duplicating
 
 # IAM Policy for Lambda functions to invoke other Lambda functions
 resource "aws_iam_policy" "lambda_invoke_policy" {
@@ -1129,8 +1114,7 @@ module "websocket_message_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
-    aws_iam_policy.lambda_websocket_policy.arn,
-    aws_iam_policy.lambda_s3_chat_files_policy.arn
+    aws_iam_policy.lambda_websocket_policy.arn
   ]
 
   tags = var.common_tags
@@ -1501,7 +1485,37 @@ module "session_management_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
-    aws_iam_policy.lambda_s3_chat_files_policy.arn
+    data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
+  ]
+
+  tags = var.common_tags
+}
+
+# File Return Lambda Function
+module "file_return_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-file-return-${var.environment}"
+  description   = "Lambda function for secure file returns with user validation"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 256
+
+  source_dir = "../backend_app/src/file_return/app"
+
+  environment_variables = {
+    S3_BUCKET          = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    SESSIONS_TABLE     = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    WEBSOCKET_ENDPOINT = data.terraform_remote_state.base_infra.outputs.websocket_api_endpoint
+    ENVIRONMENT        = var.environment
+    LOG_LEVEL          = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
+    aws_iam_policy.lambda_websocket_policy.arn
   ]
 
   tags = var.common_tags

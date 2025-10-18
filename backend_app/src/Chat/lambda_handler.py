@@ -21,18 +21,6 @@ os.environ.setdefault('OTEL_PYTHON_CONTEXT', 'contextvars_context')
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
-# Import DirectFileReturn exception for file return handling
-try:
-    from tools.agent_file_return import DirectFileReturn
-    logger.info("✅ Successfully imported DirectFileReturn exception")
-except ImportError as e:
-    logger.warning(f"⚠️ Could not import DirectFileReturn: {e}")
-    # Define fallback for local development
-    class DirectFileReturn(Exception):
-        def __init__(self, message: str, file_data: list):
-            self.message = message
-            self.file_data = file_data
-            super().__init__(message)
 
 # Simple import test
 logger.info("🔍 Testing imports...")
@@ -598,24 +586,6 @@ Session Context:
                 if hasattr(agent_response.message, 'content'):
                     logger.info(f"🔍 DEBUG: Agent response content type: {type(agent_response.message.content)}")
                     logger.info(f"🔍 DEBUG: Agent response content: {agent_response.message.content}")
-        except DirectFileReturn as e:
-            # Handle direct file return exception
-            logger.info(f"📁 DIRECT FILE RETURN: Detected DirectFileReturn exception with {len(e.file_data)} files")
-            
-            # Return structured response for direct frontend processing
-            response_body = {
-                'response': e.message,
-                'file_data': e.file_data,
-                'session_id': session_id,
-                'user_id': user_id,
-                'timestamp': int(time.time())
-            }
-            
-            logger.info(f"📁 DIRECT FILE RETURN: Returning structured response with {len(e.file_data)} files")
-            return {
-                'statusCode': 200,
-                'body': response_body
-            }
         except Exception as e:
             # Handle other exceptions
             logger.error(f"❌ Error in agent processing: {str(e)}")
@@ -683,41 +653,13 @@ Session Context:
             else:
                 logger.warning(f"⚠️ Cannot update session context - session_context: {session_context is not None}, user_id: {user_id is not None}")
             
-            # Check if this is a file return response by looking for AGENT_BREAK pattern
-            import re
-            agent_break_match = re.search(r'AGENT_BREAK:\s*(\{.*\})', response_content, re.DOTALL)
-            if agent_break_match:
-                try:
-                    import json
-                    file_data = json.loads(agent_break_match.group(1))
-                    logger.info(f"📁 FILE RETURN: Detected AGENT_BREAK response with {len(file_data.get('file_data', []))} files")
-                    
-                    # Return structured response for direct frontend processing
-                    # Use the message from the JSON data instead of the full response
-                    response_body = {
-                        'response': file_data.get('message', 'Files ready for download'),
-                        'file_data': file_data.get('file_data', []),
-                        'session_id': session_id,
-                        'user_id': user_id,
-                        'timestamp': int(time.time())
-                    }
-                except json.JSONDecodeError as e:
-                    logger.error(f"❌ Failed to parse AGENT_BREAK JSON: {e}")
-                    logger.error(f"❌ JSON string: {agent_break_match.group(1)[:500]}")
-                    response_body = {
-                        'response': response_content,
-                        'session_id': session_id,
-                        'user_id': user_id,
-                        'timestamp': int(time.time())
-                    }
-            else:
-                # Regular text response
-                response_body = {
-                    'response': response_content,
-                    'session_id': session_id,
-                    'user_id': user_id,
-                    'timestamp': int(time.time())
-                }
+            # Regular text response
+            response_body = {
+                'response': response_content,
+                'session_id': session_id,
+                'user_id': user_id,
+                'timestamp': int(time.time())
+            }
             
             logger.info(f"🔍 DEBUG: Response body being returned: {response_body}")
             logger.info(f"🔍 DEBUG: Response body type: {type(response_body)}")
