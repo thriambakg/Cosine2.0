@@ -381,6 +381,51 @@ export default function ChatPage() {
     };
   }, [currentSession?.session_id]);
 
+  // Poll for new messages when agent might be returning files (REST endpoint)
+  useEffect(() => {
+    if (!currentSession?.session_id || !user?.id) return;
+
+    let pollInterval: NodeJS.Timeout;
+    
+    // Only poll when we're in a loading state (agent might be processing)
+    if (isUnifiedProcessing) {
+      console.log('🔄 ChatPage: Starting message polling for agent file returns');
+      
+      pollInterval = setInterval(async () => {
+        try {
+          // Check if there are new messages in the database
+          const session = await sessionManagementAPI.getSession(currentSession.session_id, user.id);
+          
+          if (session && session.messages) {
+            const currentMessageCount = unifiedMessageHandler.getMessagesForSession(currentSession.session_id).length;
+            const dbMessageCount = session.messages.length;
+            
+            // If database has more messages than our cache, refresh
+            if (dbMessageCount > currentMessageCount) {
+              console.log('📨 ChatPage: Found new messages in database, refreshing session');
+              await loadSessionFromDatabase(currentSession.session_id);
+              
+              // Clear loading state since we got the response
+              // Note: Loading state is managed by unified messaging system
+              unifiedMessageHandler.broadcastLoadingState(currentSession.session_id, false, 'chatpage');
+              
+              // Stop polling
+              clearInterval(pollInterval);
+            }
+          }
+        } catch (error) {
+          console.error('❌ ChatPage: Error polling for messages:', error);
+        }
+      }, 2000); // Poll every 2 seconds
+    }
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [currentSession?.session_id, user?.id, isUnifiedProcessing]);
+
   // Listen for session variable updates (including file uploads)
   useEffect(() => {
     const handleSessionVariablesUpdate = (event: CustomEvent) => {
@@ -693,6 +738,47 @@ export default function ChatPage() {
       console.log('📋 Session deleted:', sessionId);
     } catch (error) {
       console.error('📋 Error deleting session:', error);
+    }
+  };
+
+  // Load session from database (for refreshing after agent file returns)
+  const loadSessionFromDatabase = async (sessionId: string) => {
+    if (!user?.id) return;
+
+    try {
+      console.log('📋 ChatPage: Loading session from database:', sessionId);
+      const session = await sessionManagementAPI.getSession(sessionId, user.id);
+      
+      if (session) {
+        console.log('✅ ChatPage: Session loaded from database successfully:', {
+          sessionId: session.session_id,
+          messageCount: session.messages?.length || 0,
+          hasContext: !!session.session_variables?.context_items
+        });
+        
+        // Update current session via persistence system
+        // Note: currentSession is managed by useChatPersistence, we just need to reload
+        setSelectedModel(session.model || 'claude-3-sonnet');
+
+        // Load existing messages into unified messaging system
+        if (session.messages && session.messages.length > 0) {
+          console.log('📨 ChatPage: Loading existing messages into unified system:', session.messages.length);
+          unifiedMessageHandler.loadExistingMessages(sessionId, session.messages);
+        }
+
+        // Load context if available
+        if (session.session_variables?.context_items) {
+          setSessionContext(session.session_variables.context_items);
+        } else {
+          setSessionContext([]);
+        }
+        
+        console.log('✅ ChatPage: Session data loaded');
+      } else {
+        console.log('⚠️ ChatPage: Session not found in database');
+      }
+    } catch (error: any) {
+      console.error('❌ ChatPage: Failed to load session:', error);
     }
   };
 

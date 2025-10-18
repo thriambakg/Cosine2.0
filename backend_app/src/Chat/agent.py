@@ -711,6 +711,8 @@ FOR FILE RETURNS:
 10. DO NOT say "here is the file" or "download link" - just call the tool
 11. The tool will automatically handle the file return and display
 
+🚨 IMPORTANT: When users ask for "download link", "presigned URL", or "return the file", you MUST use return_session_files_tool() to provide the file. Do NOT try to generate URLs manually or use other tools.
+
 FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 1. Context items now contain only metadata (not full data) for performance
 2. Use get_session_context_tool(session_id, user_id) to retrieve full context when needed
