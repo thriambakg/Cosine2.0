@@ -1507,7 +1507,7 @@ module "file_return_lambda" {
   environment_variables = {
     S3_BUCKET          = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
     SESSIONS_TABLE     = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    WEBSOCKET_ENDPOINT = data.terraform_remote_state.base_infra.outputs.websocket_api_endpoint
+    WEBSOCKET_ENDPOINT = module.websocket_api.stage_url
     ENVIRONMENT        = var.environment
     LOG_LEVEL          = var.environment == "development" ? "DEBUG" : "INFO"
   }
@@ -1519,6 +1519,8 @@ module "file_return_lambda" {
   ]
 
   tags = var.common_tags
+
+  depends_on = [module.websocket_api]
 }
 
 # News Search Lambda Function
