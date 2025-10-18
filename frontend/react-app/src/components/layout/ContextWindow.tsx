@@ -24,7 +24,7 @@ import {
 import { useContextWindow } from '../../contexts/ContextWindowContext';
 import { useAuth } from '../../contexts/AuthContext';
 // Note: Removed API imports - tiles now pass metadata only, AI agent fetches data using tools
-import { ContextItem, TileContextData } from '../tiles/common/contextManager';
+import { ContextItem } from '../tiles/common/contextManager';
 
 interface ContextWindowProps {
   className?: string;
