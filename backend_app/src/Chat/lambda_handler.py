@@ -726,18 +726,6 @@ Session Context:
                 'statusCode': 200,
                 'body': response_body
             }
-        except Exception as agent_error:
-            logger.error(f"🔍 DEBUG: Error in session-aware agent(): {str(agent_error)}")
-            logger.error(f"🔍 DEBUG: Agent error type: {type(agent_error)}")
-            import traceback
-            logger.error(f"🔍 DEBUG: Agent error traceback: {traceback.format_exc()}")
-            return {
-                'statusCode': 500,
-                'body': {
-                    'error': 'Agent execution failed',
-                    'message': str(agent_error)
-            }
-        }
         
     except Exception as e:
         logger.error(f"🔍 DEBUG: Error in chat processing: {str(e)}")
