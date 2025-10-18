@@ -139,37 +139,27 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       console.log('🚀 Starting context-aware message send');
       console.log('📦 Context items:', contextItems.length);
       
-      // Step 1: Process metadata for each context item
-      setSendProgress(`Processing metadata for ${contextItems.length} items...`);
-      const enrichedItems = await Promise.allSettled(
-        contextItems.map(async (item) => {
-          try {
-            return await fetchContextItemData(item);
-          } catch (error) {
-            console.warn(`⚠️ Failed to process metadata for ${item.type} ${item.id}:`, error);
-            // Return item without processed metadata on failure
-            return { ...item, processError: true };
-          }
-        })
-      );
+      // OPTIMIZATION: Send only metadata instead of full data
+      // The AI agent will use database tools to retrieve data as needed
+      setSendProgress(`Preparing context metadata for ${contextItems.length} items...`);
       
-      const enrichedContextItems = enrichedItems
-        .map((result, index) => {
-          if (result.status === 'fulfilled') {
-            return result.value;
-          } else {
-            console.warn(`⚠️ Skipping failed item ${index}:`, result.reason);
-            return null;
-          }
-        })
-        .filter((item): item is ContextItem => item !== null);
+      // Create lightweight context metadata (no heavy data fetching)
+      const enrichedContextItems = contextItems.map(item => ({
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        subtitle: item.subtitle,
+        timestamp: item.timestamp,
+        // Include only essential metadata, not full data
+        data: {
+          tileType: item.data?.tileType,
+          symbol: item.data?.symbol,
+          timeframe: item.data?.timeframe,
+          // Don't include heavy backendData or processed data
+        }
+      }));
       
-      const failedCount = contextItems.length - enrichedContextItems.length;
-      if (failedCount > 0) {
-        console.warn(`⚠️ ${failedCount} items failed to process, continuing with ${enrichedContextItems.length} items`);
-      }
-      
-      console.log('✅ Processed context items:', enrichedContextItems.length);
+      console.log('✅ Prepared context metadata:', enrichedContextItems.length);
       
       // Step 2: Create new chat session with context via WebSocket
       setSendProgress('Creating analysis session...');

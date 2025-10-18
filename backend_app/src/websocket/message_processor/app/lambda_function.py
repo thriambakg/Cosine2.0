@@ -231,24 +231,28 @@ def process_message(connection_id, user_id, session_id, message_data):
             logger.info(f"🔍 Session {session_id} doesn't exist, creating it for first message")
             create_session_for_first_message(user_id, session_id, model)
         
-        # Extract context items from message data (if present)
+        # Extract context items and uploaded files from message data (if present)
         context_items = message_data.get('contextItems', [])
+        uploaded_files = message_data.get('uploadedFiles', [])
         
-        # Note: Files are now handled via REST endpoint, not through WebSocket
-        # The WebSocket processor only handles context items (tiles, stocks, etc.)
-        
-        # Note: File uploads are now handled via REST endpoint and passed in context_items
+        # Note: Files can be handled via REST endpoint (uploadedFiles) or through WebSocket (context_items)
+        # The WebSocket processor handles both context items (tiles, stocks, etc.) and uploaded files
         
         has_context = len(context_items) > 0
+        has_files = len(uploaded_files) > 0
         
         # Store the original user message (without context prompt) for frontend display
         original_user_message = message_text
         
-        if has_context:
-            logger.info(f"📌 Context-aware message detected with {len(context_items)} context items")
-            logger.info(f"📌 Context items preview: {json_dumps_safe(context_items[:1])}")  # Log first item
+        # Store context and uploaded files in session_variables for persistence
+        if has_context or has_files:
+            logger.info(f"📌 Context-aware message detected with {len(context_items)} context items and {len(uploaded_files)} uploaded files")
+            if context_items:
+                logger.info(f"📌 Context items preview: {json_dumps_safe(context_items[:1])}")  # Log first item
+            if uploaded_files:
+                logger.info(f"📌 Uploaded files preview: {json_dumps_safe(uploaded_files[:1])}")  # Log first file
             
-            # Store context in session_variables for persistence
+            # Store context and files in session_variables for persistence
             if CONTEXT_BUILDER_AVAILABLE:
                 context_summary = extract_context_summary(context_items)
                 logger.info(f"📌 Context summary: {context_summary}")
@@ -258,6 +262,45 @@ def process_message(connection_id, user_id, session_id, message_data):
                     # Convert all floats to Decimal for DynamoDB compatibility
                     context_items_decimal = convert_floats_to_decimal(context_items)
                     context_summary_decimal = convert_floats_to_decimal(context_summary)
+                    uploaded_files_decimal = convert_floats_to_decimal(uploaded_files)
+                    
+                    # Get existing session_variables to merge with new data
+                    response = chat_sessions_table.get_item(
+                        Key={
+                            'user_id': user_id,
+                            'session_id': session_id
+                        }
+                    )
+                    
+                    # Get existing session_variables or create empty dict
+                    existing_session_vars = response.get('Item', {}).get('session_variables', {})
+                    
+                    # Prepare session variables with separate fields
+                    session_vars = {
+                        **existing_session_vars,  # Preserve existing data
+                        'last_updated': int(datetime.now().timestamp())
+                    }
+                    
+                    # Add context items if present
+                    if context_items:
+                        session_vars.update({
+                            'context_items': context_items_decimal,
+                            'context_added_at': int(datetime.now().timestamp()),
+                            'context_summary': context_summary_decimal,
+                        })
+                    
+                    # Add uploaded files if present
+                    if uploaded_files:
+                        # Get existing uploaded files or create empty list
+                        existing_files = existing_session_vars.get('uploaded_files', [])
+                        
+                        # Merge new files with existing files
+                        all_files = existing_files + uploaded_files_decimal
+                        
+                        session_vars.update({
+                            'uploaded_files': all_files,
+                            'files_added_at': int(datetime.now().timestamp())
+                        })
                     
                     chat_sessions_table.update_item(
                         Key={
@@ -266,24 +309,38 @@ def process_message(connection_id, user_id, session_id, message_data):
                         },
                         UpdateExpression='SET session_variables = :vars, last_updated = :updated',
                         ExpressionAttributeValues={
-                            ':vars': {
-                                'context_items': context_items_decimal,
-                                'context_added_at': int(datetime.now().timestamp()),
-                                'context_summary': context_summary_decimal,
-                            },
+                            ':vars': session_vars,
                             ':updated': int(datetime.now().timestamp())
                         }
                     )
-                    logger.info(f"📌 Stored context in session_variables")
+                    logger.info(f"📌 Stored context and uploaded files in session_variables")
                 except Exception as e:
-                    logger.error(f"❌ Failed to store context in session_variables: {e}")
+                    logger.error(f"❌ Failed to store context and files in session_variables: {e}")
                     import traceback
                     logger.error(f"Traceback: {traceback.format_exc()}")
                 
-                # Build enriched prompt with context (for AI only)
+                # Build enriched prompt with context and files (for AI only)
                 try:
-                    enriched_message = build_context_prompt(message_text, context_items)
-                    logger.info(f"📌 Enhanced message with context (length: {len(enriched_message)})")
+                    # Combine context items and uploaded files for the AI prompt
+                    all_context_items = list(context_items)
+                    
+                    # Add uploaded files as context items for the AI
+                    for file_info in uploaded_files:
+                        all_context_items.append({
+                            'type': 'file',
+                            'title': f"Uploaded File: {file_info['filename']}",
+                            'data': {
+                                'original_filename': file_info['filename'],
+                                's3_key': file_info['s3_key'],
+                                's3_url': file_info['s3_url'],
+                                'content_type': file_info['content_type'],
+                                'file_size': file_info['file_size'],
+                                'upload_timestamp': file_info['upload_timestamp']
+                            }
+                        })
+                    
+                    enriched_message = build_context_prompt(message_text, all_context_items)
+                    logger.info(f"📌 Enhanced message with context and files (length: {len(enriched_message)})")
                     logger.info(f"📌 Enriched message preview (first 500 chars): {enriched_message[:500]}")
                     
                     # Send the enriched message to AI, but keep original for frontend
@@ -293,7 +350,7 @@ def process_message(connection_id, user_id, session_id, message_data):
                     import traceback
                     logger.error(f"Traceback: {traceback.format_exc()}")
             else:
-                logger.warning(f"⚠️ Context builder not available, passing context items to chat agent for processing")
+                logger.warning(f"⚠️ Context builder not available, passing context items and files to chat agent for processing")
         
         # Call the existing chat agent Lambda (with enriched message if context present)
         # Pass original_user_message so the chat agent can store it for display
@@ -304,7 +361,8 @@ def process_message(connection_id, user_id, session_id, message_data):
             files, 
             session_id, 
             context_items if has_context else None,
-            original_user_message if has_context else None  # Original message for frontend display
+            original_user_message if (has_context or has_files) else None,  # Original message for frontend display
+            uploaded_files if has_files else None  # Uploaded files for AI processing
         )
         
         # Note: AI response is already added by the chat agent Lambda
@@ -400,7 +458,7 @@ def create_session_for_first_message(user_id, session_id, model):
     except Exception as e:
         logger.error(f"Error creating session for first message: {str(e)}")
 
-def call_chat_agent(user_id, message_text, model, files, session_id, context_items=None, original_user_message=None):
+def call_chat_agent(user_id, message_text, model, files, session_id, context_items=None, original_user_message=None, uploaded_files=None):
     """
     Call the existing chat agent Lambda function with kill signal checking
     
@@ -412,6 +470,7 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
         session_id: Session ID
         context_items: Optional context items (only passed if context builder not available)
         original_user_message: Original user message (before context enrichment) for frontend display
+        uploaded_files: Optional uploaded files for AI processing
         
     Returns:
         AI response text
@@ -459,6 +518,11 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
         if context_items and not CONTEXT_BUILDER_AVAILABLE:
             payload['contextItems'] = context_items
             logger.info(f"📌 Including context items in payload as fallback (builder not available)")
+        
+        # Include uploaded files if provided
+        if uploaded_files:
+            payload['uploadedFiles'] = uploaded_files
+            logger.info(f"📌 Including uploaded files in payload: {len(uploaded_files)} files")
         
         logger.info(f"Calling chat agent with payload: {json_dumps_safe(payload)}")
         

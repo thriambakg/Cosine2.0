@@ -110,6 +110,9 @@ from strands import tool
 # Import our custom financial calculator tool module
 import financial_calculator
 
+# Import our custom session database access tool
+from tools.session_database_access import get_session_files_tool, get_session_context_tool
+
 # Financial Analysis Tools
 class FinancialTools:
     """Enhanced financial analysis tools for the Cosine agent"""
@@ -626,6 +629,8 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 6. python_financial_calculator(calculation) - Advanced calculations (Fama-French, VaR, Sharpe ratios)
 7. http_request - Web requests for additional context
 8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3
+9. get_session_files_tool(session_id, user_id, file_type) - Retrieve uploaded files for a specific session from the database
+10. get_session_context_tool(session_id, user_id) - Get complete session context including files and context items
 
 🚨 MANDATORY BEHAVIOR:
 - You MUST use tools for EVERY financial query - NO EXCEPTIONS
@@ -653,9 +658,18 @@ FOR PORTFOLIO QUESTIONS:
 3. Provide recommendations based on REAL correlation data
 
 FOR UPLOADED FILE QUESTIONS:
-1. read_s3_file_tool(s3_key, file_type) → Read and analyze uploaded files
-2. Use file content for analysis, calculations, or context
-3. Provide insights based on file data combined with market data
+1. get_session_files_tool(session_id, user_id, file_type) → Get all uploaded files for a session
+2. get_session_context_tool(session_id, user_id) → Get complete session context including files
+3. read_s3_file_tool(s3_key, file_type) → Read and analyze specific uploaded files
+4. Use file content for analysis, calculations, or context
+5. Provide insights based on file data combined with market data
+
+FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
+1. Context items now contain only metadata (not full data) for performance
+2. Use get_session_context_tool(session_id, user_id) to retrieve full context when needed
+3. For tile data, use get_financial_data() to get current market data
+4. For articles, use search_financial_news() to get current news
+5. This optimization reduces payload size and improves performance
 
 🔴 NEVER SAY:
 - "I don't have access to real data"
@@ -1046,6 +1060,8 @@ enhanced_tools = [
     python_financial_calculator,  # Advanced financial calculations
     http_request,  # Web request tool
     read_s3_file_tool,  # S3 file reader tool
+    get_session_files_tool,  # Session database access tool
+    get_session_context_tool,  # Complete session context tool
 ]
 
 # Function to create agents with different models
