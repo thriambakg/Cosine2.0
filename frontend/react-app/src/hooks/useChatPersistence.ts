@@ -177,7 +177,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         model: session.model || 'claude-3-sonnet',
         created_at: session.created_at,
         last_updated: session.last_updated,
-        message_count: session.message_count || 0,
+        message_count: (session.messages || []).length, // Use actual message count from array
         messages: (session.messages || []).map((msg: any) => ({
           ...msg,
           timestamp: new Date((msg.timestamp || Date.now()) * 1000) // Convert seconds to milliseconds
@@ -217,7 +217,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         model: response.model,
         created_at: response.created_at,
         last_updated: response.created_at,
-        message_count: response.message_count,
+        message_count: 0, // New session starts with 0 messages
         messages: []
       };
       
@@ -303,7 +303,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
                 model: response.model,
                 created_at: response.created_at,
                 last_updated: response.last_updated,
-                message_count: response.message_count,
+                message_count: (response.messages || []).length, // Use actual message count from array
                 messages: (response.messages || []).map((msg: any) => ({
                   ...msg,
                   timestamp: new Date((msg.timestamp || Date.now()) * 1000)
@@ -365,7 +365,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         model: response.model,
         created_at: response.created_at,
         last_updated: response.last_updated,
-        message_count: response.message_count,
+        message_count: (response.messages || []).length, // Use actual message count from array
         session_variables: response.session_variables || {},  // Include session_variables!
         messages: (response.messages || []).map((msg: any) => ({
           ...msg,

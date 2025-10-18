@@ -158,6 +158,7 @@ def list_sessions(user_id: str) -> Dict[str, Any]:
         # Convert items to session list (each item is a complete session)
         session_list = []
         for item in response.get('Items', []):
+            messages = item.get('messages', [])
             session = {
                 'session_id': item['session_id'],
                 'user_id': user_id,
@@ -165,8 +166,8 @@ def list_sessions(user_id: str) -> Dict[str, Any]:
                 'last_updated': item.get('last_updated', item['created_at']),
                 'title': item.get('title', f'Chat {item["session_id"][:8]}'),
                 'model': item.get('model', 'claude-3-sonnet'),
-                'message_count': item.get('message_count', 0),
-                'messages': item.get('messages', []),
+                'message_count': len(messages),  # Use actual message count from array
+                'messages': messages,
                 'session_variables': item.get('session_variables', {})
             }
             session_list.append(session)

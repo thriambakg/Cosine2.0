@@ -11,6 +11,7 @@ import { FileUploadService, UploadedFile } from '@/services/fileUploadService';
 // NEW: Import unified messaging system
 import { useUnifiedMessaging } from '@/hooks/useUnifiedMessaging';
 import { unifiedMessageHandler } from '@/services/unifiedMessageHandler';
+import AgentFileAttachment from '@/components/chat/AgentFileAttachment';
 import {
   Box,
   Typography,
@@ -86,6 +87,37 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
     {children}
   </Box>
 );
+
+// Function to parse agent file returns from message content
+const parseAgentFileReturns = (content: string) => {
+  const fileReturns: Array<{
+    filename: string;
+    fileType: string;
+    fileSize: number;
+    downloadUrl: string;
+    uploadedAt?: string;
+    createdBy?: string;
+  }> = [];
+
+  // Look for file return patterns in the message content
+  const filePattern = /📄 File \d+: (.+?)\n   Type: (.+?)\n   Size: (.+?) bytes\n   Download: (.+?)(?:\n|$)/g;
+  let match;
+  
+  while ((match = filePattern.exec(content)) !== null) {
+    const [, filename, fileType, sizeStr, downloadUrl] = match;
+    const fileSize = parseInt(sizeStr.replace(/,/g, ''));
+    
+    fileReturns.push({
+      filename,
+      fileType,
+      fileSize,
+      downloadUrl,
+      createdBy: 'agent'
+    });
+  }
+
+  return fileReturns;
+};
 
 const MessageBubble = ({ isUser, children, status, ...props }: any) => (
   <Box
@@ -1419,9 +1451,37 @@ export default function ChatPage() {
                             }}
                           />
                         ) : (
-                          <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                            {message.text}
-                          </Typography>
+                          <>
+                            <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+                              {message.text}
+                            </Typography>
+                            
+                            {/* Display agent file returns */}
+                            {message.sender === 'bot' && (() => {
+                              const agentFiles = parseAgentFileReturns(message.text);
+                              if (agentFiles.length > 0) {
+                                return (
+                                  <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                    <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                                      📁 Files returned by AI:
+                                    </Typography>
+                                    {agentFiles.map((file, index) => (
+                                      <AgentFileAttachment
+                                        key={index}
+                                        filename={file.filename}
+                                        fileType={file.fileType}
+                                        fileSize={file.fileSize}
+                                        downloadUrl={file.downloadUrl}
+                                        uploadedAt={file.uploadedAt}
+                                        createdBy={file.createdBy}
+                                      />
+                                    ))}
+                                  </Box>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </>
                         )}
                         {(message as any).files && (message as any).files.length > 0 && (
                           <Stack spacing={1} mt={1}>

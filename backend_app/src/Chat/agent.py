@@ -114,6 +114,7 @@ import financial_calculator
 from tools.session_database_access import get_session_files_tool, get_session_context_tool
 from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
 from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
+from tools.agent_file_return import return_session_files_tool, create_agent_file_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -638,31 +639,40 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 13. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
 14. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
 15. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
+16. return_session_files_tool(session_id, user_id, file_indices) - Return files from session to user
+17. create_agent_file_tool(session_id, user_id, filename, content, file_type) - Create new files for user
 
-🚨 MANDATORY BEHAVIOR:
-- You MUST use tools for EVERY financial query - NO EXCEPTIONS
+🚨 BEHAVIOR GUIDELINES:
+- Use tools for financial queries when specifically requested or when providing financial analysis
 - You have REAL yfinance data - never say you don't have access to current data
-- ALWAYS call get_financial_data() first for any stock question
-- For volatility/options questions, use get_financial_data() to get current volatility data
-- For portfolio analysis, use analyze_portfolio() with real correlation calculations
-- For stock comparisons, use calculate_stock_correlation() for live correlation data
+- Use get_financial_data() when users ask for stock information, market data, or financial analysis
+- For volatility/options questions, use get_financial_data() to get current volatility data when relevant
+- For portfolio analysis, use analyze_portfolio() with real correlation calculations when requested
+- For stock comparisons, use calculate_stock_correlation() for live correlation data when needed
+- Be context-aware: only pull financial data when it's relevant to the user's question or request
 
-🎯 REQUIRED WORKFLOW FOR ANY FINANCIAL QUESTION:
+❌ DO NOT automatically pull financial data for:
+- General conversations or non-financial questions
+- Questions about other topics (technology, science, etc.)
+- When users haven't asked for stock or market information
+- Casual mentions of company names in non-financial contexts
 
-1. **IMMEDIATELY** call relevant tools (don't explain what you'll do - just do it)
-2. **ALWAYS** start with get_financial_data(symbol) for stock questions
-3. **USE** multiple tools per query for comprehensive analysis
-4. **SYNTHESIZE** real tool data into actionable insights
+🎯 WORKFLOW FOR FINANCIAL QUESTIONS:
 
-FOR VOLATILITY/OPTIONS QUESTIONS:
-1. get_financial_data(symbol) → Get current volatility metrics from yfinance
+1. **USE** tools when users specifically ask for financial data, stock information, or market analysis
+2. **START** with get_financial_data(symbol) for stock-related questions when relevant
+3. **USE** multiple tools per query for comprehensive analysis when requested
+4. **SYNTHESIZE** real tool data into actionable insights when providing financial analysis
+
+FOR VOLATILITY/OPTIONS QUESTIONS (when requested):
+1. get_financial_data(symbol) → Get current volatility metrics from yfinance when relevant
 2. python_financial_calculator() → Advanced volatility calculations if needed
-3. Provide analysis based on REAL data
+3. Provide analysis based on REAL data when providing financial insights
 
-FOR PORTFOLIO QUESTIONS:
-1. analyze_portfolio(portfolio_json) → Real portfolio metrics with live correlations
-2. calculate_stock_correlation() → Live correlation analysis
-3. Provide recommendations based on REAL correlation data
+FOR PORTFOLIO QUESTIONS (when requested):
+1. analyze_portfolio(portfolio_json) → Real portfolio metrics with live correlations when relevant
+2. calculate_stock_correlation() → Live correlation analysis when needed
+3. Provide recommendations based on REAL correlation data when providing portfolio insights
 
 FOR UPLOADED FILE QUESTIONS:
 1. get_session_files_tool(session_id, user_id, file_type) → Get all uploaded files for a session
@@ -687,6 +697,13 @@ FOR PDF FILE ANALYSIS:
 6. Detect document type (financial, legal, technical, academic, report) automatically
 7. Provide comprehensive analysis including word count, page estimates, and content preview
 8. For forms and tables, use analyze_pdf_forms_tool for structured data extraction
+
+FOR FILE RETURNS:
+1. return_session_files_tool(session_id, user_id, file_indices) → Return files from session to user
+2. create_agent_file_tool(session_id, user_id, filename, content, file_type) → Create new files for user
+3. Use file_indices parameter: "all" for all files, or "0,2,3" for specific files
+4. Files will appear as clickable attachments in the chat interface
+5. Use when users ask for files, want to share files, or need file downloads
 
 FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 1. Context items now contain only metadata (not full data) for performance
@@ -1092,6 +1109,8 @@ enhanced_tools = [
     read_pdf_tool,  # PDF file reader tool
     analyze_pdf_content_tool,  # PDF content analysis tool
     analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
+    return_session_files_tool,  # Return files from session to user
+    create_agent_file_tool,  # Create new files for user
 ]
 
 # Function to create agents with different models
