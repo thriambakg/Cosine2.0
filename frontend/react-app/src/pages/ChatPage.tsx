@@ -1481,7 +1481,7 @@ export default function ChatPage() {
                                     <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
                                       📁 Files returned by AI:
                                     </Typography>
-                                    {agentFiles.map((file, index) => (
+                                    {agentFiles.map((file: any, index: number) => (
                                       <AgentFileAttachment
                                         key={index}
                                         filename={file.filename}
