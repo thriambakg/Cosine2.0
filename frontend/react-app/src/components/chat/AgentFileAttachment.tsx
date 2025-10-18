@@ -4,11 +4,9 @@ import {
   Typography,
   IconButton,
   Chip,
-  Tooltip,
-  Link
+  Tooltip
 } from '@mui/material';
 import {
-  AttachFile as FileIcon,
   Download as DownloadIcon,
   Description as DocumentIcon,
   Image as ImageIcon,
@@ -22,7 +20,6 @@ interface AgentFileAttachmentProps {
   fileType: string;
   fileSize: number;
   downloadUrl: string;
-  uploadedAt?: string;
   createdBy?: string;
 }
 
@@ -31,7 +28,6 @@ const AgentFileAttachment: React.FC<AgentFileAttachmentProps> = ({
   fileType,
   fileSize,
   downloadUrl,
-  uploadedAt,
   createdBy
 }) => {
   const getFileIcon = (type: string) => {
