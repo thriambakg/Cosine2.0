@@ -99,7 +99,26 @@ const parseAgentFileReturns = (content: string) => {
     createdBy?: string;
   }> = [];
 
-  // Try to parse as JSON first (new structured format)
+  // Try to parse JSON_DATA pattern first (new structured format)
+  const jsonDataMatch = content.match(/JSON_DATA:\s*({.*})/);
+  if (jsonDataMatch) {
+    try {
+      const parsed = JSON.parse(jsonDataMatch[1]);
+      if (parsed.file_data && Array.isArray(parsed.file_data)) {
+        return parsed.file_data.map((file: any) => ({
+          filename: file.filename,
+          fileType: file.file_type,
+          fileSize: file.file_size,
+          downloadUrl: file.download_url,
+          createdBy: file.created_by || 'agent'
+        }));
+      }
+    } catch (e) {
+      // JSON parsing failed, fall back to other methods
+    }
+  }
+
+  // Try to parse as JSON first (legacy structured format)
   try {
     const parsed = JSON.parse(content);
     if (parsed.file_data && Array.isArray(parsed.file_data)) {

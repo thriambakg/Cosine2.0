@@ -242,14 +242,19 @@ def return_session_files_tool(session_id: str, user_id: str, file_indices: str =
         if not result["success"]:
             return f"Error returning files: {result['error']}"
         
-        # Return JSON string with structured data for frontend parsing
+        # Return formatted text with embedded JSON for frontend parsing
         import json
         # Convert Decimal objects to regular numbers for JSON serialization
         converted_result = convert_decimals(result)
-        return json.dumps({
+        
+        # Create the JSON data
+        json_data = {
             "message": f"📁 {converted_result['message']} - {converted_result['total_files']} file(s) returned",
             "file_data": converted_result['files']
-        })
+        }
+        
+        # Return both human-readable text and JSON data
+        return f"Files returned successfully. JSON_DATA: {json.dumps(json_data)}"
         
     except Exception as e:
         logger.error(f"Error in return_session_files_tool: {str(e)}")
@@ -280,14 +285,19 @@ def create_agent_file_tool(session_id: str, user_id: str, filename: str, content
         if not result["success"]:
             return f"Error creating file: {result['error']}"
         
-        # Return JSON string with structured data for frontend parsing
+        # Return formatted text with embedded JSON for frontend parsing
         import json
         # Convert Decimal objects to regular numbers for JSON serialization
         converted_result = convert_decimals(result)
-        return json.dumps({
+        
+        # Create the JSON data
+        json_data = {
             "message": f"📁 {converted_result['message']}",
             "file_data": [converted_result['file']]
-        })
+        }
+        
+        # Return both human-readable text and JSON data
+        return f"File created successfully. JSON_DATA: {json.dumps(json_data)}"
         
     except Exception as e:
         logger.error(f"Error in create_agent_file_tool: {str(e)}")
