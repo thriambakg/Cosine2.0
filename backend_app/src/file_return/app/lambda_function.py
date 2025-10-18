@@ -7,6 +7,7 @@ import json
 import os
 import logging
 import time
+import uuid
 import boto3
 from typing import Dict, Any, List
 from decimal import Decimal
@@ -257,14 +258,57 @@ def send_message_to_chat(user_id: str, session_id: str, message: str, file_data:
         except Exception as e:
             logger.error(f"❌ Failed to send WebSocket message: {str(e)}")
             return False
-        
+            
     except Exception as e:
         logger.error(f"❌ Failed to send message to chat: {str(e)}")
         return False
 
+def send_message_to_chat_rest(user_id: str, session_id: str, message: str, file_data: List[Dict[str, Any]] = None) -> bool:
+    """
+    Send message with file data to the chat interface via REST endpoint
+    This is used for large payloads that exceed WebSocket limits
+    """
+    try:
+        # For now, we'll use the session management endpoint to add the message
+        # This ensures the message is persisted in DynamoDB and can be retrieved by the frontend
+        
+        table = dynamodb.Table(SESSIONS_TABLE)
+        
+        # Prepare message data
+        timestamp = int(time.time())
+        message_data = {
+            'id': f'msg_{timestamp}_{uuid.uuid4().hex[:8]}',
+            'text': message,
+            'sender': 'agent',
+            'timestamp': timestamp,
+            'message_type': 'agent_file_return',
+            'file_data': file_data or []
+        }
+        
+        # Add message to session
+        response = table.update_item(
+            Key={
+                'session_id': session_id,
+                'user_id': user_id
+            },
+            UpdateExpression='SET messages = list_append(if_not_exists(messages, :empty_list), :message)',
+            ExpressionAttributeValues={
+                ':empty_list': [],
+                ':message': [message_data]
+            },
+            ReturnValues='UPDATED_NEW'
+        )
+        
+        logger.info(f"📤 Message added to session {session_id}: {len(file_data or [])} files")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to send REST message: {str(e)}")
+        return False
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Main Lambda handler for secure file returns
+    Main Lambda handler for secure file returns and message sending
     """
     try:
         logger.info(f"🔍 File return request: {json.dumps(event, default=str)}")
@@ -275,6 +319,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Validate user identity
         authenticated_user_id = validate_user_identity(event)
         
+        # Handle file return requests (always use REST endpoint for large payloads)
+        return handle_file_return(event, body, authenticated_user_id)
+            
+    except Exception as e:
+        logger.error(f"❌ Lambda handler error: {str(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                'Access-Control-Allow-Methods': 'POST,OPTIONS'
+            },
+            'body': json.dumps({'error': 'Internal server error'})
+        }
+
+def handle_file_return(event: Dict[str, Any], body: Dict[str, Any], authenticated_user_id: str) -> Dict[str, Any]:
+    """
+    Handle file return requests
+    """
+    try:
         # Extract request parameters
         session_id = body.get('session_id')
         user_id = body.get('user_id')  # User ID from the request
@@ -283,6 +351,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not session_id or not user_id:
             return {
                 'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                    'Access-Control-Allow-Methods': 'POST,OPTIONS'
+                },
                 'body': json.dumps({'error': 'Missing required parameters: session_id, user_id'})
             }
         
@@ -331,10 +405,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'body': json.dumps({'error': 'Invalid action. Must be "return_files" or "create_file"'})
             }
         
-        # Send message to chat interface via WebSocket
-        websocket_sent = send_message_to_chat(user_id, session_id, message, file_data)
+        # Send message to chat interface via REST endpoint (for large payloads)
+        rest_sent = send_message_to_chat_rest(user_id, session_id, message, file_data)
         
-        if websocket_sent:
+        if rest_sent:
             logger.info(f"✅ File return completed and sent to chat: {len(file_data)} files for user {user_id}")
             # Return success response
             return {

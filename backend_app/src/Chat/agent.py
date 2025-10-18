@@ -114,6 +114,7 @@ import financial_calculator
 from tools.session_database_access import get_session_files_tool, get_session_context_tool
 from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
 from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
+from tools.file_return_service import return_session_files_tool, create_agent_file_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -638,6 +639,8 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 13. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
 14. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
 15. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
+16. return_session_files_tool(session_id, user_id, file_indices) - Return files from session to user
+17. create_agent_file_tool(session_id, user_id, filename, content, file_type) - Create new files for user
 
 🚨 BEHAVIOR GUIDELINES:
 - Use tools for financial queries when specifically requested or when providing financial analysis
@@ -695,6 +698,18 @@ FOR PDF FILE ANALYSIS:
 7. Provide comprehensive analysis including word count, page estimates, and content preview
 8. For forms and tables, use analyze_pdf_forms_tool for structured data extraction
 
+FOR FILE RETURNS:
+1. return_session_files_tool(session_id, user_id, file_indices) → Return files from session to user
+2. create_agent_file_tool(session_id, user_id, filename, content, file_type) → Create new files for user
+3. Use file_indices parameter: "all" for all files, or "0,2,3" for specific files
+4. Files will appear as clickable attachments in the chat interface
+5. Use when users ask for files, want to share files, or need file downloads
+6. CRITICAL: When using file return tools, the tools will handle the response automatically
+7. The tools will send files directly to the chat interface via WebSocket
+8. DO NOT add any text before or after calling the tool
+9. DO NOT include URLs in your response - the tool handles file delivery
+10. DO NOT say "here is the file" or "download link" - just call the tool
+11. The tool will automatically handle the file return and display
 
 FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 1. Context items now contain only metadata (not full data) for performance
@@ -1100,6 +1115,8 @@ enhanced_tools = [
     read_pdf_tool,  # PDF file reader tool
     analyze_pdf_content_tool,  # PDF content analysis tool
     analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
+    return_session_files_tool,  # Return files from session to user
+    create_agent_file_tool,  # Create new files for user
 ]
 
 # Function to create agents with different models

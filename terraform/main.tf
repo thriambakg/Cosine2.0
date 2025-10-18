@@ -959,6 +959,12 @@ resource "aws_iam_role_policy_attachment" "chat_agent_kms_policy" {
   policy_arn = aws_iam_policy.lambda_kms_policy.arn
 }
 
+# Attach Lambda invoke policy for file return service
+resource "aws_iam_role_policy_attachment" "chat_agent_lambda_invoke_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.lambda_invoke_policy.arn
+}
+
 
 # Bedrock policy for chat agent
 resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
@@ -1031,6 +1037,9 @@ resource "aws_lambda_function" "chat_agent" {
 
       # S3 Configuration for file uploads
       CHAT_FILES_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+
+      # File Return Lambda Function Name for direct invocation
+      FILE_RETURN_LAMBDA_NAME = module.file_return_lambda.function_name
     }
   }
 
