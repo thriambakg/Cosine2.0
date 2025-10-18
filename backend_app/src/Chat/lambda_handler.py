@@ -648,12 +648,39 @@ Session Context:
             else:
                 logger.warning(f"⚠️ Cannot update session context - session_context: {session_context is not None}, user_id: {user_id is not None}")
             
-            response_body = {
-                'response': response_content,
-                'session_id': session_id,
-                'user_id': user_id,
-                'timestamp': int(time.time())
-            }
+            # Check if this is a file return response by looking for JSON_DATA pattern
+            import re
+            json_data_match = re.search(r'JSON_DATA:\s*({.*})', response_content)
+            if json_data_match:
+                try:
+                    import json
+                    file_data = json.loads(json_data_match.group(1))
+                    logger.info(f"📁 FILE RETURN: Detected file return response with {len(file_data.get('file_data', []))} files")
+                    
+                    # Return structured response for direct frontend processing
+                    response_body = {
+                        'response': response_content,
+                        'file_data': file_data.get('file_data', []),
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'timestamp': int(time.time())
+                    }
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Failed to parse JSON_DATA: {e}")
+                    response_body = {
+                        'response': response_content,
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'timestamp': int(time.time())
+                    }
+            else:
+                # Regular text response
+                response_body = {
+                    'response': response_content,
+                    'session_id': session_id,
+                    'user_id': user_id,
+                    'timestamp': int(time.time())
+                }
             
             logger.info(f"🔍 DEBUG: Response body being returned: {response_body}")
             logger.info(f"🔍 DEBUG: Response body type: {type(response_body)}")

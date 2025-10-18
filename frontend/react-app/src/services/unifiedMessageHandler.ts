@@ -17,6 +17,13 @@ export interface SharedMessage {
     size: number;
     type: string;
   }>;
+  file_data?: Array<{
+    filename: string;
+    file_type: string;
+    file_size: number;
+    download_url: string;
+    created_by?: string;
+  }>;
   sessionId: string;
   source: 'chatpage' | 'sidebar' | 'database';
 }
@@ -532,9 +539,12 @@ class UnifiedMessageHandlerService {
    * Handle AI response
    */
   private handleAIResponse(sessionId: string, data: any): void {
-    const { message_id, content, timestamp } = data;
+    const { message_id, content, timestamp, file_data } = data;
     
     console.log('🤖 UnifiedMessageHandler: Received AI response for session:', sessionId);
+    if (file_data) {
+      console.log('📁 UnifiedMessageHandler: Response includes file data:', file_data.length, 'files');
+    }
     
     // Clear loading state for all interfaces
     this.broadcastLoadingState(sessionId, false, 'chatpage');
@@ -545,7 +555,8 @@ class UnifiedMessageHandlerService {
       text: content || 'No response content',
       timestamp: timestamp || Date.now(),
       sessionId: sessionId,
-      source: 'chatpage'
+      source: 'chatpage',
+      file_data: file_data || undefined
     };
 
     // Add to local cache

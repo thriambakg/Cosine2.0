@@ -375,13 +375,24 @@ def process_message(connection_id, user_id, session_id, message_data):
         current_session_id = connection_info.get('session_id') if connection_info else None
         
         if current_session_id == session_id:
-            ai_response_message = {
-                'type': 'ai_response',
-                'message_id': ai_message_id,
-                'content': ai_response,
-                'session_id': session_id,  # Include session_id for proper routing
-                'timestamp': datetime.now().isoformat()
-            }
+            # Check if this is a file return response
+            if isinstance(ai_response, dict) and ai_response.get('type') == 'file_return':
+                ai_response_message = {
+                    'type': 'ai_response',
+                    'message_id': ai_message_id,
+                    'content': ai_response.get('message', ''),
+                    'file_data': ai_response.get('file_data', []),
+                    'session_id': session_id,
+                    'timestamp': datetime.now().isoformat()
+                }
+            else:
+                ai_response_message = {
+                    'type': 'ai_response',
+                    'message_id': ai_message_id,
+                    'content': ai_response,
+                    'session_id': session_id,  # Include session_id for proper routing
+                    'timestamp': datetime.now().isoformat()
+                }
             
             send_message_to_client(connection_id, ai_response_message)
             logger.info(f"✅ Sent AI response to session {session_id}")
@@ -542,6 +553,18 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
         
         if response_payload.get('statusCode') == 200:
             response_body = json.loads(response_payload.get('body', '{}'))
+            
+            # Check if this is a file return response with structured data
+            if 'file_data' in response_body:
+                logger.info(f"📁 FILE RETURN: Detected file return response with {len(response_body.get('file_data', []))} files")
+                # Return the structured response for direct frontend processing
+                return {
+                    'type': 'file_return',
+                    'message': response_body.get('response', 'Files returned successfully'),
+                    'file_data': response_body.get('file_data', [])
+                }
+            
+            # Regular text response
             return response_body.get('response', 'I apologize, but I encountered an error processing your request.')
         elif response_payload.get('statusCode') == 404:
             # Session not found (404) - this should not happen after our session creation check

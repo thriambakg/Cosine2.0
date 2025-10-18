@@ -1493,6 +1493,28 @@ export default function ChatPage() {
                             
                             {/* Display agent file returns */}
                             {message.sender === 'bot' && (() => {
+                              // First check for direct file_data from WebSocket
+                              if (message.file_data && Array.isArray(message.file_data)) {
+                                return (
+                                  <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                    <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                                      📁 Files returned by AI:
+                                    </Typography>
+                                    {message.file_data.map((file: any, index: number) => (
+                                      <AgentFileAttachment
+                                        key={index}
+                                        filename={file.filename}
+                                        fileType={file.file_type}
+                                        fileSize={file.file_size}
+                                        downloadUrl={file.download_url}
+                                        createdBy={file.created_by}
+                                      />
+                                    ))}
+                                  </Box>
+                                );
+                              }
+                              
+                              // Fallback to parsing text content
                               const agentFiles = parseAgentFileReturns(message.text);
                               if (agentFiles.length > 0) {
                                 return (
