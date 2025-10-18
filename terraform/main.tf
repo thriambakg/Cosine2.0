@@ -560,7 +560,8 @@ resource "aws_iam_policy" "lambda_s3_chat_files_policy" {
         Action = [
           "s3:GetObject",
           "s3:PutObject",
-          "s3:DeleteObject"
+          "s3:DeleteObject",
+          "s3:GeneratePresignedUrl"
         ]
         Resource = [
           "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/*"
