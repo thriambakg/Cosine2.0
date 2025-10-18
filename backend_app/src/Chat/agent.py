@@ -639,8 +639,10 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 13. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
 14. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
 15. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
-16. return_session_files_tool(session_id, user_id, file_indices) - Return files from session to user
-17. create_agent_file_tool(session_id, user_id, filename, content, file_type) - Create new files for user
+16. return_session_files_wrapper(file_indices) - Return files from current session to user
+17. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
+
+🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
 
 🚨 BEHAVIOR GUIDELINES:
 - Use tools for financial queries when specifically requested or when providing financial analysis
@@ -723,18 +725,18 @@ FOR FILE HANDLING - CHOOSE THE RIGHT TOOL:
    - "Make a file with this information"
 
 🎯 DECISION PROCESS:
-- **ASK FOR CLARIFICATION** if unclear: "Do you want me to analyze the file content, or do you want to download the file?"
-- **For ANALYSIS**: Use read_s3_file_tool() to read and analyze content
-- **For DOWNLOAD**: Use return_session_files_wrapper() to return the file
-- **For CREATION**: Use create_agent_file_wrapper() to create new files
+- **For ANALYSIS**: Use read_s3_file_tool() when users want to understand, analyze, or read file content
+- **For DOWNLOAD**: Use return_session_files_wrapper() when users want to receive, download, or get the file
+- **For CREATION**: Use create_agent_file_wrapper() when users want to create new files
+- **ASK FOR CLARIFICATION** if the intent is unclear
 
 💡 EXAMPLES:
-- User: "What's in this file?" → Use read_s3_file_tool()
-- User: "Download this file" → Use return_session_files_wrapper()
-- User: "Analyze the data in this file" → Use read_s3_file_tool()
-- User: "Give me the file" → Use return_session_files_wrapper()
-- User: "Create a summary file" → Use create_agent_file_wrapper()
-- User: "I need this file" → Use return_session_files_wrapper()
+- "What's in this file?" → read_s3_file_tool()
+- "Download this file" → return_session_files_wrapper()
+- "Analyze the data" → read_s3_file_tool()
+- "Give me the file" → return_session_files_wrapper()
+- "Create a summary" → create_agent_file_wrapper()
+- "I need this file" → return_session_files_wrapper()
 
 📁 FILE RETURN TOOLS:
 1. return_session_files_wrapper(file_indices) → Return files from current session to user
@@ -748,7 +750,14 @@ FOR FILE HANDLING - CHOOSE THE RIGHT TOOL:
 9. DO NOT say "here is the file" or "download link" - just call the tool
 10. The tool will automatically handle the file return and display
 
-🚨 IMPORTANT: When users ask for "download link", "presigned URL", or "return the file", you MUST use return_session_files_wrapper() to provide the file. Do NOT try to generate URLs manually or use other tools.
+🚨 IMPORTANT: When users want to download or receive files, use return_session_files_wrapper() to provide the file. Do NOT try to generate URLs manually or use other tools.
+
+🔧 FILE RETURN GUIDANCE:
+- When users want to download, get, or receive files → Use return_session_files_wrapper("all")
+- When users want to analyze or read file content → Use read_s3_file_tool()
+- When users want to create new files → Use create_agent_file_wrapper()
+
+Use your judgment to determine if the user wants the file itself or wants to analyze its content.
 
 🔧 AVAILABLE FILE TOOLS:
 - return_session_files_wrapper(file_indices) - Returns files as downloadable attachments
@@ -1154,12 +1163,17 @@ File Information:
 def return_session_files_wrapper(file_indices: str = "all") -> str:
     """Return files from the current session to the user. Use 'all' to return all files, or specify indices like '0,2,3' for specific files."""
     try:
+        logger.info(f"🔧 DEBUG: return_session_files_wrapper called with file_indices: {file_indices}")
+        
         # Get session and user info from the Lambda context
         # These are set by the Lambda handler before calling the agent
         session_id = os.environ.get('CURRENT_SESSION_ID')
         user_id = os.environ.get('CURRENT_USER_ID')
         
+        logger.info(f"🔧 DEBUG: session_id: {session_id}, user_id: {user_id}")
+        
         if not session_id or not user_id:
+            logger.error("❌ Missing session_id or user_id in environment variables")
             return "Error: Session ID and User ID are required but not available in context. Please ensure you're in an active chat session."
         
         # Parse file indices
@@ -1168,12 +1182,17 @@ def return_session_files_wrapper(file_indices: str = "all") -> str:
         else:
             indices_list = [idx.strip() for idx in file_indices.split(',')]
         
+        logger.info(f"🔧 DEBUG: Calling return_session_files_tool with session_id: {session_id}, user_id: {user_id}, indices: {indices_list}")
+        
         # Call the service function
         result = return_session_files_tool(session_id, user_id, indices_list)
+        logger.info(f"🔧 DEBUG: return_session_files_tool result: {result}")
         return result
         
     except Exception as e:
-        logger.error(f"Error in return_session_files_wrapper: {str(e)}")
+        logger.error(f"❌ Error in return_session_files_wrapper: {str(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         return f"Error returning files: {str(e)}"
 
 @tool
