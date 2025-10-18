@@ -49,7 +49,7 @@ class AgentFileReturn:
     
     def __init__(self):
         self.s3_client = boto3.client('s3')
-        self.bucket_name = os.environ.get('S3_BUCKET_NAME', 'cosine-uploads')
+        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-uploads')
     
     def return_session_files(self, session_id: str, user_id: str, file_indices: List[int] = None) -> Dict[str, Any]:
         """

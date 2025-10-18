@@ -704,9 +704,9 @@ FOR FILE RETURNS:
 3. Use file_indices parameter: "all" for all files, or "0,2,3" for specific files
 4. Files will appear as clickable attachments in the chat interface
 5. Use when users ask for files, want to share files, or need file downloads
-6. CRITICAL: When using file return tools, you MUST include the complete tool output in your response
-7. The tools return formatted text with JSON_DATA - include this complete output for proper file display
-8. DO NOT modify or summarize the tool output - use it exactly as returned
+6. MANDATORY: When using file return tools, copy and paste the EXACT tool output into your response
+7. The tools return "Files returned successfully. JSON_DATA: {...}" - include this EXACT text
+8. NEVER generate your own file URLs or responses - always use the tool output verbatim
 
 FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 1. Context items now contain only metadata (not full data) for performance
