@@ -1472,7 +1472,6 @@ export default function ChatPage() {
                                         fileType={file.fileType}
                                         fileSize={file.fileSize}
                                         downloadUrl={file.downloadUrl}
-                                        uploadedAt={file.uploadedAt}
                                         createdBy={file.createdBy}
                                       />
                                     ))}
