@@ -64,6 +64,13 @@ interface Message {
   size: number;
     type: string;
   }> | UploadedFile[]; // Support both formats for backward compatibility
+  file_data?: Array<{
+    filename: string;
+    file_type: string;
+    file_size: number;
+    download_url: string;
+    created_by?: string;
+  }>;
 }
 
 // UploadedFile interface now imported from shared FileUploadService

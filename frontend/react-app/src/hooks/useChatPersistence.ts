@@ -11,6 +11,13 @@ export interface ChatMessage {
     size: number;
     type: string;
   }>;
+  file_data?: Array<{
+    filename: string;
+    file_type: string;
+    file_size: number;
+    download_url: string;
+    created_by?: string;
+  }>;
 }
 
 export interface ChatSession {

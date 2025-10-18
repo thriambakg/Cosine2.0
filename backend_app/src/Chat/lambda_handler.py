@@ -650,7 +650,7 @@ Session Context:
             
             # Check if this is a file return response by looking for JSON_DATA pattern
             import re
-            json_data_match = re.search(r'JSON_DATA:\s*({.*})', response_content)
+            json_data_match = re.search(r'JSON_DATA:\s*(\{.*\})', response_content, re.DOTALL)
             if json_data_match:
                 try:
                     import json
@@ -658,8 +658,9 @@ Session Context:
                     logger.info(f"📁 FILE RETURN: Detected file return response with {len(file_data.get('file_data', []))} files")
                     
                     # Return structured response for direct frontend processing
+                    # Use the message from the JSON data instead of the full response
                     response_body = {
-                        'response': response_content,
+                        'response': file_data.get('message', 'Files ready for download'),
                         'file_data': file_data.get('file_data', []),
                         'session_id': session_id,
                         'user_id': user_id,
@@ -667,6 +668,7 @@ Session Context:
                     }
                 except json.JSONDecodeError as e:
                     logger.error(f"❌ Failed to parse JSON_DATA: {e}")
+                    logger.error(f"❌ JSON string: {json_data_match.group(1)[:500]}")
                     response_body = {
                         'response': response_content,
                         'session_id': session_id,

@@ -249,12 +249,12 @@ def return_session_files_tool(session_id: str, user_id: str, file_indices: str =
         
         # Create the JSON data
         json_data = {
-            "message": f"📁 {converted_result['message']} - {converted_result['total_files']} file(s) returned",
+            "message": f"📁 {converted_result['total_files']} file(s) ready for download",
             "file_data": converted_result['files']
         }
         
-        # Return both human-readable text and JSON data
-        return f"Files returned successfully. JSON_DATA: {json.dumps(json_data)}"
+        # Return ONLY JSON data - no URLs in text to avoid truncation
+        return f"JSON_DATA: {json.dumps(json_data)}"
         
     except Exception as e:
         logger.error(f"Error in return_session_files_tool: {str(e)}")
@@ -292,12 +292,12 @@ def create_agent_file_tool(session_id: str, user_id: str, filename: str, content
         
         # Create the JSON data
         json_data = {
-            "message": f"📁 {converted_result['message']}",
+            "message": f"📁 File created and ready for download",
             "file_data": [converted_result['file']]
         }
         
-        # Return both human-readable text and JSON data
-        return f"File created successfully. JSON_DATA: {json.dumps(json_data)}"
+        # Return ONLY JSON data - no URLs in text to avoid truncation
+        return f"JSON_DATA: {json.dumps(json_data)}"
         
     except Exception as e:
         logger.error(f"Error in create_agent_file_tool: {str(e)}")
