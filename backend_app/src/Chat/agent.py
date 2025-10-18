@@ -112,6 +112,7 @@ import financial_calculator
 
 # Import our custom session database access tool
 from tools.session_database_access import get_session_files_tool, get_session_context_tool
+from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -631,6 +632,8 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3
 9. get_session_files_tool(session_id, user_id, file_type) - Retrieve uploaded files for a specific session from the database
 10. get_session_context_tool(session_id, user_id) - Get complete session context including files and context items
+11. get_crypto_data_tool(symbol, timeframe) - Get real-time cryptocurrency data for analysis
+12. compare_crypto_tool(symbols, timeframe) - Compare multiple cryptocurrencies side by side
 
 🚨 MANDATORY BEHAVIOR:
 - You MUST use tools for EVERY financial query - NO EXCEPTIONS
@@ -664,12 +667,20 @@ FOR UPLOADED FILE QUESTIONS:
 4. Use file content for analysis, calculations, or context
 5. Provide insights based on file data combined with market data
 
+FOR CRYPTOCURRENCY QUESTIONS:
+1. get_crypto_data_tool(symbol, timeframe) → Get real-time crypto data for a specific cryptocurrency
+2. compare_crypto_tool(symbols, timeframe) → Compare multiple cryptocurrencies side by side
+3. Use timeframe options: '1d', '7d', '30d', '1y' for different analysis periods
+4. Provide analysis based on REAL crypto data including price, returns, and volatility
+5. Compare crypto performance against traditional assets when relevant
+
 FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 1. Context items now contain only metadata (not full data) for performance
 2. Use get_session_context_tool(session_id, user_id) to retrieve full context when needed
 3. For tile data, use get_financial_data() to get current market data
-4. For articles, use search_financial_news() to get current news
-5. This optimization reduces payload size and improves performance
+4. For crypto tiles, use get_crypto_data_tool() to get current cryptocurrency data
+5. For articles, use search_financial_news() to get current news
+6. This optimization reduces payload size and improves performance
 
 🔴 NEVER SAY:
 - "I don't have access to real data"
@@ -1062,6 +1073,8 @@ enhanced_tools = [
     read_s3_file_tool,  # S3 file reader tool
     get_session_files_tool,  # Session database access tool
     get_session_context_tool,  # Complete session context tool
+    get_crypto_data_tool,  # Real-time cryptocurrency data tool
+    compare_crypto_tool,  # Cryptocurrency comparison tool
 ]
 
 # Function to create agents with different models

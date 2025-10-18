@@ -144,7 +144,7 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       setSendProgress(`Preparing context metadata for ${contextItems.length} items...`);
       
       // Create lightweight context metadata (no heavy data fetching)
-      const enrichedContextItems = contextItems.map(item => ({
+      const enrichedContextItems = contextItems.map((item: ContextItem) => ({
         id: item.id,
         type: item.type,
         title: item.title,

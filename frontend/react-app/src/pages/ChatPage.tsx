@@ -350,14 +350,17 @@ export default function ChatPage() {
         console.log('🤖 ChatPage: Received AI typing event for message:', messageId);
         setTypingMessages(prev => new Set([...prev, messageId]));
         
-        // Clear loading state when AI starts responding
+        // Clear loading state when AI starts responding (with small delay to ensure loading wheel is visible)
         if (currentSession?.session_id) {
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [currentSession.session_id]: false
-          }));
-          // Broadcast loading state clearing to other interfaces
-          unifiedMessageHandler.broadcastLoadingState(currentSession.session_id, false, 'chatpage');
+          console.log('🤖 ChatPage: AI started typing, clearing loading state for session:', currentSession.session_id);
+          setTimeout(() => {
+            setSessionLoadingStates(prev => ({
+              ...prev,
+              [currentSession.session_id]: false
+            }));
+            // Broadcast loading state clearing to other interfaces
+            unifiedMessageHandler.broadcastLoadingState(currentSession.session_id, false, 'chatpage');
+          }, 100); // Small delay to ensure loading wheel is visible
         }
       }
     };
@@ -820,8 +823,16 @@ export default function ChatPage() {
 
     console.log('📤 ChatPage: Sending message via unified messaging system');
     
+    // Clear input and files immediately when sending
+    setInputMessage('');
+    if (uploadedFiles.length > 0) {
+      console.log('📁 ChatPage: Clearing uploaded files immediately on send');
+      setUploadedFiles([]);
+    }
+    
     // Set loading state for current session
     if (currentSession?.session_id) {
+      console.log('🔄 ChatPage: Setting loading state to true for session:', currentSession.session_id);
       setSessionLoadingStates(prev => ({
         ...prev,
         [currentSession.session_id]: true
@@ -858,10 +869,6 @@ export default function ChatPage() {
       
       if (result.success) {
         console.log('✅ ChatPage: Message sent successfully via unified system');
-        
-        // Clear input and files
-    setInputMessage('');
-    setUploadedFiles([]);
     
         // Update session ID if a new session was created
         if (result.sessionId && result.sessionId !== currentSession?.session_id) {
