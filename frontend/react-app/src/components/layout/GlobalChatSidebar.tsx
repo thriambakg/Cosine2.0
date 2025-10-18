@@ -469,13 +469,13 @@ const GlobalChatSidebar: React.FC = () => {
   //   // ... complex unified handler logic removed for simplicity
   // }, [activeSessionId, user?.id, addToSharedCache]);
 
-  // Available models (matching ChatPage exactly)
+  // Available models with nicknames and tooltips
   const availableModels = [
-    { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' },
-    { value: 'claude-3-haiku', label: 'Claude 3 Haiku' },
-    { value: 'nova-lite', label: 'Amazon Nova Lite' },
-    { value: 'gpt-oss-120b', label: 'GPT-OSS 120B' },
-    { value: 'gpt-oss-20b', label: 'GPT-OSS 20B' },
+    { value: 'claude-3-sonnet', label: 'Balanced', tooltip: 'Strikes ideal balance between intelligence and speed' },
+    { value: 'claude-3-haiku', label: 'Fast', tooltip: 'Fastest, most compact model for near-instant responsiveness' },
+    { value: 'nova-lite', label: 'Multimodal', tooltip: 'Multimodal understanding model for text, images, and videos' },
+    { value: 'gpt-oss-120b', label: 'Deep', tooltip: 'Complex reasoning, extended thinking, sophisticated analysis' },
+    { value: 'gpt-oss-20b', label: 'Smart', tooltip: 'Intelligent reasoning, complex problem-solving, efficient' },
   ];
 
   // Scroll to bottom when messages change
@@ -1786,7 +1786,7 @@ const GlobalChatSidebar: React.FC = () => {
         {/* Model Selection */}
         <FormControl fullWidth size="small" sx={{ mb: 1 }}>
           <Select
-            value={selectedModel}
+            value={selectedModel || 'claude-3-sonnet'}
             onChange={handleModelChange}
             sx={{
               color: '#ffffff',
@@ -1805,7 +1805,7 @@ const GlobalChatSidebar: React.FC = () => {
             }}
           >
             {availableModels.map((model) => (
-              <MenuItem key={model.value} value={model.value}>
+              <MenuItem key={model.value} value={model.value} title={model.tooltip}>
                 <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                   {model.label}
                 </Typography>

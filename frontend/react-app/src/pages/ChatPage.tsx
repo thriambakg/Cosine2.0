@@ -414,6 +414,11 @@ export default function ChatPage() {
   useEffect(() => {
     const currentSessionId = currentSession?.session_id;
     
+    // Set model from session if available
+    if (currentSession?.model) {
+      setSelectedModel(currentSession.model);
+    }
+    
     // Debug session switching
     console.log('🔄 SESSION EFFECT: Current session:', {
       sessionId: currentSessionId,
@@ -1194,7 +1199,7 @@ export default function ChatPage() {
                 </Typography>
                 <FormControl size="small" fullWidth>
                   <Select
-                    value={selectedModel}
+                    value={selectedModel || 'claude-3-sonnet'}
                     onChange={(e) => setSelectedModel(e.target.value)}
                     sx={{
                       color: 'white',
@@ -1213,11 +1218,21 @@ export default function ChatPage() {
                       },
                     }}
                   >
-                    <MenuItem value="claude-3-sonnet">Claude 3 Sonnet</MenuItem>
-                    <MenuItem value="claude-3-haiku">Claude 3 Haiku</MenuItem>
-                    <MenuItem value="nova-lite">Amazon Nova Lite</MenuItem>
-                    <MenuItem value="gpt-oss-120b">GPT-OSS 120B</MenuItem>
-                    <MenuItem value="gpt-oss-20b">GPT-OSS 20B</MenuItem>
+                    <MenuItem value="claude-3-sonnet" title="Strikes ideal balance between intelligence and speed">
+                      Balanced
+                    </MenuItem>
+                    <MenuItem value="claude-3-haiku" title="Fastest, most compact model for near-instant responsiveness">
+                      Fast
+                    </MenuItem>
+                    <MenuItem value="nova-lite" title="Multimodal understanding model for text, images, and videos">
+                      Multimodal
+                    </MenuItem>
+                    <MenuItem value="gpt-oss-120b" title="Complex reasoning, extended thinking, sophisticated analysis">
+                      Deep
+                    </MenuItem>
+                    <MenuItem value="gpt-oss-20b" title="Intelligent reasoning, complex problem-solving, efficient">
+                      Smart
+                    </MenuItem>
                   </Select>
                 </FormControl>
               </Box>

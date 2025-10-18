@@ -113,7 +113,7 @@ import financial_calculator
 # Import our custom session database access tool
 from tools.session_database_access import get_session_files_tool, get_session_context_tool
 from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
-from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool
+from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -637,6 +637,7 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 12. compare_crypto_tool(symbols, timeframe) - Compare multiple cryptocurrencies side by side
 13. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
 14. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
+15. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
 
 🚨 MANDATORY BEHAVIOR:
 - You MUST use tools for EVERY financial query - NO EXCEPTIONS
@@ -678,12 +679,14 @@ FOR CRYPTOCURRENCY QUESTIONS:
 5. Compare crypto performance against traditional assets when relevant
 
 FOR PDF FILE ANALYSIS:
-1. read_pdf_tool(s3_key) → Read and extract text from PDF files stored in S3
+1. read_pdf_tool(s3_key) → Read and extract text from PDF files stored in S3 (uses Textract for better accuracy)
 2. analyze_pdf_content_tool(s3_key, analysis_type) → Perform specific analysis on PDF content
-3. Use analysis_type options: 'summary', 'financial', 'legal', 'technical'
-4. Extract key information like dates, monetary amounts, percentages, emails, phone numbers
-5. Detect document type (financial, legal, technical, academic, report) automatically
-6. Provide comprehensive analysis including word count, page estimates, and content preview
+3. analyze_pdf_forms_tool(s3_key) → Analyze PDF forms and tables using Amazon Textract
+4. Use analysis_type options: 'summary', 'financial', 'legal', 'technical'
+5. Extract key information like dates, monetary amounts, percentages, emails, phone numbers
+6. Detect document type (financial, legal, technical, academic, report) automatically
+7. Provide comprehensive analysis including word count, page estimates, and content preview
+8. For forms and tables, use analyze_pdf_forms_tool for structured data extraction
 
 FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 1. Context items now contain only metadata (not full data) for performance
@@ -1088,6 +1091,7 @@ enhanced_tools = [
     compare_crypto_tool,  # Cryptocurrency comparison tool
     read_pdf_tool,  # PDF file reader tool
     analyze_pdf_content_tool,  # PDF content analysis tool
+    analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
 ]
 
 # Function to create agents with different models
