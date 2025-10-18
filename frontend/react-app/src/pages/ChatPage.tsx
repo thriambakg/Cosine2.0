@@ -1,12 +1,16 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { ENV_CONFIG } from '@/config/environment';
 import { useChatPersistence } from '@/hooks/useChatPersistence';
 import { useClock } from '@/contexts/ClockContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { sessionManagementAPI } from '@/services/api';
 import { ContextItem } from '@/components/tiles/common/contextManager';
+// NEW: Import shared file upload service
+import { FileUploadService, UploadedFile } from '@/services/fileUploadService';
+// NEW: Import unified messaging system
+import { useUnifiedMessaging } from '@/hooks/useUnifiedMessaging';
+import { unifiedMessageHandler } from '@/services/unifiedMessageHandler';
 import {
   Box,
   Typography,
@@ -54,34 +58,16 @@ interface Message {
   sender: 'user' | 'bot';
   timestamp: Date;
   status?: 'sending' | 'sent' | 'delivered' | 'error';
-  files?: UploadedFile[];
-}
-
-interface UploadedFile {
-  id?: number;
+  files?: Array<{
   name: string;
   size: number;
-  type: string;
-  compressedData?: string;
-  compressedSize?: number;
-  compressionRatio?: number;
+    type: string;
+  }> | UploadedFile[]; // Support both formats for backward compatibility
 }
 
-interface WebSocketMessage {
-  type: 'connection_established' | 'message_received' | 'ai_response' | 'error' | 'connection_establish' | 'edit_acknowledged' | 'session_updated' | 'user_message_with_files';
-  message_id?: string;
-  session_id?: string;
-  content?: string;
-  message?: string;
-  timestamp?: string;
-  unchanged?: boolean;
-  session_variables?: any;
-  files?: Array<{
-    name: string;
-    size: number;
-    type: string;
-  }>;
-}
+// UploadedFile interface now imported from shared FileUploadService
+
+// WebSocket message handling is now done by the unified MessagingService
 
 
 // Custom styled components for Wall Street chic
@@ -125,10 +111,10 @@ const MessageBubble = ({ isUser, children, status, ...props }: any) => (
     {children}
     {isUser && status && (
       <Box sx={{ position: 'absolute', bottom: 4, right: 4 }}>
-        {status === 'sending' && <CircularProgress size={12} sx={{ color: '#9ca3af' }} />}
-        {status === 'sent' && <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '10px' }}>✓</Typography>}
-        {status === 'delivered' && <Typography variant="caption" sx={{ color: '#22c55e', fontSize: '10px' }}>✓✓</Typography>}
-        {status === 'error' && <Typography variant="caption" sx={{ color: '#ef4444', fontSize: '10px' }}>✗</Typography>}
+        {status === 'sending' && <CircularProgress size={12} sx={{ color: '#3b82f6' }} />}
+        {status === 'sent' && <Typography variant="caption" sx={{ color: '#22c55e', fontSize: '12px', fontWeight: 'bold' }}>✓</Typography>}
+        {status === 'delivered' && <Typography variant="caption" sx={{ color: '#16a34a', fontSize: '12px', fontWeight: 'bold' }}>✓✓</Typography>}
+        {status === 'error' && <Typography variant="caption" sx={{ color: '#dc2626', fontSize: '12px', fontWeight: 'bold' }}>✗</Typography>}
       </Box>
     )}
   </Box>
@@ -223,7 +209,6 @@ export default function ChatPage() {
     deleteSession,
     addMessage: addPersistedMessage,
     truncateMessagesAfter,
-    loadSessionsFromBackend,
     updateSessionContext,
     updateSessionFiles,
     updateSessionVariables,
@@ -235,17 +220,13 @@ export default function ChatPage() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
   const [missedResponseNotification] = useState<string | null>(null);
-  // Connection status variables - used internally for WebSocket logic
-  const [_connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
-  const [_connectionError, setConnectionError] = useState<string | null>(null);
+  // Typing messages for AI response animation
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
-  const [connectionEstablished, setConnectionEstablished] = useState(false);
   
   // Session-specific state tracking
   const [sessionLoadingStates, setSessionLoadingStates] = useState<Record<string, boolean>>({});
   const [pendingMessages, setPendingMessages] = useState<Record<string, Message[]>>({});
-  const [processedMessageIds, setProcessedMessageIds] = useState<Set<string>>(new Set());
-  const [sentMessageIds, setSentMessageIds] = useState<Set<string>>(new Set());
+  // Removed unused state variables
   
   // Helper function to get current session loading state
   const getCurrentSessionLoading = useCallback(() => {
@@ -267,13 +248,117 @@ export default function ChatPage() {
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [isFilesExpanded, setIsFilesExpanded] = useState(false);
   
+  // NEW: Unified messaging system for centralized message handling
+  const {
+    messages: unifiedMessages,
+    isProcessing: isUnifiedProcessing,
+    crossInterfaceLoading,
+    sendMessage: sendUnifiedMessage,
+    sendContextMessage: sendUnifiedContextMessage,
+    sendFileMessage: sendUnifiedFileMessage,
+    sendFollowupMessage: sendUnifiedFollowupMessage,
+    sendEditMessage: sendUnifiedEditMessage
+  } = useUnifiedMessaging({
+    sessionId: currentSession?.session_id || null,
+    userId: user?.id,
+    source: 'chatpage',
+    onMessageUpdate: (update) => {
+      console.log('📨 ChatPage: Received unified message update:', update.type);
+    }
+  });
+
+  // Sync unified messages with local persistence system
+  useEffect(() => {
+    if (!currentSession?.session_id || unifiedMessages.length === 0) return;
+
+    console.log('🔄 ChatPage: Syncing unified messages with persistence system', {
+      sessionId: currentSession.session_id,
+      unifiedMessageCount: unifiedMessages.length,
+      localMessageCount: currentSession.messages.length
+    });
+
+    // Only sync messages that belong to the current session
+    const sessionMessages = unifiedMessages.filter(msg => msg.sessionId === currentSession.session_id);
+    
+    if (sessionMessages.length === 0) {
+      console.log('🔄 ChatPage: No unified messages for current session, skipping sync');
+      return;
+    }
+
+    // Get messages that exist in unified cache but not in local persistence
+    const localMessageIds = new Set(currentSession.messages.map(m => m.id));
+    const newMessages = sessionMessages.filter(unifiedMsg => !localMessageIds.has(unifiedMsg.id));
+
+    // Only add truly new messages to prevent duplication
+    if (newMessages.length > 0) {
+      console.log(`📨 ChatPage: Found ${newMessages.length} new messages to add to persistence`);
+      newMessages.forEach(unifiedMsg => {
+        console.log('📨 ChatPage: Adding unified message to persistence:', unifiedMsg.id);
+        addPersistedMessage({
+          id: unifiedMsg.id,
+          text: unifiedMsg.text,
+          sender: unifiedMsg.sender === 'ai' ? 'bot' : unifiedMsg.sender,
+          timestamp: new Date(unifiedMsg.timestamp),
+          files: unifiedMsg.files
+        });
+      });
+    } else {
+      console.log('🔄 ChatPage: All unified messages already exist in persistence, skipping sync');
+    }
+  }, [unifiedMessages, currentSession?.session_id, currentSession?.messages, addPersistedMessage]);
+
+  // Listen for AI response typing events from unified messaging system
+  useEffect(() => {
+    const handleAITyping = (event: CustomEvent) => {
+      const { sessionId, messageId } = event.detail;
+      
+      // Only handle typing for current session
+      if (sessionId === currentSession?.session_id) {
+        console.log('🤖 ChatPage: Received AI typing event for message:', messageId);
+        setTypingMessages(prev => new Set([...prev, messageId]));
+        
+        // Clear loading state when AI starts responding
+        if (currentSession?.session_id) {
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [currentSession.session_id]: false
+          }));
+          // Broadcast loading state clearing to other interfaces
+          unifiedMessageHandler.broadcastLoadingState(currentSession.session_id, false, 'chatpage');
+        }
+      }
+    };
+
+    window.addEventListener('ai-response-typing', handleAITyping as EventListener);
+    
+    return () => {
+      window.removeEventListener('ai-response-typing', handleAITyping as EventListener);
+    };
+  }, [currentSession?.session_id]);
+
+  // Listen for session variable updates (including file uploads)
+  useEffect(() => {
+    const handleSessionVariablesUpdate = (event: CustomEvent) => {
+      const { sessionId, sessionVariables } = event.detail;
+      console.log('📁 ChatPage: Received session variables update:', { sessionId, fileCount: sessionVariables?.uploaded_files?.length || 0 });
+      
+      if (sessionId === currentSession?.session_id) {
+        // Update session variables in persistence system
+        updateSessionVariables(sessionId, sessionVariables);
+        console.log('✅ ChatPage: Updated session variables in real-time');
+      }
+    };
+
+    window.addEventListener('session-variables-updated', handleSessionVariablesUpdate as any);
+    
+    return () => {
+      window.removeEventListener('session-variables-updated', handleSessionVariablesUpdate as any);
+    };
+  }, [currentSession?.session_id]);
+  
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const websocketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const maxReconnectAttempts = 5;
   
   // Clear loading state when session is deleted or changed
   useEffect(() => {
@@ -419,337 +504,7 @@ export default function ChatPage() {
     }
   }, [editingMessage]);
 
-  // WebSocket connection management
-  const connectWebSocket = useCallback(() => {
-    if (!user?.id || !ENV_CONFIG.websocketUrl) {
-      console.error('Cannot connect: missing user ID or WebSocket URL');
-      setConnectionError('Missing user ID or WebSocket URL');
-      return;
-    }
-
-    // Prevent multiple connections
-    if (websocketRef.current && websocketRef.current.readyState === WebSocket.CONNECTING) {
-      console.log('🔄 WebSocket connection already in progress, skipping');
-      return;
-    }
-
-    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-      console.log('✅ WebSocket already connected, skipping');
-      return;
-    }
-
-    try {
-      setConnectionStatus('connecting');
-      setConnectionError(null);
-
-      // Close existing connection if any
-      if (websocketRef.current) {
-        websocketRef.current.close();
-        websocketRef.current = null;
-      }
-
-      // Create WebSocket URL with user ID as query parameter
-      const wsUrl = `${ENV_CONFIG.websocketUrl}?userId=${user.id}`;
-      console.log('🔌 Connecting to WebSocket:', wsUrl);
-
-      const ws = new WebSocket(wsUrl);
-      websocketRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('✅ WebSocket connected');
-        setConnectionStatus('connected');
-        setConnectionError(null); // Clear any previous errors
-        reconnectAttemptsRef.current = 0;
-        
-        // Send a connection establishment message (not a chat message) only if not already established
-        if (!connectionEstablished) {
-          const connectionMessage = {
-            type: 'connection_establish',
-            userId: user.id,
-            timestamp: new Date().toISOString()
-          };
-          
-          try {
-            const messageString = JSON.stringify(connectionMessage);
-            console.log('📤 Sending connection establishment message:', messageString);
-            ws.send(messageString);
-            console.log('📤 Sent connection establishment message successfully');
-            setConnectionEstablished(true);
-          } catch (error) {
-            console.error('Error sending connection message:', error);
-          }
-        } else {
-          console.log('📤 Connection already established, skipping message');
-        }
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data: WebSocketMessage = JSON.parse(event.data);
-          console.log('📨 Received WebSocket message:', data);
-          handleWebSocketMessage(data);
-          
-          // Dispatch WebSocket message as custom event for sidebar to listen
-          const websocketEvent = new CustomEvent('websocket-message', {
-            detail: data
-          });
-          window.dispatchEvent(websocketEvent);
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-        }
-      };
-
-      ws.onclose = (event) => {
-        console.log('❌ WebSocket disconnected:', event.code, event.reason);
-        setConnectionStatus('disconnected');
-        setConnectionEstablished(false); // Reset connection established flag
-        
-        // Attempt to reconnect if not a normal closure
-        if (event.code !== 1000 && reconnectAttemptsRef.current < maxReconnectAttempts) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
-          console.log(`🔄 Attempting to reconnect in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1}/${maxReconnectAttempts})`);
-          
-          reconnectTimeoutRef.current = setTimeout(() => {
-            reconnectAttemptsRef.current++;
-            connectWebSocket();
-          }, delay);
-        } else if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-          setConnectionError('Unable to connect. Please refresh the page to try again.');
-          setConnectionStatus('error');
-        }
-      };
-
-      ws.onerror = (error) => {
-        // Log error for debugging but don't show to user
-        console.warn('🔧 WebSocket connection issue detected (handling gracefully):', error.type);
-        // Don't set error status immediately - let onclose handle reconnection
-        // This prevents showing error messages for temporary connection issues
-        console.log('🔄 WebSocket error occurred, waiting for connection to close for retry');
-        
-        // Only set error status if we've exhausted reconnection attempts
-        if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-          setConnectionStatus('error');
-          setConnectionError('Connection lost. Please refresh to reconnect.');
-        }
-      };
-
-    } catch (error) {
-      console.warn('🔧 WebSocket connection creation issue (handling gracefully):', error);
-      setConnectionStatus('error');
-      setConnectionError('Unable to establish connection. Please try again.');
-    }
-  }, [user?.id]);
-
-  const handleWebSocketMessage = useCallback((data: WebSocketMessage) => {
-    switch (data.type) {
-      case 'connection_established':
-        console.log('🔗 Session established:', data.session_id);
-        setConnectionEstablished(true);
-        // Note: Message saving is now handled by the persistence hook's retry mechanism
-        break;
-
-      case 'message_received':
-        // Message status tracking is handled by persistence system
-        console.log('📨 Message received confirmation:', data.message_id);
-        break;
-
-      case 'user_message_with_files':
-        // Handle user message with files from File Handler
-        if (data.session_id && currentSession?.session_id && data.session_id === currentSession.session_id) {
-          console.log('📁 User message with files received:', data.message_id, data.files);
-          
-          // Update the existing user message with file information
-          if (data.message_id && data.files) {
-            // Update the message in the persistence system
-            const updatedMessage = {
-              id: data.message_id,
-              text: data.content || '',
-              sender: 'user' as const,
-              timestamp: new Date(data.timestamp || Date.now()),
-              files: data.files,
-              status: 'sent' as const
-            };
-            
-            // Add the updated message to persistence system
-            addPersistedMessage(updatedMessage);
-            
-            console.log('✅ Updated user message with files in real-time');
-          }
-        }
-        break;
-
-      case 'session_updated':
-        // Handle session variables updates (e.g., new files uploaded)
-        if (data.session_id && currentSession?.session_id && data.session_id === currentSession.session_id) {
-          console.log('📁 Session variables updated:', { fileCount: data.session_variables?.uploaded_files?.length || 0 });
-          
-          // Update current session with new session variables
-          if (data.session_variables) {
-            updateSessionVariables(data.session_id, data.session_variables);
-            console.log('✅ Updated session variables in real-time');
-            
-            // Notify sidebar about session update
-            const sessionUpdateEvent = new CustomEvent('session-variables-updated', {
-              detail: {
-                sessionId: data.session_id,
-                sessionVariables: data.session_variables
-              }
-            });
-            window.dispatchEvent(sessionUpdateEvent);
-            console.log('📡 Dispatched session-variables-updated event to sidebar');
-          }
-        }
-        break;
-
-      case 'ai_response':
-        // Only process AI responses for the current session
-        if (data.session_id && currentSession?.session_id && data.session_id !== currentSession.session_id) {
-          console.log('🤖 AI response for different session, ignoring:', data.session_id, 'vs', currentSession.session_id);
-          break;
-        }
-        
-        // Check if we've already processed this message
-        const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        if (processedMessageIds.has(messageId)) {
-          console.log('🤖 Duplicate AI response ignored:', messageId);
-          break;
-        }
-        
-        // Add AI response to messages
-        const aiMessage: Message = {
-          id: messageId,
-          text: data.content || 'No response content',
-          sender: 'bot',
-          timestamp: new Date(data.timestamp || Date.now()),
-        };
-        
-        // Mark message as processed
-        setProcessedMessageIds(prev => new Set([...prev, messageId]));
-        
-        console.log('🤖 Received AI response:', {
-          messageId: aiMessage.id,
-          contentLength: aiMessage.text.length,
-          currentSessionId: currentSession?.session_id,
-          responseSessionId: data.session_id,
-          currentMessageCount: currentSession?.messages?.length || 0
-        });
-        
-        // Check if this response is for the currently viewed session
-        const responseSessionId = data.session_id;
-        if (responseSessionId === currentSession?.session_id) {
-          // Add to persistence system
-          addPersistedMessage(aiMessage);
-          // Add to typing messages to trigger typing animation
-          setTypingMessages(prev => new Set([...prev, aiMessage.id]));
-          // Clear loading state for this session
-          if (responseSessionId) {
-            setSessionLoadingStates(prev => ({
-              ...prev,
-              [responseSessionId]: false
-            }));
-          }
-          
-          console.log('📡 Adding AI response to current ChatPage session');
-        }
-        
-        // Always dispatch AI response event for sidebar (regardless of current session)
-        // This allows the sidebar to receive responses for its active session
-        const aiResponseEvent = new CustomEvent('chatpage-ai-response', {
-          detail: {
-            messageId: messageId,
-            content: data.content || 'No response content',
-            sessionId: responseSessionId,
-            userId: user?.id,
-            timestamp: Date.now()
-          }
-        });
-        window.dispatchEvent(aiResponseEvent);
-        console.log('📡 Dispatched AI response to sidebar:', {
-          messageId,
-          sessionId: responseSessionId,
-          userId: user?.id,
-          contentLength: (data.content || '').length
-        });
-        
-        if (responseSessionId && responseSessionId !== currentSession?.session_id) {
-          // Cache the message for the session it belongs to
-          console.log('🤖 Caching AI response for session:', responseSessionId);
-          setPendingMessages(prev => ({
-            ...prev,
-            [responseSessionId]: [...(prev[responseSessionId] || []), aiMessage]
-          }));
-          // Clear loading state for that session
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [responseSessionId]: false
-          }));
-        }
-        break;
-
-      case 'edit_acknowledged':
-        console.log('✏️ Edit acknowledged:', data.message_id);
-        
-        // Check if message was unchanged (user clicked edit but didn't change text)
-        if (data.unchanged) {
-          console.log('⚠️ Edit acknowledged but message unchanged - no AI response expected');
-          // Clear loading state since no AI response will come
-          if (currentSession?.session_id) {
-            setSessionLoadingStates(prev => ({
-              ...prev,
-              [currentSession.session_id]: false
-            }));
-          }
-        } else {
-          // UI has already been updated in handleSaveEdit, just log acknowledgment
-          // The AI response will come as a separate 'ai_response' message
-          console.log('✅ Edit acknowledged - waiting for AI response');
-        }
-        break;
-
-      case 'error':
-        console.error('WebSocket error message:', data.message);
-        setConnectionError(data.message || 'Unknown error');
-        // Clear loading state for current session on error
-        if (currentSession?.session_id) {
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [currentSession.session_id]: false
-          }));
-        }
-        break;
-
-      default:
-        console.warn('Unknown WebSocket message type:', data.type);
-    }
-  }, []);
-
-  // Connect to WebSocket when user is available
-  useEffect(() => {
-    if (user?.id && ENV_CONFIG.websocketUrl) {
-      connectWebSocket();
-    }
-
-    // Add global error handler for unhandled WebSocket errors
-    const handleGlobalError = (event: ErrorEvent) => {
-      if (event.message && event.message.includes('WebSocket')) {
-        console.warn('🔧 Global WebSocket error caught (handling gracefully):', event.message);
-        // Don't propagate the error to avoid showing it to users
-        event.preventDefault();
-      }
-    };
-
-    window.addEventListener('error', handleGlobalError);
-
-    return () => {
-      if (websocketRef.current) {
-        websocketRef.current.close();
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      window.removeEventListener('error', handleGlobalError);
-    };
-  }, [user?.id, ENV_CONFIG.websocketUrl]);
+  // WebSocket connection and message handling is now done by the unified MessagingService
 
   // Load context when session changes
   useEffect(() => {
@@ -774,184 +529,7 @@ export default function ChatPage() {
     }
   }, [currentSession?.session_id, currentSession?.session_variables]);
 
-  // Listen for sidebar messages and other events
-  useEffect(() => {
-    const handleSidebarMessage = (event: CustomEvent) => {
-      const messageData = event.detail;
-      console.log('📤 ChatPage received message from sidebar:', messageData);
-      
-      // Ensure we're on the same session as the sidebar
-      if (messageData.sessionId && messageData.userId === user?.id) {
-        // If ChatPage is on a different session, switch to the sidebar's session
-        if (currentSession?.session_id !== messageData.sessionId) {
-          console.log('🔄 Switching ChatPage to sidebar session:', messageData.sessionId);
-          // Load the session that the sidebar is using
-          loadSession(messageData.sessionId);
-        }
-        
-        // Add the user message to ChatPage immediately
-        const userMessage: Message = {
-          id: messageData.messageId,
-          text: messageData.message,
-          sender: 'user',
-          timestamp: new Date(messageData.timestamp || Date.now()),
-          files: messageData.files || undefined, // Include file attachments if present
-        };
-        addPersistedMessage(userMessage);
-        console.log('✅ Added sidebar message to ChatPage UI');
-        
-        // Set loading state for the session to show "AI is thinking" indicator
-        if (messageData.sessionId) {
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [messageData.sessionId]: true
-          }));
-          console.log('💭 ChatPage showing AI is thinking for sidebar message (session loading)');
-        }
-        
-        // Update ChatPage's selected model to match the sidebar's selection
-        if (messageData.model && messageData.model !== selectedModel) {
-          console.log('🔄 Updating ChatPage model from sidebar:', messageData.model);
-          setSelectedModel(messageData.model);
-        }
-        
-        // Handle file messages vs regular messages differently
-        if (messageData.files && messageData.files.length > 0) {
-          // File message - route to File Handler (like ChatPage does)
-          console.log('📁 ChatPage routing sidebar file message to File Handler');
-          // The sidebar already sent it to File Handler, so we just need to wait for WebSocket responses
-        } else {
-          // Regular message - send via WebSocket
-          if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-            const messagePayload = {
-              action: 'chat',
-              type: 'chat_message',
-              message: messageData.message,
-              userId: messageData.userId,
-              sessionId: messageData.sessionId,
-              model: messageData.model,
-              files: [],
-              messageId: messageData.messageId,
-              // Include context if present
-              ...(messageData.contextItems && messageData.contextItems.length > 0 && {
-                contextItems: messageData.contextItems,
-                context: messageData.context
-              })
-            };
-            
-            websocketRef.current.send(JSON.stringify(messagePayload));
-            console.log('📤 ChatPage sent sidebar regular message via WebSocket');
-          } else {
-            console.error('❌ WebSocket not connected, cannot send sidebar message');
-          }
-        }
-      }
-    };
-    
-    // Also listen to shared WebSocket messages (for sidebar-initiated messages)
-    const handleSharedWebSocketMessage = (event: CustomEvent) => {
-      const data = event.detail;
-      
-      // Only process AI responses (user messages already handled by sidebar-send-message event)
-      // Accept responses with no session_id (edit responses sometimes omit it) or matching session_id
-      if (data.type === 'ai_response' && (!data.session_id || data.session_id === currentSession?.session_id)) {
-        const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
-        // Check for duplicate
-        if (processedMessageIds.has(messageId)) {
-          console.log('🤖 Duplicate AI response from shared WebSocket ignored:', messageId);
-          return;
-        }
-        
-        console.log('🤖 ChatPage received AI response from shared WebSocket:', messageId);
-        
-        // Process the same way as direct WebSocket
-        const aiMessage: Message = {
-          id: messageId,
-          text: data.content || 'No response content',
-          sender: 'bot',
-          timestamp: new Date(data.timestamp || Date.now()),
-        };
-        
-        setProcessedMessageIds(prev => new Set([...prev, messageId]));
-        addPersistedMessage(aiMessage);
-        setTypingMessages(prev => new Set([...prev, aiMessage.id]));
-        
-        // Clear loading state for this session (use currentSession if response has no session_id)
-        const sessionIdToClear = data.session_id || currentSession?.session_id;
-        if (sessionIdToClear) {
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [sessionIdToClear]: false
-          }));
-          console.log('🔄 Cleared loading state for session:', sessionIdToClear);
-        }
-        
-        console.log('✅ ChatPage processed AI response from shared WebSocket');
-      }
-    };
-    
-    const handleSidebarEdit = (event: CustomEvent) => {
-      const editData = event.detail;
-      console.log('✏️ ChatPage mirroring Sidebar edit:', editData);
-      
-      if (editData.sessionId === currentSession?.session_id && editData.userId === user?.id) {
-        // Update message and truncate messages after it using the persistence system
-        truncateMessagesAfter(editData.messageId, editData.newText);
-        
-        // Set loading state
-        if (currentSession?.session_id) {
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [currentSession.session_id]: true
-          }));
-        }
-        
-        console.log('✅ ChatPage mirrored Sidebar edit');
-      }
-    };
-    
-    // Handle AI processing cancellation from sidebar
-    const handleCancelAIProcessing = (event: CustomEvent) => {
-      const { sessionId, source } = event.detail;
-      
-      // Only process if it's from sidebar and matches current session
-      if (source === 'sidebar' && sessionId === currentSession?.session_id) {
-        console.log('🛑 ChatPage received cancel from sidebar, clearing loading state');
-        setSessionLoadingStates(prev => ({
-          ...prev,
-          [sessionId]: false
-        }));
-      }
-    };
-
-    // Handle context updates from sidebar
-    const handleContextSync = (event: CustomEvent) => {
-      const { sessionId, contextItems } = event.detail;
-      console.log('🔄 ChatPage: Received context sync from Sidebar:', { sessionId, itemCount: contextItems.length });
-      
-      if (sessionId === currentSession?.session_id) {
-        setSessionContext(contextItems);
-        console.log('✅ ChatPage: Synced context from Sidebar');
-        
-        // Update sessions list with new context
-        updateSessionContext(sessionId, contextItems);
-      }
-    };
-    
-    window.addEventListener('sidebar-send-message', handleSidebarMessage as any);
-    window.addEventListener('sidebar-edit-message', handleSidebarEdit as any);
-    window.addEventListener('websocket-message', handleSharedWebSocketMessage as any);
-    window.addEventListener('cancel-ai-processing', handleCancelAIProcessing as any);
-    window.addEventListener('session-context-updated', handleContextSync as any);
-    return () => {
-      window.removeEventListener('sidebar-send-message', handleSidebarMessage as any);
-      window.removeEventListener('sidebar-edit-message', handleSidebarEdit as any);
-      window.removeEventListener('websocket-message', handleSharedWebSocketMessage as any);
-      window.removeEventListener('cancel-ai-processing', handleCancelAIProcessing as any);
-      window.removeEventListener('session-context-updated', handleContextSync as any);
-    };
-  }, [user?.id, currentSession?.session_id, processedMessageIds, addPersistedMessage, truncateMessagesAfter, loadSession, loadSessionsFromBackend, updateSessionContext]);
+  // Note: All message handling is now done by the unified messaging system
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -964,190 +542,22 @@ export default function ChatPage() {
   // Remove auto-creation - let user start typing first
   // Sessions will be created when user actually sends a message
 
-  // Helper function to convert Uint8Array to base64 without stack overflow
-  const convertUint8ArrayToBase64 = (uint8Array: Uint8Array): string => {
-    const chunkSize = 8192; // Process in 8KB chunks to avoid stack overflow
-    let result = '';
-    
-    for (let i = 0; i < uint8Array.length; i += chunkSize) {
-      const chunk = uint8Array.slice(i, i + chunkSize);
-      result += btoa(String.fromCharCode.apply(null, Array.from(chunk)));
-    }
-    
-    return result;
-  };
-
-  const compressFile = async (file: File): Promise<{compressedData: string, originalSize: number, compressedSize: number}> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        try {
-          const arrayBuffer = e.target?.result as ArrayBuffer;
-          const uint8Array = new Uint8Array(arrayBuffer);
-          
-          // For small files (< 1MB), skip compression to speed up processing
-          if (file.size < 1024 * 1024) {
-            console.log(`⚡ Skipping compression for small file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
-            // Use chunked base64 conversion to avoid stack overflow
-            const base64Data = convertUint8ArrayToBase64(uint8Array);
-            resolve({
-              compressedData: base64Data,
-              originalSize: file.size,
-              compressedSize: file.size
-            });
-            return;
-          }
-          
-          // For larger files, use CompressionStream with timeout
-          const startTime = Date.now();
-          console.log(`🔄 Starting compression for ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-          
-          const stream = new CompressionStream('gzip');
-          const writer = stream.writable.getWriter();
-          const reader = stream.readable.getReader();
-          
-          // Write data in larger chunks for better performance
-          const chunkSize = 256 * 1024; // 256KB chunks
-          for (let i = 0; i < uint8Array.length; i += chunkSize) {
-            const chunk = uint8Array.slice(i, i + chunkSize);
-            await writer.write(chunk);
-          }
-          await writer.close();
-          
-          // Read compressed data with timeout
-          const chunks: Uint8Array[] = [];
-          let done = false;
-          const timeout = setTimeout(() => {
-            console.warn(`⚠️ Compression timeout for ${file.name}, falling back to uncompressed`);
-            // Fallback to uncompressed data
-            const base64Data = btoa(String.fromCharCode.apply(null, Array.from(uint8Array)));
-            resolve({
-              compressedData: base64Data,
-              originalSize: file.size,
-              compressedSize: file.size
-            });
-          }, 5000); // 5 second timeout
-          
-          while (!done) {
-            const { value, done: readerDone } = await reader.read();
-            done = readerDone;
-            if (value) {
-              chunks.push(value);
-            }
-          }
-          
-          clearTimeout(timeout);
-          
-          // Combine chunks efficiently
-          const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-          const compressedData = new Uint8Array(totalLength);
-          let offset = 0;
-          for (const chunk of chunks) {
-            compressedData.set(chunk, offset);
-            offset += chunk.length;
-          }
-          
-          // Optimized base64 conversion
-          const compressedBase64 = convertUint8ArrayToBase64(compressedData);
-          
-          const compressionTime = Date.now() - startTime;
-          console.log(`✅ Compression completed for ${file.name} in ${compressionTime}ms`);
-          
-          resolve({
-            compressedData: compressedBase64,
-            originalSize: file.size,
-            compressedSize: compressedData.length
-          });
-        } catch (error) {
-          console.error(`❌ Compression failed for ${file.name}, using uncompressed data:`, error);
-          // Fallback to uncompressed data
-          const arrayBuffer = e.target?.result as ArrayBuffer;
-          const uint8Array = new Uint8Array(arrayBuffer);
-          const base64Data = convertUint8ArrayToBase64(uint8Array);
-          resolve({
-            compressedData: base64Data,
-            originalSize: file.size,
-            compressedSize: file.size
-          });
-        }
-      };
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsArrayBuffer(file);
-    });
-  };
-
+  // NEW: Use shared file upload service
   const handleFileUpload = async (files: FileList) => {
-    const maxFileSize = 50 * 1024 * 1024; // 50MB limit
-    const allowedTypes = [
-      // Images
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-      // Documents
-      'application/pdf', 'text/plain', 'text/csv',
-      // Data formats
-      'application/json', 'application/ld+json', 'application/xml', 'text/xml',
-      // Office documents
-      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      // Data analysis formats
-      'application/vnd.ms-excel.sheet.macroEnabled.12', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/csv', 'application/csv', 'text/tab-separated-values',
-      // Archive formats
-      'application/zip', 'application/x-zip-compressed', 'application/x-rar-compressed',
-      // Financial data formats
-      'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.text',
-      // Additional text formats
-      'text/html', 'text/css', 'text/javascript', 'application/javascript',
-      // Database exports
-      'application/sql', 'text/sql'
-    ];
+    console.log(`📁 ChatPage: User selected ${files.length} file(s) for upload`);
     
-    console.log(`📁 User selected ${files.length} file(s) for upload`);
-    
-    for (const file of Array.from(files)) {
-      console.log(`📁 Processing file: ${file.name} (${file.type}, ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    try {
+      // Use shared file upload service
+      const processedFiles = await FileUploadService.processFiles(files);
       
-      // Validate file size
-      if (file.size > maxFileSize) {
-        console.error(`❌ File ${file.name} is too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max: 50 MB)`);
-        alert(`File ${file.name} is too large. Maximum size is 50MB.`);
-        continue;
-      }
-      
-      // Validate file type
-      if (!allowedTypes.includes(file.type)) {
-        console.error(`❌ Unsupported file type: ${file.type} for ${file.name}`);
-        alert(`File type ${file.type} is not supported.`);
-        continue;
-      }
-      
-      try {
-        console.log(`🔄 Compressing file: ${file.name}`);
-        // Compress the file
-        const { compressedData, originalSize, compressedSize } = await compressFile(file);
-        
-        const compressionRatio = compressedSize / originalSize;
-        console.log(`📦 File compression: ${file.name} - ${originalSize} -> ${compressedSize} bytes (${(compressionRatio * 100).toFixed(1)}%)`);
-        
-        const uploadedFile = {
-          id: Date.now() + Math.random(),
-          name: file.name,
-          size: originalSize,
-          type: file.type,
-          compressedData,
-          compressedSize,
-          compressionRatio
-        };
-        
-        setUploadedFiles(prev => {
-          const newFiles = [...prev, uploadedFile];
-          console.log(`✅ File added to upload queue: ${file.name} (${newFiles.length} total files)`);
-          return newFiles;
-        });
-      } catch (error) {
-        console.error(`❌ Failed to compress file ${file.name}:`, error);
-        alert(`Failed to process file ${file.name}. Please try again.`);
-      }
+      // Add processed files to state
+      setUploadedFiles(prev => {
+        const newFiles = [...prev, ...processedFiles];
+        console.log(`✅ ChatPage: Added ${processedFiles.length} files to upload queue (${newFiles.length} total files)`);
+        return newFiles;
+      });
+    } catch (error) {
+      console.error('❌ ChatPage: Failed to process files:', error);
     }
   };
 
@@ -1168,12 +578,12 @@ export default function ChatPage() {
       console.log('🛑 Cancelling ongoing AI processing for edit');
       
       // Immediately clear the loading state to stop "AI is thinking" indicator
-      if (currentSession?.session_id) {
-        setSessionLoadingStates(prev => ({
-          ...prev,
-          [currentSession.session_id]: false
-        }));
-      }
+        if (currentSession?.session_id) {
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [currentSession.session_id]: false
+          }));
+        }
       
       // Notify via event for any other listeners
       const cancelEvent = new CustomEvent('cancel-ai-processing', {
@@ -1193,57 +603,29 @@ export default function ChatPage() {
   };
 
   const handleSaveEdit = async () => {
-    if (!editingMessage || editingMessageIndex === null || !editText.trim()) return;
+    if (!editingMessage || editingMessageIndex === null || !editText.trim() || isUnifiedProcessing) return;
     
     try {
-      // Send edit message via WebSocket
-      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-        const messageData = {
-          type: 'edit_message',
-          messageId: editingMessage.id,
-          newText: editText,
-          model: selectedModel,
-          sessionId: currentSession?.session_id,
-          userId: user?.id,
-          context: {
-            currentPage: 'chat',
-            sessionId: currentSession?.session_id
-          }
-        };
+      console.log('✏️ ChatPage: Sending edit message via unified system');
+      
+      // Send edit message via unified system
+      const result = await sendUnifiedEditMessage(editText, editingMessage.id, selectedModel);
+      
+      if (result.success) {
+        console.log('✅ ChatPage: Edit message sent successfully');
 
         // Immediately update the local UI to show the edited message and remove subsequent messages
         truncateMessagesAfter(editingMessage.id, editText);
-        
-        websocketRef.current.send(JSON.stringify(messageData));
         
         // Clear editing state
         setEditingMessage(null);
         setEditingMessageIndex(null);
         setEditText('');
-        
-        // Set loading state for the current session
-        if (currentSession?.session_id) {
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [currentSession.session_id]: true
-          }));
-        }
-        
-        // Dispatch event to sidebar to mirror the edit
-        const editEvent = new CustomEvent('chatpage-edit-message', {
-          detail: {
-            messageId: editingMessage.id,
-            newText: editText,
-            sessionId: currentSession?.session_id,
-            userId: user?.id,
-            timestamp: Date.now()
-          }
-        });
-        window.dispatchEvent(editEvent);
-        console.log('📡 ChatPage dispatched edit event to Sidebar');
+      } else {
+        console.error('❌ ChatPage: Failed to send edit message:', result.error);
       }
     } catch (error) {
-      console.error('Error sending edit message:', error);
+      console.error('❌ ChatPage: Error sending edit message:', error);
     }
   };
 
@@ -1253,45 +635,6 @@ export default function ChatPage() {
     setEditText('');
   };
 
-  // Send message with files to File Handler
-  const sendMessageWithFilesToFileHandler = async (message: any, files: any[], sessionId: string, userId: string) => {
-    try {
-      const filesData = files.map(file => ({
-        filename: file.name,
-        content_type: file.type,
-        data: file.compressedData // Already base64 encoded from compression
-      }));
-
-      const response = await fetch(`${ENV_CONFIG.apiGatewayUrl}/files`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          session_id: sessionId,
-          message: {
-            id: message.id,
-            text: message.text,
-            timestamp: message.timestamp
-          },
-          files: filesData,
-          context_items: sessionContext // Include existing context
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log('📁 Message with files sent to File Handler:', result);
-      return result;
-    } catch (error) {
-      console.error('❌ Error sending message with files to File Handler:', error);
-      throw error;
-    }
-  };
 
   const handleDeleteSession = async (sessionId: string, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent triggering the session load
@@ -1440,181 +783,74 @@ export default function ChatPage() {
   };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || getCurrentSessionLoading()) return;
+    if (!inputMessage.trim() || getCurrentSessionLoading() || isUnifiedProcessing) return;
 
-    // Create a new session if none exists (only when user actually sends a message)
-    let sessionToUse = currentSession;
-    let sessionId = sessionToUse?.session_id;
+    console.log('📤 ChatPage: Sending message via unified messaging system');
     
-    if (!sessionToUse || !sessionId) {
-      try {
-        // createNewSession returns the session_id
-        sessionId = await createNewSession();
-        console.log('📋 Created new session with ID:', sessionId);
-        
-        // Get the updated session from state
-        sessionToUse = currentSession;
-        
-        // If state hasn't updated yet, create a minimal session object
-        if (!sessionToUse && sessionId) {
-          sessionToUse = {
-            session_id: sessionId,
-            title: new Date().toLocaleString(),
-            model: selectedModel,
-            created_at: Date.now(),
-            last_updated: Date.now(),
-            message_count: 0,
-            messages: []
-          };
-        }
-      } catch (error) {
-        console.error('Failed to create new session:', error);
-        return;
-      }
-    }
-
-    // Double-check we have a valid session before proceeding
-    if (!sessionToUse?.session_id) {
-      console.error('No valid session available for message sending');
-      return;
-    }
-
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${user?.id || 'anonymous'}`;
-    
-    // Check if we've already sent this message
-    if (sentMessageIds.has(messageId)) {
-      console.log('📤 Duplicate message prevented:', messageId);
-      return;
+    // Set loading state for current session
+    if (currentSession?.session_id) {
+      setSessionLoadingStates(prev => ({
+        ...prev,
+        [currentSession.session_id]: true
+      }));
     }
     
-    // Also check if we've already sent a message with the same content recently
-    const recentMessages = currentSession?.messages?.slice(-5) || [];
-    const isDuplicateContent = recentMessages.some(msg => {
-      if (msg.text !== inputMessage.trim() || msg.sender !== 'user') {
-        return false;
-      }
+    try {
+      let result;
       
-      // Handle different timestamp formats
-      let msgTime;
-      if (msg.timestamp instanceof Date) {
-        msgTime = msg.timestamp.getTime();
-      } else if (typeof msg.timestamp === 'number') {
-        msgTime = msg.timestamp;
-      } else if (typeof msg.timestamp === 'string') {
-        msgTime = new Date(msg.timestamp).getTime();
+      // Determine message type and send accordingly
+      if (uploadedFiles.length > 0) {
+        // File message
+        console.log(`📁 ChatPage: Sending file message with ${uploadedFiles.length} files`);
+        result = await sendUnifiedFileMessage(inputMessage, uploadedFiles as unknown as File[], selectedModel);
+      } else if (sessionContext.length > 0) {
+        // Context message
+        console.log(`📋 ChatPage: Sending context message with ${sessionContext.length} context items`);
+        result = await sendUnifiedContextMessage(inputMessage, sessionContext, selectedModel);
+      } else if (currentSession?.session_id) {
+        // Followup message (existing session)
+        console.log('🔄 ChatPage: Sending followup message to existing session');
+        result = await sendUnifiedFollowupMessage(inputMessage, selectedModel);
       } else {
-        // If timestamp is invalid, assume it's recent to be safe
-        msgTime = Date.now();
+        // New message (no session)
+        console.log('🆕 ChatPage: Sending new message (will create session)');
+        result = await sendUnifiedMessage({
+          text: inputMessage,
+            model: selectedModel,
+          type: 'new_message'
+        });
       }
       
-      return (Date.now() - msgTime) < 5000; // Within last 5 seconds
-    });
-    
-    if (isDuplicateContent) {
-      console.log('📤 Duplicate content message prevented:', inputMessage.trim());
-      return;
-    }
-    
-    const userMessage: Message = {
-      id: messageId,
-      text: inputMessage,
-      sender: 'user',
-      timestamp: new Date(),
-      status: 'sending',
-      files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
-    };
-    
-    // Mark message as sent
-    setSentMessageIds(prev => new Set([...prev, messageId]));
-    console.log('📤 Message marked as sent:', messageId, 'Total sent messages:', sentMessageIds.size + 1);
-
-    // Add message to persistence system
-    console.log('📤 Adding user message to persistence:', {
-      messageId: userMessage.id,
-      text: userMessage.text,
-      sessionId: sessionToUse?.session_id,
-      currentMessageCount: currentSession?.messages?.length || 0
-    });
-    
-    addPersistedMessage(userMessage);
+      if (result.success) {
+        console.log('✅ ChatPage: Message sent successfully via unified system');
+        
+        // Clear input and files
     setInputMessage('');
     setUploadedFiles([]);
     
-    // Mirror user message to GlobalChatSidebar
-    const userMessageEvent = new CustomEvent('chatpage-message', {
-      detail: {
-        messageId: userMessage.id,
-        sender: 'user',
-        text: userMessage.text,
-        sessionId: sessionToUse?.session_id,
-        userId: user?.id,
-        timestamp: Date.now()
-      }
-    });
-    window.dispatchEvent(userMessageEvent);
-    console.log('📡 Dispatched user message to sidebar:', userMessage.id);
-    
-    // Set loading state for the current session
-    if (sessionToUse?.session_id) {
-      setSessionLoadingStates(prev => ({
-        ...prev,
-        [sessionToUse.session_id]: true
-      }));
-    }
-
-    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-      // Route messages with files to File Handler, messages without files to WebSocket
-      if (uploadedFiles.length > 0) {
-        console.log(`📁 Message has ${uploadedFiles.length} files, routing to File Handler...`);
-        try {
-          await sendMessageWithFilesToFileHandler(userMessage, uploadedFiles, sessionToUse?.session_id || '', user?.id || '');
-          console.log('✅ Message with files sent to File Handler');
-          return; // Exit early, File Handler will orchestrate the rest
-        } catch (error) {
-          console.error('❌ Error sending message with files to File Handler:', error);
-          // Fall back to WebSocket without files
-          console.log('🔄 Falling back to WebSocket without files');
+        // Update session ID if a new session was created
+        if (result.sessionId && result.sessionId !== currentSession?.session_id) {
+          console.log('🔄 ChatPage: New session created, loading session:', result.sessionId);
+          loadSession(result.sessionId);
         }
-      }
-      
-      // Prepare context items for WebSocket (no files)
-      const contextItems = [...sessionContext];
-      
-      // Send the chat message with context items
-      const messageData = {
-        type: 'chat',
-        messageId: userMessage.id, // Include the message ID from frontend
-        message: userMessage.text,
-        model: selectedModel,
-        sessionId: sessionId, // Use the validated sessionId
-        userId: user?.id,
-        contextItems: contextItems, // Include files and other context
-        context: {
-          currentPage: 'chat',
-          sessionId: sessionId // Use the validated sessionId
-        },
-      };
-
-      try {
-        websocketRef.current.send(JSON.stringify(messageData));
-        // Message status will be updated via WebSocket response
-      } catch (error) {
-        console.error('Error sending message:', error);
-        // Clear loading state for current session on error
-        if (sessionToUse?.session_id) {
+      } else {
+        console.error('❌ ChatPage: Failed to send message:', result.error);
+        // Clear loading state on error
+        if (currentSession?.session_id) {
           setSessionLoadingStates(prev => ({
             ...prev,
-            [sessionToUse.session_id]: false
+            [currentSession.session_id]: false
           }));
         }
+        // Handle error (could show toast notification)
       }
-    } else {
-      console.error('WebSocket not connected');
-      // Clear loading state for current session on error
-      if (sessionToUse?.session_id) {
+      } catch (error) {
+      console.error('❌ ChatPage: Error sending message via unified system:', error);
+      // Clear loading state on error
+      if (currentSession?.session_id) {
         setSessionLoadingStates(prev => ({
           ...prev,
-          [sessionToUse.session_id]: false
+          [currentSession.session_id]: false
         }));
       }
     }
@@ -1830,9 +1066,9 @@ export default function ChatPage() {
                         <ListItemText
                           primary={
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <Typography variant="caption" color="white" sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
-                                {session.title}
-                              </Typography>
+                            <Typography variant="caption" color="white" sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
+                              {session.title}
+                            </Typography>
                               {session.session_variables?.context_items && session.session_variables.context_items.length > 0 && (
                                 <Chip
                                   label={`${session.session_variables.context_items.length}`}
@@ -1878,19 +1114,19 @@ export default function ChatPage() {
                           </IconButton>
                         </Tooltip>
                         <Tooltip title="Delete">
-                          <IconButton
-                            onClick={(e) => handleDeleteSession(session.session_id, e)}
-                            sx={{
-                              color: '#9ca3af',
-                              padding: '2px',
-                              '&:hover': {
-                                color: '#ef4444',
-                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                              },
-                            }}
-                          >
-                            <DeleteIcon sx={{ fontSize: '0.9rem' }} />
-                          </IconButton>
+                        <IconButton
+                          onClick={(e) => handleDeleteSession(session.session_id, e)}
+                          sx={{
+                            color: '#9ca3af',
+                            padding: '2px',
+                            '&:hover': {
+                              color: '#ef4444',
+                              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            },
+                          }}
+                        >
+                          <DeleteIcon sx={{ fontSize: '0.9rem' }} />
+                        </IconButton>
                         </Tooltip>
                       </>
                     )}
@@ -2170,7 +1406,7 @@ export default function ChatPage() {
                 </Box>
               </Box>
             ))}
-            {getCurrentSessionLoading() && (
+            {(getCurrentSessionLoading() || (currentSession?.session_id && crossInterfaceLoading[currentSession.session_id])) && (
               <Box display="flex" gap={2}>
                 <Avatar sx={{ bgcolor: '#374151', width: 32, height: 32 }}>
                   <BotIcon />

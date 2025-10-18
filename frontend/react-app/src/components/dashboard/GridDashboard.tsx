@@ -718,7 +718,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     // Get selected tiles data
     const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
     
-    // Prepare tile data for batch addition
+    // Prepare tile data for batch addition (immediate visual feedback, no API calls)
     const tilesToAdd = selectedTilesData.map(tile => ({
       tileId: tile.id,
       tileType: tile.type,
@@ -735,7 +735,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       console.log(`✅ Added ${tilesToAdd.length} tiles to sidebar context in batch`);
     } else if (tilesToAdd.length === 1) {
       const tile = tilesToAdd[0];
-      const tileData = extractTileData(tile);
       
       // Dispatch event to add to sidebar context
       const event = new CustomEvent('add-to-sidebar-context', {
@@ -744,7 +743,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           type: 'tile',
           title: tile.options.customTitle,
           subtitle: tile.options.customSubtitle,
-          data: tileData,
+          data: tile.tileData,
           timestamp: Date.now(),
         }
       });

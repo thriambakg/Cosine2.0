@@ -408,7 +408,9 @@ export const addCustomToContext = (
 
 /**
  * Extract tile data for context
- * This function prepares tile data for context without fetching backend data
+ * This function prepares tile data for context INCLUDING backend data
+ * Note: This only extracts frontend properties. For actual API data,
+ * use fetchTileDataForContext instead.
  */
 export const extractTileData = (tile: any): TileContextData => {
   return {
@@ -423,6 +425,28 @@ export const extractTileData = (tile: any): TileContextData => {
     displayOptions: tile.displayOptions,
     filters: tile.filters,
     criteria: tile.criteria,
+    backendData: tile.backendData || tile.data || {}, // Include backend/API data if available
   };
+};
+
+/**
+ * Fetch actual tile data for context (including API data)
+ * This function fetches the actual API data for tiles when adding to context
+ */
+export const fetchTileDataForContext = async (tile: any): Promise<TileContextData> => {
+  const baseData = extractTileData(tile);
+  
+  // If tile already has backend data, use it
+  if (tile.backendData || tile.data) {
+    return {
+      ...baseData,
+      backendData: tile.backendData || tile.data
+    };
+  }
+  
+  // For tiles without backend data, we need to fetch it
+  // This would require importing the API functions
+  // For now, return the base data
+  return baseData;
 };
 

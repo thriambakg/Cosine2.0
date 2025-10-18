@@ -29,9 +29,75 @@ import {
 } from '@mui/icons-material';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { useWebSocket } from '../../contexts/WebSocketContext';
+// COMMENTED OUT: Old WebSocket context (replaced by messaging service)
+// import { useWebSocket } from '../../contexts/WebSocketContext';
 import { ContextItem } from '../tiles/common/contextManager';
 import { sessionManagementAPI } from '../../services/api';
+// COMMENTED OUT: useMessagingService (replaced with unified architecture)
+// import { useMessagingService } from '../../hooks/useMessagingService';
+// NEW: Import unified messaging system
+import { useUnifiedMessaging } from '../../hooks/useUnifiedMessaging';
+import { unifiedMessageHandler } from '../../services/unifiedMessageHandler';
+// NEW: Import shared file upload service
+import { FileUploadService, UploadedFile } from '../../services/fileUploadService';
+// Import useChatPersistence for session variable updates
+import { useChatPersistence } from '../../hooks/useChatPersistence';
+
+// Typing animation component (same as ChatPage)
+const TypingText = ({ 
+  text, 
+  speed = 30, 
+  onComplete
+}: { 
+  text: string; 
+  speed?: number; 
+  onComplete?: () => void;
+}) => {
+  const [displayedText, setDisplayedText] = useState('');
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    if (currentIndex < text.length) {
+      const timer = setTimeout(() => {
+        setDisplayedText(prev => prev + text[currentIndex]);
+        setCurrentIndex(prev => prev + 1);
+      }, speed);
+
+      return () => clearTimeout(timer);
+    } else if (onComplete && currentIndex === text.length) {
+      onComplete();
+    }
+  }, [currentIndex, text, speed, onComplete]);
+
+  // Reset when text changes
+  useEffect(() => {
+    setDisplayedText('');
+    setCurrentIndex(0);
+  }, [text]);
+
+  return (
+    <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+      {displayedText}
+      {currentIndex < text.length && (
+        <Box
+          component="span"
+          sx={{
+            display: 'inline-block',
+            width: '2px',
+            height: '1.2em',
+            backgroundColor: 'currentColor',
+            marginLeft: '2px',
+            animation: 'blink 1s infinite',
+            '@keyframes blink': {
+              '0%, 50%': { opacity: 1 },
+              '51%, 100%': { opacity: 0 },
+            },
+          }}
+        />
+      )}
+    </Typography>
+  );
+};
 
 interface Message {
   id: string;
@@ -46,15 +112,7 @@ interface Message {
   }>;
 }
 
-interface UploadedFile {
-  id?: number;
-  name: string;
-  size: number;
-  type: string;
-  compressedData?: string;
-  compressedSize?: number;
-  compressionRatio?: number;
-}
+// UploadedFile interface now imported from shared FileUploadService
 
 interface ChatSession {
   session_id: string;
@@ -74,10 +132,13 @@ interface ChatSession {
 const GlobalChatSidebar: React.FC = () => {
   const { isVisible, setIsVisible, activeSessionId, setActiveSessionId, close } = useGlobalChat();
   const { user } = useAuth();
-  const { connect: connectWebSocket, sendMessage, isConnected } = useWebSocket();
   
-  // Local state for the mirror
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Get updateSessionVariables from useChatPersistence
+  const { updateSessionVariables } = useChatPersistence(user?.id || '');
+  // COMMENTED OUT: Old WebSocket context (replaced by messaging service)
+  // const { connect: connectWebSocket, sendMessage, isConnected } = useWebSocket();
+  
+  // Local state for the mirror (using unified system for messages)
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -85,12 +146,14 @@ const GlobalChatSidebar: React.FC = () => {
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [isFilesExpanded, setIsFilesExpanded] = useState(false);
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
   
   // File upload state
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // COMMENTED OUT: Old WebSocket ref (replaced by messaging service)
+  // const sidebarWebSocketRef = useRef<WebSocket | null>(null);
   
   // Message editing state
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -99,8 +162,278 @@ const GlobalChatSidebar: React.FC = () => {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editContainerRef = useRef<HTMLDivElement>(null);
-  const processedMessageIdsRef = useRef<Set<string>>(new Set());
+  // Note: Message deduplication is now handled by unified messaging system
   const sidebarWidth = 400;
+
+  // COMMENTED OUT: Old messaging service handler (replaced by unified handler)
+  /*
+  const handleMessagingServiceMessage = useCallback((data: WebSocketMessage) => {
+    switch (data.type) {
+      case 'ai_response':
+        const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Check for duplicate
+        if (processedMessageIdsRef.current.has(messageId)) {
+          console.log('🤖 Duplicate AI response ignored (MessagingService):', messageId);
+          return;
+        }
+        
+        console.log('🤖 Sidebar MessagingService: Processing AI response for session:', data.session_id);
+        
+        // Mark as processed
+        processedMessageIdsRef.current.add(messageId);
+        
+        // Clear loading state
+        setIsLoadingMessage(false);
+        
+        // Add AI response with full text for typing animation
+        const aiMessage = {
+          id: messageId,
+          sender: 'ai' as const,
+          text: data.content || 'No response content',
+          timestamp: Date.now(),
+        };
+        
+        setMessages(prev => [...prev, aiMessage]);
+        
+        // Also add to shared cache
+        addToSharedCache({
+          id: messageId,
+          sender: 'ai',
+          text: data.content || 'No response content',
+          timestamp: Date.now(),
+          sessionId: data.session_id || activeSessionId || '',
+        });
+        
+        // Add to typing messages for streaming effect
+        setTypingMessages(prev => new Set([...prev, messageId]));
+        
+        console.log('✅ Sidebar MessagingService: Added AI response');
+        break;
+        
+      case 'message_received':
+        console.log('✅ Sidebar MessagingService: Message received confirmation:', data.message_id);
+        break;
+        
+      case 'edit_acknowledged':
+        console.log('✏️ Sidebar MessagingService: Edit acknowledged:', data.message_id);
+        
+        if (data.unchanged) {
+          console.log('⚠️ Edit acknowledged but message unchanged - no AI response expected');
+          setIsLoadingMessage(false);
+        } else {
+          console.log('✅ Edit acknowledged - waiting for AI response');
+        }
+        break;
+        
+      case 'user_message_with_files':
+        console.log('📁 Sidebar MessagingService: User message with files received:', data.message_id);
+        // Handle file message updates if needed
+        break;
+        
+      case 'session_updated':
+        console.log('📁 Sidebar MessagingService: Session updated:', data.session_variables);
+        // Handle session updates if needed
+        break;
+        
+      case 'ai_response':
+        console.log('🤖 Sidebar MessagingService: AI response received:', data.message_id);
+        
+        // Check if we've already processed this message
+        const aiResponseMessageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        if (processedMessageIdsRef.current.has(aiResponseMessageId)) {
+          console.log('🤖 Duplicate AI response ignored:', aiResponseMessageId);
+          break;
+        }
+        
+        // Mark as processed
+        processedMessageIdsRef.current.add(aiResponseMessageId);
+        
+        // Clear loading state
+        setIsLoadingMessage(false);
+        
+        // Add AI response to sidebar messages
+        const aiResponseMessage: Message = {
+          id: aiResponseMessageId,
+          text: data.content || 'No response content',
+          sender: 'ai',
+          timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
+        };
+        
+        setMessages(prev => [...prev, aiResponseMessage]);
+        
+        // Add AI response to shared cache for bidirectional sync
+        addToSharedCache({
+          id: aiResponseMessage.id,
+          sender: aiResponseMessage.sender,
+          text: aiResponseMessage.text,
+          timestamp: aiResponseMessage.timestamp,
+          sessionId: data.session_id || activeSessionId || '',
+        });
+        console.log('📨 Sidebar: Added AI response to shared cache:', aiResponseMessage.id);
+        
+        // Dispatch AI response event to ChatPage
+        const aiResponseEvent = new CustomEvent('sidebar-ai-response', {
+          detail: {
+            messageId: aiResponseMessageId,
+            content: data.content || 'No response content',
+            sessionId: data.session_id,
+            userId: user?.id,
+            timestamp: Date.now()
+          }
+        });
+        window.dispatchEvent(aiResponseEvent);
+        console.log('📡 Dispatched AI response to ChatPage:', {
+          messageId: aiResponseMessageId,
+          sessionId: data.session_id,
+          userId: user?.id,
+          contentLength: (data.content || '').length
+        });
+        break;
+        
+      case 'connection_established':
+        console.log('🔗 Sidebar MessagingService: Connection established for session:', data.session_id);
+        // COMMENTED OUT: Connection status update (not needed with unified architecture)
+        // setIsMessagingServiceConnected(true);
+        // console.log('✅ Sidebar: Connection status updated to true');
+        break;
+        
+      default:
+        console.log('📨 Sidebar MessagingService: Unknown message type:', data.type);
+    }
+  }, []);
+  */
+
+  // COMMENTED OUT: Unified handler moved after shared message cache hook
+
+  // COMMENTED OUT: No longer using MessagingService directly (replaced with ChatPage mirroring)
+  // const handleMessagingServiceSessionUpdate = useCallback((update: SessionUpdate) => {
+  //   console.log('📁 Sidebar MessagingService: Session update received:', update);
+  //   // Handle session updates if needed
+  // }, []);
+
+  // const handleMessagingServiceBroadcast = useCallback((message: BroadcastMessage) => {
+  //   console.log('📡 Sidebar MessagingService: Broadcast received:', message.type, 'from:', message.source);
+  //   
+  //   // Only process broadcasts from ChatPage for the current session
+  //   if (message.source === 'chatpage' && message.sessionId === activeSessionId) {
+  //     switch (message.type) {
+  //       case 'ai_response':
+  //         // Handle AI response from ChatPage
+  //         console.log('🤖 Sidebar MessagingService: Processing AI response from ChatPage');
+  //         break;
+  //       case 'session_update':
+  //         // Handle session update from ChatPage
+  //         console.log('📁 Sidebar MessagingService: Processing session update from ChatPage');
+  //         break;
+  //     }
+  //   }
+  // }, [activeSessionId]);
+
+  // COMMENTED OUT: useMessagingService hook (replaced with direct MessagingService calls)
+  // const messagingService = useMessagingService({
+  //   sessionId: activeSessionId || undefined,
+  //   userId: user?.id,
+  //   onMessage: handleMessagingServiceMessage,
+  //   onSessionUpdate: handleMessagingServiceSessionUpdate,
+  //   onBroadcast: handleMessagingServiceBroadcast
+  // });
+
+  // COMMENTED OUT: Connection monitoring (not needed with unified architecture)
+  // const [isMessagingServiceConnected, setIsMessagingServiceConnected] = useState(false);
+  // 
+  // // Monitor messaging service connection status
+  // useEffect(() => {
+  //   if (!activeSessionId) {
+  //     setIsMessagingServiceConnected(false);
+  //     return;
+  //   }
+  // 
+  //   // Check connection status periodically
+  //   const checkConnection = () => {
+  //     const isConnected = MessagingService.hasConnection(activeSessionId);
+  //     setIsMessagingServiceConnected(isConnected);
+  //   };
+  // 
+  //   // Check immediately
+  //   checkConnection();
+  // 
+  //   // Check more frequently initially, then less frequently
+  //   const interval = setInterval(checkConnection, 500);
+  // 
+  //   return () => clearInterval(interval);
+  // }, [activeSessionId]);
+
+  // NEW: Unified messaging system for centralized message handling
+  const {
+    messages: unifiedMessages,
+    isProcessing: isUnifiedProcessing,
+    crossInterfaceLoading,
+    sendMessage: sendUnifiedMessage,
+    sendContextMessage: sendUnifiedContextMessage,
+    sendFileMessage: sendUnifiedFileMessage,
+    sendFollowupMessage: sendUnifiedFollowupMessage
+  } = useUnifiedMessaging({
+    sessionId: activeSessionId,
+    userId: user?.id,
+    source: 'sidebar',
+    onMessageUpdate: (update) => {
+      console.log('📨 Sidebar: Received unified message update:', update.type);
+    }
+  });
+
+  // Use unified messages directly - no need for local state syncing
+  const messages = unifiedMessages.filter(msg => msg.sessionId === activeSessionId);
+
+
+  // Listen for AI response typing events from unified messaging system
+  useEffect(() => {
+    const handleAITyping = (event: CustomEvent) => {
+      const { sessionId, messageId } = event.detail;
+      
+      // Only handle typing for active session
+      if (sessionId === activeSessionId) {
+        console.log('🤖 Sidebar: Received AI typing event for message:', messageId);
+        setTypingMessages(prev => new Set([...prev, messageId]));
+        
+        // Clear loading state when AI starts responding
+        setIsLoadingMessage(false);
+        // Broadcast loading state clearing to other interfaces
+        unifiedMessageHandler.broadcastLoadingState(sessionId, false, 'sidebar');
+      }
+    };
+
+    window.addEventListener('ai-response-typing', handleAITyping as EventListener);
+    
+    return () => {
+      window.removeEventListener('ai-response-typing', handleAITyping as EventListener);
+    };
+  }, [activeSessionId]);
+
+  // Listen for session variable updates (including file uploads)
+  useEffect(() => {
+    const handleSessionVariablesUpdate = (event: CustomEvent) => {
+      const { sessionId, sessionVariables } = event.detail;
+      console.log('📁 Sidebar: Received session variables update:', { sessionId, fileCount: sessionVariables?.uploaded_files?.length || 0 });
+      
+      if (sessionId === activeSessionId) {
+        // Update session variables in persistence system
+        updateSessionVariables(sessionId, sessionVariables);
+        console.log('✅ Sidebar: Updated session variables in real-time');
+      }
+    };
+
+    window.addEventListener('session-variables-updated', handleSessionVariablesUpdate as any);
+    
+    return () => {
+      window.removeEventListener('session-variables-updated', handleSessionVariablesUpdate as any);
+    };
+  }, [activeSessionId]);
+
+  // COMMENTED OUT: Unified message handler (replaced with simple ChatPage mirroring)
+  // const handleUnifiedMessage = useCallback((messageData: any, source: 'websocket' | 'chatpage' | 'context') => {
+  //   // ... complex unified handler logic removed for simplicity
+  // }, [activeSessionId, user?.id, addToSharedCache]);
 
   // Available models (matching ChatPage exactly)
   const availableModels = [
@@ -124,30 +457,12 @@ const GlobalChatSidebar: React.FC = () => {
     }
   }, [uploadedFiles]);
 
-  // Typewriter effect for AI responses (same speed as ChatPage)
-  const typewriterEffect = (messageId: string, fullText: string, speed: number = 2) => {
-    let currentIndex = 0;
-    setStreamingMessageId(messageId);
-    
-    const typeInterval = setInterval(() => {
-      currentIndex++;
-      const currentText = fullText.substring(0, currentIndex);
-      
-      setMessages(prev => prev.map(msg => 
-        msg.id === messageId 
-          ? { ...msg, text: currentText }
-          : msg
-      ));
-      
-      if (currentIndex >= fullText.length) {
-        clearInterval(typeInterval);
-        setStreamingMessageId(null);
-        console.log('✅ Streaming completed for message:', messageId);
-      }
-    }, speed);
-    
-    return typeInterval;
-  };
+  // COMMENTED OUT: Old typewriter effect (replaced by TypingText component)
+  // const typewriterEffect = (messageId: string, fullText: string, speed: number = 2) => {
+  //   // Implementation removed - now using TypingText component
+  // };
+
+  // DUPLICATE REMOVED: Handler functions are defined above
 
   // Edit message handlers
   const handleEditMessage = (message: Message, messageIndex: number) => {
@@ -180,74 +495,62 @@ const GlobalChatSidebar: React.FC = () => {
     if (!editingMessage || editingMessageIndex === null || !editText.trim() || !activeSessionId) return;
     
     try {
-      // Ensure WebSocket is connected
-      if (!isConnected && activeSessionId) {
-        console.log('🔌 WebSocket not connected for edit, connecting to session:', activeSessionId);
-        connectWebSocket(activeSessionId);
-        // Wait for connection
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-      
-      // Send edit message via shared WebSocket
-      const messageData = {
-        action: 'chat',
-        type: 'edit_message',
-        messageId: editingMessage.id,
-        newText: editText,
-        model: selectedModel,
-        sessionId: activeSessionId,
-        userId: user?.id,
-        context: {
-          currentPage: window.location.pathname,
-          sessionId: activeSessionId
-        }
-      };
+      // COMMENTED OUT: No longer using direct messaging service (replaced with ChatPage mirroring)
+      // const messageData = {
+      //   action: 'chat' as const,
+      //   type: 'chat_message' as const,
+      //   messageId: editingMessage.id,
+      //   message: editText,
+      //   files: [],
+      //   sessionId: activeSessionId,
+      //   userId: user?.id!,
+      //   model: selectedModel,
+      //   context: {
+      //     currentPage: window.location.pathname,
+      //     sessionId: activeSessionId
+      //   }
+      // };
 
-      // Immediately update local UI
-      setMessages(prev => {
-        const messageIndexInArray = prev.findIndex(m => m.id === editingMessage.id);
-        if (messageIndexInArray === -1) return prev;
-        
-        // Clear processed IDs for truncated messages
-        const truncatedMessages = prev.slice(messageIndexInArray + 1);
-        truncatedMessages.forEach(msg => {
-          processedMessageIdsRef.current.delete(msg.id);
-          console.log('🗑️ Cleared processed ID for truncated message:', msg.id);
-        });
-        
-        // Update the message text and remove all messages after it
-        return prev.slice(0, messageIndexInArray + 1).map(m => 
-          m.id === editingMessage.id ? { ...m, text: editText } : m
-        );
-      });
+      // Note: Message editing is now handled by the unified messaging system
       
-      const sent = sendMessage(messageData);
-      if (sent) {
-        console.log('✅ Sidebar sent edit message via WebSocket');
-        
-        // Clear editing state
-        setEditingMessage(null);
-        setEditingMessageIndex(null);
-        setEditText('');
-        
-        // Set loading state
-        setIsLoadingMessage(true);
-        
-        // Dispatch event to ChatPage to mirror the edit
-        const editEvent = new CustomEvent('sidebar-edit-message', {
-          detail: {
-            messageId: editingMessage.id,
-            newText: editText,
-            sessionId: activeSessionId,
-            userId: user?.id,
-            timestamp: Date.now()
-          }
-        });
-        window.dispatchEvent(editEvent);
-        console.log('📡 Sidebar dispatched edit event to ChatPage');
-      } else {
-        console.error('❌ Failed to send edit message');
-      }
+      // Send via ChatPage's WebSocket connection (unified architecture)
+      const editMessageEvent = new CustomEvent('sidebar-send-message', {
+        detail: {
+          messageId: editingMessage.id,
+          message: editText, // Changed from 'text' to 'message'
+          sender: 'user',
+          timestamp: Date.now(),
+          sessionId: activeSessionId!,
+          userId: user?.id,
+          model: selectedModel,
+          files: [],
+          isEdit: true,
+          originalMessageId: editingMessage.id
+        }
+      });
+      window.dispatchEvent(editMessageEvent);
+      console.log('✅ Sidebar sent edit message via ChatPage WebSocket');
+      
+      // Clear editing state
+      setEditingMessage(null);
+      setEditingMessageIndex(null);
+      setEditText('');
+      
+      // Set loading state
+      setIsLoadingMessage(true);
+      
+      // Dispatch event to ChatPage to mirror the edit
+      const editEvent = new CustomEvent('sidebar-edit-message', {
+        detail: {
+          messageId: editingMessage.id,
+          newText: editText,
+          sessionId: activeSessionId,
+          userId: user?.id,
+          timestamp: Date.now()
+        }
+      });
+      window.dispatchEvent(editEvent);
+      console.log('📡 Sidebar dispatched edit event to ChatPage');
     } catch (error) {
       console.error('Error sending edit message:', error);
     }
@@ -260,197 +563,26 @@ const GlobalChatSidebar: React.FC = () => {
   };
 
   // File upload handlers (same as ChatPage)
-  const convertUint8ArrayToBase64 = (uint8Array: Uint8Array): string => {
-    const chunkSize = 8192;
-    let binary = '';
-    for (let i = 0; i < uint8Array.length; i += chunkSize) {
-      const chunk = uint8Array.slice(i, i + chunkSize);
-      binary += String.fromCharCode.apply(null, Array.from(chunk));
-    }
-    return btoa(binary);
-  };
-
-  const compressFile = (file: File): Promise<{ compressedData: string; originalSize: number; compressedSize: number }> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        try {
-          const arrayBuffer = e.target?.result as ArrayBuffer;
-          const uint8Array = new Uint8Array(arrayBuffer);
-          
-          // For small files (< 1MB), skip compression to speed up processing
-          if (file.size < 1024 * 1024) {
-            console.log(`⚡ Skipping compression for small file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
-            // Use chunked base64 conversion to avoid stack overflow
-            const base64Data = convertUint8ArrayToBase64(uint8Array);
-            resolve({
-              compressedData: base64Data,
-              originalSize: file.size,
-              compressedSize: file.size
-            });
-            return;
-          }
-          
-          // For larger files, use CompressionStream with timeout
-          const startTime = Date.now();
-          console.log(`🔄 Starting compression for ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-          
-          const stream = new CompressionStream('gzip');
-          const writer = stream.writable.getWriter();
-          const reader_stream = stream.readable.getReader();
-          
-          // Write data in larger chunks for better performance
-          const chunkSize = 256 * 1024; // 256KB chunks
-          for (let i = 0; i < uint8Array.length; i += chunkSize) {
-            const chunk = uint8Array.slice(i, i + chunkSize);
-            await writer.write(chunk);
-          }
-          await writer.close();
-          
-          // Read compressed data with timeout
-          const chunks: Uint8Array[] = [];
-          let done = false;
-          const timeout = setTimeout(() => {
-            console.warn(`⚠️ Compression timeout for ${file.name}, falling back to uncompressed`);
-            // Fallback to uncompressed data
-            const base64Data = btoa(String.fromCharCode.apply(null, Array.from(uint8Array)));
-            resolve({
-              compressedData: base64Data,
-              originalSize: file.size,
-              compressedSize: file.size
-            });
-          }, 5000); // 5 second timeout
-          
-          while (!done) {
-            const { value, done: readerDone } = await reader_stream.read();
-            done = readerDone;
-            if (value) {
-              chunks.push(value);
-            }
-          }
-          
-          clearTimeout(timeout);
-          
-          // Combine chunks efficiently
-          const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-          const compressedData = new Uint8Array(totalLength);
-          let offset = 0;
-          for (const chunk of chunks) {
-            compressedData.set(chunk, offset);
-            offset += chunk.length;
-          }
-          
-          // Optimized base64 conversion
-          const compressedBase64 = convertUint8ArrayToBase64(compressedData);
-          
-          const compressionTime = Date.now() - startTime;
-          console.log(`✅ Compression completed for ${file.name} in ${compressionTime}ms`);
-          
-          resolve({
-            compressedData: compressedBase64,
-            originalSize: file.size,
-            compressedSize: compressedData.length
-          });
-        } catch (error) {
-          console.error(`❌ Compression failed for ${file.name}, using uncompressed data:`, error);
-          // Fallback to uncompressed data
-          const arrayBuffer = e.target?.result as ArrayBuffer;
-          const uint8Array = new Uint8Array(arrayBuffer);
-          const base64Data = convertUint8ArrayToBase64(uint8Array);
-          resolve({
-            compressedData: base64Data,
-            originalSize: file.size,
-            compressedSize: file.size
-          });
-        }
-      };
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsArrayBuffer(file);
-    });
-  };
+  // File compression and validation now handled by shared FileUploadService
 
   const handleFileUpload = async (files: FileList) => {
-    const maxFileSize = 50 * 1024 * 1024; // 50MB limit
-    const allowedTypes = [
-      // Images
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-      // Documents
-      'application/pdf', 'text/plain', 'text/csv',
-      // Data formats
-      'application/json', 'application/ld+json', 'application/xml', 'text/xml',
-      // Office documents
-      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      // Data analysis formats
-      'application/vnd.ms-excel.sheet.macroEnabled.12', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/csv', 'application/csv', 'text/tab-separated-values',
-      // Archive formats
-      'application/zip', 'application/x-zip-compressed', 'application/x-rar-compressed',
-      // Financial data formats
-      'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.text',
-      // Additional text formats
-      'text/html', 'text/css', 'text/javascript', 'application/javascript',
-      // Database exports
-      'application/sql', 'text/sql'
-    ];
-    
     console.log(`📁 Sidebar: User selected ${files.length} file(s) for upload`);
     setIsProcessingFiles(true);
     
     try {
-      for (const file of Array.from(files)) {
-        console.log(`📁 Sidebar: Processing file: ${file.name} (${file.type}, ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-        
-        // Validate file size
-        if (file.size > maxFileSize) {
-          console.error(`❌ File ${file.name} is too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max: 50 MB)`);
-          alert(`File ${file.name} is too large. Maximum size is 50MB.`);
-          continue;
-        }
-        
-        // Validate file type
-        if (!allowedTypes.includes(file.type)) {
-          console.error(`❌ Unsupported file type: ${file.type} for ${file.name}`);
-          alert(`File type ${file.type} is not supported.`);
-          continue;
-        }
-        
-        try {
-          console.log(`🔄 Sidebar: Compressing file: ${file.name}`);
-          // Compress the file
-          const { compressedData, originalSize, compressedSize } = await compressFile(file);
-          
-          const compressionRatio = compressedSize / originalSize;
-          console.log(`📦 Sidebar: File compression: ${file.name} - ${originalSize} -> ${compressedSize} bytes (${(compressionRatio * 100).toFixed(1)}%)`);
-          
-          const uploadedFile = {
-            id: Date.now() + Math.random(),
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            compressedData,
-            compressedSize,
-            compressionRatio
-          };
-          
-          setUploadedFiles(prev => {
-            const newFiles = [...prev, uploadedFile];
-            console.log(`✅ Sidebar: File added to upload queue: ${file.name}. Total files: ${newFiles.length}`);
-            return newFiles;
-          });
-        } catch (error) {
-          console.error(`❌ Sidebar: Error processing file ${file.name}:`, error);
-          alert(`Error processing file ${file.name}. Please try again.`);
-        }
-      }
+      // Use shared file upload service
+      const processedFiles = await FileUploadService.processFiles(files);
+      
+      // Add processed files to state
+      setUploadedFiles(prev => {
+        const newFiles = [...prev, ...processedFiles];
+        console.log(`✅ Sidebar: Added ${processedFiles.length} files to upload queue (${newFiles.length} total files)`);
+        return newFiles;
+      });
+    } catch (error) {
+      console.error('❌ Sidebar: Failed to process files:', error);
     } finally {
       setIsProcessingFiles(false);
-      // Use a timeout to ensure state has updated
-      setTimeout(() => {
-        console.log(`📁 Sidebar: File processing complete. Total uploaded files: ${uploadedFiles.length}`);
-        console.log(`📁 Sidebar: Current uploadedFiles state:`, uploadedFiles);
-      }, 100);
     }
   };
 
@@ -473,15 +605,17 @@ const GlobalChatSidebar: React.FC = () => {
         setCurrentSession(session);
         setSelectedModel(session.model || 'claude-3-sonnet');
 
-        // Load messages
-        const loadedMessages: Message[] = (session.messages || []).map((msg: any) => ({
-          id: msg.message_id || msg.id || `msg_${Date.now()}_${Math.random()}`,
-          sender: msg.sender,
-          text: msg.text,
-          timestamp: msg.timestamp || Date.now(),
-          files: msg.files || undefined, // Preserve file attachments
-        }));
-        setMessages(loadedMessages);
+        // Load existing messages into unified messaging system only if not already loaded
+        if (session.messages && session.messages.length > 0) {
+          console.log('📨 Sidebar: Loading existing messages into unified system:', session.messages.length);
+          // Check if messages are already in the unified system to prevent duplication
+          const existingMessages = unifiedMessageHandler.getMessagesForSession(sessionId);
+          if (existingMessages.length === 0) {
+            unifiedMessageHandler.loadExistingMessages(sessionId, session.messages);
+          } else {
+            console.log('📨 Sidebar: Messages already in unified system, skipping load');
+          }
+        }
 
         // Load context if available
         if (session.session_variables?.context_items) {
@@ -511,103 +645,30 @@ const GlobalChatSidebar: React.FC = () => {
 
     // Removed automatic session change mirroring - only manual "Open in Sidebar" should change the sidebar
 
-    const handleChatPageMessage = (event: CustomEvent) => {
-      const messageData = event.detail;
-      console.log('📨 GlobalChatSidebar mirroring ChatPage message:', messageData);
-      
-      if (messageData.sessionId === activeSessionId && messageData.userId === user?.id) {
-        // Add message to sidebar
-        setMessages(prev => [
-          ...prev,
-          {
-            id: messageData.messageId,
-            sender: messageData.sender,
-            text: messageData.text,
-            timestamp: messageData.timestamp
-          }
-        ]);
-        
-        // If it's a user message, show loading state
-        if (messageData.sender === 'user') {
-          setIsLoadingMessage(true);
-        }
-      }
-    };
+    // COMMENTED OUT: Old event handlers (replaced with session-specific mirroring in useEffect)
+    // const handleChatPageMessage = (event: CustomEvent) => {
+    //   const messageData = event.detail;
+    //   console.log('📨 GlobalChatSidebar mirroring ChatPage message:', messageData);
+    //   
+    //   // Use unified handler for ChatPage messages
+    //   handleUnifiedMessage(messageData, 'chatpage');
+    // };
 
-    const handleChatPageEdit = (event: CustomEvent) => {
-      const editData = event.detail;
-      console.log('✏️ GlobalChatSidebar mirroring ChatPage edit:', editData);
-      
-      if (editData.sessionId === activeSessionId && editData.userId === user?.id) {
-        // Update message and truncate messages after it
-        setMessages(prev => {
-          const messageIndex = prev.findIndex(m => m.id === editData.messageId);
-          if (messageIndex === -1) {
-            console.log('⚠️ Message not found for edit:', editData.messageId);
-            return prev;
-          }
-          
-          // Clear processed IDs for truncated messages
-          const truncatedMessages = prev.slice(messageIndex + 1);
-          truncatedMessages.forEach(msg => {
-            processedMessageIdsRef.current.delete(msg.id);
-            console.log('🗑️ Cleared processed ID for truncated message:', msg.id);
-          });
-          
-          return prev.slice(0, messageIndex + 1).map(m => 
-            m.id === editData.messageId ? { ...m, text: editData.newText } : m
-          );
-        });
-        
-        // Show loading state
-        setIsLoadingMessage(true);
-        console.log('✅ Sidebar mirrored ChatPage edit, expecting new AI response');
-      }
-    };
+    // const handleChatPageEdit = (event: CustomEvent) => {
+    //   const editData = event.detail;
+    //   console.log('✏️ GlobalChatSidebar mirroring ChatPage edit:', editData);
+    //   
+    //   // Use unified handler for ChatPage edits
+    //   handleUnifiedMessage({ ...editData, type: 'edit' }, 'chatpage');
+    // };
 
-    const handleChatPageAIResponse = (event: CustomEvent) => {
-      const responseData = event.detail;
-      console.log('🤖 GlobalChatSidebar mirroring AI response:', responseData);
-      
-      // Check for duplicate
-      if (processedMessageIdsRef.current.has(responseData.messageId)) {
-        console.log('🤖 Duplicate AI response ignored (already processed):', responseData.messageId);
-        return;
-      }
-      
-      console.log('🤖 Current activeSessionId:', activeSessionId);
-      console.log('🤖 Response sessionId:', responseData.sessionId);
-      console.log('🤖 Current user ID:', user?.id);
-      console.log('🤖 Response user ID:', responseData.userId);
-      
-      if (responseData.sessionId === activeSessionId && responseData.userId === user?.id) {
-        console.log('✅ Session and user match, adding AI response');
-        
-        // Mark as processed
-        processedMessageIdsRef.current.add(responseData.messageId);
-        
-        // Clear loading state immediately
-        setIsLoadingMessage(false);
-        
-        // Add AI response with empty text initially for typewriter effect
-        const messageId = responseData.messageId;
-        setMessages(prev => [
-          ...prev,
-          {
-            id: messageId,
-            sender: 'ai',
-            text: '', // Start empty for typewriter effect
-            timestamp: responseData.timestamp
-          }
-        ]);
-        
-        // Start typewriter effect with same speed as ChatPage (2ms)
-        typewriterEffect(messageId, responseData.content, 2);
-        console.log('✅ AI response typewriter started in sidebar');
-      } else {
-        console.log('❌ Session or user mismatch, ignoring AI response');
-      }
-    };
+    // const handleChatPageAIResponse = (event: CustomEvent) => {
+    //   const responseData = event.detail;
+    //   console.log('🤖 GlobalChatSidebar mirroring AI response:', responseData);
+    //   
+    //   // Use unified handler for ChatPage AI responses
+    //   handleUnifiedMessage({ ...responseData, sender: 'ai' }, 'chatpage');
+    // };
     
     // Handle AI processing cancellation from ChatPage
     const handleCancelAIProcessing = (event: CustomEvent) => {
@@ -620,15 +681,16 @@ const GlobalChatSidebar: React.FC = () => {
       }
     };
 
-    window.addEventListener('chatpage-message', handleChatPageMessage as EventListener);
-    window.addEventListener('chatpage-edit-message', handleChatPageEdit as EventListener);
-    window.addEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
+    // COMMENTED OUT: Old event listeners (replaced with session-specific mirroring in useEffect)
+    // window.addEventListener('chatpage-message', handleChatPageMessage as EventListener);
+    // window.addEventListener('chatpage-edit-message', handleChatPageEdit as EventListener);
+    // window.addEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
     window.addEventListener('cancel-ai-processing', handleCancelAIProcessing as EventListener);
     
     return () => {
-      window.removeEventListener('chatpage-message', handleChatPageMessage as EventListener);
-      window.removeEventListener('chatpage-edit-message', handleChatPageEdit as EventListener);
-      window.removeEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
+      // window.removeEventListener('chatpage-message', handleChatPageMessage as EventListener);
+      // window.removeEventListener('chatpage-edit-message', handleChatPageEdit as EventListener);
+      // window.removeEventListener('chatpage-ai-response', handleChatPageAIResponse as EventListener);
       window.removeEventListener('cancel-ai-processing', handleCancelAIProcessing as EventListener);
     };
   }, [isVisible, activeSessionId, user?.id]);
@@ -637,21 +699,24 @@ const GlobalChatSidebar: React.FC = () => {
   useEffect(() => {
     if (!isVisible) return;
 
-    const handleManualSessionOpen = (event: CustomEvent) => {
+    const handleManualSessionOpen = async (event: CustomEvent) => {
       const sessionData = event.detail;
       console.log('📂 GlobalChatSidebar opening session:', sessionData);
       
       if (sessionData.sessionId && sessionData.userId === user?.id) {
         setActiveSessionId(sessionData.sessionId);
         // Load the session data from database
-        loadSessionFromDatabase(sessionData.sessionId);
+        await loadSessionFromDatabase(sessionData.sessionId);
+        
+        // The useMessagingService hook will automatically connect when activeSessionId changes
+        console.log('🔌 Sidebar: Session opened, useMessagingService hook will handle connection');
       }
     };
 
-    window.addEventListener('manual-session-open', handleManualSessionOpen as EventListener);
+    window.addEventListener('manual-session-open', handleManualSessionOpen as any);
     
     return () => {
-      window.removeEventListener('manual-session-open', handleManualSessionOpen as EventListener);
+      window.removeEventListener('manual-session-open', handleManualSessionOpen as any);
     };
   }, [isVisible, user?.id, setActiveSessionId]);
 
@@ -701,7 +766,6 @@ const GlobalChatSidebar: React.FC = () => {
         if (activeSessionId && activeSessionId !== contextData.sessionId) {
           console.log('🎯 GlobalChatSidebar: Clearing old session:', activeSessionId);
           setCurrentSession(null);
-          setMessages([]);
           setSessionContext([]);
         }
         
@@ -728,76 +792,32 @@ const GlobalChatSidebar: React.FC = () => {
         // Set context items
         setSessionContext(contextData.contextItems || []);
         
-        // Add the user message immediately
-        const userMessageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const userMessage: Message = {
-          id: userMessageId,
-          sender: 'user',
-          text: contextData.userMessage,
-          timestamp: Date.now(),
-        };
-        setMessages([userMessage]);
+        // Note: User message will be added by unified messaging system
         
         // Show loading state
         setIsLoadingMessage(true);
         
-        // Small delay to ensure sessionStorage is written before WebSocket reads it
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // Send the contextualized message via unified messaging system
+        console.log('📤 Sidebar: Sending context message via unified messaging system...');
         
-        // Connect WebSocket for this session
-        console.log(`🔌 Requesting WebSocket connection for session: ${contextData.sessionId}`);
-        connectWebSocket(contextData.sessionId);
-        
-        // Wait for WebSocket to fully establish by listening for connection_established event
-        console.log('⏳ Waiting for WebSocket connection to establish...');
-        
-        const waitForConnection = new Promise<void>((resolve) => {
-          const checkConnection = () => {
-            if (isConnected) {
-              console.log('✅ WebSocket is connected, proceeding to send message');
-              resolve();
-            } else {
-              // Check again in 100ms
-              setTimeout(checkConnection, 100);
-            }
-          };
-          checkConnection();
+        try {
+          // Use the unified messaging system to send context message
+          // Pass the session ID explicitly to avoid race conditions
+          const result = await sendUnifiedContextMessage(
+            contextData.userMessage,
+            contextData.contextItems,
+            'claude-3-sonnet',
+            contextData.sessionId
+          );
           
-          // Timeout after 5 seconds
-          setTimeout(() => {
-            console.warn('⚠️ WebSocket connection timeout, attempting to send anyway');
-            resolve();
-          }, 5000);
-        });
-        
-        await waitForConnection;
-        
-        console.log('🚀 WebSocket ready, sending message');
-        
-        // Send the contextualized message
-        const messagePayload = {
-          action: 'chat',
-          type: 'chat_message',
-          message: contextData.userMessage,
-          userId: user.id,
-          sessionId: contextData.sessionId,
-          model: 'claude-3-sonnet',
-          files: [],
-          messageId: userMessageId,
-          contextItems: contextData.contextItems,
-          context: {
-            currentPage: window.location.pathname,
-            sessionId: contextData.sessionId,
-            hasContext: true,
-            contextItemCount: contextData.contextItems.length,
+          if (result.success) {
+            console.log('✅ Sidebar: Context message sent successfully via unified system');
+          } else {
+            console.error('❌ Sidebar: Failed to send context message:', result.error);
+            setIsLoadingMessage(false);
           }
-        };
-        
-        const sent = sendMessage(messagePayload);
-        if (sent) {
-          console.log('✅ GlobalChatSidebar: Sent contextualized message via WebSocket');
-        } else {
-          console.error('❌ GlobalChatSidebar: Failed to send message');
+        } catch (error) {
+          console.error('❌ Sidebar: Error sending context message via unified system:', error);
           setIsLoadingMessage(false);
         }
       }
@@ -808,7 +828,7 @@ const GlobalChatSidebar: React.FC = () => {
     return () => {
       window.removeEventListener('context-session-ready', handleContextSessionReady as any);
     };
-  }, [user?.id, activeSessionId, setIsVisible, setActiveSessionId, connectWebSocket, sendMessage]);
+  }, [user?.id, activeSessionId, setIsVisible, setActiveSessionId]);
 
   // Listen for items being added to sidebar context
   useEffect(() => {
@@ -825,6 +845,7 @@ const GlobalChatSidebar: React.FC = () => {
       const newContext = [...sessionContext, contextItem];
       setSessionContext(newContext);
       console.log('✅ Added to sidebar context');
+      console.log('📌 Context item data:', JSON.stringify(contextItem, null, 2));
       
       // Notify ChatPage of context change
       const syncEvent = new CustomEvent('session-context-updated', {
@@ -940,156 +961,12 @@ const GlobalChatSidebar: React.FC = () => {
     };
   }, [isVisible, activeSessionId]);
 
-  // Listen for WebSocket messages from ChatPage
-  useEffect(() => {
-    if (!isVisible) return;
+  // REMOVED: Old WebSocket event listeners - now handled by unified messaging system
 
-    const handleWebSocketMessage = (event: CustomEvent) => {
-      const data = event.detail;
-      console.log('📨 Sidebar received WebSocket message:', data.type);
-
-      switch (data.type) {
-        case 'ai_response':
-          const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-          
-          // Get the latest activeSessionId from sessionStorage to avoid stale closures
-          const latestActiveSessionId = sessionStorage.getItem('global-chat-active-session');
-          
-          // Log session comparison for debugging
-          console.log('🤖 Sidebar received AI response:', {
-            responseSessionId: data.session_id,
-            activeSessionIdFromState: activeSessionId,
-            activeSessionIdFromStorage: latestActiveSessionId,
-            match: data.session_id === latestActiveSessionId,
-            messageId: messageId
-          });
-          
-          // Only process if it's for the active session (check sessionStorage for latest value)
-          // If response has no session_id, assume it's for the active session (edit responses sometimes omit it)
-          if (!data.session_id || data.session_id === latestActiveSessionId || !latestActiveSessionId) {
-            // Check for duplicate
-            if (processedMessageIdsRef.current.has(messageId)) {
-              console.log('🤖 Duplicate AI response ignored (WebSocket):', messageId);
-              break;
-            }
-            
-            console.log('🤖 Sidebar processing AI response for session:', data.session_id);
-            
-            // Mark as processed
-            processedMessageIdsRef.current.add(messageId);
-            
-            // Clear loading state
-            setIsLoadingMessage(false);
-            
-            // Add AI response with empty text for typewriter effect
-            setMessages(prev => [
-              ...prev,
-              {
-                id: messageId,
-                sender: 'ai',
-                text: '',
-                timestamp: Date.now(),
-              }
-            ]);
-            
-            // Start typewriter effect
-            typewriterEffect(messageId, data.content || 'No response', 2);
-            
-            // Dispatch AI response to ChatPage so it can mirror it
-            const aiResponseEvent = new CustomEvent('chatpage-ai-response', {
-              detail: {
-                messageId: messageId,
-                content: data.content || 'No response',
-                sessionId: data.session_id,
-                userId: user?.id,
-                timestamp: Date.now()
-              }
-            });
-            window.dispatchEvent(aiResponseEvent);
-            console.log('📡 Sidebar dispatched AI response to ChatPage:', messageId);
-          } else {
-            console.log('⚠️ AI response session mismatch - not processing:', {
-              responseSessionId: data.session_id,
-              activeSessionIdFromState: activeSessionId,
-              activeSessionIdFromStorage: latestActiveSessionId
-            });
-          }
-          break;
-          
-        case 'message_received':
-          console.log('✅ Message received confirmation:', data.message_id);
-          break;
-        
-        case 'edit_acknowledged':
-          console.log('✏️ Sidebar received edit acknowledgment:', data.message_id);
-          
-          // Check if message was unchanged (user clicked edit but didn't change text)
-          if (data.unchanged) {
-            console.log('⚠️ Edit acknowledged but message unchanged - no AI response expected');
-            // Clear loading state since no AI response will come
-            setIsLoadingMessage(false);
-          } else {
-            console.log('✅ Edit acknowledged - waiting for AI response');
-            // Loading state will be cleared when AI response arrives
-          }
-          break;
-          
-        case 'user_message_with_files':
-          // Handle user message with files from File Handler
-          if (data.session_id && data.session_id === activeSessionId) {
-            console.log('📁 Sidebar: User message with files received:', data.message_id, data.files);
-            
-            // Update the existing user message with file information
-            if (data.message_id && data.files) {
-              setMessages(prev => prev.map(msg => 
-                msg.id === data.message_id 
-                  ? { ...msg, files: data.files, status: 'sent' }
-                  : msg
-              ));
-              
-              // Clear uploaded files after successful processing
-              setUploadedFiles([]);
-              
-              console.log('✅ Sidebar: Updated user message with files in real-time');
-            }
-          }
-          break;
-          
-        case 'session_updated':
-          // Handle session variables updates (e.g., new files uploaded)
-          if (data.session_id && data.session_id === activeSessionId) {
-            console.log('📁 Sidebar: Session variables updated:', data.session_variables);
-            console.log('📁 Sidebar: Uploaded files count:', data.session_variables?.uploaded_files?.length || 0);
-            
-            // Update current session with new session variables
-            if (data.session_variables) {
-              setCurrentSession(prev => prev ? {
-                ...prev,
-                session_variables: data.session_variables
-              } : null);
-              
-              console.log('✅ Sidebar: Updated session variables in real-time');
-              console.log('📁 Sidebar: Files section should now show', data.session_variables?.uploaded_files?.length || 0, 'files');
-            }
-          }
-          break;
-          
-        case 'error':
-          console.error('❌ WebSocket error:', data.message);
-          setIsLoadingMessage(false);
-          break;
-      }
-    };
-
-    window.addEventListener('websocket-message', handleWebSocketMessage as EventListener);
-
-    return () => {
-      window.removeEventListener('websocket-message', handleWebSocketMessage as EventListener);
-    };
-  }, [isVisible, activeSessionId, typewriterEffect, user?.id]);
-
+  // COMMENTED OUT: Old file handler function (replaced by messaging service)
+  /*
   // Send message with files to File Handler (same as ChatPage)
-  const sendMessageWithFilesToFileHandler = async (message: any, files: any[], sessionId: string, userId: string) => {
+  const sendMessageWithFilesToFileHandler = async (message: any, files: any[], sessionId: string, userId: string, enrichedContext?: any[]) => {
     try {
       const filesData = files.map(file => ({
         filename: file.name,
@@ -1111,7 +988,7 @@ const GlobalChatSidebar: React.FC = () => {
             timestamp: message.timestamp
           },
           files: filesData,
-          context_items: sessionContext // Include existing context
+          context_items: enrichedContext || sessionContext // Use enriched context if provided
         })
       });
 
@@ -1127,168 +1004,143 @@ const GlobalChatSidebar: React.FC = () => {
       throw error;
     }
   };
+  */
 
-  // Send message - uses WebSocket directly or File Handler for files
-  const handleSendMessage = useCallback(async () => {
-    if ((!inputMessage.trim() && uploadedFiles.length === 0) || !user?.id) return;
+  // COMMENTED OUT: Old WebSocket message handler (replaced by messaging service)
+  /*
+  // Handle WebSocket messages from sidebar's own WebSocket connection
+  const handleSidebarWebSocketMessage = (data: any) => {
+    console.log('📨 Sidebar WebSocket message:', data.type);
 
-    const userMessage = inputMessage.trim();
-    let sessionId = activeSessionId;
-
-    // If no active session, create a new one
-    if (!sessionId) {
-      try {
-        console.log('🆕 Creating new session for sidebar message');
-        const response = await fetch(`https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production/sessions?user_id=${user.id}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            title: new Date().toLocaleString(),
-            model: selectedModel,
-            create_welcome_message: false
-          })
-        });
+    switch (data.type) {
+      case 'ai_response':
+        const messageId = data.message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        if (response.ok) {
-          const newSession = await response.json();
-          sessionId = newSession.session_id;
-          setActiveSessionId(sessionId);
-          console.log('✅ New session created:', sessionId);
+        // Get the latest activeSessionId from sessionStorage to avoid stale closures
+        const latestActiveSessionId = sessionStorage.getItem('global-chat-active-session');
+        
+        // Only process if it's for the active session
+        if (!data.session_id || data.session_id === latestActiveSessionId || !latestActiveSessionId) {
+          // Check for duplicate
+          if (processedMessageIdsRef.current.has(messageId)) {
+            console.log('🤖 Duplicate AI response ignored (Sidebar WebSocket):', messageId);
+            break;
+          }
+          
+          console.log('🤖 Sidebar processing AI response from own WebSocket for session:', data.session_id);
+          
+          // Mark as processed
+          processedMessageIdsRef.current.add(messageId);
+          
+          // Add AI response to sidebar messages
+          const aiMessage: Message = {
+            id: messageId,
+            sender: 'ai',
+            text: data.content || 'I apologize, but I encountered an error processing your request.',
+            timestamp: Date.now(),
+          };
+          
+          setMessages(prev => [...prev, aiMessage]);
+          setIsLoadingMessage(false);
+          setStreamingMessageId(null);
+          
+          console.log('✅ Sidebar added AI response from own WebSocket');
         } else {
-          throw new Error('Failed to create session');
+          console.log('🤖 Sidebar ignoring AI response for different session:', data.session_id);
         }
-      } catch (error) {
-        console.error('❌ Failed to create new session:', error);
-        // Create local session as fallback
-        sessionId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        setActiveSessionId(sessionId);
-        console.log('✅ Local session created:', sessionId);
-      }
-    }
-
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    // Check if we have files to upload
-    if (uploadedFiles.length > 0) {
-      console.log('📁 Sidebar: Sending message with files:', uploadedFiles.length);
-      
-      // Create user message with files
-      const userMessageWithFiles = {
-        id: messageId,
-        text: userMessage,
-        timestamp: Date.now(),
-        files: uploadedFiles.map(file => ({
-          name: file.name,
-          size: file.size,
-          type: file.type
-        }))
-      };
-
-      // Add user message to sidebar immediately (with files for immediate display)
-      setMessages(prev => [
-        ...prev,
-        {
-          id: messageId,
-          sender: 'user',
-          text: userMessage,
-          timestamp: Date.now(),
-          status: 'sending',
-          files: uploadedFiles.map(file => ({
-            name: file.name,
-            size: file.size,
-            type: file.type
-          }))
-        }
-      ]);
-
-      setInputMessage('');
-      setIsLoadingMessage(true);
-
-      try {
-        // Send to File Handler
-        if (!user?.id) {
-          throw new Error('User ID is required for file upload');
-        }
-        await (sendMessageWithFilesToFileHandler as any)(userMessageWithFiles, uploadedFiles, sessionId, user.id);
-        console.log('✅ Sidebar: Message with files sent to File Handler');
+        break;
         
-        // Clear uploaded files after sending (like ChatPage)
+      case 'message_received':
+        console.log('📨 Sidebar received message confirmation:', data.message_id);
+        break;
+        
+      case 'session_updated':
+        console.log('📁 Sidebar received session update from own WebSocket');
+        // Handle session updates if needed
+        break;
+        
+      default:
+        console.log('📨 Sidebar received unknown WebSocket message type:', data.type);
+    }
+  };
+  */
+
+  // COMMENTED OUT: Old WebSocket-based message sending
+  /*
+  const handleSendMessage = useCallback(async () => {
+    // ... old implementation commented out for rollback safety
+  }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId, uploadedFiles, sessionContext]);
+  */
+
+  // NEW: Unified messaging system-based message sending
+  const handleSendMessage = useCallback(async () => {
+    if ((!inputMessage.trim() && uploadedFiles.length === 0) || !user?.id || isUnifiedProcessing) return;
+
+    console.log('📤 Sidebar: Sending message via unified messaging system');
+    
+    // Show loading state
+    setIsLoadingMessage(true);
+    
+    // Broadcast loading state to other interfaces
+    if (activeSessionId) {
+      unifiedMessageHandler.broadcastLoadingState(activeSessionId, true, 'sidebar');
+    }
+    
+    try {
+      let result;
+      
+      // Determine message type and send accordingly
+      if (uploadedFiles.length > 0) {
+        // File message
+        console.log(`📁 Sidebar: Sending file message with ${uploadedFiles.length} files`);
+        result = await sendUnifiedFileMessage(inputMessage, uploadedFiles as unknown as File[], selectedModel);
+      } else if (sessionContext.length > 0) {
+        // Context message
+        console.log(`📋 Sidebar: Sending context message with ${sessionContext.length} context items`);
+        result = await sendUnifiedContextMessage(inputMessage, sessionContext, selectedModel);
+      } else if (activeSessionId) {
+        // Followup message (existing session)
+        console.log('🔄 Sidebar: Sending followup message to existing session');
+        result = await sendUnifiedFollowupMessage(inputMessage, selectedModel);
+      } else {
+        // New message (no session)
+        console.log('🆕 Sidebar: Sending new message (will create session)');
+        result = await sendUnifiedMessage({
+          text: inputMessage,
+          model: selectedModel,
+          type: 'new_message'
+        });
+      }
+      
+      if (result.success) {
+        console.log('✅ Sidebar: Message sent successfully via unified system');
+        
+        // Clear input and files
+        setInputMessage('');
         setUploadedFiles([]);
         
-        // Dispatch file message to ChatPage so it can add it to UI immediately
-        const fileMessageEvent = new CustomEvent('sidebar-send-message', {
-          detail: {
-            message: userMessage,
-            userId: user.id,
-            sessionId: sessionId,
-            model: selectedModel,
-            messageId: messageId,
-            timestamp: Date.now(),
-            files: uploadedFiles.map(file => ({
-              name: file.name,
-              size: file.size,
-              type: file.type
-            })),
-            contextItems: sessionContext.length > 0 ? sessionContext : undefined,
-            context: sessionContext.length > 0 ? {
-              currentPage: window.location.pathname,
-              sessionId: sessionId,
-              hasContext: true,
-              contextCount: sessionContext.length
-            } : undefined
-          }
-        });
-        window.dispatchEvent(fileMessageEvent);
-        console.log('📡 Sidebar dispatched file message to ChatPage');
-      } catch (error) {
-        console.error('❌ Sidebar: Failed to send message with files:', error);
+        // Update session ID if a new session was created
+        if (result.sessionId && result.sessionId !== activeSessionId) {
+          console.log('🔄 Sidebar: New session created, updating active session:', result.sessionId);
+          setActiveSessionId(result.sessionId);
+        }
+      } else {
+        console.error('❌ Sidebar: Failed to send message:', result.error);
         setIsLoadingMessage(false);
+        // Broadcast loading state clearing to other interfaces
+        if (activeSessionId) {
+          unifiedMessageHandler.broadcastLoadingState(activeSessionId, false, 'sidebar');
+        }
       }
-    } else {
-      // Regular message without files - use WebSocket
-      console.log('📤 Sidebar: Sending regular message via WebSocket');
-      
-      // Add user message to sidebar immediately
-      setMessages(prev => [
-        ...prev,
-        {
-          id: messageId,
-          sender: 'user',
-          text: userMessage,
-          timestamp: Date.now(),
-        }
-      ]);
-
-      setInputMessage('');
-      setUploadedFiles([]); // Clear uploaded files for regular messages too
-      setIsLoadingMessage(true);
-
-      // Note: Sidebar uses ChatPage's WebSocket connection, no need to connect separately
-
-      // Dispatch message to ChatPage to send via its WebSocket connection
-      const messageEvent = new CustomEvent('sidebar-send-message', {
-        detail: {
-          message: userMessage,
-          userId: user.id,
-          sessionId: sessionId,
-          model: selectedModel,
-          messageId: messageId,
-          timestamp: Date.now(),
-          contextItems: sessionContext.length > 0 ? sessionContext : undefined,
-          context: sessionContext.length > 0 ? {
-            currentPage: window.location.pathname,
-            sessionId: sessionId,
-            hasContext: true,
-            contextCount: sessionContext.length
-          } : undefined
-        }
-      });
-      window.dispatchEvent(messageEvent);
-      console.log('📡 Sidebar dispatched message to ChatPage for sending');
+    } catch (error) {
+      console.error('❌ Sidebar: Error sending message via unified system:', error);
+      setIsLoadingMessage(false);
+      // Broadcast loading state clearing to other interfaces
+      if (activeSessionId) {
+        unifiedMessageHandler.broadcastLoadingState(activeSessionId, false, 'sidebar');
+      }
     }
-  }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId, uploadedFiles, sessionContext]);
+  }, [inputMessage, activeSessionId, user?.id, selectedModel, uploadedFiles, sessionContext, isUnifiedProcessing, sendUnifiedMessage, sendUnifiedFileMessage, sendUnifiedContextMessage, sendUnifiedFollowupMessage, setActiveSessionId]);
 
   const handleKeyPress = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -1378,7 +1230,6 @@ const GlobalChatSidebar: React.FC = () => {
             onClick={() => {
               setActiveSessionId(null);
               setCurrentSession(null);
-              setMessages([]);
               setSessionContext([]);
               setInputMessage('');
               setIsLoadingMessage(false);
@@ -1731,35 +1582,32 @@ const GlobalChatSidebar: React.FC = () => {
                 </Box>
               ) : (
                 <>
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      color: '#ffffff',
-                      fontSize: '0.875rem',
-                      lineHeight: 1.4,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    {message.text}
-                    {streamingMessageId === message.id && (
-                      <Box
-                        component="span"
-                        sx={{
-                          display: 'inline-block',
-                          width: '8px',
-                          height: '16px',
-                          backgroundColor: '#60a5fa',
-                          marginLeft: '2px',
-                          animation: 'blink 1s infinite',
-                          '@keyframes blink': {
-                            '0%, 50%': { opacity: 1 },
-                            '51%, 100%': { opacity: 0 },
-                          },
-                        }}
-                      />
-                    )}
-                  </Typography>
+                  {message.sender === 'ai' && typingMessages.has(message.id) ? (
+                    <TypingText 
+                      text={message.text} 
+                      speed={2}
+                      onComplete={() => {
+                        setTypingMessages(prev => {
+                          const newSet = new Set(prev);
+                          newSet.delete(message.id);
+                          return newSet;
+                        });
+                      }}
+                    />
+                  ) : (
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: '#ffffff',
+                        fontSize: '0.875rem',
+                        lineHeight: 1.4,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {message.text}
+                    </Typography>
+                  )}
                   {/* File attachments */}
                   {(message as any).files && (message as any).files.length > 0 && (
                     <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
@@ -1816,7 +1664,7 @@ const GlobalChatSidebar: React.FC = () => {
           </Box>
         ))}
         
-        {isLoadingMessage && (
+        {(isLoadingMessage || (activeSessionId && crossInterfaceLoading[activeSessionId])) && (
           <Box
             sx={{
               alignSelf: 'flex-start',

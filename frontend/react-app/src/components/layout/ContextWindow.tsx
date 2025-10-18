@@ -23,7 +23,7 @@ import {
 } from '@mui/icons-material';
 import { useContextWindow } from '../../contexts/ContextWindowContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { stockDataAPI, cryptoStatsAPI, newsSearchAPI } from '../../services/api';
+// Note: Removed API imports - tiles now pass metadata only, AI agent fetches data using tools
 import { ContextItem, TileContextData } from '../tiles/common/contextManager';
 
 interface ContextWindowProps {
@@ -139,16 +139,16 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       console.log('🚀 Starting context-aware message send');
       console.log('📦 Context items:', contextItems.length);
       
-      // Step 1: Fetch fresh data for each context item
-      setSendProgress(`Fetching data for ${contextItems.length} items...`);
+      // Step 1: Process metadata for each context item
+      setSendProgress(`Processing metadata for ${contextItems.length} items...`);
       const enrichedItems = await Promise.allSettled(
         contextItems.map(async (item) => {
           try {
             return await fetchContextItemData(item);
           } catch (error) {
-            console.warn(`⚠️ Failed to fetch data for ${item.type} ${item.id}:`, error);
-            // Return item without backend data on failure
-            return { ...item, fetchError: true };
+            console.warn(`⚠️ Failed to process metadata for ${item.type} ${item.id}:`, error);
+            // Return item without processed metadata on failure
+            return { ...item, processError: true };
           }
         })
       );
@@ -166,10 +166,10 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       
       const failedCount = contextItems.length - enrichedContextItems.length;
       if (failedCount > 0) {
-        console.warn(`⚠️ ${failedCount} items failed to fetch, continuing with ${enrichedContextItems.length} items`);
+        console.warn(`⚠️ ${failedCount} items failed to process, continuing with ${enrichedContextItems.length} items`);
       }
       
-      console.log('✅ Enriched context items:', enrichedContextItems.length);
+      console.log('✅ Processed context items:', enrichedContextItems.length);
       
       // Step 2: Create new chat session with context via WebSocket
       setSendProgress('Creating analysis session...');
@@ -226,11 +226,11 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
   };
   
   const fetchContextItemData = async (item: ContextItem): Promise<ContextItem> => {
-    console.log(`🔍 Fetching data for ${item.type}: ${item.title}`);
+    console.log(`🔍 Processing metadata for ${item.type}: ${item.title}`);
     
     switch (item.type) {
       case 'tile':
-        return await fetchTileData(item);
+        return await processTileMetadata(item);
       case 'article':
         // Articles already have all needed data
         return item;
@@ -242,60 +242,30 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
     }
   };
   
-  const fetchTileData = async (item: ContextItem): Promise<ContextItem> => {
+  const processTileMetadata = async (item: ContextItem): Promise<ContextItem> => {
     const tileData = item.data as TileContextData;
     
-    try {
-      switch (tileData.tileType) {
-        case 'stock': {
-          const stockData = await stockDataAPI.getStockData({
-            ticker: tileData.symbol || '',
-            period: tileData.timeframe || '1y',
-          });
-          return { ...item, data: { ...tileData, backendData: stockData } };
-        }
-        
-        case 'crypto': {
-          const cryptoData = await cryptoStatsAPI.getStats({
-            symbols: tileData.symbol ? [tileData.symbol] : undefined,
-            timeframe: (tileData.timeframe as '1d' | '7d' | '30d' | '1y') || '30d',
-          });
-          return { ...item, data: { ...tileData, backendData: cryptoData } };
-        }
-        
-        case 'news': {
-          // Use the tile's filter query to fetch fresh articles
-          const newsData = await newsSearchAPI.searchNews(tileData.filters || {});
-          
-          // Extract article titles and URLs (max 50)
-          const articles = (newsData.articles || []).slice(0, 50).map((a: any) => ({
-            title: a.title,
-            url: a.source_url,
-            source: a.source_name,
-            published_date: a.published_date,
-          }));
-          
-          return {
-            ...item,
-            data: {
-              ...tileData,
-              backendData: {
-                articles,
-                total_count: (newsData as any).total_articles || articles.length,
-                filters: tileData.filters,
-              },
-            },
-          };
-        }
-        
-        default:
-          console.warn(`⚠️ Unknown tile type: ${tileData.tileType}`);
-          return item;
+    // Only pass metadata - let AI agent fetch actual data using tools
+    const metadata = {
+      tileType: tileData.tileType,
+      symbol: tileData.symbol,
+      timeframe: tileData.timeframe,
+      filters: tileData.filters,
+      // Include any other metadata that might be useful for the AI agent
+      title: item.title,
+      subtitle: item.subtitle,
+    };
+    
+    console.log(`📋 Tile metadata prepared for AI agent:`, metadata);
+    
+    return {
+      ...item,
+      data: {
+        ...tileData,
+        metadata, // Pass metadata instead of fetched data
+        note: 'AI agent will fetch actual data using available tools'
       }
-    } catch (error) {
-      console.error(`❌ Error fetching ${tileData.tileType} data:`, error);
-      throw error;
-    }
+    };
   };
 
   // Don't render if hidden (visibility controlled by toolbar)
