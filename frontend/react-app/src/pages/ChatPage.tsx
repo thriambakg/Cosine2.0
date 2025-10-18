@@ -245,8 +245,41 @@ export default function ChatPage() {
   
   // Context state
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
+  const previousContextRef = useRef<ContextItem[]>([]);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [isFilesExpanded, setIsFilesExpanded] = useState(false);
+  
+  // Function to detect if context has changed
+  const hasContextChanged = useCallback(() => {
+    const currentContext = sessionContext;
+    const previousContext = previousContextRef.current;
+    
+    // Compare lengths first (quick check)
+    if (currentContext.length !== previousContext.length) {
+      return true;
+    }
+    
+    // Compare each item by ID and timestamp
+    for (let i = 0; i < currentContext.length; i++) {
+      const current = currentContext[i];
+      const previous = previousContext[i];
+      
+      if (!previous || 
+          current.id !== previous.id || 
+          current.timestamp !== previous.timestamp) {
+        return true;
+      }
+    }
+    
+    return false;
+  }, [sessionContext]);
+  
+  // Update previous context when session changes
+  useEffect(() => {
+    if (currentSession?.session_id) {
+      previousContextRef.current = [...sessionContext];
+    }
+  }, [currentSession?.session_id, sessionContext]);
   
   // NEW: Unified messaging system for centralized message handling
   const {
@@ -803,10 +836,12 @@ export default function ChatPage() {
         // File message
         console.log(`📁 ChatPage: Sending file message with ${uploadedFiles.length} files`);
         result = await sendUnifiedFileMessage(inputMessage, uploadedFiles as unknown as File[], selectedModel);
-      } else if (sessionContext.length > 0) {
-        // Context message
-        console.log(`📋 ChatPage: Sending context message with ${sessionContext.length} context items`);
+      } else if (sessionContext.length > 0 && hasContextChanged()) {
+        // Context message (only if context has changed)
+        console.log(`📋 ChatPage: Sending context message with ${sessionContext.length} context items (context changed)`);
         result = await sendUnifiedContextMessage(inputMessage, sessionContext, selectedModel);
+        // Update previous context after sending
+        previousContextRef.current = [...sessionContext];
       } else if (currentSession?.session_id) {
         // Followup message (existing session)
         console.log('🔄 ChatPage: Sending followup message to existing session');

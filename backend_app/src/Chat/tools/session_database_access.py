@@ -8,9 +8,39 @@ import boto3
 import logging
 from typing import Dict, Any, List, Optional
 from botocore.exceptions import ClientError
+from decimal import Decimal
 
 # Configure logging
 logger = logging.getLogger()
+
+def convert_decimals_to_json(obj):
+    """
+    Convert Decimal objects to JSON-serializable types
+    """
+    if isinstance(obj, Decimal):
+        # Convert Decimal to int if it's a whole number, otherwise to float
+        if obj % 1 == 0:
+            return int(obj)
+        else:
+            return float(obj)
+    elif isinstance(obj, list):
+        return [convert_decimals_to_json(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_decimals_to_json(value) for key, value in obj.items()}
+    else:
+        return obj
+
+class DecimalEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder to handle Decimal objects
+    """
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            if obj % 1 == 0:
+                return int(obj)
+            else:
+                return float(obj)
+        return super(DecimalEncoder, self).default(obj)
 
 # Import Strands types (available in Lambda layer)
 try:
@@ -123,6 +153,9 @@ class SessionDatabaseAccess:
                 }
             }
             
+            # Convert Decimal objects to JSON-serializable types
+            result = convert_decimals_to_json(result)
+            
             # Add file summaries for easy reference
             if uploaded_files:
                 file_summaries = []
@@ -186,7 +219,7 @@ class SessionDatabaseAccess:
             session_item = response['Item']
             session_variables = session_item.get('session_variables', {})
             
-            return {
+            result = {
                 'session_id': session_id,
                 'user_id': user_id,
                 'exists': True,
@@ -202,6 +235,10 @@ class SessionDatabaseAccess:
                     'model': session_item.get('model', 'claude-3-sonnet')
                 }
             }
+            
+            # Convert Decimal objects to JSON-serializable types
+            result = convert_decimals_to_json(result)
+            return result
             
         except Exception as e:
             logger.error(f"Error retrieving session context: {str(e)}")
@@ -259,7 +296,7 @@ def get_session_files_tool(session_id: str, user_id: str, file_type: str = "all"
             for i, item in enumerate(result['context_items'], 1):
                 response_parts.append(f"{i}. {item.get('title', 'Unknown')} ({item.get('type', 'unknown')})")
                 if item.get('data'):
-                    response_parts.append(f"   Data: {json.dumps(item['data'], indent=2)[:200]}...")
+                    response_parts.append(f"   Data: {json.dumps(item['data'], indent=2, cls=DecimalEncoder)[:200]}...")
         
         return "\n".join(response_parts)
         
@@ -318,11 +355,11 @@ def get_session_context_tool(session_id: str, user_id: str) -> str:
             for i, item in enumerate(result['context_items'], 1):
                 response_parts.append(f"{i}. {item.get('title', 'Unknown')} ({item.get('type', 'unknown')})")
                 if item.get('data'):
-                    response_parts.append(f"   Data: {json.dumps(item['data'], indent=2)[:200]}...")
+                    response_parts.append(f"   Data: {json.dumps(item['data'], indent=2, cls=DecimalEncoder)[:200]}...")
         
         if result.get('context_summary'):
             response_parts.append(f"\nContext Summary:")
-            response_parts.append(json.dumps(result['context_summary'], indent=2))
+            response_parts.append(json.dumps(result['context_summary'], indent=2, cls=DecimalEncoder))
         
         return "\n".join(response_parts)
         

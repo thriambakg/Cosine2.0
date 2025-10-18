@@ -141,7 +141,41 @@ const GlobalChatSidebar: React.FC = () => {
   // Local state for the mirror (using unified system for messages)
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
+  const previousContextRef = useRef<ContextItem[]>([]);
   const [inputMessage, setInputMessage] = useState('');
+  
+  // Function to detect if context has changed
+  const hasContextChanged = useCallback(() => {
+    const currentContext = sessionContext;
+    const previousContext = previousContextRef.current;
+    
+    // Compare lengths first (quick check)
+    if (currentContext.length !== previousContext.length) {
+      return true;
+    }
+    
+    // Compare each item by ID and timestamp
+    for (let i = 0; i < currentContext.length; i++) {
+      const current = currentContext[i];
+      const previous = previousContext[i];
+      
+      if (!previous || 
+          current.id !== previous.id || 
+          current.timestamp !== previous.timestamp) {
+        return true;
+      }
+    }
+    
+    return false;
+  }, [sessionContext]);
+  
+  // Update previous context when session changes
+  useEffect(() => {
+    if (activeSessionId) {
+      previousContextRef.current = [...sessionContext];
+    }
+  }, [activeSessionId, sessionContext]);
+  
   const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
@@ -1094,10 +1128,12 @@ const GlobalChatSidebar: React.FC = () => {
         // File message
         console.log(`📁 Sidebar: Sending file message with ${uploadedFiles.length} files`);
         result = await sendUnifiedFileMessage(inputMessage, uploadedFiles as unknown as File[], selectedModel);
-      } else if (sessionContext.length > 0) {
-        // Context message
-        console.log(`📋 Sidebar: Sending context message with ${sessionContext.length} context items`);
+      } else if (sessionContext.length > 0 && hasContextChanged()) {
+        // Context message (only if context has changed)
+        console.log(`📋 Sidebar: Sending context message with ${sessionContext.length} context items (context changed)`);
         result = await sendUnifiedContextMessage(inputMessage, sessionContext, selectedModel);
+        // Update previous context after sending
+        previousContextRef.current = [...sessionContext];
       } else if (activeSessionId) {
         // Followup message (existing session)
         console.log('🔄 Sidebar: Sending followup message to existing session');

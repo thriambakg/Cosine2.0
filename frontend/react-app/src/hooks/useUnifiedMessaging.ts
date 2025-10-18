@@ -14,7 +14,7 @@ export interface UseUnifiedMessagingOptions {
 }
 
 export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
-  const { sessionId, userId, source, onMessageUpdate } = options;
+  const { sessionId, userId, source } = options;
   const [messages, setMessages] = useState<SharedMessage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +117,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
       text,
       model,
       type: 'context_message',
-      sessionId: targetSessionId,
+      sessionId: targetSessionId || undefined,
       contextItems,
       context: {
         currentPage: window.location.pathname,
@@ -160,13 +160,16 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
     messageId: string,
     model: string = 'claude-3-sonnet'
   ) => {
-    return sendMessage({
+    return unifiedMessageHandler.processMessage({
       text,
       model,
       type: 'edit_message',
-      messageId
+      messageId,
+      userId: userId!,
+      sessionId: sessionId || '',
+      source
     });
-  }, [sendMessage]);
+  }, [userId, sessionId, source]);
 
   // Clear session messages
   const clearSession = useCallback(() => {

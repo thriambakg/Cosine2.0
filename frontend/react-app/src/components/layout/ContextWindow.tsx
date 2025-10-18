@@ -215,48 +215,6 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
     }
   };
   
-  const fetchContextItemData = async (item: ContextItem): Promise<ContextItem> => {
-    console.log(`🔍 Processing metadata for ${item.type}: ${item.title}`);
-    
-    switch (item.type) {
-      case 'tile':
-        return await processTileMetadata(item);
-      case 'article':
-        // Articles already have all needed data
-        return item;
-      case 'chat':
-        // Chat sessions already have trimmed messages
-        return item;
-      default:
-        return item;
-    }
-  };
-  
-  const processTileMetadata = async (item: ContextItem): Promise<ContextItem> => {
-    const tileData = item.data as TileContextData;
-    
-    // Only pass metadata - let AI agent fetch actual data using tools
-    const metadata = {
-      tileType: tileData.tileType,
-      symbol: tileData.symbol,
-      timeframe: tileData.timeframe,
-      filters: tileData.filters,
-      // Include any other metadata that might be useful for the AI agent
-      title: item.title,
-      subtitle: item.subtitle,
-    };
-    
-    console.log(`📋 Tile metadata prepared for AI agent:`, metadata);
-    
-    return {
-      ...item,
-      data: {
-        ...tileData,
-        metadata, // Pass metadata instead of fetched data
-        note: 'AI agent will fetch actual data using available tools'
-      }
-    };
-  };
 
   // Don't render if hidden (visibility controlled by toolbar)
   if (!isVisible) {
