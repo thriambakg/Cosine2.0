@@ -141,7 +141,19 @@ def get_session_files(session_id: str, user_id: str, file_indices: List[int] = N
             if 'all' in file_indices:
                 selected_files = files
             else:
-                selected_files = [files[i] for i in file_indices if 0 <= i < len(files)]
+                selected_files = []
+                for index in file_indices:
+                    # Try to parse as integer (array index)
+                    try:
+                        idx = int(index)
+                        if 0 <= idx < len(files):
+                            selected_files.append(files[idx])
+                    except ValueError:
+                        # If not an integer, treat as filename and search for it
+                        for file in files:
+                            if file.get('filename') == index or file.get('s3_key', '').endswith(index):
+                                selected_files.append(file)
+                                break
         else:
             selected_files = files
         

@@ -52,6 +52,7 @@ class FileReturnService:
             payload = {
                 'user_id': self.user_id,
                 'session_id': session_id,
+                'action': 'return_files',
                 'file_indices': file_indices or ['all']
             }
             
@@ -69,6 +70,7 @@ class FileReturnService:
             payload = {
                 'user_id': self.user_id,
                 'session_id': session_id,
+                'action': 'create_file',
                 'filename': filename,
                 'content': content,
                 'file_type': file_type
