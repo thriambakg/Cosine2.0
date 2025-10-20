@@ -11,6 +11,7 @@ import uuid
 import boto3
 from typing import Dict, Any, List
 from decimal import Decimal
+from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger()
@@ -97,6 +98,7 @@ def validate_session_access(user_id: str, session_id: str) -> bool:
         logger.error(f"❌ Session validation failed: {str(e)}")
         return False
 
+
 def generate_presigned_url(s3_key: str, expiration: int = 3600) -> str:
     """
     Generate a presigned URL for S3 object access
@@ -113,79 +115,57 @@ def generate_presigned_url(s3_key: str, expiration: int = 3600) -> str:
         logger.error(f"❌ Failed to generate presigned URL: {str(e)}")
         raise
 
-def get_session_files(session_id: str, user_id: str, file_indices: List[int] = None) -> List[Dict[str, Any]]:
+def get_session_files(session_id: str, user_id: str, file_indices: List[str] = None) -> List[Dict[str, Any]]:
     """
-    Retrieve session files from DynamoDB and prepare file data
+    Generate presigned URLs for files based on S3 path construction
     """
     try:
-        table = dynamodb.Table(SESSIONS_TABLE)
-        response = table.get_item(
-            Key={
-                'session_id': session_id,
-                'user_id': user_id
-            }
-        )
-        
-        if 'Item' not in response:
-            raise ValueError(f"Session {session_id} not found")
-        
-        session_data = response['Item']
-        files = session_data.get('files', [])
-        
-        if not files:
-            logger.warning(f"📁 No files found in session {session_id}")
+        if not file_indices or 'all' in file_indices:
+            logger.warning("📁 No specific files requested or 'all' specified - cannot construct S3 paths")
             return []
         
-        # Filter files by indices if specified
-        if file_indices is not None:
-            if 'all' in file_indices:
-                selected_files = files
-            else:
-                selected_files = []
-                for index in file_indices:
-                    # Try to parse as integer (array index)
-                    try:
-                        idx = int(index)
-                        if 0 <= idx < len(files):
-                            selected_files.append(files[idx])
-                    except ValueError:
-                        # If not an integer, treat as filename and search for it
-                        for file in files:
-                            if file.get('filename') == index or file.get('s3_key', '').endswith(index):
-                                selected_files.append(file)
-                                break
-        else:
-            selected_files = files
-        
-        # Prepare file data with presigned URLs
         file_data = []
-        for file_info in selected_files:
+        
+        for filename in file_indices:
+            # Construct S3 path: users/{user_id}/sessions/{session_id}/files/{filename}
+            s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
+            
             try:
-                s3_key = file_info.get('s3_key')
-                if not s3_key:
-                    logger.warning(f"⚠️ No S3 key found for file: {file_info}")
-                    continue
+                # Check if file exists in S3
+                s3_client.head_object(Bucket=S3_BUCKET, Key=s3_key)
                 
                 # Generate presigned URL
                 download_url = generate_presigned_url(s3_key)
                 
-                file_data.append({
-                    'filename': file_info.get('filename', 'Unknown'),
-                    'file_type': file_info.get('file_type', 'application/octet-stream'),
-                    'file_size': file_info.get('file_size', 0),
+                # Create file data structure
+                file_info = {
+                    'filename': filename,
+                    's3_key': s3_key,
                     'download_url': download_url,
-                    'uploaded_at': file_info.get('uploaded_at', int(time.time()))
-                })
+                    'file_type': 'application/json' if filename.endswith('.json') else 'application/octet-stream',
+                    'file_size': 0,  # We don't have size info from S3 head_object
+                    'uploaded_at': int(time.time())
+                }
                 
+                file_data.append(file_info)
+                logger.info(f"📁 Generated presigned URL for: {s3_key}")
+                
+            except ClientError as e:
+                if e.response['Error']['Code'] == '404':
+                    logger.warning(f"📁 File not found in S3: {s3_key}")
+                    continue
+                else:
+                    logger.error(f"❌ Error checking S3 file {s3_key}: {str(e)}")
+                    continue
             except Exception as e:
-                logger.error(f"❌ Failed to process file {file_info}: {str(e)}")
+                logger.error(f"❌ Error processing file {filename}: {str(e)}")
                 continue
         
-        logger.info(f"📁 Prepared {len(file_data)} files for return")
+        logger.info(f"📁 Generated {len(file_data)} presigned URLs")
         return file_data
         
     except Exception as e:
-        logger.error(f"❌ Failed to get session files: {str(e)}")
+        logger.error(f"❌ Error generating file URLs: {str(e)}")
         raise
 
 def create_agent_file(session_id: str, user_id: str, filename: str, content: str, file_type: str = 'text/plain') -> Dict[str, Any]:
