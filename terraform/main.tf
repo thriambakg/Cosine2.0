@@ -1524,7 +1524,8 @@ module "file_return_lambda" {
   additional_policy_arns = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
-    aws_iam_policy.lambda_websocket_policy.arn
+    aws_iam_policy.lambda_websocket_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn
   ]
 
   tags = var.common_tags
