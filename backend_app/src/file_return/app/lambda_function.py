@@ -59,6 +59,10 @@ def validate_user_identity(event: Dict[str, Any]) -> str:
             body = json.loads(event.get('body', '{}'))
             user_id = body.get('authenticated_user_id')
         
+        # Option 4: From direct Lambda invocation payload (for internal calls from chat agent)
+        if not user_id:
+            user_id = event.get('user_id')
+        
         if not user_id:
             raise ValueError("No authenticated user ID found in request")
         
@@ -313,8 +317,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         logger.info(f"🔍 File return request: {json.dumps(event, default=str)}")
         
-        # Parse request body
-        body = json.loads(event.get('body', '{}'))
+        # Check if this is a direct Lambda invocation or API Gateway request
+        if 'body' in event:
+            # API Gateway request - parse body
+            body = json.loads(event.get('body', '{}'))
+        else:
+            # Direct Lambda invocation - event is the payload
+            body = event
         
         # Validate user identity
         authenticated_user_id = validate_user_identity(event)
