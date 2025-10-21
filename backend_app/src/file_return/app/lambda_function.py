@@ -59,6 +59,14 @@ def validate_user_identity(event: Dict[str, Any]) -> str:
         if not user_id:
             user_id = event.get('user_id')
         
+        # Option 5: From request body (for API Gateway requests)
+        if not user_id and 'body' in event:
+            try:
+                body = json.loads(event['body'])
+                user_id = body.get('user_id')
+            except (json.JSONDecodeError, KeyError):
+                pass
+        
         if not user_id:
             logger.error("❌ User validation failed: No authenticated user ID found in request")
             return None
