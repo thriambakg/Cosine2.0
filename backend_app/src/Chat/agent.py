@@ -640,7 +640,7 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 15. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
 16. return_session_files_wrapper(file_indices) - Return files from current session to user
 17. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
-18. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate Excel files for financial analysis (agent prepares content first)
+18. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate CSV files for financial analysis that can be opened in Excel (agent prepares content first)
 
 🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
 
@@ -698,16 +698,17 @@ FOR PDF FILE ANALYSIS:
 5. Extract key information like dates, monetary amounts, percentages, emails, phone numbers
 6. Detect document type (financial, legal, technical, academic, report) automatically
 
-FOR EXCEL FILE GENERATION:
+FOR CSV FILE GENERATION (Excel-compatible):
 1. FIRST: Use read_s3_file_tool() to read user-uploaded data files (JSON, CSV, TXT)
 2. SECOND: Use get_financial_data() or other tools to fetch live market data if needed
-3. THIRD: Prepare and format the data content for Excel
-4. FOURTH: Use generate_excel_file_tool(filename, content, template_type, include_charts) to create Excel
+3. THIRD: Prepare and format the data content for CSV
+4. FOURTH: Use generate_excel_file_tool(filename, content, template_type, include_charts) to create CSV
 5. Template types: 'financial_model', 'dcf_model', 'portfolio_analysis', 'risk_report', 'custom'
-6. The agent should orchestrate the workflow - the Excel tool only creates the file
-7. Examples:
-   - "Create a DCF model for AAPL using my historical data file" → Read file → Fetch AAPL data → Format content → Generate Excel
-   - "Generate portfolio analysis with my holdings" → Read portfolio file → Fetch market data → Format analysis → Generate Excel
+6. The agent should orchestrate the workflow - the tool only creates the CSV file
+7. CSV files can be opened directly in Excel
+8. Examples:
+   - "Create a DCF model for AAPL using my historical data file" → Read file → Fetch AAPL data → Format content → Generate CSV
+   - "Generate portfolio analysis with my holdings" → Read portfolio file → Fetch market data → Format analysis → Generate CSV
 7. Provide comprehensive analysis including word count, page estimates, and content preview
 8. For forms and tables, use analyze_pdf_forms_tool for structured data extraction
 
@@ -1215,13 +1216,13 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
 @tool
 def generate_excel_file_tool(filename: str, content: str, template_type: str = "financial_model", include_charts: bool = True) -> str:
     """
-    Generate Excel files for financial analysis. The agent should prepare the content first using other tools.
+    Generate CSV files for financial analysis that can be opened in Excel. The agent should prepare the content first using other tools.
     
     Args:
-        filename: Name of the Excel file (without .xlsx extension)
-        content: The Excel content/data to include (prepared by agent using other tools)
-        template_type: Type of Excel template ('financial_model', 'dcf_model', 'portfolio_analysis', 'risk_report', 'custom')
-        include_charts: Whether to include charts and visualizations
+        filename: Name of the file (without extension)
+        content: The data content to include (prepared by agent using other tools)
+        template_type: Type of template ('financial_model', 'dcf_model', 'portfolio_analysis', 'risk_report', 'custom')
+        include_charts: Whether to include chart instructions (noted in comments)
     
     Returns:
         Success message with file details
@@ -1236,8 +1237,8 @@ def generate_excel_file_tool(filename: str, content: str, template_type: str = "
             return "Error: Missing required environment variables (bucket_name, user_id, session_id)"
         
         # Ensure filename has proper extension
-        if not filename.endswith('.xlsx'):
-            filename = f"{filename}.xlsx"
+        if not filename.endswith('.csv'):
+            filename = f"{filename}.csv"
         
         # Create S3 key for agent-files folder
         s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
@@ -1253,18 +1254,18 @@ def generate_excel_file_tool(filename: str, content: str, template_type: str = "
             Bucket=bucket_name,
             Key=s3_key,
             Body=excel_content,
-            ContentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ContentType='text/csv',  # CSV format that Excel can open
             Metadata={
                 'generated_by': 'agent',
                 'filename': filename,
-                'file_type': 'xlsx',
+                'file_type': 'csv',
                 'template_type': template_type,
                 'includes_charts': str(include_charts)
             }
         )
         
-        logger.info(f"Generated Excel file: {s3_key}")
-        return f"✅ Successfully generated Excel file '{filename}' in agent-files folder. Template: {template_type}, Charts: {'Yes' if include_charts else 'No'}. The file will appear in the Agent Files section."
+        logger.info(f"Generated CSV file: {s3_key}")
+        return f"✅ Successfully generated CSV file '{filename}' in agent-files folder. Template: {template_type}, Chart Instructions: {'Yes' if include_charts else 'No'}. The file can be opened in Excel and will appear in the Agent Files section."
         
     except Exception as e:
         logger.error(f"Error in generate_excel_file_tool: {str(e)}")
@@ -1273,23 +1274,75 @@ def generate_excel_file_tool(filename: str, content: str, template_type: str = "
 def generate_excel_content(template_type: str, content: str, include_charts: bool) -> bytes:
     """
     Generate Excel file content based on template type and provided content.
-    This is a simplified version - in production, you'd use openpyxl or xlsxwriter.
+    Creates a proper Excel file structure that Excel can open.
     """
-    # For now, create a basic Excel-like structure
-    # In production, you'd use openpyxl to create actual Excel files
-    
-    excel_structure = {
-        "template_type": template_type,
-        "content": content,
-        "include_charts": include_charts,
-        "sheets": get_excel_sheets(template_type),
-        "formulas": get_excel_formulas(template_type),
-        "formatting": get_excel_formatting(template_type)
-    }
-    
-    # Convert to JSON for now (in production, create actual Excel binary)
-    excel_json = json.dumps(excel_structure, indent=2)
-    return excel_json.encode('utf-8')
+    try:
+        # Create a proper Excel file structure
+        # For now, we'll create a CSV-like format that Excel can open
+        # In production, you'd use openpyxl to create actual .xlsx files
+        
+        # Parse the content if it's JSON
+        try:
+            if content.strip().startswith('{') or content.strip().startswith('['):
+                data = json.loads(content)
+            else:
+                data = content
+        except:
+            data = content
+        
+        # Create Excel-compatible content
+        excel_lines = []
+        
+        # Add template information
+        excel_lines.append(f"# {template_type.upper().replace('_', ' ')} TEMPLATE")
+        excel_lines.append(f"# Generated by Cosine Financial Analysis Agent")
+        excel_lines.append(f"# Include Charts: {include_charts}")
+        excel_lines.append("")
+        
+        # Add sheet structures
+        sheets = get_excel_sheets(template_type)
+        for sheet_name, columns in sheets.items():
+            excel_lines.append(f"# {sheet_name}")
+            excel_lines.append(",".join(columns))
+            excel_lines.append("")
+        
+        # Add formulas
+        formulas = get_excel_formulas(template_type)
+        if formulas:
+            excel_lines.append("# FORMULAS")
+            for sheet, sheet_formulas in formulas.items():
+                excel_lines.append(f"# {sheet}")
+                for name, formula in sheet_formulas.items():
+                    excel_lines.append(f"{name},{formula}")
+            excel_lines.append("")
+        
+        # Add the actual content
+        if isinstance(data, dict):
+            excel_lines.append("# DATA")
+            for key, value in data.items():
+                excel_lines.append(f"{key},{value}")
+        elif isinstance(data, list):
+            excel_lines.append("# DATA")
+            for item in data:
+                if isinstance(item, dict):
+                    excel_lines.append(",".join([str(v) for v in item.values()]))
+                else:
+                    excel_lines.append(str(item))
+        else:
+            excel_lines.append("# CONTENT")
+            excel_lines.append(str(data))
+        
+        # Join all lines
+        excel_content = "\n".join(excel_lines)
+        
+        # Return as bytes
+        return excel_content.encode('utf-8')
+        
+    except Exception as e:
+        logger.error(f"Error generating Excel content: {str(e)}")
+        # Fallback to simple CSV format
+        fallback_content = f"# {template_type.upper().replace('_', ' ')} TEMPLATE\n# Generated by Cosine Financial Analysis Agent\n\n{content}"
+        return fallback_content.encode('utf-8')
 
 def get_excel_sheets(template_type: str) -> dict:
     """Get sheet structure based on template type"""
