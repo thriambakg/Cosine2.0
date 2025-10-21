@@ -426,6 +426,7 @@ export default function ChatPage() {
     };
   }, [currentSession?.session_id, user?.id, isUnifiedProcessing]);
 
+
   // Listen for session variable updates (including file uploads)
   useEffect(() => {
     const handleSessionVariablesUpdate = (event: CustomEvent) => {
@@ -1534,8 +1535,10 @@ export default function ChatPage() {
                                         filename={file.filename}
                                         fileType={file.file_type}
                                         fileSize={file.file_size}
-                                        downloadUrl={file.download_url}
+                                        s3Key={file.s3_key}
                                         createdBy={file.created_by}
+                                        userId={user?.id}
+                                        sessionId={currentSession?.session_id}
                                       />
                                     ))}
                                   </Box>

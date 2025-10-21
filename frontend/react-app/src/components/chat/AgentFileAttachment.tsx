@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Typography,
   IconButton,
   Chip,
-  Tooltip
+  Tooltip,
+  Button
 } from '@mui/material';
 import {
   Download as DownloadIcon,
@@ -19,17 +20,22 @@ interface AgentFileAttachmentProps {
   filename: string;
   fileType: string;
   fileSize: number;
-  downloadUrl: string;
+  s3Key?: string;
   createdBy?: string;
+  userId?: string;
+  sessionId?: string;
 }
 
 const AgentFileAttachment: React.FC<AgentFileAttachmentProps> = ({
   filename,
   fileType,
   fileSize,
-  downloadUrl,
-  createdBy
+  s3Key,
+  createdBy,
+  userId,
+  sessionId
 }) => {
+  const [isDownloading, setIsDownloading] = useState(false);
   const getFileIcon = (type: string) => {
     if (type.startsWith('image/')) return <ImageIcon />;
     if (type.includes('pdf')) return <PdfIcon />;
@@ -46,8 +52,46 @@ const AgentFileAttachment: React.FC<AgentFileAttachmentProps> = ({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const handleDownload = () => {
-    window.open(downloadUrl, '_blank');
+  const handleDownload = async () => {
+    if (!userId || !sessionId) {
+      console.error('Missing userId or sessionId for file download');
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      // Request fresh presigned URL from file return Lambda
+      const response = await fetch('/api/file-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          session_id: sessionId,
+          filename: filename,
+          s3_key: s3Key
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Download request failed: ${response.status}`);
+      }
+      
+      const { download_url } = await response.json();
+      
+      // Create download link and trigger download
+      const link = document.createElement('a');
+      link.href = download_url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+    } catch (error) {
+      console.error('Download failed:', error);
+      // You could show a toast notification here
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
@@ -116,14 +160,15 @@ const AgentFileAttachment: React.FC<AgentFileAttachmentProps> = ({
         </Box>
       </Box>
       
-      <Tooltip title="Download file">
+      <Tooltip title={isDownloading ? "Generating download link..." : "Download file"}>
         <IconButton
           size="small"
           onClick={handleDownload}
+          disabled={isDownloading}
           sx={{
-            color: '#3b82f6',
+            color: isDownloading ? '#9ca3af' : '#3b82f6',
             '&:hover': {
-              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              backgroundColor: isDownloading ? 'transparent' : 'rgba(59, 130, 246, 0.1)',
             }
           }}
         >

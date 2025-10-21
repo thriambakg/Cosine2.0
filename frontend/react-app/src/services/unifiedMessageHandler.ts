@@ -648,6 +648,49 @@ class UnifiedMessageHandlerService {
   }
 
   /**
+   * Convert DynamoDB format to JavaScript objects
+   */
+  private convertDynamoDBFormat(data: any): any {
+    if (!data) return undefined;
+    
+    // If it's already a JavaScript object, return as-is
+    if (typeof data === 'object' && !data.L && !data.S && !data.N && !data.M) {
+      return data;
+    }
+    
+    // Handle DynamoDB List (L)
+    if (data.L) {
+      return data.L.map((item: any) => this.convertDynamoDBFormat(item));
+    }
+    
+    // Handle DynamoDB Map (M)
+    if (data.M) {
+      const result: any = {};
+      for (const [key, value] of Object.entries(data.M)) {
+        result[key] = this.convertDynamoDBFormat(value);
+      }
+      return result;
+    }
+    
+    // Handle DynamoDB String (S)
+    if (data.S !== undefined) {
+      return data.S;
+    }
+    
+    // Handle DynamoDB Number (N)
+    if (data.N !== undefined) {
+      return parseFloat(data.N);
+    }
+    
+    // Handle DynamoDB Boolean (BOOL)
+    if (data.BOOL !== undefined) {
+      return data.BOOL;
+    }
+    
+    return data;
+  }
+
+  /**
    * Load existing messages from database into unified system
    */
   loadExistingMessages(sessionId: string, messages: any[]): void {
@@ -663,7 +706,9 @@ class UnifiedMessageHandlerService {
       text: msg.text || msg.content,
       timestamp: msg.timestamp || Date.now(),
       sessionId: sessionId,
-      source: 'database' as 'chatpage' | 'sidebar'
+      source: 'database' as 'chatpage' | 'sidebar',
+      file_data: this.convertDynamoDBFormat(msg.file_data),
+      files: this.convertDynamoDBFormat(msg.files)
     }));
     
     // Add to local cache

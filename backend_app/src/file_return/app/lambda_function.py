@@ -1,16 +1,14 @@
 """
-AWS Lambda function for secure file returns
-Validates user identity and pushes file messages to chat interface
+AWS Lambda function for generating fresh presigned URLs on-demand
+Simplified to just serve download URLs when requested
 """
 
 import json
 import os
 import logging
 import time
-import uuid
 import boto3
-from typing import Dict, Any, List
-from decimal import Decimal
+from typing import Dict, Any
 from botocore.exceptions import ClientError
 
 # Configure logging
@@ -18,65 +16,63 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 # Initialize AWS clients
-s3_client = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
-apigateway_client = boto3.client('apigatewaymanagementapi')
+s3_client = boto3.client('s3')
 
 # Environment variables
-S3_BUCKET = os.environ.get('S3_BUCKET', 'cosine-uploads')
-WEBSOCKET_ENDPOINT = os.environ.get('WEBSOCKET_ENDPOINT')
-SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE', 'cosine-sessions')
+S3_BUCKET = os.environ.get('S3_BUCKET')
+SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE')
 
-def convert_decimals(obj):
-    """Convert Decimal objects to float for JSON serialization"""
-    if isinstance(obj, Decimal):
-        return float(obj)
-    elif isinstance(obj, dict):
-        return {k: convert_decimals(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_decimals(item) for item in obj]
-    return obj
+def get_cors_headers():
+    """Get CORS headers for API responses"""
+    return {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+        'Access-Control-Allow-Methods': 'POST,OPTIONS'
+    }
 
 def validate_user_identity(event: Dict[str, Any]) -> str:
     """
     Extract and validate the authenticated user ID from the request
-    This should match your authentication mechanism (Cognito, JWT, etc.)
     """
     try:
-        # Extract user ID from request context (adjust based on your auth setup)
-        request_context = event.get('requestContext', {})
-        
         # Option 1: From API Gateway authorizer context
-        authorizer = request_context.get('authorizer', {})
-        user_id = authorizer.get('user_id') or authorizer.get('sub')
+        if 'requestContext' in event and 'authorizer' in event['requestContext']:
+            user_id = event['requestContext']['authorizer'].get('user_id')
+            if user_id:
+                return user_id
         
-        # Option 2: From headers (if using custom auth)
-        if not user_id:
-            headers = event.get('headers', {})
-            user_id = headers.get('x-user-id') or headers.get('X-User-Id')
+        # Option 2: From API Gateway request context
+        if 'requestContext' in event and 'identity' in event['requestContext']:
+            user_id = event['requestContext']['identity'].get('cognitoIdentityId')
+            if user_id:
+                return user_id
         
-        # Option 3: From request body (for internal service calls)
-        if not user_id:
-            body = json.loads(event.get('body', '{}'))
-            user_id = body.get('authenticated_user_id')
+        # Option 3: From headers
+        if 'headers' in event:
+            user_id = event['headers'].get('x-user-id') or event['headers'].get('X-User-Id')
+            if user_id:
+                return user_id
         
-        # Option 4: From direct Lambda invocation payload (for internal calls from chat agent)
+        # Option 4: From direct Lambda invocation payload
         if not user_id:
             user_id = event.get('user_id')
         
         if not user_id:
-            raise ValueError("No authenticated user ID found in request")
-        
+            logger.error("❌ User validation failed: No authenticated user ID found in request")
+            return None
+            
         logger.info(f"🔐 Authenticated user ID: {user_id}")
         return user_id
         
     except Exception as e:
-        logger.error(f"❌ User validation failed: {str(e)}")
-        raise ValueError(f"Authentication failed: {str(e)}")
+        logger.error(f"❌ User validation error: {str(e)}")
+        return None
 
 def validate_session_access(user_id: str, session_id: str) -> bool:
     """
-    Validate that the user has access to the specified session
+    Validate that the user has access to the session
     """
     try:
         table = dynamodb.Table(SESSIONS_TABLE)
@@ -88,7 +84,7 @@ def validate_session_access(user_id: str, session_id: str) -> bool:
         )
         
         if 'Item' not in response:
-            logger.warning(f"🚫 Session {session_id} not found for user {user_id}")
+            logger.warning(f"🚫 Session access denied: Session {session_id} not found for user {user_id}")
             return False
         
         logger.info(f"✅ Session {session_id} validated for user {user_id}")
@@ -97,7 +93,6 @@ def validate_session_access(user_id: str, session_id: str) -> bool:
     except Exception as e:
         logger.error(f"❌ Session validation failed: {str(e)}")
         return False
-
 
 def generate_presigned_url(s3_key: str, expiration: int = 3600) -> str:
     """
@@ -115,199 +110,98 @@ def generate_presigned_url(s3_key: str, expiration: int = 3600) -> str:
         logger.error(f"❌ Failed to generate presigned URL: {str(e)}")
         raise
 
-def get_session_files(session_id: str, user_id: str, file_indices: List[str] = None) -> List[Dict[str, Any]]:
+def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authenticated_user_id: str) -> Dict[str, Any]:
     """
-    Generate presigned URLs for files based on S3 path construction
-    """
-    try:
-        if not file_indices or 'all' in file_indices:
-            logger.warning("📁 No specific files requested or 'all' specified - cannot construct S3 paths")
-            return []
-        
-        file_data = []
-        
-        for filename in file_indices:
-            # Construct S3 path: users/{user_id}/sessions/{session_id}/files/{filename}
-            s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
-            
-            try:
-                # Check if file exists in S3
-                s3_client.head_object(Bucket=S3_BUCKET, Key=s3_key)
-                
-                # Generate presigned URL
-                download_url = generate_presigned_url(s3_key)
-                
-                # Create file data structure
-                file_info = {
-                    'filename': filename,
-                    's3_key': s3_key,
-                    'download_url': download_url,
-                    'file_type': 'application/json' if filename.endswith('.json') else 'application/octet-stream',
-                    'file_size': 0,  # We don't have size info from S3 head_object
-                    'uploaded_at': int(time.time())
-                }
-                
-                file_data.append(file_info)
-                logger.info(f"📁 Generated presigned URL for: {s3_key}")
-                
-            except ClientError as e:
-                if e.response['Error']['Code'] == '404':
-                    logger.warning(f"📁 File not found in S3: {s3_key}")
-                    continue
-                else:
-                    logger.error(f"❌ Error checking S3 file {s3_key}: {str(e)}")
-                    continue
-            except Exception as e:
-                logger.error(f"❌ Error processing file {filename}: {str(e)}")
-                continue
-        
-        logger.info(f"📁 Generated {len(file_data)} presigned URLs")
-        return file_data
-        
-    except Exception as e:
-        logger.error(f"❌ Error generating file URLs: {str(e)}")
-        raise
-
-def create_agent_file(session_id: str, user_id: str, filename: str, content: str, file_type: str = 'text/plain') -> Dict[str, Any]:
-    """
-    Create a new file in the agent files folder and return file data
+    Handle file download requests - generate fresh presigned URLs
     """
     try:
-        # Create S3 key for agent file
-        timestamp = int(time.time())
-        s3_key = f"users/{user_id}/sessions/{session_id}/agentfiles/{timestamp}_{filename}"
+        # Extract request parameters
+        session_id = body.get('session_id')
+        user_id = body.get('user_id')
+        filename = body.get('filename')
+        s3_key = body.get('s3_key')
         
-        # Upload content to S3
-        s3_client.put_object(
-            Bucket=S3_BUCKET,
-            Key=s3_key,
-            Body=content.encode('utf-8'),
-            ContentType=file_type
-        )
-        
-        # Generate presigned URL
-        download_url = generate_presigned_url(s3_key)
-        
-        file_data = {
-            'filename': filename,
-            'file_type': file_type,
-            'file_size': len(content.encode('utf-8')),
-            'download_url': download_url,
-            'uploaded_at': timestamp
-        }
-        
-        logger.info(f"📁 Created agent file: {filename}")
-        return file_data
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to create agent file: {str(e)}")
-        raise
-
-def send_message_to_chat(user_id: str, session_id: str, message: str, file_data: List[Dict[str, Any]] = None) -> bool:
-    """
-    Send message with file data to the chat interface via WebSocket
-    """
-    try:
-        if not WEBSOCKET_ENDPOINT:
-            logger.warning("⚠️ WebSocket endpoint not configured")
-            return False
-        
-        # Get the WebSocket connection ID from DynamoDB
-        table = dynamodb.Table(SESSIONS_TABLE)
-        response = table.get_item(
-            Key={
-                'session_id': session_id,
-                'user_id': user_id
+        if not session_id or not user_id or not filename:
+            return {
+                'statusCode': 400,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
             }
+        
+        # Validate that the authenticated user matches the requested user
+        if authenticated_user_id != user_id:
+            logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
+            return {
+                'statusCode': 403,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Forbidden: User mismatch'})
+            }
+        
+        # Validate session access
+        if not validate_session_access(user_id, session_id):
+            return {
+                'statusCode': 403,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Forbidden: Session access denied'})
+            }
+        
+        # Use provided s3_key or construct it
+        if not s3_key:
+            s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
+        
+        # Check if file exists in S3
+        try:
+            s3_client.head_object(Bucket=S3_BUCKET, Key=s3_key)
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                return {
+                    'statusCode': 404,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'File not found'})
+                }
+            else:
+                raise e
+        
+        # Generate fresh presigned URL with download headers
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': S3_BUCKET,
+                'Key': s3_key,
+                'ResponseContentDisposition': f'attachment; filename="{filename}"'
+            },
+            ExpiresIn=3600  # 1 hour expiration
         )
         
-        if 'Item' not in response:
-            logger.error(f"❌ Session {session_id} not found for user {user_id}")
-            return False
+        logger.info(f"🔗 Generated fresh presigned URL for {filename}")
         
-        session_data = response['Item']
-        connection_id = session_data.get('connection_id')
-        
-        if not connection_id:
-            logger.warning(f"⚠️ No WebSocket connection found for session {session_id}")
-            return False
-        
-        # Prepare message payload
-        message_payload = {
-            'type': 'agent_file_return',
-            'message': message,
-            'file_data': file_data or [],
-            'timestamp': int(time.time())
+        return {
+            'statusCode': 200,
+            'headers': get_cors_headers(),
+            'body': json.dumps({
+                'download_url': presigned_url,
+                'filename': filename,
+                'expires_in': 3600
+            })
         }
-        
-        # Send via WebSocket
-        try:
-            apigateway_client.post_to_connection(
-                ConnectionId=connection_id,
-                Data=json.dumps(message_payload)
-            )
-            logger.info(f"📤 Message sent to WebSocket connection {connection_id}: {len(file_data or [])} files")
-            return True
-        except apigateway_client.exceptions.GoneException:
-            logger.warning(f"⚠️ WebSocket connection {connection_id} is gone")
-            return False
-        except Exception as e:
-            logger.error(f"❌ Failed to send WebSocket message: {str(e)}")
-            return False
             
     except Exception as e:
-        logger.error(f"❌ Failed to send message to chat: {str(e)}")
-        return False
-
-def send_message_to_chat_rest(user_id: str, session_id: str, message: str, file_data: List[Dict[str, Any]] = None) -> bool:
-    """
-    Send message with file data to the chat interface via REST endpoint
-    This is used for large payloads that exceed WebSocket limits
-    """
-    try:
-        # For now, we'll use the session management endpoint to add the message
-        # This ensures the message is persisted in DynamoDB and can be retrieved by the frontend
+        logger.error(f"❌ File download error: {str(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         
-        table = dynamodb.Table(SESSIONS_TABLE)
-        
-        # Prepare message data
-        timestamp = int(time.time())
-        message_data = {
-            'id': f'msg_{timestamp}_{uuid.uuid4().hex[:8]}',
-            'text': message,
-            'sender': 'agent',
-            'timestamp': timestamp,
-            'message_type': 'agent_file_return',
-            'file_data': file_data or []
+        return {
+            'statusCode': 500,
+            'headers': get_cors_headers(),
+            'body': json.dumps({'error': 'Internal server error'})
         }
-        
-        # Add message to session
-        response = table.update_item(
-            Key={
-                'session_id': session_id,
-                'user_id': user_id
-            },
-            UpdateExpression='SET messages = list_append(if_not_exists(messages, :empty_list), :message)',
-            ExpressionAttributeValues={
-                ':empty_list': [],
-                ':message': [message_data]
-            },
-            ReturnValues='UPDATED_NEW'
-        )
-        
-        logger.info(f"📤 Message added to session {session_id}: {len(file_data or [])} files")
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to send REST message: {str(e)}")
-        return False
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Main Lambda handler for secure file returns and message sending
+    Main Lambda handler for file downloads - generates fresh presigned URLs
     """
     try:
-        logger.info(f"🔍 File return request: {json.dumps(event, default=str)}")
+        logger.info(f"🔍 File download request: {json.dumps(event, default=str)}")
         
         # Check if this is a direct Lambda invocation or API Gateway request
         if 'body' in event:
@@ -320,8 +214,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Validate user identity
         authenticated_user_id = validate_user_identity(event)
         
-        # Handle file return requests (always use REST endpoint for large payloads)
-        return handle_file_return(event, body, authenticated_user_id)
+        if not authenticated_user_id:
+            return {
+                'statusCode': 401,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Authentication failed: No authenticated user ID found in request'})
+            }
+        
+        # Generate fresh presigned URL for download
+        return handle_file_download(event, body, authenticated_user_id)
             
     except Exception as e:
         logger.error(f"❌ Lambda handler error: {str(e)}")
@@ -330,137 +231,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         return {
             'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS'
-            },
-            'body': json.dumps({'error': 'Internal server error'})
-        }
-
-def handle_file_return(event: Dict[str, Any], body: Dict[str, Any], authenticated_user_id: str) -> Dict[str, Any]:
-    """
-    Handle file return requests
-    """
-    try:
-        # Extract request parameters
-        session_id = body.get('session_id')
-        user_id = body.get('user_id')  # User ID from the request
-        action = body.get('action')  # 'return_files' or 'create_file'
-        
-        if not session_id or not user_id:
-            return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                    'Access-Control-Allow-Methods': 'POST,OPTIONS'
-                },
-                'body': json.dumps({'error': 'Missing required parameters: session_id, user_id'})
-            }
-        
-        # SECURITY: Validate that the authenticated user matches the requested user
-        if authenticated_user_id != user_id:
-            logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to access files for user {user_id}")
-            return {
-                'statusCode': 403,
-                'body': json.dumps({'error': 'Access denied: User ID mismatch'})
-            }
-        
-        # Validate session access
-        if not validate_session_access(user_id, session_id):
-            return {
-                'statusCode': 403,
-                'body': json.dumps({'error': 'Access denied: Session not found or access denied'})
-            }
-        
-        file_data = []
-        message = ""
-        
-        if action == 'return_files':
-            # Return existing session files
-            file_indices = body.get('file_indices', ['all'])
-            file_data = get_session_files(session_id, user_id, file_indices)
-            message = f"Returned {len(file_data)} files from your session"
-            
-        elif action == 'create_file':
-            # Create new agent file
-            filename = body.get('filename')
-            content = body.get('content')
-            file_type = body.get('file_type', 'text/plain')
-            
-            if not filename or not content:
-                return {
-                    'statusCode': 400,
-                    'body': json.dumps({'error': 'Missing required parameters for file creation: filename, content'})
-                }
-            
-            file_data = [create_agent_file(session_id, user_id, filename, content, file_type)]
-            message = f"Created new file: {filename}"
-            
-        else:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Invalid action. Must be "return_files" or "create_file"'})
-            }
-        
-        # Send message to chat interface via REST endpoint (for large payloads)
-        rest_sent = send_message_to_chat_rest(user_id, session_id, message, file_data)
-        
-        if rest_sent:
-            logger.info(f"✅ File return completed and sent to chat: {len(file_data)} files for user {user_id}")
-            # Return success response
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                    'Access-Control-Allow-Methods': 'POST,OPTIONS'
-                },
-                'body': json.dumps({
-                    'success': True,
-                    'message': 'Files sent to chat interface',
-                    'file_count': len(file_data)
-                })
-            }
-        else:
-            logger.warning(f"⚠️ File return completed but failed to send to chat: {len(file_data)} files for user {user_id}")
-            # Return the file data in HTTP response as fallback
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                    'Access-Control-Allow-Methods': 'POST,OPTIONS'
-                },
-                'body': json.dumps({
-                    'success': True,
-                    'message': message,
-                    'file_data': file_data,
-                    'session_id': session_id,
-                    'user_id': user_id,
-                    'timestamp': int(time.time()),
-                    'websocket_sent': False
-                }, default=str)
-            }
-        
-    except ValueError as e:
-        logger.error(f"❌ Validation error: {str(e)}")
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': str(e)})
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ File return failed: {str(e)}")
-        import traceback
-        logger.error(f"❌ Traceback: {traceback.format_exc()}")
-        
-        return {
-            'statusCode': 500,
+            'headers': get_cors_headers(),
             'body': json.dumps({'error': 'Internal server error'})
         }

@@ -154,8 +154,8 @@ module "api_gateway" {
     files = {
       path_part = "files"
     }
-    file_return = {
-      path_part = "file-return"
+    file_download = {
+      path_part = "file-download"
     }
   }
 
@@ -360,9 +360,9 @@ module "api_gateway" {
       lambda_arn              = module.file_upload_lambda.function_arn
       request_parameters      = {}
     }
-    # POST method for file returns
-    file_return_post = {
-      resource_key            = "file_return"
+    # POST method for file downloads (fresh presigned URLs)
+    file_download_post = {
+      resource_key            = "file_download"
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -490,10 +490,10 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "files"
     }
-    file_return_post = {
+    file_download_post = {
       function_arn  = module.file_return_lambda.function_arn
       http_method   = "POST"
-      resource_path = "file-return"
+      resource_path = "file-download"
     }
   }
 

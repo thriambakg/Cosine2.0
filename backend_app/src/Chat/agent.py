@@ -111,10 +111,9 @@ from strands import tool
 import financial_calculator
 
 # Import our custom session database access tool
-from tools.session_database_access import get_session_files_tool, get_session_context_tool
+from tools.session_database_access import get_session_files_tool, get_session_context_tool, SessionDatabaseAccess
 from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
 from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
-from tools.file_return_service import return_session_files_tool, create_agent_file_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -1160,59 +1159,58 @@ File Information:
         return f"Error reading file: {str(e)}"
 
 @tool
-def return_session_files_wrapper(file_indices: str = "all") -> str:
-    """Return files from the current session to the user. Use 'all' to return all files, or specify indices like '0,2,3' for specific files."""
+def return_files_to_user(file_indices: str = "all") -> str:
+    """Return files from the current session to the user. Use 'all' to return all files, or specify indices like '0,2,3' for specific files. This will make files available for download in the chat interface."""
     try:
-        logger.info(f"🔧 DEBUG: return_session_files_wrapper called with file_indices: {file_indices}")
-        
-        # Get session and user info from the Lambda context
-        # These are set by the Lambda handler before calling the agent
+        # Get session and user info from environment
         session_id = os.environ.get('CURRENT_SESSION_ID')
         user_id = os.environ.get('CURRENT_USER_ID')
         
-        logger.info(f"🔧 DEBUG: session_id: {session_id}, user_id: {user_id}")
-        
         if not session_id or not user_id:
-            logger.error("❌ Missing session_id or user_id in environment variables")
             return "Error: Session ID and User ID are required but not available in context. Please ensure you're in an active chat session."
+        
+        # Get session files using the existing tool
+        session_access = SessionDatabaseAccess()
+        result = session_access.get_session_files(session_id, user_id)
+        
+        if 'error' in result:
+            return f"Error retrieving files: {result['error']}"
+        
+        files = result.get('files', [])
+        if not files:
+            return "No files found in this session."
         
         # Parse file indices
         if file_indices == "all":
-            indices_list = ["all"]
+            selected_files = files
         else:
-            indices_list = [idx.strip() for idx in file_indices.split(',')]
+            try:
+                indices = [int(idx.strip()) for idx in file_indices.split(',')]
+                selected_files = [files[i] for i in indices if 0 <= i < len(files)]
+            except (ValueError, IndexError):
+                return f"Error: Invalid file indices '{file_indices}'. Use 'all' or comma-separated numbers like '0,2,3'."
         
-        logger.info(f"🔧 DEBUG: Calling return_session_files_tool with session_id: {session_id}, user_id: {user_id}, indices: {indices_list}")
+        if not selected_files:
+            return "No valid files selected."
         
-        # Call the service function
-        result = return_session_files_tool(session_id, user_id, indices_list)
-        logger.info(f"🔧 DEBUG: return_session_files_tool result: {result}")
-        return result
+        # Format file data for WebSocket delivery
+        file_data = []
+        for file in selected_files:
+            file_data.append({
+                'filename': file.get('filename', 'Unknown'),
+                's3_key': file.get('s3_key', ''),
+                'file_type': file.get('content_type', 'application/octet-stream'),
+                'file_size': file.get('file_size', 0),
+                'uploaded_at': file.get('upload_timestamp', 0)
+            })
+        
+        # Return a structured response that the WebSocket processor can parse
+        return f"AGENT_FILE_RETURN: {json.dumps({'file_data': file_data})}"
         
     except Exception as e:
-        logger.error(f"❌ Error in return_session_files_wrapper: {str(e)}")
-        import traceback
-        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        logger.error(f"Error in return_files_to_user: {str(e)}")
         return f"Error returning files: {str(e)}"
 
-@tool
-def create_agent_file_wrapper(filename: str, content: str, file_type: str = 'text/plain') -> str:
-    """Create a new file for the current session and return it to the user."""
-    try:
-        # Get session and user info from the Lambda context
-        session_id = os.environ.get('CURRENT_SESSION_ID')
-        user_id = os.environ.get('CURRENT_USER_ID')
-        
-        if not session_id or not user_id:
-            return "Error: Session ID and User ID are required but not available in context. Please ensure you're in an active chat session."
-        
-        # Call the service function
-        result = create_agent_file_tool(session_id, user_id, filename, content, file_type)
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error in create_agent_file_wrapper: {str(e)}")
-        return f"Error creating file: {str(e)}"
 
 # Define the tools list that Strands can automatically detect
 enhanced_tools = [
@@ -1232,8 +1230,7 @@ enhanced_tools = [
     read_pdf_tool,  # PDF file reader tool
     analyze_pdf_content_tool,  # PDF content analysis tool
     analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
-    return_session_files_wrapper,  # Return files from current session to user
-    create_agent_file_wrapper,  # Create new files for current session
+    return_files_to_user,  # Return files from session to user for download
 ]
 
 # Function to create agents with different models

@@ -564,6 +564,24 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
                     'file_data': response_body.get('file_data', [])
                 }
             
+            # Check if this is an agent file return response
+            response_text = response_body.get('response', '')
+            if response_text.startswith('AGENT_FILE_RETURN:'):
+                try:
+                    # Extract the JSON data after the prefix
+                    json_data = response_text.replace('AGENT_FILE_RETURN:', '').strip()
+                    file_return_data = json.loads(json_data)
+                    
+                    logger.info(f"📁 AGENT FILE RETURN: Detected agent file return with {len(file_return_data.get('file_data', []))} files")
+                    return {
+                        'type': 'file_return',
+                        'message': 'Files returned successfully',
+                        'file_data': file_return_data.get('file_data', [])
+                    }
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Failed to parse agent file return JSON: {str(e)}")
+                    # Fall through to regular text response
+            
             # Regular text response
             return response_body.get('response', 'I apologize, but I encountered an error processing your request.')
         elif response_payload.get('statusCode') == 404:
