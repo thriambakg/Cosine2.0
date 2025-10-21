@@ -1463,10 +1463,11 @@ const GlobalChatSidebar: React.FC = () => {
                             
                             const { download_url } = await response.json();
                             
-                            // Create download link and trigger download
+                            // Create download link and trigger download in new tab
                             const link = document.createElement('a');
                             link.href = download_url;
                             link.download = file.filename;
+                            link.target = '_blank';  // Open in new tab to avoid redirect issues
                             document.body.appendChild(link);
                             link.click();
                             document.body.removeChild(link);
