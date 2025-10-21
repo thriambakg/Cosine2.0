@@ -566,6 +566,8 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         # Set environment variables for tools to access session and user info
         os.environ['CURRENT_SESSION_ID'] = session_id
         os.environ['CURRENT_USER_ID'] = user_id
+        os.environ['SESSION_ID'] = session_id
+        os.environ['USER_ID'] = user_id
         
         # Create enhanced message with session context for the agent
         enhanced_message = f"""
