@@ -17,7 +17,7 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
-s3_client = boto3.client('s3')
+s3_client = boto3.client('s3', config=boto3.session.Config(signature_version='s3v4'))
 
 # Environment variables
 S3_BUCKET = os.environ.get('S3_BUCKET')
@@ -110,8 +110,7 @@ def generate_presigned_url(s3_key: str, expiration: int = 3600) -> str:
         response = s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': S3_BUCKET, 'Key': s3_key},
-            ExpiresIn=expiration,
-            Config=boto3.session.Config(signature_version='s3v4')  # Use Signature Version 4 for KMS
+            ExpiresIn=expiration
         )
         logger.info(f"🔗 Generated presigned URL for {s3_key}")
         return response
@@ -171,7 +170,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             else:
                 raise e
         
-        # Generate fresh presigned URL with download headers and Signature Version 4 for KMS
+        # Generate fresh presigned URL with download headers (S3 client already configured for Signature Version 4)
         presigned_url = s3_client.generate_presigned_url(
             'get_object',
             Params={
@@ -179,8 +178,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                 'Key': s3_key,
                 'ResponseContentDisposition': f'attachment; filename="{filename}"'
             },
-            ExpiresIn=3600,  # 1 hour expiration
-            Config=boto3.session.Config(signature_version='s3v4')  # Use Signature Version 4 for KMS
+            ExpiresIn=3600  # 1 hour expiration
         )
         
         logger.info(f"🔗 Generated fresh presigned URL for {filename}")
