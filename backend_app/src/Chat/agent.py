@@ -114,6 +114,7 @@ import financial_calculator
 from tools.session_database_access import get_session_files_tool, get_session_context_tool, SessionDatabaseAccess
 from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
 from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
+from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -641,6 +642,12 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 16. return_session_files_wrapper(file_indices) - Return files from current session to user
 17. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
 18. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate CSV files for financial analysis that can be opened in Excel (agent prepares content first)
+19. get_company_cik(symbol) - Get Central Index Key (CIK) for a company by ticker symbol
+20. get_company_filings(cik, form_type, limit) - Get recent SEC filings for a company
+21. get_filing_document(cik, accession_number, document_name) - Get full text content of SEC filing
+22. search_sec_filings(company_name, form_type, start_date, end_date, limit) - Search SEC filings by criteria
+23. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
+24. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
 
 🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
 
@@ -799,6 +806,16 @@ FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 4. For crypto tiles, use get_crypto_data_tool() to get current cryptocurrency data
 5. For articles, use search_financial_news() to get current news
 6. This optimization reduces payload size and improves performance
+
+FOR SEC FILINGS AND REGULATORY DOCUMENTS:
+1. Use get_company_cik(symbol) to get Central Index Key for any public company
+2. Use get_company_filings(cik, form_type, limit) to get recent SEC filings (10-K, 10-Q, 8-K, etc.)
+3. Use get_filing_document(cik, accession_number, document_name) to get full text of specific filings
+4. Use download_filing_pdf(cik, accession_number, document_name, save_to_s3=True) to download entire SEC filings as PDFs
+5. Use get_filing_exhibits(cik, accession_number) to get all exhibits for a filing
+6. Use search_sec_filings(company_name, form_type, start_date, end_date, limit) to search across companies
+7. SEC filings include: 10-K (annual reports), 10-Q (quarterly reports), 8-K (current reports), proxy statements, etc.
+8. You can download and analyze entire SEC documents including financial statements, risk factors, and management discussions
 
 FOR SESSION VARIABLES AND TILES QUESTIONS:
 1. ALWAYS use get_session_context_tool(session_id, user_id) when users ask about:
@@ -1594,6 +1611,12 @@ enhanced_tools = [
     read_pdf_tool,  # PDF file reader tool
     analyze_pdf_content_tool,  # PDF content analysis tool
     analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
+    get_company_cik,  # Get company CIK from ticker symbol
+    get_company_filings,  # Get SEC filings for a company
+    get_filing_document,  # Get full text of SEC filing
+    search_sec_filings,  # Search SEC filings by criteria
+    get_filing_exhibits,  # Get exhibits for SEC filing
+    download_filing_pdf,  # Download SEC filing as PDF
 ]
 
 # Function to create agents with different models
