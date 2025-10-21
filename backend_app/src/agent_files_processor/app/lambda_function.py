@@ -5,6 +5,13 @@ import os
 from datetime import datetime
 from decimal import Decimal
 
+# Custom JSON encoder to handle Decimal objects
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        return super(DecimalEncoder, self).default(obj)
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -28,7 +35,7 @@ def lambda_handler(event, context):
     to include the new agent file in the agent_files array.
     """
     try:
-        logger.info(f"Processing agent files notification: {json.dumps(event)}")
+        logger.info(f"Processing agent files notification: {json.dumps(event, cls=DecimalEncoder)}")
         
         # Parse SNS message
         if 'Records' in event:
@@ -36,7 +43,7 @@ def lambda_handler(event, context):
                 if record.get('EventSource') == 'aws:sns':
                     # Parse SNS message
                     sns_message = json.loads(record['Sns']['Message'])
-                    logger.info(f"SNS Message: {json.dumps(sns_message)}")
+                    logger.info(f"SNS Message: {json.dumps(sns_message, cls=DecimalEncoder)}")
                     
                     # Process S3 event from SNS
                     if 'Records' in sns_message:
@@ -48,7 +55,7 @@ def lambda_handler(event, context):
             'statusCode': 200,
             'body': json.dumps({
                 'message': 'Agent files processed successfully'
-            })
+            }, cls=DecimalEncoder)
         }
         
     except Exception as e:
@@ -57,7 +64,7 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'body': json.dumps({
                 'error': str(e)
-            })
+            }, cls=DecimalEncoder)
         }
 
 def process_agent_file(s3_record):
@@ -205,7 +212,7 @@ def send_session_update_to_websocket(user_id, session_id, session_variables):
         response = lambda_client.invoke(
             FunctionName=WEBSOCKET_PROCESSOR_FUNCTION_NAME,
             InvocationType='Event',  # Async invocation
-            Payload=json.dumps(websocket_payload)
+            Payload=json.dumps(websocket_payload, cls=DecimalEncoder)
         )
         
         logger.info(f"Sent session update to WebSocket processor for session {session_id}")

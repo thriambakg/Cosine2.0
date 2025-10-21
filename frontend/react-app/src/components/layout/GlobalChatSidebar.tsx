@@ -1419,7 +1419,25 @@ const GlobalChatSidebar: React.FC = () => {
             {isFilesExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
           </Box>
           <Collapse in={isFilesExpanded}>
-            <Box sx={{ py: 1, px: 1, maxHeight: 200, overflow: 'auto' }}>
+            <Box sx={{ 
+              py: 1, 
+              px: 1, 
+              maxHeight: 200, 
+              overflow: 'auto',
+              '&::-webkit-scrollbar': {
+                width: '6px',
+              },
+              '&::-webkit-scrollbar-track': {
+                backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                borderRadius: '3px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.7)',
+              },
+            }}>
               {/* User Files Section */}
               <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle2" sx={{ 
