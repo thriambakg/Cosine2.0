@@ -1158,60 +1158,6 @@ File Information:
         logger.error(f"Error in read_s3_file_tool: {str(e)}")
         return f"Error reading file: {str(e)}"
 
-@tool
-def return_files_to_user(file_indices: str = "all") -> str:
-    """Return files from the current session to the user. Use 'all' to return all files, or specify indices like '0,2,3' for specific files. This will make files available for download in the chat interface."""
-    try:
-        # Get session and user info from environment
-        session_id = os.environ.get('CURRENT_SESSION_ID')
-        user_id = os.environ.get('CURRENT_USER_ID')
-        
-        if not session_id or not user_id:
-            return "Error: Session ID and User ID are required but not available in context. Please ensure you're in an active chat session."
-        
-        # Get session files using the existing tool
-        session_access = SessionDatabaseAccess()
-        result = session_access.get_session_files(session_id, user_id)
-        
-        if 'error' in result:
-            return f"Error retrieving files: {result['error']}"
-        
-        files = result.get('files', [])
-        if not files:
-            return "No files found in this session."
-        
-        # Parse file indices
-        if file_indices == "all":
-            selected_files = files
-        else:
-            try:
-                indices = [int(idx.strip()) for idx in file_indices.split(',')]
-                selected_files = [files[i] for i in indices if 0 <= i < len(files)]
-            except (ValueError, IndexError):
-                return f"Error: Invalid file indices '{file_indices}'. Use 'all' or comma-separated numbers like '0,2,3'."
-        
-        if not selected_files:
-            return "No valid files selected."
-        
-        # Format file data for WebSocket delivery
-        file_data = []
-        for file in selected_files:
-            file_data.append({
-                'filename': file.get('filename', 'Unknown'),
-                's3_key': file.get('s3_key', ''),
-                'file_type': file.get('content_type', 'application/octet-stream'),
-                'file_size': file.get('file_size', 0),
-                'uploaded_at': file.get('upload_timestamp', 0)
-            })
-        
-        # Return a structured response that the WebSocket processor can parse
-        return f"AGENT_FILE_RETURN: {json.dumps({'file_data': file_data})}"
-        
-    except Exception as e:
-        logger.error(f"Error in return_files_to_user: {str(e)}")
-        return f"Error returning files: {str(e)}"
-
-
 # Define the tools list that Strands can automatically detect
 enhanced_tools = [
     get_financial_data,
@@ -1230,7 +1176,6 @@ enhanced_tools = [
     read_pdf_tool,  # PDF file reader tool
     analyze_pdf_content_tool,  # PDF content analysis tool
     analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
-    return_files_to_user,  # Return files from session to user for download
 ]
 
 # Function to create agents with different models

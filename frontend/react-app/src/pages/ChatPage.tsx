@@ -11,7 +11,6 @@ import { FileUploadService, UploadedFile } from '@/services/fileUploadService';
 // NEW: Import unified messaging system
 import { useUnifiedMessaging } from '@/hooks/useUnifiedMessaging';
 import { unifiedMessageHandler } from '@/services/unifiedMessageHandler';
-import AgentFileAttachment from '@/components/chat/AgentFileAttachment';
 import {
   Box,
   Typography,
@@ -52,6 +51,7 @@ import {
   ExpandLess as ExpandLessIcon,
   ExpandMore as ExpandMoreIcon,
   Download as DownloadIcon,
+  SmartToy as SmartToyIcon,
 } from '@mui/icons-material';
 
 interface Message {
@@ -65,13 +65,6 @@ interface Message {
   size: number;
     type: string;
   }> | UploadedFile[]; // Support both formats for backward compatibility
-  file_data?: Array<{
-    filename: string;
-    file_type: string;
-    file_size: number;
-    download_url: string;
-    created_by?: string;
-  }>;
 }
 
 // UploadedFile interface now imported from shared FileUploadService
@@ -1521,33 +1514,6 @@ export default function ChatPage() {
                               {message.text}
                             </Typography>
                             
-                            {/* Display agent file returns */}
-                            {message.sender === 'bot' && (() => {
-                              // First check for direct file_data from WebSocket
-                              if (message.file_data && Array.isArray(message.file_data)) {
-                                return (
-                                  <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                    <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-                                      📁 Files returned by AI:
-                                    </Typography>
-                                    {message.file_data.map((file: any, index: number) => (
-                                      <AgentFileAttachment
-                                        key={index}
-                                        filename={file.filename}
-                                        fileType={file.file_type}
-                                        fileSize={file.file_size}
-                                        s3Key={file.s3_key}
-                                        createdBy={file.created_by}
-                                        userId={user?.id}
-                                        sessionId={currentSession?.session_id}
-                                      />
-                                    ))}
-                                  </Box>
-                                );
-                              }
-                              
-                              return null;
-                            })()}
                           </>
                         )}
                         {(message as any).files && (message as any).files.length > 0 && (
@@ -1759,8 +1725,9 @@ export default function ChatPage() {
           </Box>
         )}
 
-        {/* Uploaded Files - Separate Section */}
-        {currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0 && (
+        {/* Files Section - User Files and Agent Files */}
+        {(currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0) || 
+         (currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0) ? (
           <Box sx={{ borderTop: '2px solid #374151', backgroundColor: 'rgba(15, 23, 42, 0.95)' }}>
             <Box
               sx={{
@@ -1776,144 +1743,317 @@ export default function ChatPage() {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <FileIcon sx={{ color: '#3b82f6', fontSize: '1rem' }} />
                 <Typography variant="body2" sx={{ color: '#3b82f6', fontSize: '0.8rem', fontWeight: 600 }}>
-                  Files ({currentSession.session_variables.uploaded_files.length} {currentSession.session_variables.uploaded_files.length === 1 ? 'file' : 'files'})
+                  Files
                 </Typography>
               </Box>
               {isFilesExpanded ? <ExpandLessIcon fontSize="small" sx={{ color: '#9ca3af' }} /> : <ExpandMoreIcon fontSize="small" sx={{ color: '#9ca3af' }} />}
             </Box>
             <Collapse in={isFilesExpanded}>
-              <List dense sx={{ py: 0, px: 1, maxHeight: 150, overflow: 'auto' }}>
-                {currentSession.session_variables.uploaded_files.map((file: any, index: number) => (
-                  <ListItem 
-                    key={index} 
-                    sx={{ 
-                      py: 0.5, 
-                      px: 1,
-                      borderRadius: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      '&:hover': {
-                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        '& .remove-file-btn': {
-                          opacity: 1,
-                        }
-                      }
-                    }}
-                  >
-                    {/* Delete button on the left */}
-                    <IconButton
-                      size="small"
-                      className="remove-file-btn"
-                      onClick={async () => {
-                        const newFiles = currentSession.session_variables?.uploaded_files?.filter((_: any, i: number) => i !== index) || [];
-                        
-                        // Update the session using the hook function
-                        updateSessionFiles(currentSession.session_id, newFiles);
-                        console.log(`🗑️ Removed file: ${file.filename}`);
-                        
-                        // Persist the updated files to backend immediately
-                        if (currentSession?.session_id && user?.id) {
-                          try {
-                            await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
-                              session_variables: {
-                                ...currentSession.session_variables,
-                                uploaded_files: newFiles,
-                                files_added_at: Date.now(),
+              <Box sx={{ py: 1, px: 1, maxHeight: 200, overflow: 'auto' }}>
+                {/* User Files Section */}
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" sx={{ 
+                    fontWeight: 600, 
+                    color: '#3b82f6', 
+                    mb: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    fontSize: '0.75rem'
+                  }}>
+                    <PersonIcon fontSize="small" />
+                    User Files ({currentSession?.session_variables?.uploaded_files?.length || 0})
+                  </Typography>
+                  
+                  {currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0 ? (
+                    <List dense sx={{ py: 0 }}>
+                      {currentSession.session_variables.uploaded_files.map((file: any, index: number) => (
+                        <ListItem 
+                          key={index} 
+                          sx={{ 
+                            py: 0.5, 
+                            px: 1,
+                            borderRadius: '4px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            '&:hover': {
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                              '& .remove-file-btn': {
+                                opacity: 1,
                               }
-                            });
-                            console.log('✅ Updated files in backend');
-                          } catch (error) {
-                            console.error('❌ Failed to update files in backend:', error);
-                          }
-                        }
-                      }}
-                      sx={{ 
-                        opacity: 0,
-                        transition: 'opacity 0.2s',
-                        color: '#dc2626',
-                        mr: 0.5,
-                        '&:hover': { color: '#ef4444' }
-                      }}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                    
-                    {/* Download button */}
-                    <IconButton
-                      size="small"
-                      className="remove-file-btn"
-                      onClick={async () => {
-                        if (!currentSession?.session_id || !user?.id) {
-                          console.error('Missing session ID or user ID for file download');
-                          return;
-                        }
+                            }
+                          }}
+                        >
+                          {/* Delete button on the left */}
+                          <IconButton
+                            size="small"
+                            className="remove-file-btn"
+                            onClick={async () => {
+                              const newFiles = currentSession.session_variables?.uploaded_files?.filter((_: any, i: number) => i !== index) || [];
+                              
+                              // Update the session using the hook function
+                              updateSessionFiles(currentSession.session_id, newFiles);
+                              console.log(`🗑️ Removed file: ${file.filename}`);
+                              
+                              // Persist the updated files to backend immediately
+                              if (currentSession?.session_id && user?.id) {
+                                try {
+                                  await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
+                                    session_variables: {
+                                      ...currentSession.session_variables,
+                                      uploaded_files: newFiles,
+                                      files_added_at: Date.now(),
+                                    }
+                                  });
+                                  console.log('✅ Updated files in backend');
+                                } catch (error) {
+                                  console.error('❌ Failed to update files in backend:', error);
+                                }
+                              }
+                            }}
+                            sx={{ 
+                              opacity: 0,
+                              transition: 'opacity 0.2s',
+                              color: '#dc2626',
+                              mr: 0.5,
+                              '&:hover': { color: '#ef4444' }
+                            }}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                          
+                          {/* Download button */}
+                          <IconButton
+                            size="small"
+                            className="remove-file-btn"
+                            onClick={async () => {
+                              if (!currentSession?.session_id || !user?.id) {
+                                console.error('Missing session ID or user ID for file download');
+                                return;
+                              }
 
-                        try {
-                          console.log('📥 Downloading file:', file.filename);
+                              try {
+                                console.log('📥 Downloading file:', file.filename);
+                                
+                                // Request fresh presigned URL from file return Lambda
+                                const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                                const response = await fetch(`${apiUrl}/file-download`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    user_id: user.id,
+                                    session_id: currentSession.session_id,
+                                    filename: file.filename,
+                                    s3_key: file.s3_key
+                                  })
+                                });
+                                
+                                if (!response.ok) {
+                                  throw new Error(`Download request failed: ${response.status}`);
+                                }
+                                
+                                const { download_url } = await response.json();
+                                
+                                // Create download link and trigger download in new tab
+                                const link = document.createElement('a');
+                                link.href = download_url;
+                                link.download = file.filename;
+                                link.target = '_blank';  // Open in new tab to avoid redirect issues
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                
+                                console.log('✅ File download started');
+                              } catch (error) {
+                                console.error('❌ Download failed:', error);
+                              }
+                            }}
+                            sx={{ 
+                              opacity: 0,
+                              transition: 'opacity 0.2s',
+                              color: '#3b82f6',
+                              mr: 1,
+                              '&:hover': { color: '#60a5fa' }
+                            }}
+                          >
+                            <DownloadIcon fontSize="small" />
+                          </IconButton>
                           
-                          // Request fresh presigned URL from file return Lambda
-                          const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                          const response = await fetch(`${apiUrl}/file-download`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              user_id: user.id,
-                              session_id: currentSession.session_id,
-                              filename: file.filename,
-                              s3_key: file.s3_key
-                            })
-                          });
+                          {/* Content on the right */}
+                          <ListItemText
+                            primary={file.filename}
+                            secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type}`}
+                            primaryTypographyProps={{
+                              fontSize: '0.75rem',
+                              color: '#ffffff',
+                            }}
+                            secondaryTypographyProps={{
+                              fontSize: '0.65rem',
+                              color: '#9ca3af',
+                            }}
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+                  ) : (
+                    <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem', fontStyle: 'italic' }}>
+                      No user files uploaded
+                    </Typography>
+                  )}
+                </Box>
+
+                {/* Agent Files Section */}
+                <Box sx={{ mb: 1 }}>
+                  <Typography variant="subtitle2" sx={{ 
+                    fontWeight: 600, 
+                    color: '#22c55e', 
+                    mb: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    fontSize: '0.75rem'
+                  }}>
+                    <SmartToyIcon fontSize="small" />
+                    Agent Files ({currentSession?.session_variables?.agent_files?.length || 0})
+                  </Typography>
+                  
+                  {currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0 ? (
+                    <List dense sx={{ py: 0 }}>
+                      {currentSession.session_variables.agent_files.map((file: any, index: number) => (
+                        <ListItem 
+                          key={index} 
+                          sx={{ 
+                            py: 0.5, 
+                            px: 1,
+                            borderRadius: '4px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                            '&:hover': {
+                              backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                              '& .remove-file-btn': {
+                                opacity: 1,
+                              }
+                            }
+                          }}
+                        >
+                          {/* Delete button on the left */}
+                          <IconButton
+                            size="small"
+                            className="remove-file-btn"
+                            onClick={async () => {
+                              const newFiles = currentSession.session_variables?.agent_files?.filter((_: any, i: number) => i !== index) || [];
+                              
+                              // Update the session using the hook function
+                              if (currentSession?.session_id && user?.id) {
+                                try {
+                                  await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
+                                    session_variables: {
+                                      ...currentSession.session_variables,
+                                      agent_files: newFiles,
+                                    }
+                                  });
+                                  console.log('✅ Updated agent files in backend');
+                                } catch (error) {
+                                  console.error('❌ Failed to update agent files in backend:', error);
+                                }
+                              }
+                            }}
+                            sx={{ 
+                              opacity: 0,
+                              transition: 'opacity 0.2s',
+                              color: '#dc2626',
+                              mr: 0.5,
+                              '&:hover': { color: '#ef4444' }
+                            }}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
                           
-                          if (!response.ok) {
-                            throw new Error(`Download request failed: ${response.status}`);
-                          }
+                          {/* Download button */}
+                          <IconButton
+                            size="small"
+                            className="remove-file-btn"
+                            onClick={async () => {
+                              if (!currentSession?.session_id || !user?.id) {
+                                console.error('Missing session ID or user ID for file download');
+                                return;
+                              }
+
+                              try {
+                                console.log('📥 Downloading agent file:', file.filename);
+                                
+                                // Request fresh presigned URL from file return Lambda
+                                const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                                const response = await fetch(`${apiUrl}/file-download`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    user_id: user.id,
+                                    session_id: currentSession.session_id,
+                                    filename: file.filename,
+                                    s3_key: file.s3_key
+                                  })
+                                });
+                                
+                                if (!response.ok) {
+                                  throw new Error(`Download request failed: ${response.status}`);
+                                }
+                                
+                                const { download_url } = await response.json();
+                                
+                                // Create download link and trigger download in new tab
+                                const link = document.createElement('a');
+                                link.href = download_url;
+                                link.download = file.filename;
+                                link.target = '_blank';  // Open in new tab to avoid redirect issues
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                
+                                console.log('✅ Agent file download started');
+                              } catch (error) {
+                                console.error('❌ Agent file download failed:', error);
+                              }
+                            }}
+                            sx={{ 
+                              opacity: 0,
+                              transition: 'opacity 0.2s',
+                              color: '#22c55e',
+                              mr: 1,
+                              '&:hover': { color: '#16a34a' }
+                            }}
+                          >
+                            <DownloadIcon fontSize="small" />
+                          </IconButton>
                           
-                          const { download_url } = await response.json();
-                          
-                          // Create download link and trigger download in new tab
-                          const link = document.createElement('a');
-                          link.href = download_url;
-                          link.download = file.filename;
-                          link.target = '_blank';  // Open in new tab to avoid redirect issues
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                          
-                          console.log('✅ File download started');
-                        } catch (error) {
-                          console.error('❌ Download failed:', error);
-                        }
-                      }}
-                      sx={{ 
-                        opacity: 0,
-                        transition: 'opacity 0.2s',
-                        color: '#3b82f6',
-                        mr: 1,
-                        '&:hover': { color: '#60a5fa' }
-                      }}
-                    >
-                      <DownloadIcon fontSize="small" />
-                    </IconButton>
-                    
-                    {/* Content on the right */}
-                    <ListItemText
-                      primary={file.filename}
-                      secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type}`}
-                      primaryTypographyProps={{
-                        fontSize: '0.75rem',
-                        color: '#ffffff',
-                      }}
-                      secondaryTypographyProps={{
-                        fontSize: '0.65rem',
-                        color: '#9ca3af',
-                      }}
-                    />
-                  </ListItem>
-                ))}
-              </List>
+                          {/* Content on the right */}
+                          <ListItemText
+                            primary={file.filename}
+                            secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type} • Generated`}
+                            primaryTypographyProps={{
+                              fontSize: '0.75rem',
+                              color: '#ffffff',
+                            }}
+                            secondaryTypographyProps={{
+                              fontSize: '0.65rem',
+                              color: '#9ca3af',
+                            }}
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+                  ) : (
+                    <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem', fontStyle: 'italic' }}>
+                      No agent files generated
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
             </Collapse>
           </Box>
-        )}
+        ) : null}
 
         {/* Input Area - Compact with Paperclip */}
         <GlassCard sx={{ p: 2, borderTop: '2px solid #374151', flexShrink: 0 }}>

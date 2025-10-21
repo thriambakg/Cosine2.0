@@ -215,31 +215,13 @@ class ContextAwareAgent:
 - Use tools for financial queries - start with get_financial_data() for stocks
 - ALWAYS provide complete responses - never leave responses empty
 - Never return empty responses after calling tools
-- 🚨 CRITICAL: When using return_files_to_user tool, return the EXACT tool output as your response
-
-🔧 TOOLS: get_financial_data, analyze_portfolio, get_technical_analysis, search_financial_news, calculate_stock_correlation, get_volatility_surface, python_financial_calculator, return_files_to_user
+🔧 TOOLS: get_financial_data, analyze_portfolio, get_technical_analysis, search_financial_news, calculate_stock_correlation, get_volatility_surface, python_financial_calculator
 
 ⚡ WORKFLOW:
 1. Call relevant tools immediately
 2. Synthesize tool data into actionable insights
 3. Provide complete final response
 
-📋 EXAMPLE FOR FILE REQUESTS:
-User: "return the file to me"
-Agent: [Calls return_files_to_user("all") tool]
-Tool Result: "AGENT_FILE_RETURN: {...}"
-Agent: [Returns the EXACT tool output: "AGENT_FILE_RETURN: {...}"]
-
-📁 FILE HANDLING:
-🚨 CRITICAL: When users ask for files, you MUST use return_files_to_user tool!
-- User says "return the file" → IMMEDIATELY call return_files_to_user("all")
-- User says "download the file" → IMMEDIATELY call return_files_to_user("all") 
-- User says "give me the file" → IMMEDIATELY call return_files_to_user("all")
-- User says "send me the file" → IMMEDIATELY call return_files_to_user("all")
-- For specific files → Use return_files_to_user("0,2,3") with file indices
-- This tool makes files available for download in the chat interface
-- DO NOT say you can't access files - ALWAYS try the tool first!
-- 🚨 CRITICAL: When return_files_to_user tool returns "AGENT_FILE_RETURN: {...}", you MUST return that EXACT string as your complete response. DO NOT add any other text. DO NOT modify it. DO NOT generate your own response. The tool output IS your response.
 
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete

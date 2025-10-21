@@ -564,23 +564,6 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
                     'file_data': response_body.get('file_data', [])
                 }
             
-            # Check if this is an agent file return response
-            response_text = response_body.get('response', '')
-            if response_text.startswith('AGENT_FILE_RETURN:'):
-                try:
-                    # Extract the JSON data after the prefix
-                    json_data = response_text.replace('AGENT_FILE_RETURN:', '').strip()
-                    file_return_data = json.loads(json_data)
-                    
-                    logger.info(f"📁 AGENT FILE RETURN: Detected agent file return with {len(file_return_data.get('file_data', []))} files")
-                    return {
-                        'type': 'file_return',
-                        'message': 'Files returned successfully',
-                        'file_data': file_return_data.get('file_data', [])
-                    }
-                except json.JSONDecodeError as e:
-                    logger.error(f"❌ Failed to parse agent file return JSON: {str(e)}")
-                    # Fall through to regular text response
             
             # Regular text response
             return response_body.get('response', 'I apologize, but I encountered an error processing your request.')
@@ -957,6 +940,11 @@ def handle_s3_event_notification(event):
                 continue
             
             logger.info(f"📦 S3 Object Created: {bucket_name}/{s3_key}")
+            
+            # Skip agent files - they are handled by the agent files processor
+            if 'agent-files' in s3_key:
+                logger.info(f"📦 Skipping agent file: {s3_key}")
+                continue
             
             # Parse S3 key to extract user_id and session_id
             # Expected format: users/{user_id}/sessions/{session_id}/files/{filename}
@@ -1534,6 +1522,64 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
         logger.error(f"❌ Error in process_message_direct: {str(e)}")
         raise
 
+def handle_session_update(event):
+    """
+    Handle session update from Agent Files Processor
+    
+    Args:
+        event: Session update event with user_id, session_id, and session_variables
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        user_id = event.get('user_id')
+        session_id = event.get('session_id')
+        session_variables = event.get('session_variables')
+        
+        if not user_id or not session_id or not session_variables:
+            logger.error("Missing required fields in session update event")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Missing required fields'})
+            }
+        
+        logger.info(f"📁 Processing session update for user {user_id}, session {session_id}")
+        
+        # Find active WebSocket connections for this user/session
+        active_connections = get_active_connections_for_user_session(user_id, session_id)
+        
+        if active_connections:
+            for connection_id in active_connections:
+                try:
+                    # Send session update message to client
+                    session_update_message = {
+                        'type': 'session_updated',
+                        'session_id': session_id,
+                        'session_variables': session_variables,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    send_message_to_client(connection_id, session_update_message)
+                    logger.info(f"📁 Sent session variables update to connection {connection_id}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to send session variables update to {connection_id}: {str(e)}")
+        else:
+            logger.warning(f"⚠️ No active connections found for user {user_id}, session {session_id}")
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({'message': 'Session update processed'})
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in handle_session_update: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': str(e)})
+        }
+
 def lambda_handler(event, context):
     """
     Lambda handler for WebSocket message processing, S3 event notifications, and File Handler invocations
@@ -1546,6 +1592,11 @@ def lambda_handler(event, context):
         if 'type' in event and event.get('type') == 'chat':
             logger.info("Processing message from File Handler")
             return handle_file_handler_message(event)
+        
+        # Check if this is a session update from Agent Files Processor
+        if 'type' in event and event.get('type') == 'session_update':
+            logger.info("Processing session update from Agent Files Processor")
+            return handle_session_update(event)
         
         # Check if this is an S3 event notification (SNS)
         if 'Records' in event and event['Records'][0].get('EventSource') == 'aws:s3':

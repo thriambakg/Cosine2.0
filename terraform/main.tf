@@ -1601,3 +1601,49 @@ module "file_upload_lambda" {
 
   tags = var.common_tags
 }
+
+# Agent Files Processor Lambda Function
+module "agent_files_processor_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-agent-files-processor-${var.environment}"
+  description   = "Lambda function for processing agent files and updating session_variables"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/agent_files_processor/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT                       = var.environment
+    LOG_LEVEL                         = var.environment == "development" ? "DEBUG" : "INFO"
+    CHAT_FILES_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    CHAT_SESSIONS_TABLE_NAME          = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    WEBSOCKET_PROCESSOR_FUNCTION_NAME = module.websocket_message_lambda.function_name
+  }
+
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_invoke_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
+  ]
+
+  tags = var.common_tags
+}
+
+# SNS Permission for Agent Files Processor Lambda
+resource "aws_lambda_permission" "agent_files_processor_sns" {
+  statement_id  = "AllowExecutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = module.agent_files_processor_lambda.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = data.terraform_remote_state.base_infra.outputs.agent_file_upload_notifications_topic_arn
+}
