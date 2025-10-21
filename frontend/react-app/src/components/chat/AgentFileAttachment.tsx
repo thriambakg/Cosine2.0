@@ -4,8 +4,7 @@ import {
   Typography,
   IconButton,
   Chip,
-  Tooltip,
-  Button
+  Tooltip
 } from '@mui/material';
 import {
   Download as DownloadIcon,
