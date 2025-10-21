@@ -428,17 +428,19 @@ def download_filing_pdf(cik: str, accession_number: str, document_name: str,
                 
                 s3_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
                 
-                return f"✅ Successfully downloaded and saved SEC filing to S3:\n\n"
-                return += f"Document: {document_name}\n"
-                return += f"CIK: {cik_padded}\n"
-                return += f"Accession: {accession_number}\n"
-                return += f"S3 URL: {s3_url}\n"
-                return += f"File Size: {len(content):,} bytes"
+                result = f"✅ Successfully downloaded and saved SEC filing to S3:\n\n"
+                result += f"Document: {document_name}\n"
+                result += f"CIK: {cik_padded}\n"
+                result += f"Accession: {accession_number}\n"
+                result += f"S3 URL: {s3_url}\n"
+                result += f"File Size: {len(content):,} bytes"
+                return result
             else:
-                return f"✅ Successfully downloaded SEC filing:\n\n"
-                return += f"Document: {document_name}\n"
-                return += f"File Size: {len(content):,} bytes\n"
-                return += f"Content Type: {response.headers.get('content-type', 'unknown')}"
+                result = f"✅ Successfully downloaded SEC filing:\n\n"
+                result += f"Document: {document_name}\n"
+                result += f"File Size: {len(content):,} bytes\n"
+                result += f"Content Type: {response.headers.get('content-type', 'unknown')}"
+                return result
         else:
             return f"Error downloading document: HTTP {response.status_code}"
             
