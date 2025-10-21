@@ -42,6 +42,7 @@ interface UseChatPersistenceReturn {
   updateSessionTitle: (sessionId: string, newTitle: string) => Promise<void>;
   updateSessionContext: (sessionId: string, contextItems: any[]) => void;
   updateSessionFiles: (sessionId: string, uploadedFiles: any[]) => void;
+  updateSessionAgentFiles: (sessionId: string, agentFiles: any[]) => void;
   updateSessionVariables: (sessionId: string, sessionVariables: any) => void;
   
   // Message management
@@ -853,8 +854,55 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       });
     }
     
+    // Dispatch session variables update event to notify other components
+    const sessionVariables = { uploaded_files: uploadedFiles };
+    const updateEvent = new CustomEvent('session-variables-updated', {
+      detail: { sessionId, sessionVariables }
+    });
+    window.dispatchEvent(updateEvent);
+    console.log('📋 Dispatched session-variables-updated event for file removal');
+    
     // Save will happen automatically via the useEffect that watches sessions/currentSession
     console.log('✅ Updated session files in local state');
+  }, [currentSession?.session_id]);
+
+  const updateSessionAgentFiles = useCallback((sessionId: string, agentFiles: any[]) => {
+    console.log('📋 Updating session agent files:', { sessionId, fileCount: agentFiles.length });
+    
+    // Update sessions array
+    setSessions(prev => {
+      const updated = prev.map(s => 
+        s.session_id === sessionId 
+          ? { ...s, session_variables: { ...s.session_variables, agent_files: agentFiles } }
+          : s
+      );
+      console.log('📋 Updated sessions array, session now has:', updated.find(s => s.session_id === sessionId)?.session_variables?.agent_files?.length, 'agent files');
+      return updated;
+    });
+    
+    // Update current session if it matches
+    if (currentSession?.session_id === sessionId) {
+      setCurrentSession(prev => {
+        if (!prev) return null;
+        const updated = {
+          ...prev,
+          session_variables: { ...prev.session_variables, agent_files: agentFiles }
+        };
+        console.log('📋 Updated currentSession, now has:', updated.session_variables?.agent_files?.length, 'agent files');
+        return updated;
+      });
+    }
+    
+    // Dispatch session variables update event to notify other components
+    const sessionVariables = { agent_files: agentFiles };
+    const updateEvent = new CustomEvent('session-variables-updated', {
+      detail: { sessionId, sessionVariables }
+    });
+    window.dispatchEvent(updateEvent);
+    console.log('📋 Dispatched session-variables-updated event for agent file removal');
+    
+    // Save will happen automatically via the useEffect that watches sessions/currentSession
+    console.log('✅ Updated session agent files in local state');
   }, [currentSession?.session_id]);
 
   const updateSessionVariables = useCallback((sessionId: string, sessionVariables: any) => {
@@ -900,6 +948,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     updateSessionTitle,
     updateSessionContext,
     updateSessionFiles,
+    updateSessionAgentFiles,
     updateSessionVariables,
     
     // Message management

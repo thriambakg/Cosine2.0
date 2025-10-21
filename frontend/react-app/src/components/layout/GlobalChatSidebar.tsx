@@ -137,7 +137,7 @@ const GlobalChatSidebar: React.FC = () => {
   const { user } = useAuth();
   
   // Get updateSessionVariables from useChatPersistence
-  const { updateSessionVariables } = useChatPersistence(user?.id || '');
+  const { updateSessionAgentFiles, updateSessionVariables } = useChatPersistence(user?.id || '');
   // COMMENTED OUT: Old WebSocket context (replaced by messaging service)
   // const { connect: connectWebSocket, sendMessage, isConnected } = useWebSocket();
   
@@ -1689,15 +1689,10 @@ const GlobalChatSidebar: React.FC = () => {
                               onClick={async () => {
                                 const newFiles = currentSession.session_variables?.agent_files?.filter((_: any, i: number) => i !== index) || [];
                                 
-                                // Update the local session state
-                                const updatedSession = {
-                                  ...currentSession,
-                                  session_variables: {
-                                    ...currentSession.session_variables,
-                                    agent_files: newFiles
-                                  }
-                                };
-                                setCurrentSession(updatedSession);
+                                // Update the session using the hook function
+                                if (activeSessionId) {
+                                  updateSessionAgentFiles(activeSessionId, newFiles);
+                                }
                                 console.log(`🗑️ Removed agent file: ${file.filename}`);
                                 
                                 // Persist the updated files to backend immediately

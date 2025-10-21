@@ -214,6 +214,7 @@ export default function ChatPage() {
     truncateMessagesAfter,
     updateSessionContext,
     updateSessionFiles,
+    updateSessionAgentFiles,
     updateSessionVariables,
   } = useChatPersistence(user?.id || '');
   
@@ -1964,6 +1965,10 @@ export default function ChatPage() {
                               const newFiles = currentSession.session_variables?.agent_files?.filter((_: any, i: number) => i !== index) || [];
                               
                               // Update the session using the hook function
+                              updateSessionAgentFiles(currentSession.session_id, newFiles);
+                              console.log(`🗑️ Removed agent file: ${file.filename}`);
+                              
+                              // Persist the updated files to backend immediately
                               if (currentSession?.session_id && user?.id) {
                                 try {
                                   await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {

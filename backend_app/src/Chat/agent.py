@@ -699,16 +699,21 @@ FOR PDF FILE ANALYSIS:
 6. Detect document type (financial, legal, technical, academic, report) automatically
 
 FOR CSV FILE GENERATION (Excel-compatible):
-1. FIRST: Use read_s3_file_tool() to read user-uploaded data files (JSON, CSV, TXT)
-2. SECOND: Use get_financial_data() or other tools to fetch live market data if needed
-3. THIRD: Prepare and format the data content for CSV
+1. FIRST: Determine data source:
+   - If user has uploaded files: Use read_s3_file_tool() to read user data
+   - If no files: Use get_financial_data() or other tools to fetch live market data
+   - If both: Combine user data with live market data for comprehensive analysis
+2. SECOND: Process and analyze the data to extract meaningful insights
+3. THIRD: Format the processed data into structured content for the CSV
 4. FOURTH: Use generate_excel_file_tool(filename, content, template_type, include_charts) to create CSV
 5. Template types: 'financial_model', 'dcf_model', 'portfolio_analysis', 'risk_report', 'custom'
 6. The agent should orchestrate the workflow - the tool only creates the CSV file
 7. CSV files can be opened directly in Excel
 8. Examples:
-   - "Create a DCF model for AAPL using my historical data file" → Read file → Fetch AAPL data → Format content → Generate CSV
-   - "Generate portfolio analysis with my holdings" → Read portfolio file → Fetch market data → Format analysis → Generate CSV
+   - "Create a DCF model for AAPL using my historical data file" → Read file → Process data → Format content → Generate CSV
+   - "Generate a financial analysis for AAPL" → Fetch live AAPL data → Process data → Format content → Generate CSV
+   - "Create portfolio analysis with my holdings and live market data" → Read portfolio file → Fetch market data → Combine and analyze → Generate CSV
+9. IMPORTANT: Always process the actual data content, not just include the raw data or tool calls
 7. Provide comprehensive analysis including word count, page estimates, and content preview
 8. For forms and tables, use analyze_pdf_forms_tool for structured data extraction
 
@@ -1277,10 +1282,6 @@ def generate_excel_content(template_type: str, content: str, include_charts: boo
     Creates a proper Excel file structure that Excel can open.
     """
     try:
-        # Create a proper Excel file structure
-        # For now, we'll create a CSV-like format that Excel can open
-        # In production, you'd use openpyxl to create actual .xlsx files
-        
         # Parse the content if it's JSON
         try:
             if content.strip().startswith('{') or content.strip().startswith('['):
@@ -1299,38 +1300,17 @@ def generate_excel_content(template_type: str, content: str, include_charts: boo
         excel_lines.append(f"# Include Charts: {include_charts}")
         excel_lines.append("")
         
-        # Add sheet structures
-        sheets = get_excel_sheets(template_type)
-        for sheet_name, columns in sheets.items():
-            excel_lines.append(f"# {sheet_name}")
-            excel_lines.append(",".join(columns))
-            excel_lines.append("")
-        
-        # Add formulas
-        formulas = get_excel_formulas(template_type)
-        if formulas:
-            excel_lines.append("# FORMULAS")
-            for sheet, sheet_formulas in formulas.items():
-                excel_lines.append(f"# {sheet}")
-                for name, formula in sheet_formulas.items():
-                    excel_lines.append(f"{name},{formula}")
-            excel_lines.append("")
-        
-        # Add the actual content
-        if isinstance(data, dict):
-            excel_lines.append("# DATA")
-            for key, value in data.items():
-                excel_lines.append(f"{key},{value}")
-        elif isinstance(data, list):
-            excel_lines.append("# DATA")
-            for item in data:
-                if isinstance(item, dict):
-                    excel_lines.append(",".join([str(v) for v in item.values()]))
-                else:
-                    excel_lines.append(str(item))
+        # Process data based on template type
+        if template_type == "financial_model":
+            excel_lines.extend(generate_financial_model_content(data))
+        elif template_type == "dcf_model":
+            excel_lines.extend(generate_dcf_model_content(data))
+        elif template_type == "portfolio_analysis":
+            excel_lines.extend(generate_portfolio_analysis_content(data))
+        elif template_type == "risk_report":
+            excel_lines.extend(generate_risk_report_content(data))
         else:
-            excel_lines.append("# CONTENT")
-            excel_lines.append(str(data))
+            excel_lines.extend(generate_custom_content(data, template_type))
         
         # Join all lines
         excel_content = "\n".join(excel_lines)
@@ -1343,6 +1323,171 @@ def generate_excel_content(template_type: str, content: str, include_charts: boo
         # Fallback to simple CSV format
         fallback_content = f"# {template_type.upper().replace('_', ' ')} TEMPLATE\n# Generated by Cosine Financial Analysis Agent\n\n{content}"
         return fallback_content.encode('utf-8')
+
+def generate_financial_model_content(data):
+    """Generate content for financial model template"""
+    lines = []
+    
+    # Company Summary Section
+    lines.append("# COMPANY SUMMARY")
+    lines.append("Metric,Value")
+    
+    if isinstance(data, dict):
+        # Extract company info if available
+        company_name = data.get('company_name', 'N/A')
+        symbol = data.get('symbol', 'N/A')
+        market_cap = data.get('market_cap', 0)
+        shares_outstanding = data.get('shares_outstanding', 0)
+        pe_ratio = data.get('pe_ratio', 0)
+        dividend_yield = data.get('dividend_yield', 0)
+        
+        lines.append(f"Company Name,{company_name}")
+        lines.append(f"Symbol,{symbol}")
+        lines.append(f"Market Cap,${market_cap:,.0f}")
+        lines.append(f"Shares Outstanding,{shares_outstanding:,.0f}")
+        lines.append(f"P/E Ratio,{pe_ratio}")
+        lines.append(f"Dividend Yield,{dividend_yield}%")
+        lines.append("")
+        
+        # Historical Price Analysis
+        if 'history' in data and isinstance(data['history'], list):
+            lines.append("# HISTORICAL PRICE ANALYSIS")
+            lines.append("Date,Open,High,Low,Close,Volume,Market Cap")
+            
+            # Get recent data points (last 30 days or all if less)
+            recent_data = data['history'][-30:] if len(data['history']) > 30 else data['history']
+            
+            for point in recent_data:
+                date = point.get('date', 'N/A')
+                open_price = point.get('open', 0)
+                high = point.get('high', 0)
+                low = point.get('low', 0)
+                close = point.get('close', 0)
+                volume = point.get('volume', 0)
+                market_cap = point.get('market_cap', 0)
+                
+                lines.append(f"{date},{open_price:.2f},{high:.2f},{low:.2f},{close:.2f},{volume:,.0f},{market_cap:,.0f}")
+            
+            lines.append("")
+            
+            # Calculate key metrics
+            if len(data['history']) > 0:
+                prices = [point.get('close', 0) for point in data['history'] if point.get('close')]
+                if prices:
+                    current_price = prices[-1]
+                    high_52w = max(prices)
+                    low_52w = min(prices)
+                    avg_price = sum(prices) / len(prices)
+                    
+                    lines.append("# KEY METRICS")
+                    lines.append("Metric,Value")
+                    lines.append(f"Current Price,${current_price:.2f}")
+                    lines.append(f"52-Week High,${high_52w:.2f}")
+                    lines.append(f"52-Week Low,${low_52w:.2f}")
+                    lines.append(f"Average Price,${avg_price:.2f}")
+                    lines.append(f"Price Range,${((high_52w - low_52w) / low_52w * 100):.1f}%")
+                    lines.append("")
+    
+    return lines
+
+def generate_dcf_model_content(data):
+    """Generate content for DCF model template"""
+    lines = []
+    
+    lines.append("# DCF MODEL ASSUMPTIONS")
+    lines.append("Assumption,Value")
+    lines.append("WACC,10.0%")
+    lines.append("Terminal Growth Rate,3.0%")
+    lines.append("Revenue Growth Year 1,5.0%")
+    lines.append("Revenue Growth Year 2,4.0%")
+    lines.append("Revenue Growth Year 3,3.0%")
+    lines.append("EBITDA Margin,20.0%")
+    lines.append("Tax Rate,25.0%")
+    lines.append("")
+    
+    if isinstance(data, dict) and 'history' in data:
+        # Use historical data for projections
+        lines.append("# HISTORICAL DATA FOR PROJECTIONS")
+        lines.append("Year,Revenue,EBITDA,Free Cash Flow")
+        
+        # Simple projection based on historical trend
+        if len(data['history']) > 0:
+            recent_prices = [point.get('close', 0) for point in data['history'][-252:]]  # Last year
+            if recent_prices:
+                avg_price = sum(recent_prices) / len(recent_prices)
+                base_revenue = avg_price * 1000000  # Simplified assumption
+                
+                for year in range(1, 6):
+                    growth_rate = max(0.03, 0.05 - (year - 1) * 0.01)  # Declining growth
+                    revenue = base_revenue * (1 + growth_rate) ** year
+                    ebitda = revenue * 0.20  # 20% margin
+                    fcf = ebitda * 0.75  # 75% conversion
+                    
+                    lines.append(f"Year {year},${revenue:,.0f},${ebitda:,.0f},${fcf:,.0f}")
+    
+    return lines
+
+def generate_portfolio_analysis_content(data):
+    """Generate content for portfolio analysis template"""
+    lines = []
+    
+    lines.append("# PORTFOLIO SUMMARY")
+    lines.append("Symbol,Weight,Return,Beta,Sharpe Ratio")
+    
+    if isinstance(data, dict):
+        symbol = data.get('symbol', 'UNKNOWN')
+        # Calculate basic metrics
+        if 'history' in data and len(data['history']) > 1:
+            prices = [point.get('close', 0) for point in data['history'] if point.get('close')]
+            if len(prices) > 1:
+                returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
+                avg_return = sum(returns) / len(returns) * 252  # Annualized
+                volatility = (sum([(r - avg_return/252)**2 for r in returns]) / len(returns))**0.5 * (252**0.5)
+                sharpe_ratio = avg_return / volatility if volatility > 0 else 0
+                
+                lines.append(f"{symbol},100.0%,{avg_return:.2f}%,1.00,{sharpe_ratio:.2f}")
+    
+    return lines
+
+def generate_risk_report_content(data):
+    """Generate content for risk report template"""
+    lines = []
+    
+    lines.append("# RISK METRICS")
+    lines.append("Metric,Value,Benchmark,Status")
+    
+    if isinstance(data, dict) and 'history' in data:
+        if len(data['history']) > 1:
+            prices = [point.get('close', 0) for point in data['history'] if point.get('close')]
+            if len(prices) > 1:
+                returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
+                volatility = (sum([(r - sum(returns)/len(returns))**2 for r in returns]) / len(returns))**0.5 * (252**0.5)
+                
+                lines.append(f"Volatility,{volatility:.2f}%,15.0%,{'High' if volatility > 20 else 'Medium' if volatility > 10 else 'Low'}")
+                lines.append(f"Max Drawdown,{max([min(returns[i:]) - max(returns[:i+1]) for i in range(len(returns))]):.2f}%,-10.0%,{'High' if volatility > 20 else 'Medium'}")
+    
+    return lines
+
+def generate_custom_content(data, template_type):
+    """Generate content for custom template"""
+    lines = []
+    
+    lines.append("# CUSTOM ANALYSIS")
+    lines.append("Field,Value")
+    
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key != 'history':  # Skip large history arrays
+                lines.append(f"{key},{value}")
+    elif isinstance(data, list):
+        for i, item in enumerate(data[:10]):  # Limit to first 10 items
+            if isinstance(item, dict):
+                for k, v in item.items():
+                    lines.append(f"Item_{i}_{k},{v}")
+            else:
+                lines.append(f"Item_{i},{item}")
+    
+    return lines
 
 def get_excel_sheets(template_type: str) -> dict:
     """Get sheet structure based on template type"""
