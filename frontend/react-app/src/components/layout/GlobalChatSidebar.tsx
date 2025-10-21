@@ -26,6 +26,7 @@ import {
   Edit as EditIcon,
   AttachFile as AttachFileIcon,
   InsertDriveFile as FileIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -1430,49 +1431,104 @@ const GlobalChatSidebar: React.FC = () => {
                     }
                   }}
                   secondaryAction={
-                    <IconButton
-                      edge="end"
-                      size="small"
-                      className="remove-file-btn"
-                      onClick={async () => {
-                        const newFiles = currentSession.session_variables?.uploaded_files?.filter((_: any, i: number) => i !== index) || [];
-                        
-                        // Update the local session state
-                        const updatedSession = {
-                          ...currentSession,
-                          session_variables: {
-                            ...currentSession.session_variables,
-                            uploaded_files: newFiles
+                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                      <IconButton
+                        size="small"
+                        className="remove-file-btn"
+                        onClick={async () => {
+                          if (!activeSessionId || !user?.id) {
+                            console.error('Missing session ID or user ID for file download');
+                            return;
                           }
-                        };
-                        setCurrentSession(updatedSession);
-                        console.log(`🗑️ Removed file: ${file.filename}`);
-                        
-                        // Persist the updated files to backend immediately
-                        if (activeSessionId && user?.id) {
+
                           try {
-                            await sessionManagementAPI.updateSession(activeSessionId, user.id, {
-                              session_variables: {
-                                ...currentSession.session_variables,
-                                uploaded_files: newFiles,
-                                files_added_at: Date.now(),
-                              }
+                            console.log('📥 Downloading file:', file.filename);
+                            
+                            // Request fresh presigned URL from file return Lambda
+                            const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                            const response = await fetch(`${apiUrl}/file-download`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                user_id: user.id,
+                                session_id: activeSessionId,
+                                filename: file.filename,
+                                s3_key: file.s3_key
+                              })
                             });
-                            console.log('✅ Updated files in backend');
+                            
+                            if (!response.ok) {
+                              throw new Error(`Download request failed: ${response.status}`);
+                            }
+                            
+                            const { download_url } = await response.json();
+                            
+                            // Create download link and trigger download
+                            const link = document.createElement('a');
+                            link.href = download_url;
+                            link.download = file.filename;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            
+                            console.log('✅ File download started');
                           } catch (error) {
-                            console.error('❌ Failed to update files in backend:', error);
+                            console.error('❌ Download failed:', error);
                           }
-                        }
-                      }}
-                      sx={{ 
-                        opacity: 0,
-                        transition: 'opacity 0.2s',
-                        color: '#dc2626',
-                        '&:hover': { color: '#ef4444' }
-                      }}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                        }}
+                        sx={{ 
+                          opacity: 0,
+                          transition: 'opacity 0.2s',
+                          color: '#3b82f6',
+                          '&:hover': { color: '#60a5fa' }
+                        }}
+                      >
+                        <DownloadIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton
+                        edge="end"
+                        size="small"
+                        className="remove-file-btn"
+                        onClick={async () => {
+                          const newFiles = currentSession.session_variables?.uploaded_files?.filter((_: any, i: number) => i !== index) || [];
+                          
+                          // Update the local session state
+                          const updatedSession = {
+                            ...currentSession,
+                            session_variables: {
+                              ...currentSession.session_variables,
+                              uploaded_files: newFiles
+                            }
+                          };
+                          setCurrentSession(updatedSession);
+                          console.log(`🗑️ Removed file: ${file.filename}`);
+                          
+                          // Persist the updated files to backend immediately
+                          if (activeSessionId && user?.id) {
+                            try {
+                              await sessionManagementAPI.updateSession(activeSessionId, user.id, {
+                                session_variables: {
+                                  ...currentSession.session_variables,
+                                  uploaded_files: newFiles,
+                                  files_added_at: Date.now(),
+                                }
+                              });
+                              console.log('✅ Updated files in backend');
+                            } catch (error) {
+                              console.error('❌ Failed to update files in backend:', error);
+                            }
+                          }
+                        }}
+                        sx={{ 
+                          opacity: 0,
+                          transition: 'opacity 0.2s',
+                          color: '#dc2626',
+                          '&:hover': { color: '#ef4444' }
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
                   }
                 >
                   <ListItemText

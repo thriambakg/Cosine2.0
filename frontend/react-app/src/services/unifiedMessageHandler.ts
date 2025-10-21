@@ -254,15 +254,23 @@ class UnifiedMessageHandlerService {
       throw new Error('No files provided for file message');
     }
 
-    // Ensure WebSocket connection exists (creates new session if needed)
-    await this.ensureWebSocketConnection(sessionId, messageData.userId);
+    // Broadcast loading state for file upload
+    this.broadcastLoadingState(sessionId, true, messageData.source);
 
-    // Files are already processed by FileUploadService in the component
-    // No need to process them again
-    
-    // Send file message via WebSocket
-    await this.sendFileMessage(sessionId, messageData);
-    console.log('✅ UnifiedMessageHandler: File message sent for session:', sessionId);
+    try {
+      // Ensure WebSocket connection exists (creates new session if needed)
+      await this.ensureWebSocketConnection(sessionId, messageData.userId);
+
+      // Files are already processed by FileUploadService in the component
+      // No need to process them again
+      
+      // Send file message via WebSocket
+      await this.sendFileMessage(sessionId, messageData);
+      console.log('✅ UnifiedMessageHandler: File message sent for session:', sessionId);
+    } finally {
+      // Clear loading state
+      this.broadcastLoadingState(sessionId, false, messageData.source);
+    }
   }
 
   /**

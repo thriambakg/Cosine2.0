@@ -500,7 +500,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "37"
+  deployment_trigger = "38" # Updated to apply CORS configuration for file-download endpoint
 }
 
 # IAM Policy for Lambda functions to publish to SNS

@@ -51,6 +51,7 @@ import {
   OpenInNew as OpenInNewIcon,
   ExpandLess as ExpandLessIcon,
   ExpandMore as ExpandMoreIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 
 interface Message {
@@ -1830,11 +1831,67 @@ export default function ChatPage() {
                         opacity: 0,
                         transition: 'opacity 0.2s',
                         color: '#dc2626',
-                        mr: 1,
+                        mr: 0.5,
                         '&:hover': { color: '#ef4444' }
                       }}
                     >
                       <DeleteIcon fontSize="small" />
+                    </IconButton>
+                    
+                    {/* Download button */}
+                    <IconButton
+                      size="small"
+                      className="remove-file-btn"
+                      onClick={async () => {
+                        if (!currentSession?.session_id || !user?.id) {
+                          console.error('Missing session ID or user ID for file download');
+                          return;
+                        }
+
+                        try {
+                          console.log('📥 Downloading file:', file.filename);
+                          
+                          // Request fresh presigned URL from file return Lambda
+                          const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                          const response = await fetch(`${apiUrl}/file-download`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              user_id: user.id,
+                              session_id: currentSession.session_id,
+                              filename: file.filename,
+                              s3_key: file.s3_key
+                            })
+                          });
+                          
+                          if (!response.ok) {
+                            throw new Error(`Download request failed: ${response.status}`);
+                          }
+                          
+                          const { download_url } = await response.json();
+                          
+                          // Create download link and trigger download
+                          const link = document.createElement('a');
+                          link.href = download_url;
+                          link.download = file.filename;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                          
+                          console.log('✅ File download started');
+                        } catch (error) {
+                          console.error('❌ Download failed:', error);
+                        }
+                      }}
+                      sx={{ 
+                        opacity: 0,
+                        transition: 'opacity 0.2s',
+                        color: '#3b82f6',
+                        mr: 1,
+                        '&:hover': { color: '#60a5fa' }
+                      }}
+                    >
+                      <DownloadIcon fontSize="small" />
                     </IconButton>
                     
                     {/* Content on the right */}
