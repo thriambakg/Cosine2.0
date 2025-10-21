@@ -1727,8 +1727,8 @@ export default function ChatPage() {
         )}
 
         {/* Files Section - User Files and Agent Files */}
-        {(currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0) || 
-         (currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0) ? (
+        {((currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0) || 
+          (currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0)) ? (
           <Box sx={{ borderTop: '2px solid #374151', backgroundColor: 'rgba(15, 23, 42, 0.95)' }}>
             <Box
               sx={{

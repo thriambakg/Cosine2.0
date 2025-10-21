@@ -1400,8 +1400,8 @@ const GlobalChatSidebar: React.FC = () => {
       )}
 
       {/* Files Section - User Files and Agent Files */}
-      {(currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0) || 
-       (currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0) ? (
+      {((currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0) || 
+        (currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0)) ? (
         <Box sx={{ borderBottom: '1px solid #374151' }}>
           <Box
             sx={{

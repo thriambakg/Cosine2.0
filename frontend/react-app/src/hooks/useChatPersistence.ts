@@ -823,6 +823,14 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       });
     }
     
+    // Dispatch session variables update event to notify other components
+    const sessionVariables = { context_items: contextItems };
+    const updateEvent = new CustomEvent('session-variables-updated', {
+      detail: { sessionId, sessionVariables }
+    });
+    window.dispatchEvent(updateEvent);
+    console.log('📋 Dispatched session-variables-updated event for context update');
+    
     // Save will happen automatically via the useEffect that watches sessions/currentSession
     console.log('✅ Updated session context in local state');
   }, [currentSession?.session_id]);
@@ -908,25 +916,25 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
   const updateSessionVariables = useCallback((sessionId: string, sessionVariables: any) => {
     console.log('📋 Updating session variables:', { sessionId, fileCount: sessionVariables?.uploaded_files?.length || 0 });
     
-    // Update sessions array
+    // Update sessions array - MERGE with existing session variables
     setSessions(prev => {
       const updated = prev.map(s => 
         s.session_id === sessionId 
-          ? { ...s, session_variables: sessionVariables }
+          ? { ...s, session_variables: { ...s.session_variables, ...sessionVariables } }
           : s
       );
       return updated;
     });
     
-    // Update current session if it matches
+    // Update current session if it matches - MERGE with existing session variables
     if (currentSession?.session_id === sessionId) {
       setCurrentSession(prev => {
         if (!prev) return null;
         const updated = {
           ...prev,
-          session_variables: sessionVariables
+          session_variables: { ...prev.session_variables, ...sessionVariables }
         };
-        console.log('📋 Updated currentSession with new session variables');
+        console.log('📋 Updated currentSession with merged session variables');
         return updated;
       });
     }
