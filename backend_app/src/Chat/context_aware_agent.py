@@ -227,7 +227,7 @@ class ContextAwareAgent:
 User: "return the file to me"
 Agent: [Calls return_files_to_user("all") tool]
 Tool Result: "AGENT_FILE_RETURN: {...}"
-Agent: "Files have been returned to your chat interface. You can now download them."
+Agent: [Returns the EXACT tool output: "AGENT_FILE_RETURN: {...}"]
 
 📁 FILE HANDLING:
 🚨 CRITICAL: When users ask for files, you MUST use return_files_to_user tool!
@@ -238,6 +238,7 @@ Agent: "Files have been returned to your chat interface. You can now download th
 - For specific files → Use return_files_to_user("0,2,3") with file indices
 - This tool makes files available for download in the chat interface
 - DO NOT say you can't access files - ALWAYS try the tool first!
+- IMPORTANT: When return_files_to_user tool returns "AGENT_FILE_RETURN: {...}", use that EXACT output as your response - do not modify it!
 
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete

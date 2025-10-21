@@ -254,6 +254,9 @@ class UnifiedMessageHandlerService {
       throw new Error('No files provided for file message');
     }
 
+    // Ensure WebSocket connection exists (creates new session if needed)
+    await this.ensureWebSocketConnection(sessionId, messageData.userId);
+
     // Files are already processed by FileUploadService in the component
     // No need to process them again
     
