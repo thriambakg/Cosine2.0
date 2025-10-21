@@ -223,10 +223,21 @@ class ContextAwareAgent:
 2. Synthesize tool data into actionable insights
 3. Provide complete final response
 
+📋 EXAMPLE FOR FILE REQUESTS:
+User: "return the file to me"
+Agent: [Calls return_files_to_user("all") tool]
+Tool Result: "AGENT_FILE_RETURN: {...}"
+Agent: "Files have been returned to your chat interface. You can now download them."
+
 📁 FILE HANDLING:
-- When users ask for "download", "return", "give me the file", or "send me the file" → Use return_files_to_user("all")
-- When users want specific files → Use return_files_to_user("0,2,3") with file indices
+🚨 CRITICAL: When users ask for files, you MUST use return_files_to_user tool!
+- User says "return the file" → IMMEDIATELY call return_files_to_user("all")
+- User says "download the file" → IMMEDIATELY call return_files_to_user("all") 
+- User says "give me the file" → IMMEDIATELY call return_files_to_user("all")
+- User says "send me the file" → IMMEDIATELY call return_files_to_user("all")
+- For specific files → Use return_files_to_user("0,2,3") with file indices
 - This tool makes files available for download in the chat interface
+- DO NOT say you can't access files - ALWAYS try the tool first!
 
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete
