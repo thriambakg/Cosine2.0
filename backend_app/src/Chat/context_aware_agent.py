@@ -216,12 +216,17 @@ class ContextAwareAgent:
 - ALWAYS provide complete responses - never leave responses empty
 - Never return empty responses after calling tools
 
-🔧 TOOLS: get_financial_data, analyze_portfolio, get_technical_analysis, search_financial_news, calculate_stock_correlation, get_volatility_surface, python_financial_calculator
+🔧 TOOLS: get_financial_data, analyze_portfolio, get_technical_analysis, search_financial_news, calculate_stock_correlation, get_volatility_surface, python_financial_calculator, return_files_to_user
 
 ⚡ WORKFLOW:
 1. Call relevant tools immediately
 2. Synthesize tool data into actionable insights
 3. Provide complete final response
+
+📁 FILE HANDLING:
+- When users ask for "download", "return", "give me the file", or "send me the file" → Use return_files_to_user("all")
+- When users want specific files → Use return_files_to_user("0,2,3") with file indices
+- This tool makes files available for download in the chat interface
 
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete
