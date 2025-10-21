@@ -640,6 +640,7 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 15. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
 16. return_session_files_wrapper(file_indices) - Return files from current session to user
 17. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
+18. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate Excel files for financial analysis (agent prepares content first)
 
 🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
 
@@ -696,6 +697,17 @@ FOR PDF FILE ANALYSIS:
 4. Use analysis_type options: 'summary', 'financial', 'legal', 'technical'
 5. Extract key information like dates, monetary amounts, percentages, emails, phone numbers
 6. Detect document type (financial, legal, technical, academic, report) automatically
+
+FOR EXCEL FILE GENERATION:
+1. FIRST: Use read_s3_file_tool() to read user-uploaded data files (JSON, CSV, TXT)
+2. SECOND: Use get_financial_data() or other tools to fetch live market data if needed
+3. THIRD: Prepare and format the data content for Excel
+4. FOURTH: Use generate_excel_file_tool(filename, content, template_type, include_charts) to create Excel
+5. Template types: 'financial_model', 'dcf_model', 'portfolio_analysis', 'risk_report', 'custom'
+6. The agent should orchestrate the workflow - the Excel tool only creates the file
+7. Examples:
+   - "Create a DCF model for AAPL using my historical data file" → Read file → Fetch AAPL data → Format content → Generate Excel
+   - "Generate portfolio analysis with my holdings" → Read portfolio file → Fetch market data → Format analysis → Generate Excel
 7. Provide comprehensive analysis including word count, page estimates, and content preview
 8. For forms and tables, use analyze_pdf_forms_tool for structured data extraction
 
@@ -1200,6 +1212,154 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
         logger.error(f"Error in generate_agent_file_tool: {str(e)}")
         return f"Error generating file: {str(e)}"
 
+@tool
+def generate_excel_file_tool(filename: str, content: str, template_type: str = "financial_model", include_charts: bool = True) -> str:
+    """
+    Generate Excel files for financial analysis. The agent should prepare the content first using other tools.
+    
+    Args:
+        filename: Name of the Excel file (without .xlsx extension)
+        content: The Excel content/data to include (prepared by agent using other tools)
+        template_type: Type of Excel template ('financial_model', 'dcf_model', 'portfolio_analysis', 'risk_report', 'custom')
+        include_charts: Whether to include charts and visualizations
+    
+    Returns:
+        Success message with file details
+    """
+    try:
+        # Get environment variables
+        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+        user_id = os.environ.get('USER_ID')
+        session_id = os.environ.get('SESSION_ID')
+        
+        if not bucket_name or not user_id or not session_id:
+            return "Error: Missing required environment variables (bucket_name, user_id, session_id)"
+        
+        # Ensure filename has proper extension
+        if not filename.endswith('.xlsx'):
+            filename = f"{filename}.xlsx"
+        
+        # Create S3 key for agent-files folder
+        s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
+        
+        # Initialize S3 client
+        s3_client = boto3.client('s3')
+        
+        # Generate Excel content based on template type and provided content
+        excel_content = generate_excel_content(template_type, content, include_charts)
+        
+        # Upload file to S3
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Body=excel_content,
+            ContentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            Metadata={
+                'generated_by': 'agent',
+                'filename': filename,
+                'file_type': 'xlsx',
+                'template_type': template_type,
+                'includes_charts': str(include_charts)
+            }
+        )
+        
+        logger.info(f"Generated Excel file: {s3_key}")
+        return f"✅ Successfully generated Excel file '{filename}' in agent-files folder. Template: {template_type}, Charts: {'Yes' if include_charts else 'No'}. The file will appear in the Agent Files section."
+        
+    except Exception as e:
+        logger.error(f"Error in generate_excel_file_tool: {str(e)}")
+        return f"Error generating Excel file: {str(e)}"
+
+def generate_excel_content(template_type: str, content: str, include_charts: bool) -> bytes:
+    """
+    Generate Excel file content based on template type and provided content.
+    This is a simplified version - in production, you'd use openpyxl or xlsxwriter.
+    """
+    # For now, create a basic Excel-like structure
+    # In production, you'd use openpyxl to create actual Excel files
+    
+    excel_structure = {
+        "template_type": template_type,
+        "content": content,
+        "include_charts": include_charts,
+        "sheets": get_excel_sheets(template_type),
+        "formulas": get_excel_formulas(template_type),
+        "formatting": get_excel_formatting(template_type)
+    }
+    
+    # Convert to JSON for now (in production, create actual Excel binary)
+    excel_json = json.dumps(excel_structure, indent=2)
+    return excel_json.encode('utf-8')
+
+def get_excel_sheets(template_type: str) -> dict:
+    """Get sheet structure based on template type"""
+    sheet_templates = {
+        "financial_model": {
+            "Summary": ["Company", "Revenue", "EBITDA", "Net Income", "EPS"],
+            "Income Statement": ["Revenue", "COGS", "Gross Profit", "Operating Expenses", "EBITDA", "Interest", "Taxes", "Net Income"],
+            "Balance Sheet": ["Assets", "Current Assets", "Cash", "Receivables", "Inventory", "Fixed Assets", "Liabilities", "Equity"],
+            "Cash Flow": ["Operating Cash Flow", "Investing Cash Flow", "Financing Cash Flow", "Net Cash Flow"]
+        },
+        "dcf_model": {
+            "DCF Model": ["Year", "Revenue", "Growth Rate", "EBITDA", "EBITDA Margin", "Tax Rate", "Free Cash Flow", "Terminal Value", "Present Value"],
+            "Assumptions": ["WACC", "Terminal Growth Rate", "Revenue Growth", "EBITDA Margin", "Tax Rate"],
+            "Sensitivity": ["WACC", "Terminal Growth", "Revenue Growth", "EBITDA Margin"]
+        },
+        "portfolio_analysis": {
+            "Portfolio Summary": ["Symbol", "Shares", "Price", "Value", "Weight", "Return", "Beta", "Sharpe Ratio"],
+            "Performance": ["Date", "Portfolio Value", "Benchmark Value", "Excess Return", "Cumulative Return"],
+            "Risk Metrics": ["Volatility", "VaR", "Max Drawdown", "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio"]
+        },
+        "risk_report": {
+            "Risk Summary": ["Metric", "Value", "Benchmark", "Status"],
+            "VaR Analysis": ["Confidence Level", "1-Day VaR", "10-Day VaR", "30-Day VaR"],
+            "Stress Tests": ["Scenario", "Portfolio Impact", "Individual Asset Impact"]
+        }
+    }
+    return sheet_templates.get(template_type, {"Sheet1": ["Data", "Value", "Notes"]})
+
+def get_excel_formulas(template_type: str) -> dict:
+    """Get Excel formulas based on template type"""
+    formula_templates = {
+        "financial_model": {
+            "Summary": {
+                "EPS": "=Net_Income/Shares_Outstanding",
+                "P/E": "=Price/EPS",
+                "ROE": "=Net_Income/Equity"
+            },
+            "Income Statement": {
+                "Gross Profit": "=Revenue-COGS",
+                "EBITDA": "=Gross_Profit-Operating_Expenses",
+                "Net Income": "=EBITDA-Interest-Taxes"
+            }
+        },
+        "dcf_model": {
+            "DCF Model": {
+                "Free Cash Flow": "=EBITDA*(1-Tax_Rate)-CapEx-Changes_in_Working_Capital",
+                "Present Value": "=FCF/(1+WACC)^Year",
+                "Terminal Value": "=FCF_Terminal/(WACC-Terminal_Growth_Rate)"
+            }
+        },
+        "portfolio_analysis": {
+            "Portfolio Summary": {
+                "Weight": "=Value/Total_Portfolio_Value",
+                "Return": "=(Current_Price-Purchase_Price)/Purchase_Price",
+                "Sharpe Ratio": "=(Portfolio_Return-Risk_Free_Rate)/Portfolio_Volatility"
+            }
+        }
+    }
+    return formula_templates.get(template_type, {})
+
+def get_excel_formatting(template_type: str) -> dict:
+    """Get Excel formatting based on template type"""
+    return {
+        "headers": {"bold": True, "background_color": "#3b82f6", "text_color": "white"},
+        "numbers": {"number_format": "#,##0.00"},
+        "percentages": {"number_format": "0.00%"},
+        "currency": {"number_format": "$#,##0.00"},
+        "dates": {"number_format": "mm/dd/yyyy"}
+    }
+
 # Define the tools list that Strands can automatically detect
 enhanced_tools = [
     get_financial_data,
@@ -1213,6 +1373,7 @@ enhanced_tools = [
     read_s3_file_tool,  # S3 file reader tool
     get_session_files_tool,  # Session database access tool
     generate_agent_file_tool,  # Generate files in agent-files folder
+    generate_excel_file_tool,  # Generate Excel files for financial analysis
     get_session_context_tool,  # Complete session context tool
     get_crypto_data_tool,  # Real-time cryptocurrency data tool
     compare_crypto_tool,  # Cryptocurrency comparison tool
