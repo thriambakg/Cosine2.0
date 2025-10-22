@@ -120,7 +120,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
     console.log('🔍 DEBUG: contextItems content:', contextItems);
     
     const targetSessionId = overrideSessionId || sessionId;
-    const messageData = {
+    const messageData: Omit<UnifiedMessageData, 'messageId' | 'userId' | 'source'> = {
       text,
       model,
       type: 'context_message',
