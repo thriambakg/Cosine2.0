@@ -5,6 +5,7 @@ import CryptoTile from '../tiles/CryptoTile';
 import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
 import NewsTile from '../tiles/NewsTile';
+import PortfolioTile from '../tiles/PortfolioTile';
 import PlaceholderTile from '../tiles/PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../tiles/tileConfig';
@@ -27,6 +28,7 @@ interface DragState {
   dragTileId: string | null;
   dragStart: { x: number; y: number };
   currentPosition: GridPosition | null;
+  lastUpdateTime?: number;
 }
 
 interface ResizeState {
@@ -68,6 +70,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     dragTileId: null,
     dragStart: { x: 0, y: 0 },
     currentPosition: null,
+    lastUpdateTime: undefined,
   });
 
   const [selectionState, setSelectionState] = useState<SelectionState>({
@@ -308,15 +311,12 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   // Handle drag start
   const handleDragStart = useCallback((tileId: string, event: React.MouseEvent) => {
     event.preventDefault();
-    console.log('🖱️ Drag start for tile:', tileId);
     const tile = tiles.find(t => t.id === tileId);
     if (!tile) {
-      console.log('❌ Tile not found:', tileId);
       return;
     }
 
     const { position } = getDefaultGridProps(tile);
-    console.log('📍 Starting drag from position:', position);
     
     setDragState({
       isDragging: true,
@@ -326,9 +326,15 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     });
   }, [tiles, getDefaultGridProps]);
 
-  // Handle drag move
+  // Handle drag move with time-based throttling for smoother control
   const handleDragMove = useCallback((event: MouseEvent) => {
     if (!dragState.isDragging || !containerRef.current) return;
+
+    // Throttle updates to prevent too rapid movement
+    const now = Date.now();
+    if (dragState.lastUpdateTime && now - dragState.lastUpdateTime < 50) { // 50ms throttle
+      return;
+    }
 
     const rect = containerRef.current.getBoundingClientRect();
     const relativeX = event.clientX - rect.left;
@@ -347,11 +353,16 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       };
 
       // Only update if position actually changed
-      if (dragState.currentPosition?.x !== constrainedPos.x || dragState.currentPosition?.y !== constrainedPos.y) {
-        console.log('🔄 Updating drag position to:', constrainedPos);
+      const currentPos = dragState.currentPosition;
+      const hasMoved = !currentPos || 
+        currentPos.x !== constrainedPos.x || 
+        currentPos.y !== constrainedPos.y;
+
+      if (hasMoved) {
         setDragState(prev => ({
           ...prev,
           currentPosition: constrainedPos,
+          lastUpdateTime: now,
         }));
       }
     }
@@ -359,22 +370,14 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
   // Handle drag end
   const handleDragEnd = useCallback(() => {
-    console.log('🏁 Drag end:', dragState);
     if (!dragState.isDragging || !dragState.dragTileId || !dragState.currentPosition) return;
 
     const tile = tiles.find(t => t.id === dragState.dragTileId);
     if (tile) {
       const { size } = getDefaultGridProps(tile);
       
-      console.log('🔍 Checking if position is available:', {
-        position: dragState.currentPosition,
-        size,
-        tileId: dragState.dragTileId
-      });
-      
       // Check if the new position is available
       if (isAreaAvailable(dragState.currentPosition, size, dragState.dragTileId)) {
-        console.log('✅ Position available, updating tile');
         // Update the tile's grid position
         onUpdateTile(dragState.dragTileId, {
           gridPosition: dragState.currentPosition,
@@ -384,9 +387,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             y: dragState.currentPosition.y * (cellSize + GRID_GAP),
           }
         });
-        console.log('✅ Tile moved successfully to:', dragState.currentPosition);
-      } else {
-        console.log('❌ Position not available, reverting');
       }
     }
 
@@ -395,6 +395,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       dragTileId: null,
       dragStart: { x: 0, y: 0 },
       currentPosition: null,
+      lastUpdateTime: undefined,
     });
   }, [dragState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile, gridColumns, cellSize]);
 
@@ -866,6 +867,19 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       isPinned: tile.isPinned,
     };
 
+    const portfolioProps = {
+      ...commonProps,
+      displayOptions: (tile.displayOptions as any) || {
+        showHoldings: true,
+        showPerformance: true,
+        showAllocation: false,
+        showRiskMetrics: true,
+        showStockDetails: true,
+      },
+      portfolioData: tile.portfolioData,
+      isPinned: tile.isPinned,
+    };
+
 
     return (
       <Box
@@ -887,6 +901,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           <StockScreenerTile key={tile.id} {...stockScreenerProps} />
         ) : tile.type === 'news' ? (
           <NewsTile key={tile.id} {...newsProps} />
+        ) : tile.type === 'portfolio' ? (
+          <PortfolioTile key={tile.id} {...portfolioProps} />
         ) : (
           <PlaceholderTile
             key={tile.id}

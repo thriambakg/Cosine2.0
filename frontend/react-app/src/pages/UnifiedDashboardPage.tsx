@@ -27,7 +27,8 @@ import {
   AutoAwesome as AutoAwesomeIcon,
   Chat as ChatIcon,
   Settings as SettingsIcon,
-  Article as ArticleIcon
+  Article as ArticleIcon,
+  Assessment as AssessmentIcon
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
@@ -192,14 +193,14 @@ const tileCategories: TileCategory[] = [
         tiles: [
           {
             id: 'portfolio',
-            name: 'Portfolio Overview',
-            description: 'View portfolio performance and allocation',
+            name: 'Portfolio Analysis',
+            description: 'Analyze portfolio risk, performance, and allocation',
             category: 'portfolio',
             subcategory: 'overview',
-            icon: <SettingsIcon />,
+            icon: <AssessmentIcon />,
             color: '#3b82f6',
             isAvailable: true,
-            placeholder: true
+            placeholder: false
           }
         ]
       }
@@ -477,34 +478,14 @@ const UnifiedDashboardPage: React.FC = () => {
   // Get current tiles from the active tab
   const getCurrentDashboardTiles = () => {
     if (activeTab) {
-      console.log('🔍 getCurrentDashboardTiles (tab-based):', {
-        activeTabId: activeTab.id,
-        activeTabName: activeTab.name,
-        activeTabTiles: (activeTab.tiles || []).length,
-        activeTabTilesData: activeTab.tiles || []
-      });
-      
       return activeTab.tiles || [];
     } else {
-      console.log('🔍 getCurrentDashboardTiles: No active tab found');
       return [];
     }
   };
   
   const tiles = getTilesWithUniqueIds(getCurrentDashboardTiles());
   
-  // Debug: Log tiles being rendered
-  console.log('🎯 TILES BEING RENDERED DEBUG START');
-  console.log('Number of tiles:', tiles.length);
-  tiles.forEach(tile => {
-    console.log(`Rendering tile ${tile.id}:`, {
-      gridPosition: tile.gridPosition,
-      gridSize: tile.gridSize,
-      position: tile.position,
-      size: tile.size
-    });
-  });
-  console.log('🎯 TILES BEING RENDERED DEBUG END');
 
 
   // Tab management handlers
@@ -760,6 +741,9 @@ const UnifiedDashboardPage: React.FC = () => {
     } else if (tileType.id === 'news') {
       // Handle news tile creation
       handleCreateNewsTile();
+    } else if (tileType.id === 'portfolio') {
+      // Handle portfolio tile creation
+      handleCreatePortfolioTile();
     } else if (tileType.placeholder) {
       // For placeholder tiles, show a message
       alert(`${tileType.name} tiles are coming soon!`);
@@ -869,6 +853,34 @@ const UnifiedDashboardPage: React.FC = () => {
         countryExpression: [],
       },
       articles: [],
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
+  };
+
+  // Portfolio tile creation handler
+  const handleCreatePortfolioTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `portfolio_${Date.now()}`,
+      type: 'portfolio',
+      title: 'Portfolio Analysis',
+      displayOptions: {
+        showHoldings: true,
+        showPerformance: true,
+        showAllocation: false,
+        showRiskMetrics: true,
+        showStockDetails: true,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 600, height: 800 },
+      gridPosition: findNextAvailablePosition({ width: 6, height: 8 }),
+      gridSize: { width: 6, height: 8 },
+      dashboard_id: currentDashboardId,
     };
 
     const updatedTiles = [...(activeTab.tiles || []), newTile];
@@ -1064,8 +1076,6 @@ const UnifiedDashboardPage: React.FC = () => {
   };
 
   const handleUpdateTile = (id: string, data: any) => {
-    console.log('🔄 handleUpdateTile called:', { id, data });
-    
     if (!activeTabId) {
       console.warn('No active tab ID found, cannot update tile');
       return;
@@ -1073,20 +1083,15 @@ const UnifiedDashboardPage: React.FC = () => {
 
     // Use functional update to get current tiles
     updateTabTiles(activeTabId, (currentTiles) => {
-      console.log('Current tiles before update:', currentTiles.map((t: any) => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
-      
       const updatedTiles = currentTiles.map((tile: any) => 
         tile.id === id ? { ...tile, ...data } : tile
       );
       
-      console.log('Updated tiles after merge:', updatedTiles.map((t: any) => ({ id: t.id, gridPosition: t.gridPosition, gridSize: t.gridSize })));
       return updatedTiles;
     });
   };
 
   const handleSettingsChange = (id: string, settings: any) => {
-    console.log('⚙️ handleSettingsChange called:', { id, settings, activeTabId });
-    
     if (!activeTabId) {
       console.warn('No active tab ID found, cannot update tile settings');
       return;
@@ -1095,19 +1100,15 @@ const UnifiedDashboardPage: React.FC = () => {
     // Use a function-based approach to get CURRENT tiles from state
     // This ensures we always work with the latest data, not stale closures
     updateTabTiles(activeTabId, (currentTiles: any[]) => {
-      console.log('Current tiles before settings update:', currentTiles.map((t: any) => ({ id: t.id, isPinned: t.isPinned, gridPosition: t.gridPosition, gridSize: t.gridSize })));
-      
       const updatedTiles = currentTiles.map((tile: any) => 
         tile.id === id ? { ...tile, ...settings } : tile
       );
       
-      console.log('Updated tiles after settings merge:', updatedTiles.map((t: any) => ({ id: t.id, isPinned: t.isPinned, gridPosition: t.gridPosition, gridSize: t.gridSize })));
       return updatedTiles;
     });
   };
 
   const handleResizeTile = (id: string, size: { width: number; height: number }) => {
-    console.log('🔧 handleResizeTile called:', { id, size });
     if (!activeTabId) return;
 
     // Convert pixel size back to grid size for consistency

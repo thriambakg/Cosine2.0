@@ -106,14 +106,6 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
 
   const { groupedTabs, ungroupedTabs } = getTabsByGroup();
 
-  // Debug current drag state
-  console.log('🔍 Current drag state:', { 
-    draggedTab: draggedTab?.id, 
-    draggedGroup: draggedGroup?.id,
-    dragPreviewPosition,
-    totalTabs: tabs.length,
-    ungroupedTabsCount: ungroupedTabs.length
-  });
 
   const handleContextMenu = (event: React.MouseEvent, tab: DashboardTab) => {
     event.preventDefault();

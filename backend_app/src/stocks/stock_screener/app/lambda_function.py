@@ -79,10 +79,10 @@ try:
     if not ALL_AVAILABLE_STOCKS:
         logger.warning("⚠️ CSV loading returned empty list, falling back to predefined list")
         ALL_AVAILABLE_STOCKS = None
-    else:
+        else:
         logger.info(f"✅ Successfully loaded {len(ALL_AVAILABLE_STOCKS)} stock symbols from CSV")
         logger.info(f"✅ Sample symbols: {ALL_AVAILABLE_STOCKS[:20]}")
-except Exception as e:
+    except Exception as e:
     logger.error(f"❌ Failed to load stock symbols from CSV: {str(e)}")
     import traceback
     logger.error(f"Traceback: {traceback.format_exc()}")
@@ -160,7 +160,7 @@ def enforce_yf_rate_limit():
     lock = get_rate_limit_lock()
     
     with lock:
-        current_time = time.time()
+    current_time = time.time()
         time_since_last = current_time - _last_yf_request_time
         
         if time_since_last < RATE_LIMIT_DELAY:
@@ -1553,7 +1553,7 @@ def lambda_handler(event, context):
                     'message': 'No stocks match the selected criteria. Try adjusting your filters.'
                 }
             else:
-                logger.info(f"Stock screening completed: {len(results)} results found")
+            logger.info(f"Stock screening completed: {len(results)} results found")
             response = {
                 'success': True,
                 'results': results,
@@ -1605,8 +1605,8 @@ def lambda_handler(event, context):
     except TimeoutError as e:
         logger.warning(f"=== LAMBDA TIMEOUT ===")
         logger.warning(f"Timeout error: {str(e)}")
-        
-        return {
+            
+            return {
             'statusCode': 408,  # Request Timeout
                 'headers': {
                     'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
