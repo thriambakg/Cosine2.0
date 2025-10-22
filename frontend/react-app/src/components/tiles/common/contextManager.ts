@@ -30,6 +30,14 @@ export interface TileContextData {
   filters?: any;
   criteria?: any;
   
+  // Portfolio-specific data
+  portfolioData?: {
+    entries: Array<{ stock: string; shares: number }>;
+    results: any;
+    timeframe: string;
+    isExpanded: boolean;
+  };
+  
   // Backend data (to be fetched)
   backendData?: any;
 }
@@ -148,6 +156,16 @@ const getTileSubtitle = (tileType: string, tileData: TileContextData): string =>
     case 'stock':
     case 'crypto':
       return `${tileData.symbol || 'Unknown'} • ${tileData.timeframe || '1d'}`;
+    
+    case 'portfolio':
+      if (tileData.portfolioData?.entries) {
+        const validEntries = tileData.portfolioData.entries.filter(e => e.stock && e.shares > 0);
+        if (validEntries.length > 0) {
+          const stocks = validEntries.map(e => `${e.shares} ${e.stock}`).join(', ');
+          return `${stocks} • ${tileData.portfolioData.timeframe || '1y'}`;
+        }
+      }
+      return 'No holdings • 1y';
     
     case 'news':
       const filterCount = Object.values(tileData.filters || {}).filter(
@@ -413,7 +431,7 @@ export const addCustomToContext = (
  * use fetchTileDataForContext instead.
  */
 export const extractTileData = (tile: any): TileContextData => {
-  return {
+  const baseData = {
     tileId: tile.id,
     tileType: tile.type,
     position: tile.position,
@@ -427,6 +445,16 @@ export const extractTileData = (tile: any): TileContextData => {
     criteria: tile.criteria,
     backendData: tile.backendData || tile.data || {}, // Include backend/API data if available
   };
+
+  // Add portfolio-specific data for portfolio tiles
+  if (tile.type === 'portfolio' && tile.portfolioData) {
+    return {
+      ...baseData,
+      portfolioData: tile.portfolioData, // Include portfolio analysis results, stocks, shares, etc.
+    };
+  }
+
+  return baseData;
 };
 
 /**

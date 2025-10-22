@@ -355,7 +355,49 @@ def get_session_context_tool(session_id: str, user_id: str) -> str:
             for i, item in enumerate(result['context_items'], 1):
                 response_parts.append(f"{i}. {item.get('title', 'Unknown')} ({item.get('type', 'unknown')})")
                 if item.get('data'):
-                    response_parts.append(f"   Data: {json.dumps(item['data'], indent=2, cls=DecimalEncoder)[:200]}...")
+                    data = item['data']
+                    
+                    # Special handling for portfolio tiles
+                    if data.get('tileType') == 'portfolio' and data.get('portfolioData'):
+                        portfolio_data = data['portfolioData']
+                        response_parts.append(f"   Portfolio Tile Details:")
+                        response_parts.append(f"   - Timeframe: {portfolio_data.get('timeframe', 'Unknown')}")
+                        response_parts.append(f"   - Expanded: {portfolio_data.get('isExpanded', False)}")
+                        
+                        # Portfolio holdings
+                        if portfolio_data.get('entries'):
+                            response_parts.append(f"   - Holdings:")
+                            for entry in portfolio_data['entries']:
+                                if entry.get('stock') and entry.get('shares', 0) > 0:
+                                    response_parts.append(f"     • {entry['shares']} shares of {entry['stock']}")
+                        
+                        # Portfolio analysis results
+                        if portfolio_data.get('results'):
+                            results = portfolio_data['results']
+                            response_parts.append(f"   - Analysis Results:")
+                            response_parts.append(f"     • Total Value: ${results.get('total_portfolio_value', 0):.2f}")
+                            response_parts.append(f"     • Expected Return: {results.get('portfolio_expected_return', 0):.2f}%")
+                            response_parts.append(f"     • Volatility: {results.get('portfolio_volatility', 0):.2f}%")
+                            response_parts.append(f"     • Sharpe Ratio: {results.get('sharpe_ratio', 0):.3f}")
+                            
+                            # Individual stock details
+                            if results.get('stock_details'):
+                                response_parts.append(f"     • Individual Stock Details:")
+                                for stock, details in results['stock_details'].items():
+                                    response_parts.append(f"       - {stock}: {details.get('shares', 0)} shares, ${details.get('total_value', 0):.2f} value, {details.get('weight', 0)*100:.1f}% weight")
+                                    response_parts.append(f"         Return: {details.get('annual_return', 0):.2f}%, Volatility: {details.get('annual_volatility', 0):.2f}%")
+                        
+                        # Grid position and size
+                        if data.get('gridPosition'):
+                            pos = data['gridPosition']
+                            response_parts.append(f"   - Grid Position: ({pos.get('x', 0)}, {pos.get('y', 0)})")
+                        if data.get('gridSize'):
+                            size = data['gridSize']
+                            response_parts.append(f"   - Grid Size: {size.get('width', 0)}x{size.get('height', 0)}")
+                    
+                    else:
+                        # For non-portfolio tiles, show truncated data
+                        response_parts.append(f"   Data: {json.dumps(data, indent=2, cls=DecimalEncoder)[:200]}...")
         
         if result.get('context_summary'):
             response_parts.append(f"\nContext Summary:")

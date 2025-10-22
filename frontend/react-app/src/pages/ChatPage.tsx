@@ -291,7 +291,6 @@ export default function ChatPage() {
     isProcessing: isUnifiedProcessing,
     crossInterfaceLoading,
     sendMessage: sendUnifiedMessage,
-    sendContextMessage: sendUnifiedContextMessage,
     sendFileMessage: sendUnifiedFileMessage,
     sendFollowupMessage: sendUnifiedFollowupMessage,
     sendEditMessage: sendUnifiedEditMessage
@@ -944,9 +943,13 @@ export default function ChatPage() {
         console.log(`📁 ChatPage: Sending file message with ${uploadedFiles.length} files`);
         result = await sendUnifiedFileMessage(inputMessage, uploadedFiles as unknown as File[], selectedModel);
       } else if (sessionContext.length > 0 && hasContextChanged()) {
-        // Context message (only if context has changed)
-        console.log(`📋 ChatPage: Sending context message with ${sessionContext.length} context items (context changed)`);
-        result = await sendUnifiedContextMessage(inputMessage, sessionContext, selectedModel);
+        // Context has changed but don't send context data - agent will fetch from database
+        console.log(`📋 ChatPage: Context changed (${sessionContext.length} items) - sending regular message (agent will fetch context from database)`);
+        result = await sendUnifiedMessage({
+          text: inputMessage,
+          model: selectedModel,
+          type: 'new_message'
+        });
         // Update previous context after sending
         previousContextRef.current = [...sessionContext];
       } else if (currentSession?.session_id) {
