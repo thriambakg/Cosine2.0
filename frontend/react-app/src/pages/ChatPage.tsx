@@ -258,8 +258,12 @@ export default function ChatPage() {
     const currentContext = sessionContext;
     const previousContext = previousContextRef.current;
     
+    console.log('🔍 DEBUG: ChatPage hasContextChanged - currentContext:', currentContext);
+    console.log('🔍 DEBUG: ChatPage hasContextChanged - previousContext:', previousContext);
+    
     // Compare lengths first (quick check)
     if (currentContext.length !== previousContext.length) {
+      console.log(`📋 ChatPage: Context length changed: ${previousContext.length} → ${currentContext.length}`);
       return true;
     }
     
@@ -271,19 +275,25 @@ export default function ChatPage() {
       if (!previous || 
           current.id !== previous.id || 
           current.timestamp !== previous.timestamp) {
+        console.log(`📋 ChatPage: Context item changed at index ${i}:`, { current, previous });
         return true;
       }
     }
     
+    console.log('🔍 DEBUG: ChatPage hasContextChanged - no changes detected, returning false');
     return false;
   }, [sessionContext]);
   
-  // Update previous context when session changes
+  // Update previous context when session changes (but not on every sessionContext change)
   useEffect(() => {
     if (currentSession?.session_id) {
-      previousContextRef.current = [...sessionContext];
+      // Only update if this is a new session, not a context change
+      if (previousContextRef.current.length === 0) {
+        previousContextRef.current = [...sessionContext];
+        console.log('🔍 DEBUG: ChatPage: Initial previousContextRef.current set for new session:', previousContextRef.current);
+      }
     }
-  }, [currentSession?.session_id, sessionContext]);
+  }, [currentSession?.session_id]);
   
   // NEW: Unified messaging system for centralized message handling
   const {
@@ -291,6 +301,7 @@ export default function ChatPage() {
     isProcessing: isUnifiedProcessing,
     crossInterfaceLoading,
     sendMessage: sendUnifiedMessage,
+    sendContextMessage: sendUnifiedContextMessage,
     sendFileMessage: sendUnifiedFileMessage,
     sendFollowupMessage: sendUnifiedFollowupMessage,
     sendEditMessage: sendUnifiedEditMessage
@@ -619,6 +630,70 @@ export default function ChatPage() {
     }
   }, [currentSession?.session_id, currentSession?.session_variables]);
 
+  // Listen for tiles being added to context in existing sessions
+  useEffect(() => {
+    const handleAddToContext = (event: CustomEvent) => {
+      console.log('🎯 ChatPage: Received add-to-context event:', event.detail);
+      const newItem: ContextItem = event.detail;
+      
+      setSessionContext((prev) => {
+        console.log('🔍 DEBUG: ChatPage: Current sessionContext before update:', prev);
+        console.log('🔍 DEBUG: ChatPage: Adding new item:', newItem);
+        
+        // Check if item already exists (by id prefix to avoid duplicates)
+        const baseId = newItem.id.split('_').slice(0, -1).join('_');
+        const exists = prev.some(item => item.id.startsWith(baseId));
+        if (exists) {
+          console.log('⚠️ ChatPage: Item already in context, skipping:', newItem.id);
+          return prev;
+        }
+        
+        console.log('✅ ChatPage: Adding item to context:', newItem);
+        
+        // Update previous context ref to mark that context has changed
+        // This ensures the next message will send context data
+        previousContextRef.current = prev; // Keep the old context for change detection
+        
+        const newContext = [...prev, newItem];
+        console.log('🔍 DEBUG: ChatPage: New sessionContext after update:', newContext);
+        console.log('🔍 DEBUG: ChatPage: Updated previousContextRef.current:', previousContextRef.current);
+        console.log('🎯 ChatPage: Context change detection scenario completed - context data is ready for next message');
+        console.log('🔍 DEBUG: ChatPage: Final contextItems after direct add:', newContext);
+        console.log('🔍 DEBUG: ChatPage: Context length after direct add:', newContext.length);
+        
+        return newContext;
+      });
+    };
+
+    const handleContextSync = (event: CustomEvent) => {
+      const { sessionId, contextItems } = event.detail;
+      console.log('🔄 ChatPage: Received context sync from Sidebar:', { sessionId, itemCount: contextItems.length });
+      
+      if (sessionId === currentSession?.session_id) {
+        // Update previous context ref to mark that context has changed
+        // This ensures the next message will send context data
+        previousContextRef.current = sessionContext; // Keep the old context for change detection
+        console.log('🔍 DEBUG: ChatPage: Updated previousContextRef.current for sync:', previousContextRef.current);
+        
+        setSessionContext(contextItems);
+        console.log('✅ ChatPage: Synced context from Sidebar');
+        console.log('🎯 ChatPage: Context change detection scenario completed - context data is ready for next message');
+        console.log('🔍 DEBUG: ChatPage: Final contextItems after sync:', contextItems);
+        console.log('🔍 DEBUG: ChatPage: Context length after sync:', contextItems.length);
+      }
+    };
+
+    console.log('🎧 ChatPage: Setting up event listeners for add-to-context and session-context-updated');
+    window.addEventListener('add-to-context', handleAddToContext as EventListener);
+    window.addEventListener('session-context-updated', handleContextSync as EventListener);
+    
+    return () => {
+      console.log('🎧 ChatPage: Removing event listeners for add-to-context and session-context-updated');
+      window.removeEventListener('add-to-context', handleAddToContext as EventListener);
+      window.removeEventListener('session-context-updated', handleContextSync as EventListener);
+    };
+  }, [currentSession?.session_id]);
+
   // Note: All message handling is now done by the unified messaging system
 
   const scrollToBottom = () => {
@@ -943,13 +1018,18 @@ export default function ChatPage() {
         console.log(`📁 ChatPage: Sending file message with ${uploadedFiles.length} files`);
         result = await sendUnifiedFileMessage(inputMessage, uploadedFiles as unknown as File[], selectedModel);
       } else if (sessionContext.length > 0 && hasContextChanged()) {
-        // Context has changed but don't send context data - agent will fetch from database
-        console.log(`📋 ChatPage: Context changed (${sessionContext.length} items) - sending regular message (agent will fetch context from database)`);
-        result = await sendUnifiedMessage({
-          text: inputMessage,
-          model: selectedModel,
-          type: 'new_message'
-        });
+        // Context has changed - send context data for initial message, agent will fetch from database for follow-ups
+        console.log(`📋 ChatPage: Context changed (${sessionContext.length} items) - sending context message with tile data`);
+        console.log('🔍 DEBUG: sessionContext state:', sessionContext);
+        console.log('🔍 DEBUG: sessionContext.length:', sessionContext.length);
+        console.log('🔍 DEBUG: hasContextChanged():', hasContextChanged());
+        console.log('🔍 DEBUG: previousContextRef.current:', previousContextRef.current);
+        console.log('🎯 ChatPage: USER SENDING MESSAGE - Context change detection triggered, context data ready to be sent!');
+        console.log('🔍 DEBUG: ChatPage: About to send contextItems to WebSocket:', sessionContext);
+        console.log('🔍 DEBUG: ChatPage: sessionContext state when sending message:', sessionContext);
+        console.log('🔍 DEBUG: ChatPage: sessionContext length when sending message:', sessionContext.length);
+        console.log('🔍 DEBUG: ChatPage: sessionContext content when sending message:', JSON.stringify(sessionContext, null, 2));
+        result = await sendUnifiedContextMessage(inputMessage, sessionContext, selectedModel);
         // Update previous context after sending
         previousContextRef.current = [...sessionContext];
       } else if (currentSession?.session_id) {

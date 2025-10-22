@@ -152,8 +152,12 @@ const GlobalChatSidebar: React.FC = () => {
     const currentContext = sessionContext;
     const previousContext = previousContextRef.current;
     
+    console.log('🔍 DEBUG: Sidebar hasContextChanged - currentContext:', currentContext);
+    console.log('🔍 DEBUG: Sidebar hasContextChanged - previousContext:', previousContext);
+    
     // Compare lengths first (quick check)
     if (currentContext.length !== previousContext.length) {
+      console.log(`📋 Sidebar: Context length changed: ${previousContext.length} → ${currentContext.length}`);
       return true;
     }
     
@@ -165,19 +169,25 @@ const GlobalChatSidebar: React.FC = () => {
       if (!previous || 
           current.id !== previous.id || 
           current.timestamp !== previous.timestamp) {
+        console.log(`📋 Sidebar: Context item changed at index ${i}:`, { current, previous });
         return true;
       }
     }
     
+    console.log('🔍 DEBUG: Sidebar hasContextChanged - no changes detected, returning false');
     return false;
   }, [sessionContext]);
   
-  // Update previous context when session changes
+  // Update previous context when session changes (but not on every sessionContext change)
   useEffect(() => {
     if (activeSessionId) {
-      previousContextRef.current = [...sessionContext];
+      // Only update if this is a new session, not a context change
+      if (previousContextRef.current.length === 0) {
+        previousContextRef.current = [...sessionContext];
+        console.log('🔍 DEBUG: Sidebar: Initial previousContextRef.current set for new session:', previousContextRef.current);
+      }
     }
-  }, [activeSessionId, sessionContext]);
+  }, [activeSessionId]);
   
   const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
@@ -407,6 +417,7 @@ const GlobalChatSidebar: React.FC = () => {
     isProcessing: isUnifiedProcessing,
     crossInterfaceLoading,
     sendMessage: sendUnifiedMessage,
+    sendContextMessage: sendUnifiedContextMessage,
     sendFileMessage: sendUnifiedFileMessage,
     sendFollowupMessage: sendUnifiedFollowupMessage
   } = useUnifiedMessaging({
@@ -877,12 +888,25 @@ const GlobalChatSidebar: React.FC = () => {
       }
       
       // Add to current session context
+      console.log('🔍 DEBUG: Sidebar: Current sessionContext before update:', sessionContext);
+      console.log('🔍 DEBUG: Sidebar: Adding new item:', contextItem);
+      
+      // Update previous context ref to mark that context has changed
+      // This ensures the next message will send context data
+      previousContextRef.current = sessionContext; // Keep the old context for change detection
+      
       const newContext = [...sessionContext, contextItem];
       setSessionContext(newContext);
+      console.log('🔍 DEBUG: Sidebar: New sessionContext after update:', newContext);
+      console.log('🔍 DEBUG: Sidebar: Updated previousContextRef.current:', previousContextRef.current);
+      console.log('🎯 Sidebar: Context change detection scenario completed - context data is ready for next message');
+      console.log('🔍 DEBUG: Sidebar: Final contextItems after direct add:', newContext);
+      console.log('🔍 DEBUG: Sidebar: Context length after direct add:', newContext.length);
+      
       console.log('✅ Added to sidebar context');
       console.log('📌 Context item data:', JSON.stringify(contextItem, null, 2));
       
-      // Notify ChatPage of context change
+      // Notify ChatPage of context change AFTER change detection is set up
       const syncEvent = new CustomEvent('session-context-updated', {
         detail: { sessionId: activeSessionId, contextItems: newContext }
       });
@@ -956,6 +980,11 @@ const GlobalChatSidebar: React.FC = () => {
       console.log('🔄 Sidebar: Received context sync from ChatPage:', { sessionId, itemCount: contextItems.length });
       
       if (sessionId === activeSessionId) {
+        // Don't update previousContextRef here - it should already be set correctly
+        // The context sync is just synchronizing the state, not adding new items
+        console.log('🔍 DEBUG: Sidebar: Context sync - not updating previousContextRef.current');
+        console.log('🔍 DEBUG: Sidebar: Current previousContextRef.current:', previousContextRef.current);
+        
         setSessionContext(contextItems);
         console.log('✅ Sidebar: Synced context from ChatPage');
       }
@@ -1130,13 +1159,18 @@ const GlobalChatSidebar: React.FC = () => {
         console.log(`📁 Sidebar: Sending file message with ${uploadedFiles.length} files`);
         result = await sendUnifiedFileMessage(inputMessage, uploadedFiles as unknown as File[], selectedModel);
       } else if (sessionContext.length > 0 && hasContextChanged()) {
-        // Context has changed but don't send context data - agent will fetch from database
-        console.log(`📋 Sidebar: Context changed (${sessionContext.length} items) - sending regular message (agent will fetch context from database)`);
-        result = await sendUnifiedMessage({
-          text: inputMessage,
-          model: selectedModel,
-          type: 'new_message'
-        });
+        // Context has changed - send context data for initial message, agent will fetch from database for follow-ups
+        console.log(`📋 Sidebar: Context changed (${sessionContext.length} items) - sending context message with tile data`);
+        console.log('🔍 DEBUG: sessionContext state:', sessionContext);
+        console.log('🔍 DEBUG: sessionContext.length:', sessionContext.length);
+        console.log('🔍 DEBUG: hasContextChanged():', hasContextChanged());
+        console.log('🔍 DEBUG: previousContextRef.current:', previousContextRef.current);
+        console.log('🎯 Sidebar: USER SENDING MESSAGE - Context change detection triggered, context data ready to be sent!');
+        console.log('🔍 DEBUG: Sidebar: About to send contextItems to WebSocket:', sessionContext);
+        console.log('🔍 DEBUG: Sidebar: sessionContext state when sending message:', sessionContext);
+        console.log('🔍 DEBUG: Sidebar: sessionContext length when sending message:', sessionContext.length);
+        console.log('🔍 DEBUG: Sidebar: sessionContext content when sending message:', JSON.stringify(sessionContext, null, 2));
+        result = await sendUnifiedContextMessage(inputMessage, sessionContext, selectedModel);
         // Update previous context after sending
         previousContextRef.current = [...sessionContext];
       } else if (activeSessionId) {
@@ -1181,7 +1215,7 @@ const GlobalChatSidebar: React.FC = () => {
         unifiedMessageHandler.broadcastLoadingState(activeSessionId, false, 'sidebar');
       }
     }
-  }, [inputMessage, activeSessionId, user?.id, selectedModel, uploadedFiles, sessionContext, isUnifiedProcessing, sendUnifiedMessage, sendUnifiedFileMessage, sendUnifiedFollowupMessage, setActiveSessionId]);
+  }, [inputMessage, activeSessionId, user?.id, selectedModel, uploadedFiles, sessionContext, isUnifiedProcessing, sendUnifiedMessage, sendUnifiedContextMessage, sendUnifiedFileMessage, sendUnifiedFollowupMessage, setActiveSessionId]);
 
   const handleKeyPress = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {

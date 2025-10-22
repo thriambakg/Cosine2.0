@@ -84,6 +84,9 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
       };
 
       console.log(`📤 ${source}: Sending message via unified handler:`, fullMessageData.messageId);
+      console.log('🔍 DEBUG: sendMessage - fullMessageData being passed to processMessage:', fullMessageData);
+      console.log('🔍 DEBUG: sendMessage - contextItems in fullMessageData:', fullMessageData.contextItems);
+      console.log('🔍 DEBUG: sendMessage - contextItems length:', fullMessageData.contextItems?.length || 0);
       
       const result = await unifiedMessageHandler.processMessage(fullMessageData);
       
@@ -112,8 +115,12 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
     model: string = 'claude-3-sonnet',
     overrideSessionId?: string
   ) => {
+    console.log('🔍 DEBUG: sendContextMessage called with:', { text, contextItems, model, overrideSessionId });
+    console.log('🔍 DEBUG: contextItems length:', contextItems.length);
+    console.log('🔍 DEBUG: contextItems content:', contextItems);
+    
     const targetSessionId = overrideSessionId || sessionId;
-    return sendMessage({
+    const messageData = {
       text,
       model,
       type: 'context_message',
@@ -125,7 +132,10 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
         hasContext: true,
         contextCount: contextItems.length
       }
-    });
+    };
+    
+    console.log('🔍 DEBUG: sendContextMessage - messageData being passed to sendMessage:', messageData);
+    return sendMessage(messageData);
   }, [sendMessage, sessionId]);
 
   // Send file message

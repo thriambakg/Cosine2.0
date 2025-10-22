@@ -68,6 +68,12 @@ export interface UnifiedTile {
   results?: StockResult[]; // For stock_screener tiles
   filters?: NewsFilters; // For news tiles
   articles?: NewsArticle[]; // For news tiles
+  portfolioData?: { // For portfolio tiles
+    entries: Array<{ stock: string; shares: number }>;
+    results: any;
+    timeframe: string;
+    isExpanded: boolean;
+  };
   displayOptions: {
     [key: string]: any; // Flexible display options for different tile types
   };

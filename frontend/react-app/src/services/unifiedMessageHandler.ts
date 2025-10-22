@@ -73,6 +73,8 @@ class UnifiedMessageHandlerService {
    */
   async processMessage(messageData: UnifiedMessageData): Promise<SessionCreationResult> {
     console.log('🎯 UnifiedMessageHandler: Processing message:', messageData.type, 'from:', messageData.source);
+    console.log('🔍 DEBUG: processMessage - messageData.contextItems:', messageData.contextItems);
+    console.log('🔍 DEBUG: processMessage - contextItems length:', messageData.contextItems?.length || 0);
     
     // Check if already processing this message
     if (this.processingQueue.has(messageData.messageId)) {
@@ -98,6 +100,9 @@ class UnifiedMessageHandlerService {
    */
   private async handleMessageProcessing(messageData: UnifiedMessageData): Promise<SessionCreationResult> {
     try {
+      console.log('🔍 DEBUG: handleMessageProcessing - messageData.contextItems:', messageData.contextItems);
+      console.log('🔍 DEBUG: handleMessageProcessing - contextItems length:', messageData.contextItems?.length || 0);
+      
       // Step 1: Ensure session exists
       const sessionResult = await this.ensureSessionExists(messageData);
       if (!sessionResult.success) {
@@ -228,6 +233,8 @@ class UnifiedMessageHandlerService {
    */
   private async processContextMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
     console.log('📋 UnifiedMessageHandler: Processing context message for session:', sessionId);
+    console.log('🔍 DEBUG: processContextMessage - messageData.contextItems:', messageData.contextItems);
+    console.log('🔍 DEBUG: processContextMessage - contextItems length:', messageData.contextItems?.length || 0);
     
     // Ensure WebSocket connection
     await this.ensureWebSocketConnection(sessionId, messageData.userId);
@@ -453,6 +460,10 @@ class UnifiedMessageHandlerService {
       contextItems: messageData.contextItems || [],
       context: messageData.context
     };
+
+    console.log('🔍 DEBUG: sendWebSocketMessage - messageRequest being sent to WebSocket:', messageRequest);
+    console.log('🔍 DEBUG: sendWebSocketMessage - contextItems in messageRequest:', messageRequest.contextItems);
+    console.log('🔍 DEBUG: sendWebSocketMessage - contextItems length:', messageRequest.contextItems.length);
 
     try {
       ws.send(JSON.stringify(messageRequest));
