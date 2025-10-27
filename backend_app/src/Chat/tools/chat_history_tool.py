@@ -49,15 +49,26 @@ class ChatHistoryAccess:
     def _parse_dynamodb_message(self, message_item: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse DynamoDB message format to extract message data
+        Handles both DynamoDB M/S/N/L format and already parsed format
         
         Args:
-            message_item: DynamoDB message item with nested M/S/N/L format
+            message_item: DynamoDB message item (either M/S/N/L format or already parsed)
             
         Returns:
             Parsed message dictionary
         """
         try:
-            # Extract the 'M' (Map) wrapper
+            # Check if this is already in parsed format (has direct keys)
+            if 'text' in message_item and 'sender' in message_item:
+                # Already parsed format - just convert Decimal to int for timestamp
+                parsed_message = dict(message_item)
+                if 'timestamp' in parsed_message and hasattr(parsed_message['timestamp'], 'to_integral_value'):
+                    parsed_message['timestamp'] = int(parsed_message['timestamp'])
+                elif isinstance(parsed_message.get('timestamp'), str):
+                    parsed_message['timestamp'] = int(parsed_message['timestamp'])
+                return parsed_message
+            
+            # DynamoDB M/S/N/L format - extract the 'M' (Map) wrapper
             message_map = message_item.get('M', {})
             
             # Parse each field from DynamoDB format
@@ -108,6 +119,7 @@ class ChatHistoryAccess:
             
         except Exception as e:
             logger.error(f"Error parsing DynamoDB message: {str(e)}")
+            logger.error(f"Message item that failed: {message_item}")
             return {
                 'text': '',
                 'sender': 'unknown',
