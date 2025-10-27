@@ -1395,7 +1395,7 @@ export default function ChatPage() {
                     <MenuItem value="claude-opus-4-1" title="Strikes ideal balance between intelligence and speed">
                       Balanced
                     </MenuItem>
-                    <MenuItem value="claude-3-haiku" title="Fastest, most compact model for near-instant responsiveness">
+                    <MenuItem value="claude-haiku-4-5" title="Fastest, most compact model for near-instant responsiveness">
                       Fast
                     </MenuItem>
                     <MenuItem value="nova-lite" title="Multimodal understanding model for text, images, and videos">

@@ -272,7 +272,7 @@ def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_fi
             'message': message['text'],
             'contextItems': enriched_context_items,
             'uploadedFiles': uploaded_files,  # Separate file uploads
-            'model': 'claude-3-sonnet',  # Default model
+            'model': 'claude-opus-4-1',  # Default model
             'sessionId': session_id,
             'userId': user_id,
             'timestamp': message.get('timestamp', int(datetime.utcnow().timestamp() * 1000))

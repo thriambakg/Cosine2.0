@@ -26,14 +26,14 @@ class ContextAwareAgent:
         
         logger.info("ContextAwareAgent system initialized")
     
-    def get_session_agent(self, session_context: Dict[str, Any], model_name: str = 'claude-3-sonnet') -> Any:
+    def get_session_agent(self, session_context: Dict[str, Any], model_name: str = 'claude-opus-4-1') -> Any:
         """
         Get or create a session-specific agent with proper context and model
         
         Args:
             session_context: Complete session context from SessionManager
             model_name: Name of the model to use:
-                       - 'claude-3-sonnet': Claude 3 Sonnet (default)
+                       - 'claude-opus-4-1': Claude Opus 4.1 (default)
                        - 'claude-haiku-4-5': Claude Haiku 4.5 (faster, cheaper)
                        - 'gpt-4': Maps to Claude 3 Sonnet (until proper GPT-4 access is configured)
                        - 'gpt-3.5-turbo': Maps to Claude 3 Haiku (until proper GPT-3.5 access is configured)
@@ -80,7 +80,7 @@ class ContextAwareAgent:
             # Fallback to base agent
             return self.base_agent
     
-    def _create_session_agent(self, session_context: Dict[str, Any], model_name: str = 'claude-3-sonnet') -> Any:
+    def _create_session_agent(self, session_context: Dict[str, Any], model_name: str = 'claude-opus-4-1') -> Any:
         """
         Create a new agent instance with session-specific context and model
         
@@ -107,8 +107,8 @@ class ContextAwareAgent:
             from agent import MODELS
             
             if model_name not in MODELS:
-                logger.warning(f"Unknown model '{model_name}', falling back to claude-3-sonnet")
-                model_name = 'claude-3-sonnet'
+                logger.warning(f"Unknown model '{model_name}', falling back to claude-opus-4-1")
+                model_name = 'claude-opus-4-1'
             
             selected_model = MODELS[model_name]
             logger.info(f"Creating session agent with model: {model_name}")

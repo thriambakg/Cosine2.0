@@ -459,9 +459,9 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 logger.info(f"🔍 DEBUG: Found user_id in 'context.userId' field: '{user_id}'")
         
         # Extract model
-        model = 'claude-3-sonnet'  # Default model
+        model = 'claude-opus-4-1'  # Default model
         if 'model' in event_body:
-            model = event_body.get('model', 'claude-3-sonnet').strip()
+            model = event_body.get('model', 'claude-opus-4-1').strip()
             logger.info(f"🔍 DEBUG: Found model in 'model' field: '{model}'")
         else:
             logger.info(f"🔍 DEBUG: No model found in event_body, using default: '{model}'")
@@ -840,7 +840,7 @@ def test_lambda_locally():
                 'action': 'chat',
                 'message': 'Hello, this is a test message',
                 'userId': 'test-user-123',
-                'model': 'claude-3-sonnet',
+                'model': 'claude-opus-4-1',
                 'files': [],
                 'context': {
                     'currentPage': 'chat',
@@ -864,7 +864,7 @@ def test_simple_event():
         "action": "chat",
         "message": "Hello, this is a test message",
         "userId": "test-user-123",
-        "model": "claude-3-sonnet",
+        "model": "claude-opus-4-1",
         "files": [],
         "context": {
             "currentPage": "chat",

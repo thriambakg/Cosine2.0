@@ -14,7 +14,7 @@ export const usePersistentModel = () => {
         // Validate that the stored model is one of the available options
         const availableModels = [
           'claude-opus-4-1',
-          'claude-3-haiku', 
+          'claude-haiku-4-5', 
           'nova-lite',
           'gpt-oss-120b',
           'gpt-oss-20b'

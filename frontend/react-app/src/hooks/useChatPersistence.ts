@@ -208,7 +208,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       console.log('📋 Creating new session...');
       const response = await api.sessions.createSession(userId, {
         title: title || new Date().toLocaleString(),
-        model: model || 'claude-3-sonnet',
+        model: model || 'claude-opus-4-1',
         create_welcome_message: false
       });
       
@@ -241,7 +241,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         const localSession: ChatSession = {
           session_id: localSessionId,
           title: sessionTitle,
-          model: model || 'claude-3-sonnet',
+          model: model || 'claude-opus-4-1',
           created_at: now,
           last_updated: now,
           message_count: 0,

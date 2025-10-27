@@ -153,7 +153,7 @@ def process_message(connection_id, user_id, session_id, message_data):
     try:
         message_type = message_data.get('type', 'chat')
         message_text = message_data.get('message', '')
-        model = message_data.get('model', 'claude-3-sonnet')
+        model = message_data.get('model', 'claude-opus-4-1')
         files = message_data.get('files', [])
         
         # Use message ID from frontend if provided, otherwise generate one
@@ -620,7 +620,7 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
     try:
         message_id = message_data.get('messageId')
         new_text = message_data.get('newText')
-        model = message_data.get('model', 'claude-3-sonnet')
+        model = message_data.get('model', 'claude-opus-4-1')
         
         if not all([message_id, new_text]):
             logger.error(f"Missing required fields for edit message: messageId={message_id}, newText={new_text}")
