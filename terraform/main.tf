@@ -1680,12 +1680,12 @@ resource "aws_lambda_permission" "agent_files_processor_s3" {
   action        = "lambda:InvokeFunction"
   function_name = module.agent_files_processor_lambda.function_name
   principal     = "s3.amazonaws.com"
-  source_arn    = data.terraform_remote_state.base_infra.outputs.chat_files_s3_bucket_arn
+  source_arn    = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn
 }
 
 # S3 Bucket Notification for Agent Files (Direct Lambda Invocation)
 resource "aws_s3_bucket_notification" "agent_files_lambda" {
-  bucket = data.terraform_remote_state.base_infra.outputs.chat_files_s3_bucket_id
+  bucket = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
 
   lambda_function {
     lambda_function_arn = module.agent_files_processor_lambda.function_arn
