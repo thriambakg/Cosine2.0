@@ -616,7 +616,7 @@ MODELS = {
     'claude-opus-4-1': BedrockModel(
         model_id="us.anthropic.claude-opus-4-1-20250805-v1:0"
     ),
-    'claude-3-haiku': BedrockModel(
+    'claude-haiku-4-5': BedrockModel(
         model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0"
     ),
     'nova-lite': BedrockModel(
@@ -1707,7 +1707,7 @@ def create_financial_agent(model_name: str = 'claude-opus-4-1') -> Agent:
     Args:
         model_name: Name of the model to use:
                    - 'claude-opus-4-1': Claude Opus 4.1 (default)
-                   - 'claude-3-haiku': Claude 3 Haiku (faster, cheaper)
+                   - 'claude-haiku-4-5': Claude Haiku 4.5 (faster, cheaper)
                    - 'gpt-oss-120b': OpenAI GPT-OSS 120B (high performance)
                    - 'gpt-oss-20b': OpenAI GPT-OSS 20B (faster, efficient)
         

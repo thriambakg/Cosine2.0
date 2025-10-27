@@ -497,7 +497,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         if session_id and user_id:
             # Get existing session context
             logger.info(f"🔍 DEBUG: Retrieving session context for session {session_id}")
-            session_context = session_manager.get_session_context(session_id, user_id)
+            session_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
             
             if not session_context:
                 logger.error(f"❌ Session {session_id} not found for user {user_id} - this should not happen if frontend is working correctly")
@@ -533,7 +533,7 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
                 logger.info("🔍 DEBUG: No session_id provided, creating new session")
                 page_context = event_body.get('context', {})
                 session_id = session_manager.create_session(user_id or 'default', page_context, model)
-                session_context = session_manager.get_session_context(session_id, user_id or 'default')
+                session_context = session_manager.get_session_context(session_id, user_id or 'default', include_conversation_history=False)
                 is_new_session = True
             else:
                 logger.error(f"❌ Missing user_id for session {session_id}")

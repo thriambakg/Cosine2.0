@@ -489,7 +489,7 @@ const GlobalChatSidebar: React.FC = () => {
   // Available models with nicknames and tooltips
   const availableModels = [
     { value: 'claude-opus-4-1', label: 'Balanced', tooltip: 'Strikes ideal balance between intelligence and speed' },
-    { value: 'claude-3-haiku', label: 'Fast', tooltip: 'Fastest, most compact model for near-instant responsiveness' },
+    { value: 'claude-haiku-4-5', label: 'Fast', tooltip: 'Fastest, most compact model for near-instant responsiveness' },
     { value: 'nova-lite', label: 'Multimodal', tooltip: 'Multimodal understanding model for text, images, and videos' },
     { value: 'gpt-oss-120b', label: 'Deep', tooltip: 'Complex reasoning, extended thinking, sophisticated analysis' },
     { value: 'gpt-oss-20b', label: 'Smart', tooltip: 'Intelligent reasoning, complex problem-solving, efficient' },

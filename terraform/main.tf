@@ -992,6 +992,7 @@ resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
           "arn:aws:bedrock:*:*:foundation-model/openai.gpt-oss-20b-1:0",
           # Foundation models (legacy model IDs) - Fallback support
           "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-opus-4-1-20250805-v1:0",
+          "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
           "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-3-haiku-20240307-v1:0",
           "arn:aws:bedrock:*:*:foundation-model/amazon.nova-lite-v1:0",
           # Inference profiles for cross-region inference
@@ -1002,6 +1003,7 @@ resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
           "arn:aws:bedrock:*:*:inference-profile/openai.gpt-oss-20b-1:0",
           # Inference profiles (legacy model IDs) - Fallback support
           "arn:aws:bedrock:*:*:inference-profile/anthropic.claude-opus-4-1-20250805-v1:0",
+          "arn:aws:bedrock:*:*:inference-profile/anthropic.claude-haiku-4-5-20251001-v1:0",
           "arn:aws:bedrock:*:*:inference-profile/anthropic.claude-3-haiku-20240307-v1:0",
           "arn:aws:bedrock:*:*:inference-profile/amazon.nova-lite-v1:0"
         ]

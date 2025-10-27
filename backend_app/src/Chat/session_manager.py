@@ -92,13 +92,14 @@ class SessionManager:
             logger.error(f"Error creating session: {str(e)}")
             raise
     
-    def get_session_context(self, session_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_session_context(self, session_id: str, user_id: str, include_conversation_history: bool = False) -> Optional[Dict[str, Any]]:
         """
         Retrieve session context with validation
         
         Args:
             session_id: Unique identifier for the session
             user_id: User ID for validation
+            include_conversation_history: Whether to include full conversation history (default: False for efficiency)
             
         Returns:
             session_context: Complete session context or None if not found
@@ -123,38 +124,33 @@ class SessionManager:
                 logger.warning(f"Invalid session access attempt: {session_id} by {user_id}")
                 return None
             
-            # Build conversation history from messages array
+            # Only build conversation history if explicitly requested
             conversation_history = []
-            messages = session_item.get('messages', [])
-            
-            logger.info(f"🔍 DEBUG: Building conversation history from {len(messages)} messages")
-            for i, message in enumerate(messages):
-                logger.info(f"🔍 DEBUG: Message {i+1}: sender={message.get('sender')}, text='{message.get('text', '')[:100]}...'")
-            
-            for message in messages:
-                if message.get('sender') == 'user':
-                    conversation_history.append({
-                        'timestamp': message['timestamp'],
-                        'user_message': message.get('text', ''),
-                        'agent_response': ''
-                    })
-                    logger.info(f"🔍 DEBUG: Added user message to conversation history: '{message.get('text', '')[:100]}...'")
-                elif message.get('sender') == 'bot':
-                    # Add to the last conversation entry or create new one
-                    if conversation_history and conversation_history[-1]['agent_response'] == '':
-                        conversation_history[-1]['agent_response'] = message.get('text', '')
-                        logger.info(f"🔍 DEBUG: Paired bot response with last user message: '{message.get('text', '')[:100]}...'")
-                    else:
+            if include_conversation_history:
+                messages = session_item.get('messages', [])
+                logger.info(f"🔍 DEBUG: Building conversation history from {len(messages)} messages")
+                
+                for message in messages:
+                    if message.get('sender') == 'user':
                         conversation_history.append({
                             'timestamp': message['timestamp'],
-                            'user_message': '',
-                            'agent_response': message.get('text', '')
+                            'user_message': message.get('text', ''),
+                            'agent_response': ''
                         })
-                        logger.info(f"🔍 DEBUG: Added standalone bot response to conversation history: '{message.get('text', '')[:100]}...'")
-            
-            logger.info(f"🔍 DEBUG: Final conversation history has {len(conversation_history)} entries")
-            for i, conv in enumerate(conversation_history):
-                logger.info(f"🔍 DEBUG: Conversation {i+1}: user='{conv['user_message'][:50]}...', bot='{conv['agent_response'][:50]}...'")
+                    elif message.get('sender') == 'bot':
+                        # Add to the last conversation entry or create new one
+                        if conversation_history and conversation_history[-1]['agent_response'] == '':
+                            conversation_history[-1]['agent_response'] = message.get('text', '')
+                        else:
+                            conversation_history.append({
+                                'timestamp': message['timestamp'],
+                                'user_message': '',
+                                'agent_response': message.get('text', '')
+                            })
+                
+                logger.info(f"🔍 DEBUG: Built conversation history with {len(conversation_history)} entries")
+            else:
+                logger.info(f"🔍 DEBUG: Skipping conversation history build for efficiency (use chat history tools instead)")
             
             # Combine metadata and context
             session_context = {

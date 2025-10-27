@@ -46,7 +46,7 @@ export const usePersistentModel = () => {
       // Validate the new model
       const availableModels = [
         'claude-opus-4-1',
-        'claude-3-haiku', 
+        'claude-haiku-4-5', 
         'nova-lite',
         'gpt-oss-120b',
         'gpt-oss-20b'
