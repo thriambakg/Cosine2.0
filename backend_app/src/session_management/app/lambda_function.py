@@ -403,9 +403,22 @@ def update_session_metadata(user_id: str, session_id: str, metadata: Dict[str, A
             expression_attribute_values[':model'] = metadata['model']
         
         if 'session_variables' in metadata:
+            # Get existing session_variables to merge with new data
+            response = table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id}
+            )
+            
+            # Get existing session_variables or create empty dict
+            existing_session_vars = response.get('Item', {}).get('session_variables', {})
+            
+            # Merge new session_variables with existing ones
+            merged_session_vars = {
+                **existing_session_vars,  # Preserve existing data
+                **convert_floats_to_decimal(metadata['session_variables'])  # Add new data
+            }
+            
             update_expression_parts.append('session_variables = :session_variables')
-            # Convert floats to Decimal for DynamoDB compatibility
-            expression_attribute_values[':session_variables'] = convert_floats_to_decimal(metadata['session_variables'])
+            expression_attribute_values[':session_variables'] = merged_session_vars
         
         if update_expression_parts:
             update_expression_parts.append('last_updated = :timestamp')

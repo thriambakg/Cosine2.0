@@ -256,6 +256,15 @@ class ContextAwareAgent:
 - "do you see this item?" → get_session_context_tool()
 - "what did I ask about before?" → get_chat_history_tool(limit=3)
 
+📝 CHAT HISTORY INTERPRETATION:
+When get_chat_history_tool returns data:
+- If "success": true and "conversations" array has items → There IS previous conversation history
+- If "success": true and "conversations" array is empty → No previous conversations in this session
+- If "success": false → There was an error retrieving history
+- ALWAYS check the "total_conversations" field to understand the full scope
+- Use the conversation data to provide accurate summaries of what was discussed
+- NEVER say "this is the start of our conversation" if conversations array contains items
+
 🔧 TO GET SESSION_ID AND USER_ID:
 - session_id and user_id are provided in the Session Context section of your input message
 - Look for "Session ID: {session_id}" and "User ID: {user_id}" in the message you receive
