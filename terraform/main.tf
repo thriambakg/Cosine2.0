@@ -1674,18 +1674,11 @@ module "agent_files_processor_lambda" {
   tags = var.common_tags
 }
 
-# SNS Permission for Agent Files Processor Lambda
-resource "aws_lambda_permission" "agent_files_processor_sns" {
-  statement_id  = "AllowExecutionFromSNS"
+# S3 Permission for Agent Files Processor Lambda (Direct Invocation)
+resource "aws_lambda_permission" "agent_files_processor_s3" {
+  statement_id  = "AllowExecutionFromS3"
   action        = "lambda:InvokeFunction"
   function_name = module.agent_files_processor_lambda.function_name
-  principal     = "sns.amazonaws.com"
-  source_arn    = data.terraform_remote_state.base_infra.outputs.agent_file_upload_notifications_topic_arn
-}
-
-# SNS Subscription for Agent Files Processor Lambda
-resource "aws_sns_topic_subscription" "agent_files_processor" {
-  topic_arn = data.terraform_remote_state.base_infra.outputs.agent_file_upload_notifications_topic_arn
-  protocol  = "lambda"
-  endpoint  = module.agent_files_processor_lambda.function_arn
+  principal     = "s3.amazonaws.com"
+  source_arn    = data.terraform_remote_state.base_infra.outputs.chat_files_s3_bucket_arn
 }

@@ -126,7 +126,7 @@ class UnifiedChartGenerator:
 
         buffer = BytesIO()
         plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
-        buffer.seek(0)
+            buffer.seek(0)
         plt.close(fig)  # Close the plot to free memory
 
         s3_key = f"users/{self.user_id}/sessions/{self.session_id}/agent-files/{filename}"
