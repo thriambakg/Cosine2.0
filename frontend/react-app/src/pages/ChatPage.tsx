@@ -11,6 +11,7 @@ import { FileUploadService, UploadedFile } from '@/services/fileUploadService';
 // NEW: Import unified messaging system
 import { useUnifiedMessaging } from '@/hooks/useUnifiedMessaging';
 import { unifiedMessageHandler } from '@/services/unifiedMessageHandler';
+import { usePersistentModel } from '@/hooks/usePersistentModel';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
 import {
   Box,
@@ -223,7 +224,7 @@ export default function ChatPage() {
   const messages = currentSession?.messages || [];
   const [inputMessage, setInputMessage] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [selectedModel, setSelectedModel] = useState('claude-opus-4-1');
+  const { selectedModel, setSelectedModel } = usePersistentModel();
   const [missedResponseNotification] = useState<string | null>(null);
   // Typing messages for AI response animation
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
@@ -476,9 +477,7 @@ export default function ChatPage() {
     const currentSessionId = currentSession?.session_id;
     
     // Set model from session if available
-    if (currentSession?.model) {
-      setSelectedModel(currentSession.model);
-    }
+    // Don't reset model - keep user's persistent selection
     
     // Debug session switching
     console.log('🔄 SESSION EFFECT: Current session:', {
@@ -829,7 +828,7 @@ export default function ChatPage() {
         
         // Update current session via persistence system
         // Note: currentSession is managed by useChatPersistence, we just need to reload
-        setSelectedModel(session.model || 'claude-opus-4-1');
+        // Don't reset model - keep user's persistent selection
 
         // Load existing messages into unified messaging system
         if (session.messages && session.messages.length > 0) {

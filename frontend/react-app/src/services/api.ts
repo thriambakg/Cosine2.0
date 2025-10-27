@@ -769,7 +769,7 @@ export const sessionManagementAPI = {
   }): Promise<{ session_id: string, title: string, model: string, created_at: number, message_count: number }> => {
     const requestBody = {
       title: sessionData.title || new Date().toLocaleString(),
-      model: sessionData.model || 'claude-3-sonnet',
+      model: sessionData.model || 'claude-opus-4-1',
       create_welcome_message: sessionData.create_welcome_message !== false
     };
     console.log('📋 API - Creating session:', { userId, requestBody });

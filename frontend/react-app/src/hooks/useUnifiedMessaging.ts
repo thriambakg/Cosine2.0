@@ -112,7 +112,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
   const sendContextMessage = useCallback(async (
     text: string, 
     contextItems: any[], 
-    model: string = 'claude-3-sonnet',
+    model: string = 'claude-opus-4-1',
     overrideSessionId?: string
   ) => {
     console.log('🔍 DEBUG: sendContextMessage called with:', { text, contextItems, model, overrideSessionId });

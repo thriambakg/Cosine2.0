@@ -46,6 +46,7 @@ import { unifiedMessageHandler } from '../../services/unifiedMessageHandler';
 import { FileUploadService, UploadedFile } from '../../services/fileUploadService';
 // Import useChatPersistence for session variable updates
 import { useChatPersistence } from '../../hooks/useChatPersistence';
+import { usePersistentModel } from '../../hooks/usePersistentModel';
 
 // Typing animation component (same as ChatPage)
 const TypingText = ({ 
@@ -190,7 +191,7 @@ const GlobalChatSidebar: React.FC = () => {
     }
   }, [activeSessionId]);
   
-  const [selectedModel, setSelectedModel] = useState('claude-opus-4-1');
+  const { selectedModel, setSelectedModel } = usePersistentModel();
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [isFilesExpanded, setIsFilesExpanded] = useState(false);
@@ -653,7 +654,7 @@ const GlobalChatSidebar: React.FC = () => {
         
         // Update session data
         setCurrentSession(session);
-        setSelectedModel(session.model || 'claude-opus-4-1');
+        // Don't reset model - keep user's persistent selection
 
         // Load existing messages into unified messaging system only if not already loaded
         if (session.messages && session.messages.length > 0) {
@@ -832,7 +833,7 @@ const GlobalChatSidebar: React.FC = () => {
         setCurrentSession({
           session_id: contextData.sessionId,
           title: new Date().toLocaleString(),
-          model: 'claude-opus-4-1',
+          model: selectedModel, // Use persistent model selection
           created_at: Date.now(),
           last_updated: Date.now(),
           message_count: 0,
@@ -854,7 +855,7 @@ const GlobalChatSidebar: React.FC = () => {
           // Send regular message - agent will fetch context from database
           const result = await sendUnifiedMessage({
             text: contextData.userMessage,
-            model: 'claude-opus-4-1',
+            model: selectedModel, // Use persistent model selection
             type: 'new_message',
             sessionId: contextData.sessionId
           });

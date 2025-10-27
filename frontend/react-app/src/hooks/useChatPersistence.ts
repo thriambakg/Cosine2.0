@@ -175,7 +175,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       const transformedSessions = response.sessions.map(session => ({
         session_id: session.session_id,
         title: session.title || `Chat ${session.session_id.substring(0, 8)}`,
-        model: session.model || 'claude-3-sonnet',
+        model: session.model || 'claude-opus-4-1',
         created_at: session.created_at,
         last_updated: session.last_updated,
         message_count: (session.messages || []).length, // Use actual message count from array
