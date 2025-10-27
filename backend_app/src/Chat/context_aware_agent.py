@@ -225,11 +225,20 @@ class ContextAwareAgent:
 - search_chat_history_tool(session_id, user_id, search_term, limit) - Search chat history
 - generate_agent_file_tool(filename, content, file_type) - Create files
 - generate_excel_file_tool(filename, content, template_type, include_charts) - Create CSV files
+- get_session_context_tool(session_id, user_id) - Get full session context when needed
+- get_session_files_tool(session_id, user_id, file_type) - Get specific files when needed
 
 ⚡ WORKFLOW:
 1. Call relevant tools immediately
-2. Synthesize tool data into actionable insights
-3. Provide complete final response
+2. Use on-demand tools to get full content when needed
+3. Synthesize tool data into actionable insights
+4. Provide complete final response
+
+💡 ON-DEMAND LOADING:
+- Session context shows summaries only - use tools to get full content
+- get_session_context_tool() - Get complete session context when needed
+- get_session_files_tool() - Get specific files when needed
+- get_chat_history_tool() - Get conversation history when needed
 
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete
@@ -240,6 +249,68 @@ class ContextAwareAgent:
         session_info = self._format_session_context(session_context)
         
         return base_prompt + session_info
+    
+    def _get_webpage_summary(self, context: Dict[str, Any]) -> str:
+        """
+        Get a summary of webpage content instead of full content
+        
+        Args:
+            context: Session context
+            
+        Returns:
+            Summary of webpage content
+        """
+        webpage_content = context.get('webpage_content', '')
+        if not webpage_content or webpage_content == 'No webpage content available':
+            return 'No webpage content available'
+        
+        # Show first 200 characters as preview
+        preview = webpage_content[:200] + "..." if len(webpage_content) > 200 else webpage_content
+        return f"Preview: {preview}\n\n💡 Use get_session_context_tool() to access full webpage content when needed."
+    
+    def _get_files_summary(self, session_variables: Dict[str, Any]) -> str:
+        """
+        Get a summary of uploaded files instead of full details
+        
+        Args:
+            session_variables: Session variables
+            
+        Returns:
+            Summary of uploaded files
+        """
+        uploaded_files = session_variables.get('uploaded_files', [])
+        if not uploaded_files:
+            return 'No files uploaded'
+        
+        file_count = len(uploaded_files)
+        file_names = [f.get('name', 'Unknown') for f in uploaded_files[:3]]  # Show first 3
+        summary = f"{file_count} file(s) uploaded: {', '.join(file_names)}"
+        if file_count > 3:
+            summary += f" and {file_count - 3} more"
+        
+        return f"{summary}\n\n💡 Use get_session_files_tool() to access specific files when needed."
+    
+    def _get_context_items_summary(self, session_variables: Dict[str, Any]) -> str:
+        """
+        Get a summary of context items instead of full details
+        
+        Args:
+            session_variables: Session variables
+            
+        Returns:
+            Summary of context items
+        """
+        context_items = session_variables.get('context_items', [])
+        if not context_items:
+            return 'No context items available'
+        
+        item_count = len(context_items)
+        item_types = [item.get('type', 'unknown') for item in context_items[:3]]  # Show first 3 types
+        summary = f"{item_count} context item(s): {', '.join(item_types)}"
+        if item_count > 3:
+            summary += f" and {item_count - 3} more"
+        
+        return f"{summary}\n\n💡 Use get_session_context_tool() to access specific context items when needed."
     
     def _truncate_content(self, content: str, max_length: int = 1000) -> str:
         """
@@ -288,15 +359,15 @@ Page Type: {session_variables.get('page_type', 'unknown')}
 
 📄 WEBPAGE CONTENT:
 ==================
-{self._truncate_content(context.get('webpage_content', 'No webpage content available'), 1000)}
+{self._get_webpage_summary(context)}
 
 📁 UPLOADED FILES IN SESSION:
 ============================
-{self._truncate_content(self._format_uploaded_files(session_variables), 500)}
+{self._get_files_summary(session_variables)}
 
 📋 CONTEXT ITEMS IN SESSION:
 ============================
-{self._truncate_content(self._format_context_items(session_variables), 500)}
+{self._get_context_items_summary(session_variables)}
 
 🎯 SESSION FOCUS:
 ================
