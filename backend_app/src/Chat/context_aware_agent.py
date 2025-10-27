@@ -216,13 +216,20 @@ class ContextAwareAgent:
 - Use tools for financial queries - start with get_financial_data() for stocks
 - ALWAYS provide complete responses - never leave responses empty
 - Never return empty responses after calling tools
-🔧 TOOLS: get_financial_data, analyze_portfolio, get_technical_analysis, search_financial_news, calculate_stock_correlation, get_volatility_surface, python_financial_calculator
+
+🔧 KEY TOOLS: 
+- get_financial_data(symbol, timeframe, start_date, end_date) - LIVE stock data
+- get_crypto_data_tool(symbol, timeframe, start_date, end_date) - Crypto data
+- generate_chart_tool(symbol, data_json, chart_type, title) - Generate charts
+- get_chat_history_tool(session_id, user_id, limit, include_recent) - Get chat history
+- search_chat_history_tool(session_id, user_id, search_term, limit) - Search chat history
+- generate_agent_file_tool(filename, content, file_type) - Create files
+- generate_excel_file_tool(filename, content, template_type, include_charts) - Create CSV files
 
 ⚡ WORKFLOW:
 1. Call relevant tools immediately
 2. Synthesize tool data into actionable insights
 3. Provide complete final response
-
 
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete
@@ -233,6 +240,22 @@ class ContextAwareAgent:
         session_info = self._format_session_context(session_context)
         
         return base_prompt + session_info
+    
+    def _truncate_content(self, content: str, max_length: int = 1000) -> str:
+        """
+        Truncate content to prevent token limit issues
+        
+        Args:
+            content: Content to truncate
+            max_length: Maximum length allowed
+            
+        Returns:
+            Truncated content with ellipsis if needed
+        """
+        if not content or len(content) <= max_length:
+            return content
+        
+        return content[:max_length] + "... [truncated]"
     
     def _format_session_context(self, session_context: Dict[str, Any]) -> str:
         """
@@ -249,7 +272,9 @@ class ContextAwareAgent:
             metadata = session_context.get('metadata', {})
             context = session_context.get('context', {})
             session_variables = context.get('session_variables', {})
-            conversation_history = context.get('conversation_history', [])
+            # Note: Conversation history is now available via get_chat_history_tool and search_chat_history_tool
+            # No need to access conversation_history from context for efficiency
+            conversation_history = []
             
             # Format webpage information
             webpage_info = f"""
@@ -263,15 +288,15 @@ Page Type: {session_variables.get('page_type', 'unknown')}
 
 📄 WEBPAGE CONTENT:
 ==================
-{context.get('webpage_content', 'No webpage content available')}
+{self._truncate_content(context.get('webpage_content', 'No webpage content available'), 1000)}
 
 📁 UPLOADED FILES IN SESSION:
 ============================
-{self._format_uploaded_files(session_variables)}
+{self._truncate_content(self._format_uploaded_files(session_variables), 500)}
 
 📋 CONTEXT ITEMS IN SESSION:
 ============================
-{self._format_context_items(session_variables)}
+{self._truncate_content(self._format_context_items(session_variables), 500)}
 
 🎯 SESSION FOCUS:
 ================

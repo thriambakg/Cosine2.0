@@ -349,7 +349,7 @@ class SessionManager:
         """
         try:
             # Get complete session data
-            session_context = self.get_session_context(session_id, user_id)
+            session_context = self.get_session_context(session_id, user_id, include_conversation_history=False)
             if not session_context:
                 return False
             
@@ -365,7 +365,7 @@ class SessionManager:
                 'user_id': user_id,
                 'archived_at': int(time.time()),
                 'session_metadata': session_context['metadata'],
-                'conversation_history': session_context['conversation_history'],
+                'conversation_history': [],  # Empty since we're not loading conversation history for efficiency
                 'session_variables': session_context['session_variables'],
                 'all_messages': messages_response.get('Items', [])
             }
