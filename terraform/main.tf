@@ -1682,3 +1682,17 @@ resource "aws_lambda_permission" "agent_files_processor_s3" {
   principal     = "s3.amazonaws.com"
   source_arn    = data.terraform_remote_state.base_infra.outputs.chat_files_s3_bucket_arn
 }
+
+# S3 Bucket Notification for Agent Files (Direct Lambda Invocation)
+resource "aws_s3_bucket_notification" "agent_files_lambda" {
+  bucket = data.terraform_remote_state.base_infra.outputs.chat_files_s3_bucket_id
+
+  lambda_function {
+    lambda_function_arn = module.agent_files_processor_lambda.function_arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "users/"
+    filter_suffix       = "/agent-files/"
+  }
+
+  depends_on = [aws_lambda_permission.agent_files_processor_s3]
+}
