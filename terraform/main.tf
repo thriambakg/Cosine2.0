@@ -1682,3 +1682,10 @@ resource "aws_lambda_permission" "agent_files_processor_sns" {
   principal     = "sns.amazonaws.com"
   source_arn    = data.terraform_remote_state.base_infra.outputs.agent_file_upload_notifications_topic_arn
 }
+
+# SNS Subscription for Agent Files Processor Lambda
+resource "aws_sns_topic_subscription" "agent_files_processor" {
+  topic_arn = data.terraform_remote_state.base_infra.outputs.agent_file_upload_notifications_topic_arn
+  protocol  = "lambda"
+  endpoint  = module.agent_files_processor_lambda.function_arn
+}

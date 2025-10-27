@@ -240,6 +240,27 @@ class ContextAwareAgent:
 - get_session_files_tool() - Get specific files when needed
 - get_chat_history_tool() - Get conversation history when needed
 
+🧠 INTELLIGENT CONTEXT DETECTION: When users ask questions that seem to reference previous data, context, or items from earlier in the conversation, use the appropriate tool:
+
+📋 CONTEXT TOOLS USAGE:
+- get_session_context_tool(session_id, user_id) - For files, context items, and session variables
+- get_chat_history_tool(session_id, user_id, limit, include_recent) - For previous conversations
+- search_chat_history_tool(session_id, user_id, search_term, limit) - For specific topics in chat history
+
+🔍 TRIGGER EXAMPLES:
+- "can you see this context item?" → get_session_context_tool()
+- "do you remember what I said about AAPL?" → search_chat_history_tool(search_term="AAPL")
+- "what did we discuss earlier?" → get_chat_history_tool(limit=5)
+- "can you access any previous context items?" → get_session_context_tool()
+- "what's in my session?" → get_session_context_tool()
+- "do you see this item?" → get_session_context_tool()
+- "what did I ask about before?" → get_chat_history_tool(limit=3)
+
+🔧 TO GET SESSION_ID AND USER_ID:
+- session_id and user_id are provided in the Session Context section of your input message
+- Look for "Session ID: {session_id}" and "User ID: {user_id}" in the message you receive
+- Use these exact values when calling the tools
+
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete
 
