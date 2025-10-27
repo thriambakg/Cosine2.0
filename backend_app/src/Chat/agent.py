@@ -116,6 +116,7 @@ from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
 from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
 from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
 from tools.chart_generator import generate_chart_tool
+from tools.chat_history_tool import get_chat_history_tool, search_chat_history_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -660,35 +661,41 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3
 9. get_session_files_tool(session_id, user_id, file_type) - Retrieve uploaded files for a specific session from the database
 10. get_session_context_tool(session_id, user_id) - Get complete session context including files and context items
-11. get_crypto_data_tool(symbol, timeframe, start_date, end_date) - Get real-time cryptocurrency data for analysis with flexible timeframes
-12. compare_crypto_tool(symbols, timeframe, start_date, end_date) - Compare multiple cryptocurrencies side by side with flexible timeframes
-13. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
-14. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
-15. generate_chart_tool(symbol, data_json, chart_type, title) - Generate unified charts for both stocks and crypto using matplotlib (line, candlestick, volume, ohlc) and save directly to S3
-17. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
-18. return_session_files_wrapper(file_indices) - Return files from current session to user
-19. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
-20. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate CSV files for financial analysis that can be opened in Excel (agent prepares content first)
-21. get_company_cik(symbol) - Get Central Index Key (CIK) for a company by ticker symbol
-22. get_company_filings(cik, form_type, limit) - Get recent SEC filings for a company
-23. get_filing_document(cik, accession_number, document_name) - Get full text content of SEC filing
-24. search_sec_filings(company_name, form_type, start_date, end_date, limit) - Search SEC filings by criteria
-25. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
-26. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
+11. get_chat_history_tool(session_id, user_id, limit, include_recent) - Get chat history on-demand with smart pagination
+12. search_chat_history_tool(session_id, user_id, search_term, limit) - Search chat history for specific terms or topics
+13. get_crypto_data_tool(symbol, timeframe, start_date, end_date) - Get real-time cryptocurrency data for analysis with flexible timeframes
+14. compare_crypto_tool(symbols, timeframe, start_date, end_date) - Compare multiple cryptocurrencies side by side with flexible timeframes
+15. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
+16. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
+17. generate_chart_tool(symbol, data_json, chart_type, title) - Generate unified charts for both stocks and crypto using matplotlib (line, candlestick, volume, ohlc) and save directly to S3
+18. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
+19. return_session_files_wrapper(file_indices) - Return files from current session to user
+20. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
+21. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate CSV files for financial analysis that can be opened in Excel (agent prepares content first)
+22. get_company_cik(symbol) - Get Central Index Key (CIK) for a company by ticker symbol
+23. get_company_filings(cik, form_type, limit) - Get recent SEC filings for a company
+24. get_filing_document(cik, accession_number, document_name) - Get full text content of SEC filing
+25. search_sec_filings(company_name, form_type, start_date, end_date, limit) - Search SEC filings by criteria
+26. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
+27. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
 
 🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
 
-🧠 INTELLIGENT CONTEXT DETECTION: When users ask questions that seem to reference previous data, context, or items from earlier in the conversation, ALWAYS call get_session_context_tool(session_id, user_id) to retrieve the complete session context from the database.
+🧠 INTELLIGENT CONTEXT DETECTION: When users ask questions that seem to reference previous data, context, or items from earlier in the conversation, use the appropriate tool:
 
-🔍 TRIGGER EXAMPLES (but not limited to these):
-- "can you see this context item?"
-- "do you remember the tile i gave you?"
-- "what data can you return from it?"
-- "can you access any previous context items?"
-- "what's in my session?"
-- "do you see this item?"
-- "can you see this data?"
-- Any question that seems to reference previous context, tiles, files, or data
+📋 CONTEXT TOOLS USAGE:
+- get_session_context_tool(session_id, user_id) - For files, context items, and session variables
+- get_chat_history_tool(session_id, user_id, limit, include_recent) - For previous conversations
+- search_chat_history_tool(session_id, user_id, search_term, limit) - For specific topics in chat history
+
+🔍 TRIGGER EXAMPLES:
+- "can you see this context item?" → get_session_context_tool()
+- "do you remember what I said about AAPL?" → search_chat_history_tool(search_term="AAPL")
+- "what did we discuss earlier?" → get_chat_history_tool(limit=5)
+- "can you access any previous context items?" → get_session_context_tool()
+- "what's in my session?" → get_session_context_tool()
+- "do you see this item?" → get_session_context_tool()
+- "what did I ask about before?" → get_chat_history_tool(limit=3)
 
 🔧 TO GET SESSION_ID AND USER_ID:
 - session_id and user_id are provided in the Session Context section of your input message
@@ -1688,6 +1695,8 @@ enhanced_tools = [
     get_filing_exhibits,  # Get exhibits for SEC filing
     download_filing_pdf,  # Download SEC filing as PDF
     generate_chart_tool,  # Generate unified charts for both stocks and crypto
+    get_chat_history_tool,  # Get chat history on-demand with pagination
+    search_chat_history_tool,  # Search chat history for specific terms
 ]
 
 # Function to create agents with different models

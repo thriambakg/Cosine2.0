@@ -95,8 +95,9 @@ class ContextAwareAgent:
             # Generate session-aware system prompt
             system_prompt = self._generate_session_prompt(session_context)
             
-            # Inject conversation history into system prompt for model switching
-            enhanced_system_prompt = self._add_conversation_history_to_prompt(system_prompt, session_context)
+            # Note: Conversation history is now available via get_chat_history_tool and search_chat_history_tool
+            # No need to inject full history into system prompt for efficiency
+            enhanced_system_prompt = system_prompt
             
             # Get session-specific tools
             session_tools = self._get_session_tools(session_context)
@@ -281,40 +282,8 @@ Based on the current webpage and user intent, focus on:
 
 """
             
-            # Add recent conversation context with smart selection
-            if conversation_history:
-                conversation_context = "\n💬 RECENT CONVERSATION:\n=====================\n"
-                
-                # Smart context selection: prioritize recent messages but include more if needed
-                total_messages = len(conversation_history)
-                
-                if total_messages <= 5:
-                    # Short conversation: include all messages
-                    recent_messages = conversation_history
-                elif total_messages <= 10:
-                    # Medium conversation: include last 5 messages
-                    recent_messages = conversation_history[-5:]
-                else:
-                    # Long conversation: include last 3 + first few for context
-                    recent_messages = conversation_history[:2] + conversation_history[-3:]
-                
-                for i, msg in enumerate(recent_messages):
-                    user_msg = msg.get('user_message', '').strip()
-                    agent_msg = msg.get('agent_response', '').strip()
-                    
-                    if user_msg:  # Only include if there's a user message
-                        # Use relative numbering for clarity
-                        msg_num = conversation_history.index(msg) + 1
-                        conversation_context += f"Q{msg_num}: {user_msg}\n"
-                        if agent_msg:
-                            # Include more of the response for better context
-                            conversation_context += f"A{msg_num}: {agent_msg[:1000]}{'...' if len(agent_msg) > 1000 else ''}\n\n"
-                
-                # Add context summary for long conversations
-                if total_messages > 10:
-                    conversation_context += f"[Note: This is part of a longer conversation with {total_messages} total exchanges]\n\n"
-                
-                webpage_info += conversation_context
+            # Note: Conversation history is now available via get_chat_history_tool and search_chat_history_tool
+            # No need to include conversation history in system prompt for efficiency
             
             # Add session-specific instructions
             context_note = ""
@@ -329,9 +298,9 @@ Based on the current webpage and user intent, focus on:
 - Maintain conversation continuity within this session
 - Don't mix contexts from other sessions or users
 - Use session-relevant tools: {', '.join(session_variables.get('relevant_tools', []))}
-- IMPORTANT: If user asks follow-up questions about previous responses, reference the conversation history above
-- If user asks about "these stocks" or "which one", check the recent conversation for stock mentions
-{context_note}- If user references earlier parts of conversation not shown above, acknowledge the longer conversation context
+- IMPORTANT: If user asks follow-up questions about previous responses, use get_chat_history_tool() or search_chat_history_tool()
+- If user asks about "these stocks" or "which one", use search_chat_history_tool() to find relevant previous conversations
+{context_note}- If user references earlier parts of conversation, use get_chat_history_tool() to retrieve the relevant history
 - If user asks about something not related to current context, gently redirect to session focus
 
 """
