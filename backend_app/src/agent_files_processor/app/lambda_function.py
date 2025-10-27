@@ -30,22 +30,26 @@ def lambda_handler(event, context):
     """
     Process agent files uploaded to S3 and update session_variables.
     
-    This Lambda is triggered directly by S3 when files are uploaded to the agent-files/ folder.
+    This Lambda is triggered by SNS when files are uploaded to the agent-files/ folder.
     It extracts user_id and session_id from the S3 key, then updates the session_variables
     to include the new agent file in the agent_files array.
     """
     try:
         logger.info(f"Processing agent files notification: {json.dumps(event, cls=DecimalEncoder)}")
         
-        # Handle S3 events directly (no SNS wrapper)
+        # Parse SNS message
         if 'Records' in event:
             for record in event['Records']:
-                if record.get('eventSource') == 'aws:s3':
-                    # Direct S3 event
-                    logger.info(f"S3 Event: {json.dumps(record, cls=DecimalEncoder)}")
+                if record.get('EventSource') == 'aws:sns':
+                    # Parse SNS message
+                    sns_message = json.loads(record['Sns']['Message'])
+                    logger.info(f"SNS Message: {json.dumps(sns_message, cls=DecimalEncoder)}")
                     
-                    if record.get('eventName') == 'ObjectCreated:Put':
-                        process_agent_file(record)
+                    # Process S3 event from SNS
+                    if 'Records' in sns_message:
+                        for s3_record in sns_message['Records']:
+                            if s3_record.get('eventName') == 'ObjectCreated:Put':
+                                process_agent_file(s3_record)
         
         return {
             'statusCode': 200,
