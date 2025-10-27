@@ -131,6 +131,7 @@ class ChatHistoryAccess:
         """
         try:
             logger.info(f"Getting chat history for session {session_id}, limit: {limit}, recent: {include_recent}")
+            logger.info(f"Using table: {self.chat_sessions_table_name}")
             
             # Get session from DynamoDB
             response = self.chat_sessions_table.get_item(
@@ -140,7 +141,10 @@ class ChatHistoryAccess:
                 }
             )
             
+            logger.info(f"DynamoDB response: {response}")
+            
             if 'Item' not in response:
+                logger.warning(f"Session {session_id} not found in DynamoDB")
                 return {
                     "success": False,
                     "error": f"Session {session_id} not found",
@@ -149,6 +153,7 @@ class ChatHistoryAccess:
             
             session_item = response['Item']
             messages = session_item.get('messages', [])
+            logger.info(f"Found {len(messages)} messages in session")
             
             if not messages:
                 return {
@@ -160,9 +165,12 @@ class ChatHistoryAccess:
             
             # Parse DynamoDB messages and build conversation history
             conversation_history = []
-            for message_item in messages:
+            logger.info(f"Processing {len(messages)} messages")
+            for i, message_item in enumerate(messages):
+                logger.info(f"Processing message {i+1}: {message_item}")
                 # Parse DynamoDB message format
                 message = self._parse_dynamodb_message(message_item)
+                logger.info(f"Parsed message {i+1}: {message}")
                 
                 if message.get('sender') == 'user':
                     conversation_history.append({
@@ -189,6 +197,7 @@ class ChatHistoryAccess:
             
             # Apply pagination and ordering
             total_conversations = len(conversation_history)
+            logger.info(f"Built {total_conversations} conversation pairs")
             
             if include_recent:
                 # Return most recent conversations
@@ -196,6 +205,8 @@ class ChatHistoryAccess:
             else:
                 # Return oldest conversations
                 paginated_conversations = conversation_history[:limit] if limit < total_conversations else conversation_history
+            
+            logger.info(f"Returning {len(paginated_conversations)} conversations after pagination")
             
             # Format conversations for agent consumption
             formatted_conversations = []
