@@ -41,13 +41,15 @@ class CryptoDataFetcher:
         self.base_url = "https://min-api.cryptocompare.com/data"
         self.api_key = os.environ.get('CRYPTOCOMPARE_API_KEY', '')
     
-    def fetch_crypto_data(self, symbol: str, timeframe: str = '7d') -> Dict[str, Any]:
+    def fetch_crypto_data(self, symbol: str, timeframe: str = '7d', start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """
         Fetch cryptocurrency data for a given symbol and timeframe
         
         Args:
             symbol: Cryptocurrency symbol (e.g., 'BTC', 'ETH')
-            timeframe: Time period ('1d', '7d', '30d', '1y')
+            timeframe: Time period ('1d', '7d', '30d', '1y', '2y', '5y', 'max')
+            start_date: Start date in 'YYYY-MM-DD' format (optional)
+            end_date: End date in 'YYYY-MM-DD' format (optional)
             
         Returns:
             Dictionary with crypto data including price, returns, volatility
@@ -56,7 +58,7 @@ class CryptoDataFetcher:
             symbol = symbol.upper()
             
             # Fetch historical data
-            historical_data = self._fetch_historical_data(symbol, timeframe)
+            historical_data = self._fetch_historical_data(symbol, timeframe, start_date, end_date)
             if not historical_data:
                 return {"error": f"No data available for {symbol}"}
             
@@ -69,8 +71,8 @@ class CryptoDataFetcher:
             logger.error(f"Error fetching crypto data for {symbol}: {str(e)}")
             return {"error": f"Failed to fetch data for {symbol}: {str(e)}"}
     
-    def _fetch_historical_data(self, symbol: str, timeframe: str) -> List[Dict[str, Any]]:
-        """Fetch historical data from CryptoCompare API"""
+    def _fetch_historical_data(self, symbol: str, timeframe: str, start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
+        """Fetch historical data from CryptoCompare API with support for custom date ranges"""
         try:
             # Map timeframe to API parameters
             if timeframe == '1d':
@@ -85,7 +87,14 @@ class CryptoDataFetcher:
             else:
                 # For other timeframes, fetch daily data
                 endpoint = f"{self.base_url}/v2/histoday"
-                days_map = {'7d': 7, '30d': 30, '1y': 365}
+                days_map = {
+                    '7d': 7, 
+                    '30d': 30, 
+                    '1y': 365,
+                    '2y': 730,
+                    '5y': 1825,
+                    'max': 2000  # Maximum limit for API
+                }
                 days = days_map.get(timeframe, 7)
                 params = {
                     "fsym": symbol,
@@ -93,6 +102,24 @@ class CryptoDataFetcher:
                     "limit": days,
                     "toTs": int(datetime.now().timestamp())
                 }
+            
+            # Handle custom date ranges
+            if start_date and end_date:
+                try:
+                    from datetime import datetime
+                    start_ts = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp())
+                    end_ts = int(datetime.strptime(end_date, '%Y-%m-%d').timestamp())
+                    
+                    # Use daily data for custom ranges
+                    endpoint = f"{self.base_url}/v2/histoday"
+                    params = {
+                        "fsym": symbol,
+                        "tsym": "USD",
+                        "toTs": end_ts,
+                        "limit": min(2000, (end_ts - start_ts) // 86400)  # Convert days to seconds
+                    }
+                except ValueError:
+                    logger.warning(f"Invalid date format: {start_date} or {end_date}")
             
             # Add API key if available
             if self.api_key:
@@ -242,13 +269,15 @@ class CryptoDataFetcher:
 crypto_fetcher = CryptoDataFetcher()
 
 @tool
-def get_crypto_data_tool(symbol: str, timeframe: str = "7d") -> str:
+def get_crypto_data_tool(symbol: str, timeframe: str = "7d", start_date: str = None, end_date: str = None) -> str:
     """
-    Tool function to fetch real-time cryptocurrency data
+    Tool function to fetch real-time cryptocurrency data with flexible timeframes
     
     Args:
         symbol: Cryptocurrency symbol (e.g., 'BTC', 'ETH', 'DOGE')
-        timeframe: Time period for analysis ('1d', '7d', '30d', '1y')
+        timeframe: Time period for analysis ('1d', '7d', '30d', '1y', '2y', '5y', 'max')
+        start_date: Start date in 'YYYY-MM-DD' format (optional)
+        end_date: End date in 'YYYY-MM-DD' format (optional)
         
     Returns:
         String with cryptocurrency data including price, returns, and volatility
@@ -258,7 +287,7 @@ def get_crypto_data_tool(symbol: str, timeframe: str = "7d") -> str:
             return "Error: symbol parameter is required"
         
         # Fetch crypto data
-        result = crypto_fetcher.fetch_crypto_data(symbol.upper(), timeframe)
+        result = crypto_fetcher.fetch_crypto_data(symbol.upper(), timeframe, start_date, end_date)
         
         if "error" in result:
             return f"Error fetching crypto data for {symbol}: {result['error']}"
@@ -298,13 +327,15 @@ def get_crypto_data_tool(symbol: str, timeframe: str = "7d") -> str:
         return f"Error fetching crypto data: {str(e)}"
 
 @tool
-def compare_crypto_tool(symbols: str, timeframe: str = "7d") -> str:
+def compare_crypto_tool(symbols: str, timeframe: str = "7d", start_date: str = None, end_date: str = None) -> str:
     """
-    Tool function to compare multiple cryptocurrencies
+    Tool function to compare multiple cryptocurrencies with flexible timeframes
     
     Args:
         symbols: Comma-separated list of crypto symbols (e.g., 'BTC,ETH,DOGE')
-        timeframe: Time period for comparison ('1d', '7d', '30d', '1y')
+        timeframe: Time period for comparison ('1d', '7d', '30d', '1y', '2y', '5y', 'max')
+        start_date: Start date in 'YYYY-MM-DD' format (optional)
+        end_date: End date in 'YYYY-MM-DD' format (optional)
         
     Returns:
         String with comparison data for multiple cryptocurrencies
@@ -322,7 +353,7 @@ def compare_crypto_tool(symbols: str, timeframe: str = "7d") -> str:
         # Fetch data for each symbol
         results = []
         for symbol in symbol_list:
-            data = crypto_fetcher.fetch_crypto_data(symbol, timeframe)
+            data = crypto_fetcher.fetch_crypto_data(symbol, timeframe, start_date, end_date)
             if "error" not in data:
                 results.append(data)
         

@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import MarkdownRenderer from '@/components/common/MarkdownRenderer';
 import {
   Box,
   Typography,
@@ -189,7 +190,7 @@ const GlobalChatSidebar: React.FC = () => {
     }
   }, [activeSessionId]);
   
-  const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
+  const [selectedModel, setSelectedModel] = useState('claude-opus-4-1');
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [isFilesExpanded, setIsFilesExpanded] = useState(false);
@@ -210,7 +211,9 @@ const GlobalChatSidebar: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editContainerRef = useRef<HTMLDivElement>(null);
   // Note: Message deduplication is now handled by unified messaging system
-  const sidebarWidth = 400;
+  const [sidebarWidth, setSidebarWidth] = useState(400);
+  const [isResizing, setIsResizing] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
 
   // COMMENTED OUT: Old messaging service handler (replaced by unified handler)
   /*
@@ -484,7 +487,7 @@ const GlobalChatSidebar: React.FC = () => {
 
   // Available models with nicknames and tooltips
   const availableModels = [
-    { value: 'claude-3-sonnet', label: 'Balanced', tooltip: 'Strikes ideal balance between intelligence and speed' },
+    { value: 'claude-opus-4-1', label: 'Balanced', tooltip: 'Strikes ideal balance between intelligence and speed' },
     { value: 'claude-3-haiku', label: 'Fast', tooltip: 'Fastest, most compact model for near-instant responsiveness' },
     { value: 'nova-lite', label: 'Multimodal', tooltip: 'Multimodal understanding model for text, images, and videos' },
     { value: 'gpt-oss-120b', label: 'Deep', tooltip: 'Complex reasoning, extended thinking, sophisticated analysis' },
@@ -650,7 +653,7 @@ const GlobalChatSidebar: React.FC = () => {
         
         // Update session data
         setCurrentSession(session);
-        setSelectedModel(session.model || 'claude-3-sonnet');
+        setSelectedModel(session.model || 'claude-opus-4-1');
 
         // Load existing messages into unified messaging system only if not already loaded
         if (session.messages && session.messages.length > 0) {
@@ -829,7 +832,7 @@ const GlobalChatSidebar: React.FC = () => {
         setCurrentSession({
           session_id: contextData.sessionId,
           title: new Date().toLocaleString(),
-          model: 'claude-3-sonnet',
+          model: 'claude-opus-4-1',
           created_at: Date.now(),
           last_updated: Date.now(),
           message_count: 0,
@@ -851,7 +854,7 @@ const GlobalChatSidebar: React.FC = () => {
           // Send regular message - agent will fetch context from database
           const result = await sendUnifiedMessage({
             text: contextData.userMessage,
-            model: 'claude-3-sonnet',
+            model: 'claude-opus-4-1',
             type: 'new_message',
             sessionId: contextData.sessionId
           });
@@ -1224,6 +1227,54 @@ const GlobalChatSidebar: React.FC = () => {
     }
   };
 
+  // Resize handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    
+    const windowWidth = window.innerWidth;
+    const newWidth = windowWidth - e.clientX;
+    
+    // Calculate percentage limits
+    const minWidth = windowWidth * 0.1; // 10% of screen width
+    const maxWidth = windowWidth * 0.75; // 75% of screen width
+    
+    // Clamp the width within limits
+    const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+    
+    setSidebarWidth(clampedWidth);
+  }, [isResizing]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  // Add global mouse event listeners for resizing
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, handleMouseMove, handleMouseUp]);
+
   const handleModelChange = (event: SelectChangeEvent) => {
     setSelectedModel(event.target.value);
   };
@@ -1234,6 +1285,7 @@ const GlobalChatSidebar: React.FC = () => {
 
   return (
     <Box
+      ref={sidebarRef}
       sx={{
         position: 'fixed',
         right: 0,
@@ -1254,6 +1306,25 @@ const GlobalChatSidebar: React.FC = () => {
         },
       }}
     >
+      {/* Resize Handle */}
+      <Box
+        onMouseDown={handleMouseDown}
+        sx={{
+          position: 'absolute',
+          left: -4,
+          top: 0,
+          bottom: 0,
+          width: 8,
+          cursor: 'col-resize',
+          zIndex: 1201,
+          '&:hover': {
+            backgroundColor: 'rgba(59, 130, 246, 0.3)',
+          },
+          '&:active': {
+            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+          },
+        }}
+      />
       {/* Header */}
       <Box
         sx={{
@@ -1921,18 +1992,16 @@ const GlobalChatSidebar: React.FC = () => {
                       }}
                     />
                   ) : (
-                    <Typography
+                    <MarkdownRenderer 
+                      content={message.text}
                       variant="body2"
                       sx={{
                         color: '#ffffff',
                         fontSize: '0.875rem',
                         lineHeight: 1.4,
-                        whiteSpace: 'pre-wrap',
                         wordBreak: 'break-word',
                       }}
-                    >
-                      {message.text}
-                    </Typography>
+                    />
                   )}
                   {/* File attachments */}
                   {(message as any).files && (message as any).files.length > 0 && (
@@ -2076,7 +2145,7 @@ const GlobalChatSidebar: React.FC = () => {
         {/* Model Selection */}
         <FormControl fullWidth size="small" sx={{ mb: 1 }}>
           <Select
-            value={selectedModel || 'claude-3-sonnet'}
+            value={selectedModel || 'claude-opus-4-1'}
             onChange={handleModelChange}
             sx={{
               color: '#ffffff',

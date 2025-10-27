@@ -11,6 +11,7 @@ import { FileUploadService, UploadedFile } from '@/services/fileUploadService';
 // NEW: Import unified messaging system
 import { useUnifiedMessaging } from '@/hooks/useUnifiedMessaging';
 import { unifiedMessageHandler } from '@/services/unifiedMessageHandler';
+import MarkdownRenderer from '@/components/common/MarkdownRenderer';
 import {
   Box,
   Typography,
@@ -222,7 +223,7 @@ export default function ChatPage() {
   const messages = currentSession?.messages || [];
   const [inputMessage, setInputMessage] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [selectedModel, setSelectedModel] = useState('claude-3-sonnet');
+  const [selectedModel, setSelectedModel] = useState('claude-opus-4-1');
   const [missedResponseNotification] = useState<string | null>(null);
   // Typing messages for AI response animation
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
@@ -828,7 +829,7 @@ export default function ChatPage() {
         
         // Update current session via persistence system
         // Note: currentSession is managed by useChatPersistence, we just need to reload
-        setSelectedModel(session.model || 'claude-3-sonnet');
+        setSelectedModel(session.model || 'claude-opus-4-1');
 
         // Load existing messages into unified messaging system
         if (session.messages && session.messages.length > 0) {
@@ -1373,7 +1374,7 @@ export default function ChatPage() {
                 </Typography>
                 <FormControl size="small" fullWidth>
                   <Select
-                    value={selectedModel || 'claude-3-sonnet'}
+                    value={selectedModel || 'claude-opus-4-1'}
                     onChange={(e) => setSelectedModel(e.target.value)}
                     sx={{
                       color: 'white',
@@ -1392,7 +1393,7 @@ export default function ChatPage() {
                       },
                     }}
                   >
-                    <MenuItem value="claude-3-sonnet" title="Strikes ideal balance between intelligence and speed">
+                    <MenuItem value="claude-opus-4-1" title="Strikes ideal balance between intelligence and speed">
                       Balanced
                     </MenuItem>
                     <MenuItem value="claude-3-haiku" title="Fastest, most compact model for near-instant responsiveness">
@@ -1594,9 +1595,7 @@ export default function ChatPage() {
                           />
                         ) : (
                           <>
-                            <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                              {message.text}
-                            </Typography>
+                            <MarkdownRenderer content={message.text} />
                             
                           </>
                         )}

@@ -115,6 +115,7 @@ from tools.session_database_access import get_session_files_tool, get_session_co
 from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
 from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
 from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
+from tools.chart_generator import generate_chart_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -186,9 +187,15 @@ class FinancialTools:
             return {"status": "error", "message": str(e)}
     
     @staticmethod
-    def get_stock_data(symbol: str) -> Dict[str, Any]:
+    def get_stock_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """
-        Get current stock data using yfinance for real-time data
+        Get current stock data using yfinance for real-time data with custom timeframe support
+        
+        Args:
+            symbol: Stock ticker symbol
+            timeframe: Time period ('1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max')
+            start_date: Start date in 'YYYY-MM-DD' format (optional)
+            end_date: End date in 'YYYY-MM-DD' format (optional)
         """
         try:
             # Create yfinance ticker object
@@ -198,7 +205,10 @@ class FinancialTools:
             info = ticker.info
             
             # Get historical data for additional metrics
-            hist = ticker.history(period="1y")
+            if start_date and end_date:
+                hist = ticker.history(start=start_date, end=end_date)
+            else:
+                hist = ticker.history(period=timeframe)
             
             if hist.empty or not info:
                 return {
@@ -222,6 +232,18 @@ class FinancialTools:
             returns = hist['Close'].pct_change().dropna()
             volatility = returns.std() * np.sqrt(252) * 100  # Annualized percentage
             
+            # Prepare historical data for chart generation
+            historical_data = []
+            for date, row in hist.iterrows():
+                historical_data.append({
+                    "date": date.strftime('%Y-%m-%d'),
+                    "open": float(row['Open']),
+                    "high": float(row['High']),
+                    "low": float(row['Low']),
+                    "close": float(row['Close']),
+                    "volume": int(row['Volume'])
+                })
+            
             return {
                 "symbol": symbol,
                 "current_price": round(current_price, 2),
@@ -238,7 +260,14 @@ class FinancialTools:
                 "sector": info.get('sector', 'N/A'),
                 "industry": info.get('industry', 'N/A'),
                 "status": "success",
-                "source": "yfinance"
+                "source": "yfinance",
+                "timeframe": timeframe,
+                "data_points": len(hist),
+                "date_range": {
+                    "start": hist.index[0].strftime('%Y-%m-%d'),
+                    "end": hist.index[-1].strftime('%Y-%m-%d')
+                },
+                "historical_data": historical_data
             }
                 
         except Exception as e:
@@ -583,17 +612,14 @@ load_dotenv()
 
 # Configure different Bedrock models
 MODELS = {
-    'claude-3-sonnet': BedrockModel(
-        model_id="anthropic.claude-3-sonnet-20240229-v1:0",
-        region="us-east-1"
+    'claude-opus-4-1': BedrockModel(
+        model_id="us.anthropic.claude-opus-4-1-20250805-v1:0"
     ),
     'claude-3-haiku': BedrockModel(
-        model_id="anthropic.claude-3-haiku-20240307-v1:0",
-        region="us-east-1"
+        model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0"
     ),
     'nova-lite': BedrockModel(
-        model_id="amazon.nova-lite-v1:0",
-        region="us-east-1"
+        model_id="us.amazon.nova-lite-v1:0"
     ),
     'gpt-oss-120b': BedrockModel(
         model_id="openai.gpt-oss-120b-1:0",
@@ -606,7 +632,7 @@ MODELS = {
 }
 
 # Default model (for backward compatibility)
-model = MODELS['claude-3-sonnet']
+model = MODELS['claude-opus-4-1']
 
 # Define an enhanced financial analysis system prompt with explicit tool orchestration
 FINANCIAL_ANALYSIS_PROMPT = """
@@ -624,7 +650,7 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 - End your response after providing the requested analysis
 
 🔧 YOUR REAL-TIME TOOLS (MANDATORY TO USE):
-1. get_financial_data(symbol) - LIVE stock data via yfinance (current price, market cap, P/E, volatility, etc.)
+1. get_financial_data(symbol, timeframe, start_date, end_date) - LIVE stock data via yfinance with custom timeframes and date ranges for chart generation
 2. search_financial_news(query) - Recent financial news and market developments  
 3. get_technical_analysis(symbol) - Technical indicators (RSI, moving averages, MACD, Bollinger Bands)
 4. analyze_portfolio(portfolio_data, period) - REAL portfolio analysis with live correlation data via yfinance
@@ -634,20 +660,21 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3
 9. get_session_files_tool(session_id, user_id, file_type) - Retrieve uploaded files for a specific session from the database
 10. get_session_context_tool(session_id, user_id) - Get complete session context including files and context items
-11. get_crypto_data_tool(symbol, timeframe) - Get real-time cryptocurrency data for analysis
-12. compare_crypto_tool(symbols, timeframe) - Compare multiple cryptocurrencies side by side
+11. get_crypto_data_tool(symbol, timeframe, start_date, end_date) - Get real-time cryptocurrency data for analysis with flexible timeframes
+12. compare_crypto_tool(symbols, timeframe, start_date, end_date) - Compare multiple cryptocurrencies side by side with flexible timeframes
 13. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
 14. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
-15. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
-16. return_session_files_wrapper(file_indices) - Return files from current session to user
-17. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
-18. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate CSV files for financial analysis that can be opened in Excel (agent prepares content first)
-19. get_company_cik(symbol) - Get Central Index Key (CIK) for a company by ticker symbol
-20. get_company_filings(cik, form_type, limit) - Get recent SEC filings for a company
-21. get_filing_document(cik, accession_number, document_name) - Get full text content of SEC filing
-22. search_sec_filings(company_name, form_type, start_date, end_date, limit) - Search SEC filings by criteria
-23. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
-24. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
+15. generate_chart_tool(symbol, data_json, chart_type, title) - Generate unified charts for both stocks and crypto using matplotlib (line, candlestick, volume, ohlc) and save directly to S3
+17. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
+18. return_session_files_wrapper(file_indices) - Return files from current session to user
+19. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
+20. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate CSV files for financial analysis that can be opened in Excel (agent prepares content first)
+21. get_company_cik(symbol) - Get Central Index Key (CIK) for a company by ticker symbol
+22. get_company_filings(cik, form_type, limit) - Get recent SEC filings for a company
+23. get_filing_document(cik, accession_number, document_name) - Get full text content of SEC filing
+24. search_sec_filings(company_name, form_type, start_date, end_date, limit) - Search SEC filings by criteria
+25. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
+26. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
 
 🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
 
@@ -667,6 +694,19 @@ You are a professional financial analyst assistant for Cosine, a financial advis
 - session_id and user_id are provided in the Session Context section of your input message
 - Look for "Session ID: {session_id}" and "User ID: {user_id}" in the message you receive
 - Use these exact values when calling get_session_context_tool(session_id, user_id)
+
+📊 CHART GENERATION WORKFLOW:
+When users request charts (e.g., "generate a chart for AAPL", "show me TSLA price history", "create a candlestick chart for MSFT", "generate a BTC chart"):
+1. **FOR STOCKS**: Use get_financial_data(symbol, timeframe, start_date, end_date) to fetch historical data
+2. **FOR CRYPTO**: Use get_crypto_data_tool(symbol, timeframe, start_date, end_date) to fetch historical data
+3. **TIMEFRAMES**: '1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max' (stocks) | '1d', '7d', '30d', '1y', '2y', '5y', 'max' (crypto)
+4. **DATE RANGES**: Use start_date and end_date parameters for custom date ranges (format: 'YYYY-MM-DD')
+5. **THEN**: Use generate_chart_tool(symbol, data_json, chart_type, title) - automatically detects stock vs crypto data
+6. **CHART TYPES**: 'line' (default), 'candlestick', 'volume', 'ohlc' - all work for both stocks and crypto
+7. **RESULT**: Chart is automatically saved to S3 agent-files folder and will appear in the files section
+8. **EXAMPLES**: 
+   - "I want a chart for AAPL past 2 years" → get_financial_data("AAPL", "2y") → generate_chart_tool("AAPL", data_json, "line")
+   - "Generate a BTC candlestick chart" → get_crypto_data_tool("BTC", "1y") → generate_chart_tool("BTC", data_json, "candlestick")
 
 🚨 NEVER SAY "I don't have access to previous context" - ALWAYS call get_session_context_tool first to check what's actually available!
 
@@ -948,10 +988,10 @@ Note: This is a simulated analysis. For actual research, use real Fama-French da
 # Create standalone tool functions that the Strands framework can recognize
 
 @tool
-def get_financial_data(symbol: str) -> str:
-    """Get current stock price, market cap, and financial metrics for a given stock symbol."""
+def get_financial_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> str:
+    """Get current stock price, market cap, and financial metrics for a given stock symbol. Supports custom timeframes and date ranges for chart generation."""
     try:
-        data = FinancialTools.get_stock_data(symbol)
+        data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
         return json.dumps(data, indent=2)
     except Exception as e:
         return f"Error getting financial data: {str(e)}"
@@ -1647,16 +1687,17 @@ enhanced_tools = [
     search_sec_filings,  # Search SEC filings by criteria
     get_filing_exhibits,  # Get exhibits for SEC filing
     download_filing_pdf,  # Download SEC filing as PDF
+    generate_chart_tool,  # Generate unified charts for both stocks and crypto
 ]
 
 # Function to create agents with different models
-def create_financial_agent(model_name: str = 'claude-3-sonnet') -> Agent:
+def create_financial_agent(model_name: str = 'claude-opus-4-1') -> Agent:
     """
     Create a financial agent with the specified model
     
     Args:
         model_name: Name of the model to use:
-                   - 'claude-3-sonnet': Claude 3 Sonnet (default)
+                   - 'claude-opus-4-1': Claude Opus 4.1 (default)
                    - 'claude-3-haiku': Claude 3 Haiku (faster, cheaper)
                    - 'gpt-oss-120b': OpenAI GPT-OSS 120B (high performance)
                    - 'gpt-oss-20b': OpenAI GPT-OSS 20B (faster, efficient)
@@ -1665,8 +1706,8 @@ def create_financial_agent(model_name: str = 'claude-3-sonnet') -> Agent:
         Agent: Configured financial agent
     """
     if model_name not in MODELS:
-        logger.warning(f"Unknown model '{model_name}', falling back to claude-3-sonnet")
-        model_name = 'claude-3-sonnet'
+        logger.warning(f"Unknown model '{model_name}', falling back to claude-opus-4-1")
+        model_name = 'claude-opus-4-1'
     
     selected_model = MODELS[model_name]
     logger.info(f"Creating financial agent with model: {model_name}")
@@ -1678,7 +1719,7 @@ def create_financial_agent(model_name: str = 'claude-3-sonnet') -> Agent:
     )
 
 # Default financial agent (for backward compatibility)
-financial_agent = create_financial_agent('claude-3-sonnet')
+financial_agent = create_financial_agent('claude-opus-4-1')
 
 def analyze_stock(stock_symbol, user_question=None):
     """

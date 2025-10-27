@@ -11,6 +11,11 @@ variable "environment" {
   type        = string
 }
 
+variable "aws_region" {
+  description = "AWS region for the SSL certificate"
+  type        = string
+}
+
 variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
