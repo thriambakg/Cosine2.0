@@ -12,7 +12,6 @@ logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
 s3_client = boto3.client('s3')
-sns_client = boto3.client('sns')
 
 def lambda_handler(event, context):
     """
@@ -96,7 +95,6 @@ def lambda_handler(event, context):
         
         # Get environment variables
         bucket_name = os.environ['CHAT_FILES_BUCKET_NAME']
-        sns_topic_arn = os.environ['SNS_TOPIC_ARN']
         
         # Process each file
         uploaded_files = []
@@ -174,32 +172,7 @@ def lambda_handler(event, context):
                 })
             }
         
-        # Send SNS notification for each uploaded file
-        for file_info in uploaded_files:
-            try:
-                sns_message = {
-                    'Records': [{
-                        's3': {
-                            'bucket': {'name': bucket_name},
-                            'object': {'key': file_info['s3_key']}
-                        }
-                    }]
-                }
-                
-                sns_client.publish(
-                    TopicArn=sns_topic_arn,
-                    Message=json.dumps(sns_message),
-                    Subject=f"File uploaded: {file_info['filename']}"
-                )
-                
-                logger.info(f"Sent SNS notification for file: {file_info['filename']}")
-                
-            except Exception as e:
-                logger.error(f"Error sending SNS notification for {file_info['filename']}: {str(e)}")
-        
-        # Wait for SNS confirmation (simplified - in production, use proper async handling)
-        logger.info("Waiting for SNS confirmation...")
-        time.sleep(2)  # Give SNS time to process
+        # Files uploaded successfully, proceed to WebSocket processor
         
         # Now send enriched message to WebSocket processor via direct Lambda invocation
         # The WebSocket processor will handle storing the message and sending responses
