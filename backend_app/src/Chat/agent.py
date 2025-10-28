@@ -1736,8 +1736,8 @@ def create_financial_agent(model_name: str = 'claude-opus-4-1') -> Agent:
         model=selected_model
     )
 
-# Default financial agent (for backward compatibility)
-financial_agent = create_financial_agent('claude-opus-4-1')
+# Default financial agent (for backward compatibility) - removed to prevent unnecessary creation at import time
+# financial_agent = create_financial_agent('claude-opus-4-1')
 
 def analyze_stock(stock_symbol, user_question=None):
     """
@@ -1755,7 +1755,7 @@ def analyze_stock(stock_symbol, user_question=None):
     else:
         prompt = f"Provide a comprehensive buy/sell analysis for {stock_symbol} stock based on current market data, financial metrics, and recent news."
     
-    return financial_agent(prompt)
+    return create_financial_agent()(prompt)
 
 def chat_with_agent():
     """
@@ -1814,7 +1814,7 @@ def chat_with_agent():
             # Enhanced query processing
             # The agent will automatically decide which tools to use based on the query
             try:
-                response = financial_agent(user_input)
+                response = create_financial_agent()(user_input)
                 print(f"\n💡 Enhanced Cosine Agent:\n{response}")
                 
             except Exception as agent_error:
@@ -1831,7 +1831,7 @@ def chat_with_agent():
                 """
                 
                 try:
-                    fallback_response = financial_agent(basic_prompt)
+                    fallback_response = create_financial_agent()(basic_prompt)
                     print(f"\n💡 Basic Analysis:\n{fallback_response}")
                 except Exception as fallback_error:
                     print(f"❌ Unable to process request: {str(fallback_error)}")

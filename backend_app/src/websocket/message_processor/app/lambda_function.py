@@ -338,38 +338,21 @@ def process_message(connection_id, user_id, session_id, message_data):
                     import traceback
                     logger.error(f"Traceback: {traceback.format_exc()}")
                 
-            # Build enriched prompt with context and files (for AI only)
+            # Build clean message for AI (no system prompt, let agent tools handle file access)
             try:
-                # Combine context items and uploaded files for the AI prompt
-                all_context_items = list(context_items)
+                # Send only the original user message - let agent tools discover and access files
+                clean_message = original_user_message if original_user_message else message_text
+                logger.info(f"📌 Sending clean message to AI: '{clean_message}'")
+                logger.info(f"📌 Files available via tools: {len(uploaded_files)} uploaded files")
                 
-                # Add uploaded files as context items for the AI
-                for file_info in uploaded_files:
-                    all_context_items.append({
-                        'type': 'file',
-                        'title': f"Uploaded File: {file_info['filename']}",
-                        'data': {
-                            'original_filename': file_info['filename'],
-                            's3_key': file_info['s3_key'],
-                            's3_url': file_info['s3_url'],
-                            'content_type': file_info['content_type'],
-                            'file_size': file_info['file_size'],
-                            'upload_timestamp': file_info['upload_timestamp']
-                        }
-                    })
-                
-                enriched_message = build_context_prompt(message_text, all_context_items)
-                logger.info(f"📌 Enhanced message with context and files (length: {len(enriched_message)})")
-                logger.info(f"📌 Enriched message preview (first 500 chars): {enriched_message[:500]}")
-                
-                # Send the enriched message to AI, but keep original for frontend
-                message_text = enriched_message
+                # Use clean message for AI processing
+                message_text = clean_message
             except Exception as e:
-                logger.error(f"❌ Failed to build context prompt: {e}")
+                logger.error(f"❌ Failed to prepare clean message: {e}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
         else:
-            logger.warning(f"⚠️ Context builder not available, passing context items and files to chat agent for processing")
+            logger.info(f"📌 No context or files, sending original message: '{message_text}'")
         
         # Call the existing chat agent Lambda (with enriched message if context present)
         # Pass original_user_message so the chat agent can store it for display
@@ -1230,13 +1213,10 @@ def handle_file_handler_message(event):
         except Exception as e:
             logger.error(f"❌ Failed to store user message: {e}")
         
-        # Build enriched message for AI agent
-        if CONTEXT_BUILDER_AVAILABLE and all_context_items:
-            enriched_message = build_context_prompt(message_text, all_context_items)
-            logger.info(f"📌 Built enriched message with context and uploaded files")
-        else:
-            enriched_message = message_text
-            logger.info(f"📌 Using original message (no context builder or no context items)")
+        # Send clean message to AI agent (let tools handle file access)
+        clean_message = message_text
+        logger.info(f"📌 Sending clean message to AI: '{clean_message}'")
+        logger.info(f"📌 Files available via tools: {len(uploaded_files)} uploaded files")
         
         # Invoke chat agent with enriched message
         try:
@@ -1252,7 +1232,7 @@ def handle_file_handler_message(event):
             agent_payload = {
                 'user_id': user_id,
                 'session_id': session_id,
-                'message': enriched_message,  # Use enriched message for AI
+                'message': clean_message,  # Use clean message for AI
                 'originalMessage': message_text,  # Pass original message for storage (camelCase to match handler)
                 'message_id': message_id,
                 'model': model,
@@ -1496,11 +1476,10 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
                     }
                 })
             
-            enriched_message = build_context_prompt(message_text, all_context_items)
-            logger.info(f"📌 Built enriched message with context and uploaded files")
-        else:
-            enriched_message = message_text
-            logger.info(f"📌 Using original message (no context builder or no context items)")
+        # Send clean message to AI agent (let tools handle file access)
+        clean_message = message_text
+        logger.info(f"📌 Sending clean message to AI: '{clean_message}'")
+        logger.info(f"📌 Files available via tools: {len(uploaded_files)} uploaded files")
         
         # Invoke chat agent with enriched message
         try:
@@ -1513,7 +1492,7 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
             agent_payload = {
                 'user_id': user_id,
                 'session_id': session_id,
-                'message': enriched_message,  # Use enriched message for AI
+                'message': clean_message,  # Use clean message for AI
                 'message_id': message_id,
                 'model': model,
                 'context_items': context_items_decimal,

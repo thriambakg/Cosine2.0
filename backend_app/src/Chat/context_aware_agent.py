@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 from session_manager import session_manager
-from agent import financial_agent, enhanced_tools, create_financial_agent
+from agent import enhanced_tools, create_financial_agent
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class ContextAwareAgent:
     
     def __init__(self):
         """Initialize the context-aware agent system"""
-        self.base_agent = financial_agent
+        self.base_agent = None  # Will be created on demand to avoid import-time creation
         self.base_tools = enhanced_tools
         self.session_agents = {}  # Cache for session-specific agents
         
