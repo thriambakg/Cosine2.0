@@ -5,6 +5,8 @@ import uuid
 from datetime import datetime
 import logging
 import time
+from decimal import Decimal
+from typing import List, Dict, Any
 
 # Configure logging
 logger = logging.getLogger()
@@ -12,6 +14,184 @@ logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
 s3_client = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+
+# Import context builder for enriching messages with context
+try:
+    from context_builder import build_context_prompt, extract_context_summary
+    logger.info("✅ Successfully imported context_builder")
+    CONTEXT_BUILDER_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import context_builder: {e}")
+    CONTEXT_BUILDER_AVAILABLE = False
+    # Fallback functions if import fails
+    def build_context_prompt(user_message, context_items):
+        return user_message
+    def extract_context_summary(context_items):
+        return {'total_items': len(context_items) if context_items else 0}
+
+def json_dumps_safe(obj):
+    """JSON dumps with Decimal support for DynamoDB"""
+    def decimal_default(obj):
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+    
+    return json.dumps(obj, default=decimal_default)
+
+def convert_floats_to_decimal(obj):
+    """
+    Recursively convert all float values to Decimal for DynamoDB compatibility
+    """
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    elif isinstance(obj, dict):
+        return {key: convert_floats_to_decimal(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_floats_to_decimal(item) for item in obj]
+    else:
+        return obj
+
+# Initialize DynamoDB table
+chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
+
+# Initialize WebSocket client
+websocket_client = boto3.client('apigatewaymanagementapi')
+websocket_endpoint = os.environ.get('WEBSOCKET_ENDPOINT')
+if not websocket_endpoint:
+    api_gateway_id = os.environ.get('WEBSOCKET_API_ID')
+    if api_gateway_id:
+        websocket_endpoint = f"https://{api_gateway_id}.execute-api.us-east-1.amazonaws.com/production"
+
+def update_session_variables(user_id: str, session_id: str, uploaded_files: List[Dict], context_items: List[Dict] = None):
+    """
+    Update session variables in DynamoDB with uploaded files and context items.
+    This replaces the session variable update logic from the WebSocket processor.
+    """
+    try:
+        if context_items:
+            logger.info(f"📌 Context items preview: {json_dumps_safe(context_items[:1])}")  # Log first item
+        if uploaded_files:
+            logger.info(f"📌 Uploaded files preview: {json_dumps_safe(uploaded_files[:1])}")  # Log first file
+        
+        # Store context and files in session_variables for persistence
+        if CONTEXT_BUILDER_AVAILABLE:
+            context_summary = extract_context_summary(context_items) if context_items else {}
+            logger.info(f"📌 Context summary: {context_summary}")
+            
+            # Update session variables in DynamoDB
+            try:
+                # Convert all floats to Decimal for DynamoDB compatibility
+                context_items_decimal = convert_floats_to_decimal(context_items) if context_items else []
+                context_summary_decimal = convert_floats_to_decimal(context_summary)
+                uploaded_files_decimal = convert_floats_to_decimal(uploaded_files)
+                
+                # Get existing session_variables to merge with new data
+                response = chat_sessions_table.get_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    }
+                )
+                
+                # Get existing session_variables or create empty dict
+                existing_session_vars = response.get('Item', {}).get('session_variables', {})
+                
+                # Prepare session variables with separate fields
+                session_vars = {
+                    **existing_session_vars,  # Preserve existing data
+                    'last_updated': int(datetime.now().timestamp())
+                }
+                
+                # Add context items if present
+                if context_items:
+                    session_vars.update({
+                        'context_items': context_items_decimal,
+                        'context_added_at': int(datetime.now().timestamp()),
+                        'context_summary': context_summary_decimal,
+                    })
+                
+                # Add uploaded files if present
+                if uploaded_files:
+                    # Get existing uploaded files or create empty list
+                    existing_files = existing_session_vars.get('uploaded_files', [])
+                    
+                    # Merge new files with existing files
+                    all_files = existing_files + uploaded_files_decimal
+                    
+                    session_vars.update({
+                        'uploaded_files': all_files,
+                        'files_added_at': int(datetime.now().timestamp())
+                    })
+                
+                chat_sessions_table.update_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    UpdateExpression='SET session_variables = :vars, last_updated = :updated',
+                    ExpressionAttributeValues={
+                        ':vars': session_vars,
+                        ':updated': int(datetime.now().timestamp())
+                    }
+                )
+                logger.info(f"📌 Stored context and uploaded files in session_variables")
+                
+                # Send session update to WebSocket clients
+                send_session_update_to_websocket(user_id, session_id, session_vars)
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to store context and files in session_variables: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                
+    except Exception as e:
+        logger.error(f"❌ Error updating session variables: {str(e)}")
+        raise
+
+def send_session_update_to_websocket(user_id: str, session_id: str, session_variables: Dict):
+    """
+    Send session update message to WebSocket clients.
+    This replaces the session update logic from the WebSocket processor.
+    """
+    try:
+        # Get active connections for this user
+        connections_response = chat_sessions_table.query(
+            IndexName='user_id-index',
+            KeyConditionExpression='user_id = :user_id',
+            FilterExpression='attribute_exists(connection_id)'
+        )
+        
+        active_connections = connections_response.get('Items', [])
+        
+        if active_connections:
+            logger.info(f"📁 Found {len(active_connections)} active connections for user {user_id}")
+            
+            # Send session update to all active connections
+            for connection in active_connections:
+                connection_id = connection.get('connection_id')
+                if connection_id:
+                    try:
+                        session_update_message = {
+                            'type': 'session_updated',
+                            'session_id': session_id,
+                            'session_variables': session_variables,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                        
+                        websocket_client.post_to_connection(
+                            ConnectionId=connection_id,
+                            Data=json_dumps_safe(session_update_message)
+                        )
+                        logger.info(f"📁 Sent session variables update to connection {connection_id}")
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Failed to send session variables update to connection {connection_id}: {str(e)}")
+        else:
+            logger.warning(f"⚠️ No active connections found for user {user_id}, session {session_id}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error sending session update to WebSocket: {str(e)}")
 
 def lambda_handler(event, context):
     """
@@ -172,7 +352,13 @@ def lambda_handler(event, context):
                 })
             }
         
-        # Files uploaded successfully, proceed to WebSocket processor
+        # Files uploaded successfully, update session variables immediately
+        try:
+            update_session_variables(user_id, session_id, uploaded_files, context_items)
+            logger.info("Successfully updated session variables with uploaded files")
+        except Exception as e:
+            logger.error(f"Error updating session variables: {str(e)}")
+            # Continue anyway - files are uploaded
         
         # Now send enriched message to WebSocket processor via direct Lambda invocation
         # The WebSocket processor will handle storing the message and sending responses
