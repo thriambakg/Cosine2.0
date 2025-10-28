@@ -5,6 +5,7 @@
  */
 
 import { sessionManagementAPI } from './api';
+import { API_CONFIG } from '../config/api';
 
 export interface SharedMessage {
   id: string;
@@ -56,6 +57,7 @@ class UnifiedMessageHandlerService {
   private webSocketConnections: Map<string, WebSocket> = new Map(); // sessionId -> WebSocket connection
   private cancelledMessages: Set<string> = new Set(); // messageId -> cancelled messages
   private requestIdCounter: number = 0; // For generating unique request IDs
+  private sessionUserIds: Map<string, string> = new Map(); // sessionId -> userId mapping
 
   private constructor() {
     // Listen for WebSocket responses and update local cache
@@ -178,11 +180,31 @@ class UnifiedMessageHandlerService {
   }
 
   /**
+   * Get current user ID from active sessions
+   */
+  private getCurrentUserId(): string | null {
+    // Try to get user ID from any active session
+    for (const [, userId] of this.sessionUserIds.entries()) {
+      if (userId) {
+        return userId;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Send kill signal via API as fallback
    */
   private async sendKillSignalViaAPI(sessionId: string, reason: string): Promise<void> {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/sessions`, {
+      // Get user ID from the current session or use a default
+      const userId = this.getCurrentUserId();
+      if (!userId) {
+        console.error('❌ UnifiedMessageHandler: No user ID available for kill signal');
+        return;
+      }
+
+      const response = await fetch(`${API_CONFIG.BASE_URL}/sessions?user_id=${userId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -219,6 +241,9 @@ class UnifiedMessageHandlerService {
       }
 
       const sessionId = sessionResult.sessionId!;
+
+      // Store user ID for this session
+      this.sessionUserIds.set(sessionId, messageData.userId);
 
       // Step 2: Add user message to local cache immediately (for instant display)
       this.addUserMessageToLocalCache(sessionId, messageData);
@@ -266,6 +291,8 @@ class UnifiedMessageHandlerService {
   private async ensureSessionExists(messageData: UnifiedMessageData): Promise<SessionCreationResult> {
     // If sessionId provided, use it
     if (messageData.sessionId) {
+      // Store user ID for this session
+      this.sessionUserIds.set(messageData.sessionId, messageData.userId);
       return { sessionId: messageData.sessionId, success: true };
     }
 
@@ -313,6 +340,8 @@ class UnifiedMessageHandlerService {
 
       if (response.session_id) {
         console.log('✅ UnifiedMessageHandler: Created session:', response.session_id);
+        // Store user ID for this session
+        this.sessionUserIds.set(response.session_id, messageData.userId);
         return { sessionId: response.session_id, success: true };
       } else {
         throw new Error('Failed to create session');
@@ -655,6 +684,9 @@ class UnifiedMessageHandlerService {
       case 'connection_established':
         console.log('✅ UnifiedMessageHandler: Connection established for session:', sessionId);
         break;
+      case 'message_received':
+        console.log('📨 UnifiedMessageHandler: Message received confirmation for session:', sessionId);
+        break;
       case 'kill_signal_acknowledged':
         this.handleKillSignalAcknowledgment(sessionId, data);
         break;
@@ -668,31 +700,13 @@ class UnifiedMessageHandlerService {
    */
   private handleKillSignalAcknowledgment(sessionId: string, data: any): void {
     console.log('✅ UnifiedMessageHandler: Kill signal acknowledged for session:', sessionId, 'reason:', data.reason);
+    console.log('🛑 Processing Cancelled: Processing cancelled successfully');
     
     // Clear loading state for all interfaces since processing was cancelled
     this.broadcastLoadingState(sessionId, false, 'chatpage');
     this.broadcastLoadingState(sessionId, false, 'sidebar');
     
-    // Add cancellation message to show user what happened
-    const cancellationMessage: SharedMessage = {
-      id: `cancelled_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      sender: 'ai',
-      text: `🛑 **Processing Cancelled**: ${data.message || 'The AI response was cancelled due to timeout or user action.'}`,
-      timestamp: Date.now(),
-      sessionId: sessionId,
-      source: 'chatpage'
-    };
-
-    // Add to local cache
-    if (!this.localCache.has(sessionId)) {
-      this.localCache.set(sessionId, []);
-    }
-    this.localCache.get(sessionId)!.push(cancellationMessage);
-
-    // Notify listeners of message update
-    this.notifyMessageUpdate(sessionId, this.localCache.get(sessionId)!);
-    
-    console.log('✅ UnifiedMessageHandler: Added cancellation message to local cache');
+    // Note: Removed cancellation message from chat - now only logs the cancellation
   }
 
 

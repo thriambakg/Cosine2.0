@@ -586,20 +586,35 @@ export default function ChatPage() {
         loadingTimeoutRef.current = null;
       }, 300000); // 5 minutes (300,000 ms)
     }
-    
-  // Cleanup on unmount
-  return () => {
-    if (loadingTimeoutRef.current) {
-      clearTimeout(loadingTimeoutRef.current);
-    }
-    
-    // Cancel all pending messages when component unmounts (page refresh)
-    if (currentSessionId) {
-      console.log('🧹 ChatPage: Cleaning up - cancelling all pending messages for session:', currentSessionId);
-      unifiedMessageHandler.cancelAllMessagesForSession(currentSessionId);
-    }
-  };
   }, [currentSession?.session_id, sessionLoadingStates, addPersistedMessage]);
+
+  // Track current session for cleanup
+  const currentSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentSessionRef.current = currentSession?.session_id || null;
+  }, [currentSession?.session_id]);
+
+  // Cleanup on unmount
+  const cleanupCalledRef = useRef(false);
+  useEffect(() => {
+    return () => {
+      if (cleanupCalledRef.current) {
+        console.log('🧹 ChatPage: Cleanup already called, skipping');
+        return;
+      }
+      cleanupCalledRef.current = true;
+      
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+      
+      // Cancel all pending messages when component unmounts (page refresh)
+      if (currentSessionRef.current) {
+        console.log('🧹 ChatPage: Cleaning up - cancelling all pending messages for session:', currentSessionRef.current);
+        unifiedMessageHandler.cancelAllMessagesForSession(currentSessionRef.current);
+      }
+    };
+  }, []); // Empty dependency array - only run on mount/unmount
   const editContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

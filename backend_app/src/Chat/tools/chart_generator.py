@@ -215,10 +215,27 @@ class UnifiedChartGenerator:
             
             # Decompress data if it's compressed
             from tools.data_compression import DataCompression
-            data_dict = DataCompression.decompress_data(data_dict)
+            
+            # Check if the entire response is compressed
+            if isinstance(data_dict, dict) and data_dict.get("_compressed") is True:
+                # Entire response is compressed
+                data_dict = DataCompression.decompress_data(data_dict)
+            elif isinstance(data_dict, dict) and 'historical_data' in data_dict:
+                # Only historical_data is compressed, decompress it
+                hist_data = data_dict['historical_data']
+                if isinstance(hist_data, dict) and hist_data.get("_compressed") is True:
+                    data_dict['historical_data'] = DataCompression.decompress_data(hist_data)
             
             # Debug logging to see data structure
             logger.info(f"Data structure after decompression: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
+            logger.info(f"Data type: {type(data_dict)}")
+            if isinstance(data_dict, dict):
+                logger.info(f"Has 'historical_data' key: {'historical_data' in data_dict}")
+                if 'historical_data' in data_dict:
+                    hist_data = data_dict['historical_data']
+                    logger.info(f"Historical data type: {type(hist_data)}")
+                    if isinstance(hist_data, list) and len(hist_data) > 0:
+                        logger.info(f"First historical data point: {hist_data[0]}")
             
             # Detect data type
             data_type = self._detect_data_type(data_dict)
