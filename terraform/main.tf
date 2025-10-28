@@ -1596,8 +1596,6 @@ module "file_upload_lambda" {
     CHAT_FILES_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
     CHAT_SESSIONS_TABLE_NAME          = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
     WEBSOCKET_PROCESSOR_FUNCTION_NAME = module.websocket_message_lambda.function_name
-    WEBSOCKET_ENDPOINT                = data.terraform_remote_state.base_infra.outputs.websocket_endpoint
-    WEBSOCKET_API_ID                  = data.terraform_remote_state.base_infra.outputs.websocket_api_id
   }
 
   # Attach core layer
@@ -1608,7 +1606,6 @@ module "file_upload_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
-    aws_iam_policy.lambda_websocket_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
 
