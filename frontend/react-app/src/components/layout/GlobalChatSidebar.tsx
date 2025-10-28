@@ -488,7 +488,7 @@ const GlobalChatSidebar: React.FC = () => {
 
   // Available models with nicknames and tooltips
   const availableModels = [
-    { value: 'claude-opus-4-1', label: 'Balanced', tooltip: 'Strikes ideal balance between intelligence and speed' },
+    { value: 'claude-sonnet-4', label: 'Balanced', tooltip: 'Strikes ideal balance between intelligence and speed' },
     { value: 'claude-haiku-4-5', label: 'Fast', tooltip: 'Fastest, most compact model for near-instant responsiveness' },
     { value: 'nova-lite', label: 'Multimodal', tooltip: 'Multimodal understanding model for text, images, and videos' },
     { value: 'gpt-oss-120b', label: 'Deep', tooltip: 'Complex reasoning, extended thinking, sophisticated analysis' },
@@ -2146,7 +2146,7 @@ const GlobalChatSidebar: React.FC = () => {
         {/* Model Selection */}
         <FormControl fullWidth size="small" sx={{ mb: 1 }}>
           <Select
-            value={selectedModel || 'claude-opus-4-1'}
+            value={selectedModel || 'claude-sonnet-4'}
             onChange={handleModelChange}
             sx={{
               color: '#ffffff',

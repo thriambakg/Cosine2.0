@@ -232,7 +232,7 @@ class SessionDatabaseAccess:
                     'last_updated': session_item.get('last_updated'),
                     'message_count': session_item.get('message_count', 0),
                     'title': session_item.get('title', 'Untitled'),
-                    'model': session_item.get('model', 'claude-opus-4-1')
+                    'model': session_item.get('model', 'claude-sonnet-4')
                 }
             }
             
@@ -337,7 +337,7 @@ def get_session_context_tool(session_id: str, user_id: str) -> str:
             f"Complete Session Context for {session_id}:",
             f"- User: {result['user_id']}",
             f"- Title: {result['session_metadata'].get('title', 'Untitled')}",
-            f"- Model: {result['session_metadata'].get('model', 'claude-opus-4-1')}",
+            f"- Model: {result['session_metadata'].get('model', 'claude-sonnet-4')}",
             f"- Created: {result['session_metadata'].get('created_at', 'Unknown')}",
             f"- Last Updated: {result['session_metadata'].get('last_updated', 'Unknown')}",
             f"- Message Count: {result['session_metadata'].get('message_count', 0)}"

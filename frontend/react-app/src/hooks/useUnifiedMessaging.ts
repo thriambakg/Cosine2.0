@@ -112,7 +112,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
   const sendContextMessage = useCallback(async (
     text: string, 
     contextItems: any[], 
-    model: string = 'claude-opus-4-1',
+    model: string = 'claude-sonnet-4',
     overrideSessionId?: string
   ) => {
     console.log('🔍 DEBUG: sendContextMessage called with:', { text, contextItems, model, overrideSessionId });
@@ -142,7 +142,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
   const sendFileMessage = useCallback(async (
     text: string,
     files: File[],
-    model: string = 'claude-opus-4-1'
+    model: string = 'claude-sonnet-4'
   ) => {
     return sendMessage({
       text,
@@ -155,7 +155,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
   // Send followup message (existing session)
   const sendFollowupMessage = useCallback(async (
     text: string,
-    model: string = 'claude-opus-4-1'
+    model: string = 'claude-sonnet-4'
   ) => {
     return sendMessage({
       text,
@@ -168,7 +168,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
   const sendEditMessage = useCallback(async (
     text: string,
     messageId: string,
-    model: string = 'claude-opus-4-1'
+    model: string = 'claude-sonnet-4'
   ) => {
     return unifiedMessageHandler.processMessage({
       text,

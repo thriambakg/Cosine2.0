@@ -165,7 +165,7 @@ def list_sessions(user_id: str) -> Dict[str, Any]:
                 'created_at': item['created_at'],
                 'last_updated': item.get('last_updated', item['created_at']),
                 'title': item.get('title', f'Chat {item["session_id"][:8]}'),
-                'model': item.get('model', 'claude-opus-4-1'),
+                'model': item.get('model', 'claude-sonnet-4'),
                 'message_count': len(messages),  # Use actual message count from array
                 'messages': messages,
                 'session_variables': item.get('session_variables', {})
@@ -221,7 +221,7 @@ def get_session(user_id: str, session_id: str) -> Dict[str, Any]:
             'title': session_data.get('title', f'Chat {session_id[:8]}'),
             'created_at': session_data.get('created_at', int(time.time())),
             'last_updated': session_data.get('last_updated', session_data.get('created_at')),
-            'model': session_data.get('model', 'claude-opus-4-1'),
+            'model': session_data.get('model', 'claude-sonnet-4'),
             'message_count': len(messages),
             'messages': messages,
             'session_variables': session_data.get('session_variables', {})
@@ -247,7 +247,7 @@ def create_session(user_id: str, session_data: Dict[str, Any]) -> Dict[str, Any]
         session_id = str(uuid.uuid4())
         timestamp = int(time.time())
         title = session_data.get('title', f'New Chat {datetime.now().strftime("%m/%d %H:%M")}')
-        model = session_data.get('model', 'claude-opus-4-1')
+        model = session_data.get('model', 'claude-sonnet-4')
         
         # Create single session item (no welcome message)
         session_item = {

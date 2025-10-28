@@ -962,24 +962,24 @@ resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
         ]
         Resource = [
           # Foundation models (US-specific model IDs) - Cross-region inference enabled
-          "arn:aws:bedrock:*:*:foundation-model/us.anthropic.claude-opus-4-1-20250805-v1:0",
+          "arn:aws:bedrock:*:*:foundation-model/us.anthropic.claude-sonnet-4-20250514-v1:0",
           "arn:aws:bedrock:*:*:foundation-model/us.anthropic.claude-haiku-4-5-20251001-v1:0",
           "arn:aws:bedrock:*:*:foundation-model/us.amazon.nova-lite-v1:0",
           "arn:aws:bedrock:*:*:foundation-model/openai.gpt-oss-120b-1:0",
           "arn:aws:bedrock:*:*:foundation-model/openai.gpt-oss-20b-1:0",
           # Foundation models (legacy model IDs) - Fallback support
-          "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-opus-4-1-20250805-v1:0",
+          "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
           "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
           "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-3-haiku-20240307-v1:0",
           "arn:aws:bedrock:*:*:foundation-model/amazon.nova-lite-v1:0",
           # Inference profiles for cross-region inference
-          "arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-opus-4-1-20250805-v1:0",
+          "arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0",
           "arn:aws:bedrock:*:*:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0",
           "arn:aws:bedrock:*:*:inference-profile/us.amazon.nova-lite-v1:0",
           "arn:aws:bedrock:*:*:inference-profile/openai.gpt-oss-120b-1:0",
           "arn:aws:bedrock:*:*:inference-profile/openai.gpt-oss-20b-1:0",
           # Inference profiles (legacy model IDs) - Fallback support
-          "arn:aws:bedrock:*:*:inference-profile/anthropic.claude-opus-4-1-20250805-v1:0",
+          "arn:aws:bedrock:*:*:inference-profile/anthropic.claude-sonnet-4-20250514-v1:0",
           "arn:aws:bedrock:*:*:inference-profile/anthropic.claude-haiku-4-5-20251001-v1:0",
           "arn:aws:bedrock:*:*:inference-profile/anthropic.claude-3-haiku-20240307-v1:0",
           "arn:aws:bedrock:*:*:inference-profile/amazon.nova-lite-v1:0"

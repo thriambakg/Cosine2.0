@@ -175,7 +175,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       const transformedSessions = response.sessions.map(session => ({
         session_id: session.session_id,
         title: session.title || `Chat ${session.session_id.substring(0, 8)}`,
-        model: session.model || 'claude-opus-4-1',
+        model: session.model || 'claude-sonnet-4',
         created_at: session.created_at,
         last_updated: session.last_updated,
         message_count: (session.messages || []).length, // Use actual message count from array
@@ -208,7 +208,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       console.log('📋 Creating new session...');
       const response = await api.sessions.createSession(userId, {
         title: title || new Date().toLocaleString(),
-        model: model || 'claude-opus-4-1',
+        model: model || 'claude-sonnet-4',
         create_welcome_message: false
       });
       
@@ -241,7 +241,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
         const localSession: ChatSession = {
           session_id: localSessionId,
           title: sessionTitle,
-          model: model || 'claude-opus-4-1',
+          model: model || 'claude-sonnet-4',
           created_at: now,
           last_updated: now,
           message_count: 0,

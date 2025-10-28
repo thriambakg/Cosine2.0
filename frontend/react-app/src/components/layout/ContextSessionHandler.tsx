@@ -50,7 +50,7 @@ const ContextSessionHandler: React.FC = () => {
         // Create new session via API
         const response = await sessionManagementAPI.createSession(user.id, {
           title: new Date().toLocaleString(),
-          model: 'claude-opus-4-1',
+          model: 'claude-sonnet-4',
           create_welcome_message: false
         });
 

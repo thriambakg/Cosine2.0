@@ -41,7 +41,7 @@ class SessionManager:
         
         logger.info(f"SessionManager initialized with table: {self.chat_sessions_table_name}")
     
-    def create_session(self, user_id: str, page_context: Dict[str, Any], model: str = 'claude-opus-4-1') -> str:
+    def create_session(self, user_id: str, page_context: Dict[str, Any], model: str = 'claude-sonnet-4') -> str:
         """
         Create a new chat session with initial context
         
@@ -257,7 +257,7 @@ class SessionManager:
                     'sender': 'bot',
                     'timestamp': timestamp + 1,
                     'message_type': 'text',
-                    'model': model or 'claude-opus-4-1'  # Include model information
+                    'model': model or 'claude-sonnet-4'  # Include model information
                 }
                 messages.append(agent_message)
                 logger.info(f"✅ Added agent message: {agent_message['id']} with model: {model}")
@@ -323,7 +323,7 @@ class SessionManager:
                     'created_at': item['created_at'],
                     'last_updated': item['last_updated'],
                     'title': item.get('title', f'Chat {item["session_id"][:8]}'),
-                    'model': item.get('model', 'claude-opus-4-1'),
+                    'model': item.get('model', 'claude-sonnet-4'),
                     'message_count': item.get('message_count', 0),
                     'page_url': item.get('page_url', ''),
                     'page_title': item.get('page_title', ''),

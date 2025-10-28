@@ -503,7 +503,7 @@ class UnifiedMessageHandlerService {
           },
           files: filesData,
           context_items: messageData.contextItems || [],
-          model: messageData.model || 'claude-opus-4-1'  // Include selected model
+          model: messageData.model || 'claude-sonnet-4'  // Include selected model
         };
 
         const response = await fetch(`${process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'}/files`, {

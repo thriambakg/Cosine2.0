@@ -619,8 +619,8 @@ load_dotenv()
 
 # Configure different Bedrock models
 MODELS = {
-    'claude-opus-4-1': BedrockModel(
-        model_id="us.anthropic.claude-opus-4-1-20250805-v1:0"
+    'claude-sonnet-4': BedrockModel(
+        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0"
     ),
     'claude-haiku-4-5': BedrockModel(
         model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -639,7 +639,7 @@ MODELS = {
 }
 
 # Default model (for backward compatibility)
-model = MODELS['claude-opus-4-1']
+model = MODELS['claude-sonnet-4']
 
 # Define an enhanced financial analysis system prompt with explicit tool orchestration
 FINANCIAL_ANALYSIS_PROMPT = """
@@ -1811,13 +1811,13 @@ enhanced_tools = [
 ]
 
 # Function to create agents with different models
-def create_financial_agent(model_name: str = 'claude-opus-4-1') -> Agent:
+def create_financial_agent(model_name: str = 'claude-sonnet-4') -> Agent:
     """
     Create a financial agent with the specified model
     
     Args:
         model_name: Name of the model to use:
-                   - 'claude-opus-4-1': Claude Opus 4.1 (default)
+                   - 'claude-sonnet-4': Claude Sonnet 4 (default)
                    - 'claude-haiku-4-5': Claude Haiku 4.5 (faster, cheaper)
                    - 'gpt-oss-120b': OpenAI GPT-OSS 120B (high performance)
                    - 'gpt-oss-20b': OpenAI GPT-OSS 20B (faster, efficient)
@@ -1826,8 +1826,8 @@ def create_financial_agent(model_name: str = 'claude-opus-4-1') -> Agent:
         Agent: Configured financial agent
     """
     if model_name not in MODELS:
-        logger.warning(f"Unknown model '{model_name}', falling back to claude-opus-4-1")
-        model_name = 'claude-opus-4-1'
+        logger.warning(f"Unknown model '{model_name}', falling back to claude-sonnet-4")
+        model_name = 'claude-sonnet-4'
     
     selected_model = MODELS[model_name]
     logger.info(f"Creating financial agent with model: {model_name}")

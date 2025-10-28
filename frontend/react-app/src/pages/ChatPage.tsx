@@ -1393,7 +1393,7 @@ export default function ChatPage() {
                 </Typography>
                 <FormControl size="small" fullWidth>
                   <Select
-                    value={selectedModel || 'claude-opus-4-1'}
+                    value={selectedModel || 'claude-sonnet-4'}
                     onChange={(e) => setSelectedModel(e.target.value)}
                     sx={{
                       color: 'white',
@@ -1412,7 +1412,7 @@ export default function ChatPage() {
                       },
                     }}
                   >
-                    <MenuItem value="claude-opus-4-1" title="Strikes ideal balance between intelligence and speed">
+                    <MenuItem value="claude-sonnet-4" title="Strikes ideal balance between intelligence and speed">
                       Balanced
                     </MenuItem>
                     <MenuItem value="claude-haiku-4-5" title="Fastest, most compact model for near-instant responsiveness">

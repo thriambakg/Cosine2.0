@@ -51,7 +51,7 @@ def lambda_handler(event, context):
         message = body.get('message', {})
         files = body.get('files', [])
         context_items = body.get('context_items', [])
-        model = body.get('model', 'claude-opus-4-1')  # Get model from request
+        model = body.get('model', 'claude-sonnet-4')  # Get model from request
         
         if not user_id or not session_id:
             return {

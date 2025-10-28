@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 
 const MODEL_STORAGE_KEY = 'cosine_selected_model';
-const DEFAULT_MODEL = 'claude-opus-4-1'; // Balanced
+const DEFAULT_MODEL = 'claude-sonnet-4'; // Balanced
 
 export const usePersistentModel = () => {
   const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_MODEL);
@@ -13,7 +13,7 @@ export const usePersistentModel = () => {
       if (storedModel) {
         // Validate that the stored model is one of the available options
         const availableModels = [
-          'claude-opus-4-1',
+          'claude-sonnet-4',
           'claude-haiku-4-5', 
           'nova-lite',
           'gpt-oss-120b',
@@ -45,7 +45,7 @@ export const usePersistentModel = () => {
     try {
       // Validate the new model
       const availableModels = [
-        'claude-opus-4-1',
+        'claude-sonnet-4',
         'claude-haiku-4-5', 
         'nova-lite',
         'gpt-oss-120b',
