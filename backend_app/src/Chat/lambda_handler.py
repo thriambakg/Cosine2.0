@@ -500,20 +500,28 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             session_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
             
             if not session_context:
-                logger.warning(f"⚠️ Session {session_id} not found for user {user_id} - creating session with model {model}")
-                # Create session if it doesn't exist (handles race condition with WebSocket processor)
-                page_context = event_body.get('context', {})
-                session_manager.create_session(user_id, page_context, model)
-                session_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
-                is_new_session = True
+                logger.warning(f"⚠️ Session {session_id} not found for user {user_id} - waiting for WebSocket processor to create it")
+                # Wait briefly for WebSocket processor to create session (handles race condition)
+                import time
+                max_retries = 3
+                retry_delay = 0.5  # 500ms
+                
+                for attempt in range(max_retries):
+                    logger.info(f"🔍 Retry {attempt + 1}/{max_retries}: Waiting for session creation...")
+                    time.sleep(retry_delay)
+                    session_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
+                    
+                    if session_context:
+                        logger.info(f"✅ Session {session_id} found after retry {attempt + 1}")
+                        break
                 
                 if not session_context:
-                    logger.error(f"❌ Failed to create session {session_id} for user {user_id}")
+                    logger.error(f"❌ Session {session_id} still not found after {max_retries} retries - WebSocket processor may have failed")
                     return {
-                        'statusCode': 500,
+                        'statusCode': 404,
                         'body': {
-                            'error': 'Failed to create session',
-                            'message': f'Could not create session {session_id} for user {user_id}',
+                            'error': 'Session not found',
+                            'message': f'Session {session_id} not found for user {user_id} after retries',
                             'session_id': session_id,
                             'user_id': user_id
                         }
