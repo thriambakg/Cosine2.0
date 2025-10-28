@@ -280,9 +280,17 @@ def update_session_variables(user_id, session_id, uploaded_files, context_items)
             # Merge uploaded files and context items into session_variables
             merged_session_vars = {
                 **existing_session_vars,  # Preserve existing data
-                'uploaded_files': uploaded_files_decimal,
-                'context_items': context_items_decimal
             }
+            
+            # Append uploaded files to existing files (don't overwrite)
+            existing_files = existing_session_vars.get('uploaded_files', [])
+            all_files = existing_files + uploaded_files_decimal
+            merged_session_vars['uploaded_files'] = all_files
+            logger.info(f"📌 Merged uploaded files: {len(existing_files)} existing + {len(uploaded_files_decimal)} new = {len(all_files)} total")
+            
+            # Update context items (these can be replaced as they're typically from the current message)
+            merged_session_vars['context_items'] = context_items_decimal
+            logger.info(f"📌 Updated context items: {len(context_items_decimal)} items")
             
             # Update the session with merged session_variables
             table.update_item(
