@@ -382,6 +382,7 @@ When get_chat_history_tool returns data:
 🌐 CURRENT SESSION CONTEXT:
 ===========================
 Session ID: {session_id}
+User ID: {session_context['user_id']}
 Webpage: {metadata.get('page_url', 'Unknown')}
 Page Title: {metadata.get('page_title', 'Unknown')}
 User Intent: {metadata.get('user_intent', 'general')}
