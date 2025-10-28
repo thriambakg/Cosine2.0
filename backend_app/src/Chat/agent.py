@@ -837,6 +837,22 @@ FOR FILE HANDLING - CHOOSE THE RIGHT TOOL:
 - **For CREATION**: Use create_agent_file_wrapper() when users want to create new files
 - **ASK FOR CLARIFICATION** if the intent is unclear
 
+📁 FILE DISCOVERY WORKFLOW:
+When users ask about files (e.g., "can you see this file?", "do you see any files?", "what files do I have?"):
+1. **ALWAYS FIRST**: Call get_session_files_tool(session_id, user_id, "all") to discover all uploaded files
+2. **IF FILES FOUND**: List the files and ask which one they want to work with
+3. **IF NO FILES**: Inform them that no files are currently uploaded
+4. **FOR SPECIFIC FILE**: Use read_s3_file_tool(s3_key, file_type) with the S3 key from the file metadata
+5. **NEVER ASSUME**: Don't rely on session context for file information - always use the tools!
+
+🚨 CRITICAL FILE DISCOVERY RULES:
+- When users ask "can you see this file?" → ALWAYS call get_session_files_tool() first
+- When users ask "what files do I have?" → ALWAYS call get_session_files_tool() first  
+- When users ask "do you see any files?" → ALWAYS call get_session_files_tool() first
+- NEVER say "no files uploaded" without first calling get_session_files_tool()
+- If files are found, provide the list and ask which one they want to work with
+- Use the S3 key from get_session_files_tool() result to call read_s3_file_tool()
+
 💡 EXAMPLES:
 - "What's in this file?" → read_s3_file_tool()
 - "Download this file" → return_session_files_wrapper()
