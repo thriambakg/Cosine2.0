@@ -11,7 +11,7 @@ import GlobalChatSidebar from './GlobalChatSidebar';
 import ContextSessionHandler from './ContextSessionHandler';
 import { ClockProvider } from '../../contexts/ClockContext';
 import { ContextWindowProvider } from '../../contexts/ContextWindowContext';
-import { WebSocketProvider } from '../../contexts/WebSocketContext';
+// import { WebSocketProvider } from '../../contexts/WebSocketContext'; // COMMENTED OUT: Replaced by UnifiedMessageHandler
 import { GlobalChatProvider } from '../../contexts/GlobalChatContext';
 
 interface AppLayoutProps {
@@ -29,8 +29,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   return (
     <ClockProvider>
       <ContextWindowProvider>
-        <WebSocketProvider>
-          <GlobalChatProvider>
+        <GlobalChatProvider>
             <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
               {/* Header */}
               <AppHeader />
@@ -64,7 +63,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
             {/* Context Window - moved outside main Box to ensure proper provider access */}
             <ContextWindow />
           </GlobalChatProvider>
-        </WebSocketProvider>
       </ContextWindowProvider>
     </ClockProvider>
   );

@@ -86,13 +86,8 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
         setActiveSessionId(sessionId);
         reconnectAttemptsRef.current = 0;
 
-        // Send connection establishment message
-        ws.send(JSON.stringify({
-          action: 'chat',
-          type: 'connection_establish',
-          userId: user.id,
-          sessionId: sessionId,
-        }));
+        // Connection establishment message is now handled by UnifiedMessageHandler
+        // to avoid duplicate WebSocket processor invocations
       };
 
       ws.onclose = (event) => {

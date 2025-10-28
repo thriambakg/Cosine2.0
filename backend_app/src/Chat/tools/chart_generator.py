@@ -217,6 +217,9 @@ class UnifiedChartGenerator:
             from tools.data_compression import DataCompression
             data_dict = DataCompression.decompress_data(data_dict)
             
+            # Debug logging to see data structure
+            logger.info(f"Data structure after decompression: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
+            
             # Detect data type
             data_type = self._detect_data_type(data_dict)
             logger.info(f"Detected data type: {data_type} for symbol: {symbol}")
