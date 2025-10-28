@@ -244,7 +244,7 @@ def process_message(connection_id, user_id, session_id, message_data):
         # Store the original user message (without context prompt) for frontend display
         original_user_message = message_text
         
-        # Store context and uploaded files in session_variables for persistence
+        # Build enriched prompt with context and files (for AI only)
         if has_context or has_files:
             logger.info(f"📌 Context-aware message detected with {len(context_items)} context items and {len(uploaded_files)} uploaded files")
             if context_items:
@@ -252,73 +252,8 @@ def process_message(connection_id, user_id, session_id, message_data):
             if uploaded_files:
                 logger.info(f"📌 Uploaded files preview: {json_dumps_safe(uploaded_files[:1])}")  # Log first file
             
-            # Store context and files in session_variables for persistence
+            # Note: Session variables are now updated by the file upload lambda, not here
             if CONTEXT_BUILDER_AVAILABLE:
-                context_summary = extract_context_summary(context_items)
-                logger.info(f"📌 Context summary: {context_summary}")
-                
-                # Update session variables in DynamoDB
-                try:
-                    # Convert all floats to Decimal for DynamoDB compatibility
-                    context_items_decimal = convert_floats_to_decimal(context_items)
-                    context_summary_decimal = convert_floats_to_decimal(context_summary)
-                    uploaded_files_decimal = convert_floats_to_decimal(uploaded_files)
-                    
-                    # Get existing session_variables to merge with new data
-                    response = chat_sessions_table.get_item(
-                        Key={
-                            'user_id': user_id,
-                            'session_id': session_id
-                        }
-                    )
-                    
-                    # Get existing session_variables or create empty dict
-                    existing_session_vars = response.get('Item', {}).get('session_variables', {})
-                    
-                    # Prepare session variables with separate fields
-                    session_vars = {
-                        **existing_session_vars,  # Preserve existing data
-                        'last_updated': int(datetime.now().timestamp())
-                    }
-                    
-                    # Add context items if present
-                    if context_items:
-                        session_vars.update({
-                            'context_items': context_items_decimal,
-                            'context_added_at': int(datetime.now().timestamp()),
-                            'context_summary': context_summary_decimal,
-                        })
-                    
-                    # Add uploaded files if present
-                    if uploaded_files:
-                        # Get existing uploaded files or create empty list
-                        existing_files = existing_session_vars.get('uploaded_files', [])
-                        
-                        # Merge new files with existing files
-                        all_files = existing_files + uploaded_files_decimal
-                        
-                        session_vars.update({
-                            'uploaded_files': all_files,
-                            'files_added_at': int(datetime.now().timestamp())
-                        })
-                    
-                    chat_sessions_table.update_item(
-                        Key={
-                            'user_id': user_id,
-                            'session_id': session_id
-                        },
-                        UpdateExpression='SET session_variables = :vars, last_updated = :updated',
-                        ExpressionAttributeValues={
-                            ':vars': session_vars,
-                            ':updated': int(datetime.now().timestamp())
-                        }
-                    )
-                    logger.info(f"📌 Stored context and uploaded files in session_variables")
-                except Exception as e:
-                    logger.error(f"❌ Failed to store context and files in session_variables: {e}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                
                 # Build enriched prompt with context and files (for AI only)
                 try:
                     # Combine context items and uploaded files for the AI prompt
@@ -1127,50 +1062,8 @@ def handle_file_handler_message(event):
                 }
             })
         
-        # Store uploaded files in session_variables for persistence
-        if uploaded_files:
-            try:
-                uploaded_files_decimal = convert_floats_to_decimal(uploaded_files)
-                
-                # First, get the current session_variables to merge with uploaded files
-                response = chat_sessions_table.get_item(
-                    Key={
-                        'user_id': user_id,
-                        'session_id': session_id
-                    }
-                )
-                
-                # Get existing session_variables or create empty dict
-                existing_session_vars = response.get('Item', {}).get('session_variables', {})
-                
-                # Get existing uploaded files or create empty list
-                existing_files = existing_session_vars.get('uploaded_files', [])
-                
-                # Merge new files with existing files
-                all_files = existing_files + uploaded_files_decimal
-                
-                # Merge uploaded files into session_variables
-                updated_session_vars = {
-                    **existing_session_vars,
-                    'uploaded_files': all_files,
-                    'files_added_at': int(datetime.now().timestamp())
-                }
-                
-                # Update the session with merged session_variables
-                chat_sessions_table.update_item(
-                    Key={
-                        'user_id': user_id,
-                        'session_id': session_id
-                    },
-                    UpdateExpression='SET session_variables = :vars, last_updated = :updated',
-                    ExpressionAttributeValues={
-                        ':vars': updated_session_vars,
-                        ':updated': int(datetime.now().timestamp())
-                    }
-                )
-                logger.info(f"📌 Stored uploaded files in session_variables")
-            except Exception as e:
-                logger.error(f"❌ Failed to store uploaded files: {e}")
+        # Note: Session variables are now updated by the file upload lambda, not here
+        # The WebSocket processor only handles message processing and AI responses
         
         # Store the original user message in the database first
         try:
@@ -1393,41 +1286,8 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
         context_items_decimal = convert_floats_to_decimal(context_items)
         uploaded_files_decimal = convert_floats_to_decimal(uploaded_files)
         
-        # Store context and uploaded files separately in session_variables for persistence
-        if CONTEXT_BUILDER_AVAILABLE:
-            context_summary = extract_context_summary(context_items)
-            logger.info(f"📌 Context summary: {context_summary}")
-            
-            # Update session variables in DynamoDB
-            try:
-                context_summary_decimal = convert_floats_to_decimal(context_summary)
-                
-                # Prepare session variables with separate fields
-                session_vars = {
-                    'context_items': context_items_decimal,
-                    'context_added_at': int(datetime.now().timestamp()),
-                    'context_summary': context_summary_decimal,
-                }
-                
-                # Add uploaded files if any
-                if uploaded_files:
-                    session_vars['uploaded_files'] = uploaded_files_decimal
-                    session_vars['files_added_at'] = int(datetime.now().timestamp())
-                
-                chat_sessions_table.update_item(
-                    Key={
-                        'user_id': user_id,
-                        'session_id': session_id
-                    },
-                    UpdateExpression='SET session_variables = :vars, last_updated = :updated',
-                    ExpressionAttributeValues={
-                        ':vars': session_vars,
-                        ':updated': int(datetime.now().timestamp())
-                    }
-                )
-                logger.info(f"📌 Stored context and uploaded files in session_variables")
-            except Exception as e:
-                logger.error(f"❌ Failed to store context in session_variables: {e}")
+        # Note: Session variables are now updated by the file upload lambda, not here
+        # The WebSocket processor only handles message processing and AI responses
         
         # Store the original user message in the database first
         try:
