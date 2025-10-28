@@ -1079,6 +1079,7 @@ def handle_file_handler_message(event):
         message_id = event.get('messageId')
         context_items = event.get('contextItems', [])
         uploaded_files = event.get('uploadedFiles', [])  # Separate file uploads
+        session_variables_updated = event.get('session_variables_updated', False)
         model = event.get('model', 'claude-3-sonnet')
         
         if not user_id or not session_id:
@@ -1130,7 +1131,9 @@ def handle_file_handler_message(event):
             })
         
         # Store uploaded files in session_variables for persistence
-        if uploaded_files:
+        # Skip if session_variables were already updated by file upload lambda
+        if uploaded_files and not session_variables_updated:
+            logger.info(f"📌 Storing uploaded files in session_variables (not updated by file upload lambda)")
             try:
                 uploaded_files_decimal = convert_floats_to_decimal(uploaded_files)
                 
@@ -1173,6 +1176,8 @@ def handle_file_handler_message(event):
                 logger.info(f"📌 Stored uploaded files in session_variables")
             except Exception as e:
                 logger.error(f"❌ Failed to store uploaded files: {e}")
+        elif uploaded_files and session_variables_updated:
+            logger.info(f"📌 Skipping uploaded files storage - already handled by file upload lambda")
         
         # Store the original user message in the database first
         try:
