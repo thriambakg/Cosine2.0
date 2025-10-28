@@ -500,18 +500,24 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             session_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
             
             if not session_context:
-                logger.error(f"❌ Session {session_id} not found for user {user_id} - this should not happen if frontend is working correctly")
-                # DO NOT create a new session here - this would break continuity
-                # Return an error instead
-                return {
-                    'statusCode': 404,
-                    'body': {
-                        'error': 'Session not found',
-                        'message': f'Session {session_id} not found for user {user_id}',
-                        'session_id': session_id,
-                        'user_id': user_id
+                logger.warning(f"⚠️ Session {session_id} not found for user {user_id} - creating session with model {model}")
+                # Create session if it doesn't exist (handles race condition with WebSocket processor)
+                page_context = event_body.get('context', {})
+                session_manager.create_session(user_id, page_context, model)
+                session_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
+                is_new_session = True
+                
+                if not session_context:
+                    logger.error(f"❌ Failed to create session {session_id} for user {user_id}")
+                    return {
+                        'statusCode': 500,
+                        'body': {
+                            'error': 'Failed to create session',
+                            'message': f'Could not create session {session_id} for user {user_id}',
+                            'session_id': session_id,
+                            'user_id': user_id
+                        }
                     }
-                }
             
             # Check for kill signal before processing
             if session_context.get('killed_at'):
