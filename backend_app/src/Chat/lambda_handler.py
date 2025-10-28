@@ -502,7 +502,6 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             if not session_context:
                 logger.warning(f"⚠️ Session {session_id} not found for user {user_id} - waiting for WebSocket processor to create it")
                 # Wait briefly for WebSocket processor to create session (handles race condition)
-                import time
                 max_retries = 3
                 retry_delay = 0.5  # 500ms
                 
