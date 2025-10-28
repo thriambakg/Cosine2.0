@@ -282,12 +282,16 @@ def process_message(connection_id, user_id, session_id, message_data):
         original_user_message = message_text
         
         # Store context items in session_variables for persistence (uploaded files handled by file upload lambda)
-        if has_context:
-            logger.info(f"📌 Context-aware message detected with {len(context_items)} context items")
-            logger.info(f"📌 Context items preview: {json_dumps_safe(context_items[:1])}")  # Log first item
+        # But we still need to process uploaded files for AI prompt building
+        if has_context or has_files:
+            logger.info(f"📌 Context-aware message detected with {len(context_items)} context items and {len(uploaded_files)} uploaded files")
+            if context_items:
+                logger.info(f"📌 Context items preview: {json_dumps_safe(context_items[:1])}")  # Log first item
+            if uploaded_files:
+                logger.info(f"📌 Uploaded files preview: {json_dumps_safe(uploaded_files[:1])}")  # Log first file
             
-            # Store context items in session_variables for persistence
-            if CONTEXT_BUILDER_AVAILABLE:
+            # Store context items in session_variables for persistence (uploaded files already handled by file upload lambda)
+            if has_context and CONTEXT_BUILDER_AVAILABLE:
                 context_summary = extract_context_summary(context_items)
                 logger.info(f"📌 Context summary: {context_summary}")
                 
@@ -334,38 +338,38 @@ def process_message(connection_id, user_id, session_id, message_data):
                     import traceback
                     logger.error(f"Traceback: {traceback.format_exc()}")
                 
-                # Build enriched prompt with context and files (for AI only)
-                try:
-                    # Combine context items and uploaded files for the AI prompt
-                    all_context_items = list(context_items)
-                    
-                    # Add uploaded files as context items for the AI
-                    for file_info in uploaded_files:
-                        all_context_items.append({
-                            'type': 'file',
-                            'title': f"Uploaded File: {file_info['filename']}",
-                            'data': {
-                                'original_filename': file_info['filename'],
-                                's3_key': file_info['s3_key'],
-                                's3_url': file_info['s3_url'],
-                                'content_type': file_info['content_type'],
-                                'file_size': file_info['file_size'],
-                                'upload_timestamp': file_info['upload_timestamp']
-                            }
-                        })
-                    
-                    enriched_message = build_context_prompt(message_text, all_context_items)
-                    logger.info(f"📌 Enhanced message with context and files (length: {len(enriched_message)})")
-                    logger.info(f"📌 Enriched message preview (first 500 chars): {enriched_message[:500]}")
-                    
-                    # Send the enriched message to AI, but keep original for frontend
-                    message_text = enriched_message
-                except Exception as e:
-                    logger.error(f"❌ Failed to build context prompt: {e}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-            else:
-                logger.warning(f"⚠️ Context builder not available, passing context items and files to chat agent for processing")
+            # Build enriched prompt with context and files (for AI only)
+            try:
+                # Combine context items and uploaded files for the AI prompt
+                all_context_items = list(context_items)
+                
+                # Add uploaded files as context items for the AI
+                for file_info in uploaded_files:
+                    all_context_items.append({
+                        'type': 'file',
+                        'title': f"Uploaded File: {file_info['filename']}",
+                        'data': {
+                            'original_filename': file_info['filename'],
+                            's3_key': file_info['s3_key'],
+                            's3_url': file_info['s3_url'],
+                            'content_type': file_info['content_type'],
+                            'file_size': file_info['file_size'],
+                            'upload_timestamp': file_info['upload_timestamp']
+                        }
+                    })
+                
+                enriched_message = build_context_prompt(message_text, all_context_items)
+                logger.info(f"📌 Enhanced message with context and files (length: {len(enriched_message)})")
+                logger.info(f"📌 Enriched message preview (first 500 chars): {enriched_message[:500]}")
+                
+                # Send the enriched message to AI, but keep original for frontend
+                message_text = enriched_message
+            except Exception as e:
+                logger.error(f"❌ Failed to build context prompt: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+        else:
+            logger.warning(f"⚠️ Context builder not available, passing context items and files to chat agent for processing")
         
         # Call the existing chat agent Lambda (with enriched message if context present)
         # Pass original_user_message so the chat agent can store it for display

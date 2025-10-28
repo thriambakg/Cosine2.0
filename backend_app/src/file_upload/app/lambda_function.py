@@ -51,6 +51,7 @@ def lambda_handler(event, context):
         message = body.get('message', {})
         files = body.get('files', [])
         context_items = body.get('context_items', [])
+        model = body.get('model', 'claude-opus-4-1')  # Get model from request
         
         if not user_id or not session_id:
             return {
@@ -190,7 +191,7 @@ def lambda_handler(event, context):
         # The WebSocket processor will handle storing the message and sending responses
         try:
             send_enriched_message_to_websocket(
-                user_id, session_id, message, uploaded_files, context_items, session_variables_updated
+                user_id, session_id, message, uploaded_files, context_items, session_variables_updated, model
             )
             logger.info("Successfully sent enriched message to WebSocket processor")
         except Exception as e:
@@ -315,7 +316,7 @@ def update_session_variables(user_id, session_id, uploaded_files, context_items)
         logger.error(f"❌ Failed to update session_variables: {str(e)}")
         return False
 
-def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_files, context_items, session_variables_updated):
+def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_files, context_items, session_variables_updated, model):
     """
     Send enriched message with file references to WebSocket processor.
     
@@ -326,6 +327,7 @@ def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_fi
         uploaded_files: List of uploaded file metadata with S3 keys/URLs
         context_items: Existing context items
         session_variables_updated: Boolean indicating if session variables were successfully updated
+        model: AI model to use for processing
     """
     try:
         # Get WebSocket processor function name from environment
@@ -345,7 +347,7 @@ def send_enriched_message_to_websocket(user_id, session_id, message, uploaded_fi
             'message': message['text'],
             'contextItems': enriched_context_items,
             'uploadedFiles': uploaded_files,  # Separate file uploads
-            'model': 'claude-opus-4-1',  # Default model
+            'model': model,  # Use selected model from request
             'sessionId': session_id,
             'userId': user_id,
             'timestamp': message.get('timestamp', int(datetime.utcnow().timestamp() * 1000)),

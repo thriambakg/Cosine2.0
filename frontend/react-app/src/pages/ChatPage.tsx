@@ -1000,14 +1000,16 @@ export default function ChatPage() {
       setUploadedFiles([]);
     }
     
-    // Set loading state for current session
-    if (currentSession?.session_id) {
-      console.log('🔄 ChatPage: Setting loading state to true for session:', currentSession.session_id);
-      setSessionLoadingStates(prev => ({
-        ...prev,
-        [currentSession.session_id]: true
-      }));
-    }
+    // Set loading state for current session (or prepare for new session)
+    const sessionId = currentSession?.session_id || 'pending';
+    console.log('🔄 ChatPage: Setting loading state to true for session:', sessionId);
+    setSessionLoadingStates(prev => ({
+      ...prev,
+      [sessionId]: true
+    }));
+    
+    // Also broadcast loading state to other interfaces
+    unifiedMessageHandler.broadcastLoadingState(sessionId, true, 'chatpage');
     
     try {
       let result;
@@ -1052,28 +1054,46 @@ export default function ChatPage() {
         // Update session ID if a new session was created
         if (result.sessionId && result.sessionId !== currentSession?.session_id) {
           console.log('🔄 ChatPage: New session created, loading session:', result.sessionId);
+          
+          // Clear loading state for the old session ID and set it for the new one
+          if (currentSession?.session_id) {
+            setSessionLoadingStates(prev => ({
+              ...prev,
+              [currentSession.session_id]: false
+            }));
+          }
+          
+          // Set loading state for the new session
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [result.sessionId]: true
+          }));
+          
+          // Broadcast loading state for the new session
+          unifiedMessageHandler.broadcastLoadingState(result.sessionId, true, 'chatpage');
+          
           loadSession(result.sessionId);
         }
       } else {
         console.error('❌ ChatPage: Failed to send message:', result.error);
         // Clear loading state on error
-        if (currentSession?.session_id) {
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [currentSession.session_id]: false
-          }));
-        }
+        const errorSessionId = result.sessionId || currentSession?.session_id || 'pending';
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [errorSessionId]: false
+        }));
+        unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'chatpage');
         // Handle error (could show toast notification)
       }
       } catch (error) {
       console.error('❌ ChatPage: Error sending message via unified system:', error);
       // Clear loading state on error
-      if (currentSession?.session_id) {
-        setSessionLoadingStates(prev => ({
-          ...prev,
-          [currentSession.session_id]: false
-        }));
-      }
+      const errorSessionId = currentSession?.session_id || 'pending';
+      setSessionLoadingStates(prev => ({
+        ...prev,
+        [errorSessionId]: false
+      }));
+      unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'chatpage');
     }
   };
 
