@@ -109,33 +109,33 @@ def upload_file_and_notify(
             Metadata=upload_metadata
         )
         
-                logger.info(f"Successfully uploaded file: {s3_key}")
-                
-                # Create file metadata for return
-                file_metadata = {
-                    'filename': filename,
-                    's3_key': s3_key,
-                    's3_url': f"https://{bucket_name}.s3.amazonaws.com/{s3_key}",
-                    'file_size': len(file_content),
-                    'content_type': content_type,
-                    'upload_timestamp': str(int(datetime.utcnow().timestamp())),
-                    'file_id': filename.split('.')[0] if '.' in filename else filename,
-                    'generated_by': 'agent'
-                }
-                
-                # Notify agent files processor if this is an agent file
-                if folder == "agent-files":
-                    success = invoke_agent_files_processor(
-                        s3_bucket_name=bucket_name,
-                        s3_key=s3_key,
-                        file_size=len(file_content),
-                        file_metadata=file_metadata
-                    )
-                    
-                    if not success:
-                        logger.warning(f"File uploaded but failed to notify processor: {s3_key}")
-                
-                return f"✅ Successfully uploaded file '{filename}' to {folder} folder. The file will appear in the file menu."
+        logger.info(f"Successfully uploaded file: {s3_key}")
+        
+        # Create file metadata for return
+        file_metadata = {
+            'filename': filename,
+            's3_key': s3_key,
+            's3_url': f"https://{bucket_name}.s3.amazonaws.com/{s3_key}",
+            'file_size': len(file_content),
+            'content_type': content_type,
+            'upload_timestamp': str(int(datetime.utcnow().timestamp())),
+            'file_id': filename.split('.')[0] if '.' in filename else filename,
+            'generated_by': 'agent'
+        }
+        
+        # Notify agent files processor if this is an agent file
+        if folder == "agent-files":
+            success = invoke_agent_files_processor(
+                s3_bucket_name=bucket_name,
+                s3_key=s3_key,
+                file_size=len(file_content),
+                file_metadata=file_metadata
+            )
+            
+            if not success:
+                logger.warning(f"File uploaded but failed to notify processor: {s3_key}")
+        
+        return f"✅ Successfully uploaded file '{filename}' to {folder} folder. The file will appear in the file menu."
         
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
