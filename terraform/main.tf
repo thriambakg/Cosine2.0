@@ -504,29 +504,6 @@ module "api_gateway" {
   deployment_trigger = "39" # Updated to apply CORS configuration for stock-screener endpoint
 }
 
-# IAM Policy for Lambda functions to publish to SNS
-resource "aws_iam_policy" "lambda_sns_policy" {
-  name        = "${var.project_name}-lambda-sns-policy-${var.environment}"
-  description = "Policy for Lambda functions to publish to SNS topics"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sns:Publish"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.chat_file_upload_notifications_topic_arn
-        ]
-      }
-    ]
-  })
-
-  tags = var.common_tags
-}
-
 # IAM Policy for Lambda functions to access Secrets Manager
 resource "aws_iam_policy" "lambda_secrets_policy" {
   name        = "${var.project_name}-lambda-secrets-policy-${var.environment}"
@@ -1629,7 +1606,6 @@ module "file_upload_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
-    aws_iam_policy.lambda_sns_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
 
