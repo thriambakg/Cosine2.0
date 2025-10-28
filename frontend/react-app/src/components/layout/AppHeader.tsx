@@ -5,7 +5,6 @@ import {
   IconButton,
   Typography,
   Box,
-  Badge,
   Avatar,
   Menu,
   MenuItem,
@@ -15,7 +14,6 @@ import {
 } from '@mui/material';
 import {
   Menu as MenuIcon,
-  Notifications as BellIcon,
   NavigateNext as NavigateNextIcon,
   AccessTime as ClockIcon,
   Dashboard as ContextIcon,
@@ -27,7 +25,6 @@ import { toggleSidebar } from '../../store/slices/navigationSlice';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContextWindow } from '../../contexts/ContextWindowContext';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
-import NotificationCenter from './NotificationCenter';
 
 export default function AppHeader() {
   const theme = useTheme();
@@ -39,8 +36,6 @@ export default function AppHeader() {
   const { isVisible: isGlobalChatVisible, toggle: toggleGlobalChat } = useGlobalChat();
   
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [notificationAnchorEl, setNotificationAnchorEl] = useState<null | HTMLElement>(null);
-  const [notifications] = useState(3); // This would come from Redux in a real app
   const [isClockVisible, setIsClockVisible] = useState<boolean>(() => {
     const saved = localStorage.getItem('floating-clock-visible');
     return saved ? JSON.parse(saved) : false; // Default to hidden
@@ -54,14 +49,6 @@ export default function AppHeader() {
 
   const handleMenuClose = () => {
     setAnchorEl(null);
-  };
-
-  const handleNotificationMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setNotificationAnchorEl(event.currentTarget);
-  };
-
-  const handleNotificationMenuClose = () => {
-    setNotificationAnchorEl(null);
   };
 
   const handleLogout = async () => {
@@ -299,45 +286,6 @@ export default function AppHeader() {
               <ClockIcon />
             </IconButton>
             
-            <IconButton
-              color="inherit"
-              onClick={handleNotificationMenuOpen}
-              sx={{
-                color: '#8b8b8b',
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                width: 44,
-                height: 44,
-                borderRadius: '8px',
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                '&:hover': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                  color: '#ffffff',
-                  transform: 'translateY(-1px)',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-                },
-              }}
-            >
-              <Badge 
-                badgeContent={notifications} 
-                sx={{
-                  '& .MuiBadge-badge': {
-                    backgroundColor: '#ff4757',
-                    color: '#ffffff',
-                    fontWeight: 600,
-                    fontSize: '0.7rem',
-                    minWidth: 18,
-                    height: 18,
-                    borderRadius: '9px',
-                    border: '2px solid rgba(15, 15, 20, 0.95)',
-                  }
-                }}
-              >
-                <BellIcon />
-              </Badge>
-            </IconButton>
-
             <IconButton 
               onClick={handleProfileMenuOpen} 
               sx={{ 
@@ -392,12 +340,6 @@ export default function AppHeader() {
                 },
               }}
             >
-              <MenuItem onClick={handleMenuClose}>
-                <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 500 }}>Profile</Typography>
-              </MenuItem>
-              <MenuItem onClick={handleMenuClose}>
-                <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 500 }}>Settings</Typography>
-              </MenuItem>
               <MenuItem onClick={handleLogout}>
                 <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 500 }}>Logout</Typography>
               </MenuItem>
@@ -405,12 +347,6 @@ export default function AppHeader() {
           </Box>
         </Toolbar>
       </AppBar>
-
-      {/* Notification Center */}
-      <NotificationCenter
-        anchorEl={notificationAnchorEl}
-        onClose={handleNotificationMenuClose}
-      />
     </>
   );
 }

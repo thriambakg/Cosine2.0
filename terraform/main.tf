@@ -1052,6 +1052,9 @@ resource "aws_lambda_function" "chat_agent" {
 
       # File Return Lambda Function Name for direct invocation
       FILE_RETURN_LAMBDA_NAME = module.file_return_lambda.function_name
+
+      # Agent Files Processor Lambda Function Name for direct invocation
+      AGENT_FILES_PROCESSOR_FUNCTION_NAME = module.agent_files_processor_lambda.function_name
     }
   }
 
@@ -1635,8 +1638,10 @@ module "agent_files_processor_lambda" {
     WEBSOCKET_PROCESSOR_FUNCTION_NAME = module.websocket_message_lambda.function_name
   }
 
-  # Attach core layer
-  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  # Attach core layer only
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
 
   # Additional IAM policies
   additional_policy_arns = [
@@ -1647,20 +1652,4 @@ module "agent_files_processor_lambda" {
   ]
 
   tags = var.common_tags
-}
-
-# SNS Permission for Agent Files Processor Lambda
-resource "aws_lambda_permission" "agent_files_processor_sns" {
-  statement_id  = "AllowExecutionFromSNS"
-  action        = "lambda:InvokeFunction"
-  function_name = module.agent_files_processor_lambda.function_name
-  principal     = "sns.amazonaws.com"
-  source_arn    = data.terraform_remote_state.base_infra.outputs.agent_file_upload_notifications_topic_arn
-}
-
-# SNS Subscription for Agent Files Processor Lambda
-resource "aws_sns_topic_subscription" "agent_files_processor" {
-  topic_arn = data.terraform_remote_state.base_infra.outputs.agent_file_upload_notifications_topic_arn
-  protocol  = "lambda"
-  endpoint  = module.agent_files_processor_lambda.function_arn
 }

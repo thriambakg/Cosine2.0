@@ -1337,38 +1337,36 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
     """Generate a file in the agent-files folder for the current session. Use this to create files that the user can download."""
     try:
         # Get environment variables
-        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
         user_id = os.environ.get('USER_ID')
         session_id = os.environ.get('SESSION_ID')
         
-        if not bucket_name or not user_id or not session_id:
-            return "Error: Missing required environment variables (bucket_name, user_id, session_id)"
+        if not user_id or not session_id:
+            return "Error: Missing required environment variables (user_id, session_id)"
         
         # Ensure filename has proper extension
         if not filename.endswith(f'.{file_type}'):
             filename = f"{filename}.{file_type}"
         
-        # Create S3 key for agent-files folder
-        s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
-        
-        # Initialize S3 client
-        s3_client = boto3.client('s3')
-        
-        # Upload file to S3
-        s3_client.put_object(
-            Bucket=bucket_name,
-            Key=s3_key,
-            Body=content.encode('utf-8'),
-            ContentType=f'text/{file_type}' if file_type == 'txt' else f'application/{file_type}',
-            Metadata={
-                'generated_by': 'agent',
-                'filename': filename,
-                'file_type': file_type
-            }
-        )
-        
-        logger.info(f"Generated agent file: {s3_key}")
-        return f"✅ Successfully generated file '{filename}' in agent-files folder. The file will appear in the Agent Files section of the file menu."
+        # Use unified file upload function
+        try:
+            from lambda_invocation import upload_file_and_notify
+            
+            result = upload_file_and_notify(
+                content=content,
+                filename=filename,
+                user_id=user_id,
+                session_id=session_id,
+                file_type=file_type,
+                folder="agent-files",
+                metadata={'generated_by': 'agent'}
+            )
+            
+            logger.info(f"Generated agent file: {filename}")
+            return result
+            
+        except ImportError:
+            logger.warning("lambda_invocation module not available - falling back to manual upload")
+            return "Error: Shared file upload module not available"
         
     except Exception as e:
         logger.error(f"Error in generate_agent_file_tool: {str(e)}")
@@ -1390,43 +1388,44 @@ def generate_excel_file_tool(filename: str, content: str, template_type: str = "
     """
     try:
         # Get environment variables
-        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
         user_id = os.environ.get('USER_ID')
         session_id = os.environ.get('SESSION_ID')
         
-        if not bucket_name or not user_id or not session_id:
-            return "Error: Missing required environment variables (bucket_name, user_id, session_id)"
+        if not user_id or not session_id:
+            return "Error: Missing required environment variables (user_id, session_id)"
         
         # Ensure filename has proper extension
         if not filename.endswith('.csv'):
             filename = f"{filename}.csv"
         
-        # Create S3 key for agent-files folder
-        s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
-        
-        # Initialize S3 client
-        s3_client = boto3.client('s3')
-        
         # Generate Excel content based on template type and provided content
         excel_content = generate_excel_content(template_type, content, include_charts)
         
-        # Upload file to S3
-        s3_client.put_object(
-            Bucket=bucket_name,
-            Key=s3_key,
-            Body=excel_content,
-            ContentType='text/csv',  # CSV format that Excel can open
-            Metadata={
-                'generated_by': 'agent',
-                'filename': filename,
-                'file_type': 'csv',
-                'template_type': template_type,
-                'includes_charts': str(include_charts)
-            }
-        )
-        
-        logger.info(f"Generated CSV file: {s3_key}")
-        return f"✅ Successfully generated CSV file '{filename}' in agent-files folder. Template: {template_type}, Chart Instructions: {'Yes' if include_charts else 'No'}. The file can be opened in Excel and will appear in the Agent Files section."
+        # Use unified file upload function
+        try:
+            from lambda_invocation import upload_file_and_notify
+            
+            result = upload_file_and_notify(
+                content=excel_content,
+                filename=filename,
+                user_id=user_id,
+                session_id=session_id,
+                file_type='csv',
+                content_type='text/csv',
+                folder="agent-files",
+                metadata={
+                    'generated_by': 'agent',
+                    'template_type': template_type,
+                    'includes_charts': str(include_charts)
+                }
+            )
+            
+            logger.info(f"Generated CSV file: {filename}")
+            return result
+            
+        except ImportError:
+            logger.warning("lambda_invocation module not available - falling back to manual upload")
+            return "Error: Shared file upload module not available"
         
     except Exception as e:
         logger.error(f"Error in generate_excel_file_tool: {str(e)}")

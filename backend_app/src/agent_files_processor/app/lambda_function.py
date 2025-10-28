@@ -30,26 +30,18 @@ def lambda_handler(event, context):
     """
     Process agent files uploaded to S3 and update session_variables.
     
-    This Lambda is triggered by SNS when files are uploaded to the agent-files/ folder.
-    It extracts user_id and session_id from the S3 key, then updates the session_variables
+    This Lambda is triggered by direct invocation from agent tools.
+    It extracts user_id and session_id, then updates the session_variables
     to include the new agent file in the agent_files array.
     """
     try:
         logger.info(f"Processing agent files notification: {json.dumps(event, cls=DecimalEncoder)}")
         
-        # Parse SNS message
-        if 'Records' in event:
-            for record in event['Records']:
-                if record.get('EventSource') == 'aws:sns':
-                    # Parse SNS message
-                    sns_message = json.loads(record['Sns']['Message'])
-                    logger.info(f"SNS Message: {json.dumps(sns_message, cls=DecimalEncoder)}")
-                    
-                    # Process S3 event from SNS
-                    if 'Records' in sns_message:
-                        for s3_record in sns_message['Records']:
-                            if s3_record.get('eventName') == 'ObjectCreated:Put':
-                                process_agent_file(s3_record)
+        # Process direct invocation
+        if event.get('type') == 'direct_invocation':
+            process_direct_invocation(event)
+        else:
+            logger.warning(f"Unknown event format - expected direct_invocation: {event}")
         
         return {
             'statusCode': 200,
@@ -67,70 +59,46 @@ def lambda_handler(event, context):
             }, cls=DecimalEncoder)
         }
 
-def process_agent_file(s3_record):
+def process_direct_invocation(event):
     """
-    Process a single agent file upload and update session_variables.
+    Process a direct invocation from agent tools.
+    
+    Args:
+        event: Direct invocation payload with user_id, session_id, s3_key, etc.
     """
     try:
-        # Extract S3 object information
-        bucket_name = s3_record['s3']['bucket']['name']
-        object_key = s3_record['s3']['object']['key']
+        user_id = event.get('user_id')
+        session_id = event.get('session_id')
+        s3_key = event.get('s3_key')
+        filename = event.get('filename')
+        file_metadata = event.get('file_metadata', {})
         
-        logger.info(f"Processing agent file: {object_key}")
+        logger.info(f"Processing direct invocation - User: {user_id}, Session: {session_id}, File: {filename}")
         
-        # Parse the S3 key to extract user_id and session_id
-        # Expected format: users/{user_id}/sessions/{session_id}/agent-files/{filename}
-        key_parts = object_key.split('/')
-        if len(key_parts) < 5 or key_parts[0] != 'users' or key_parts[2] != 'sessions' or key_parts[4] != 'agent-files':
-            logger.warning(f"Invalid agent file key format: {object_key}")
-            return
-        
-        # Additional check to ensure this is an agent-files folder
-        if 'agent-files' not in object_key:
-            logger.info(f"Skipping non-agent file: {object_key}")
-            return
-        
-        user_id = key_parts[1]
-        session_id = key_parts[3]
-        filename = key_parts[5] if len(key_parts) > 5 else 'unknown'
-        
-        logger.info(f"Extracted - User ID: {user_id}, Session ID: {session_id}, Filename: {filename}")
-        
-        # Get file metadata from S3
-        try:
-            response = s3_client.head_object(Bucket=bucket_name, Key=object_key)
-            file_size = response.get('ContentLength', 0)
-            content_type = response.get('ContentType', 'application/octet-stream')
-            last_modified = response.get('LastModified', datetime.utcnow())
-        except Exception as e:
-            logger.error(f"Error getting file metadata: {str(e)}")
-            file_size = 0
-            content_type = 'application/octet-stream'
-            last_modified = datetime.utcnow()
-        
-        # Create agent file metadata
-        agent_file_metadata = {
-            'filename': filename,
-            's3_key': object_key,
-            's3_url': f"https://{bucket_name}.s3.amazonaws.com/{object_key}",
-            'file_size': file_size,
-            'content_type': content_type,
-            'upload_timestamp': int(last_modified.timestamp()),
-            'file_id': filename.split('.')[0] if '.' in filename else filename,  # Use filename without extension as file_id
-            'generated_by': 'agent'
-        }
+        # Use provided file metadata or create default
+        if not file_metadata:
+            file_metadata = {
+                'filename': filename,
+                's3_key': s3_key,
+                's3_url': f"https://{CHAT_FILES_BUCKET_NAME}.s3.amazonaws.com/{s3_key}",
+                'file_size': event.get('file_size', 0),
+                'content_type': 'application/octet-stream',
+                'upload_timestamp': int(datetime.utcnow().timestamp()),
+                'file_id': filename.split('.')[0] if '.' in filename else filename,
+                'generated_by': 'agent'
+            }
         
         # Update session_variables in DynamoDB
-        updated_session_variables = update_session_agent_files(user_id, session_id, agent_file_metadata)
+        updated_session_variables = update_session_agent_files(user_id, session_id, file_metadata)
         
         # Send WebSocket notification to frontend
         if updated_session_variables:
             send_session_update_to_websocket(user_id, session_id, updated_session_variables)
         
-        logger.info(f"Successfully processed agent file: {filename}")
+        logger.info(f"Successfully processed direct invocation for file: {filename}")
         
     except Exception as e:
-        logger.error(f"Error processing agent file: {str(e)}")
+        logger.error(f"Error processing direct invocation: {str(e)}")
         raise
 
 def update_session_agent_files(user_id, session_id, agent_file_metadata):

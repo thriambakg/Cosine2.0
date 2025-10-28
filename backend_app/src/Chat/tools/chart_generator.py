@@ -126,29 +126,39 @@ class UnifiedChartGenerator:
 
         buffer = BytesIO()
         plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
-        buffer.seek(0)
+            buffer.seek(0)
         plt.close(fig)  # Close the plot to free memory
 
-        s3_key = f"users/{self.user_id}/sessions/{self.session_id}/agent-files/{filename}"
-        
-        metadata = {
-            'generated_by': 'agent',
-            'filename': filename,
-            'symbol': symbol,
-            'chart_type': chart_type,
-            'timeframe': timeframe,
-            'data_points': str(data_points),
-            'asset_type': asset_type
-        }
-
-        self.s3_client.put_object(
-            Bucket=self.bucket_name,
-            Key=s3_key,
-            Body=buffer.getvalue(),
-            ContentType='image/png',
-            Metadata=metadata
-        )
-        return f"✅ Chart generated successfully!\n📊 File: {filename}\n📈 Symbol: {symbol}\n📅 Timeframe: {timeframe}\n📊 Chart Type: {chart_type}\n📊 Data Points: {data_points}\n🔗 The chart has been saved to your session files and will appear in the files section."
+        # Use unified file upload function
+        try:
+            from lambda_invocation import upload_file_and_notify
+            
+            metadata = {
+                'generated_by': 'agent',
+                'symbol': symbol,
+                'chart_type': chart_type,
+                'timeframe': timeframe,
+                'data_points': str(data_points),
+                'asset_type': asset_type
+            }
+            
+            result = upload_file_and_notify(
+                content=buffer.getvalue(),
+                filename=filename,
+                user_id=self.user_id,
+                session_id=self.session_id,
+                file_type='png',
+                content_type='image/png',
+                folder="agent-files",
+                metadata=metadata
+            )
+            
+            logger.info(f"Generated chart: {filename}")
+            return result
+            
+        except ImportError:
+            logger.warning("lambda_invocation module not available - falling back to manual upload")
+            return "Error: Shared file upload module not available"
 
     def _add_watermark(self, fig):
         """Add investcosine.com watermark to the chart."""
