@@ -665,6 +665,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 
 🔧 YOUR REAL-TIME TOOLS (MANDATORY TO USE):
 1. get_financial_data(symbol, timeframe, start_date, end_date) - LIVE stock data via yfinance with custom timeframes and date ranges for chart generation
+2. get_multiple_financial_data(symbols, timeframe, start_date, end_date) - Get data for multiple stocks efficiently (e.g., 'AAPL,MSFT,SPY')
 2. search_financial_news(query) - Recent financial news and market developments  
 3. get_technical_analysis(symbol) - Technical indicators (RSI, moving averages, MACD, Bollinger Bands)
 4. analyze_portfolio(portfolio_data, period) - REAL portfolio analysis with live correlation data via yfinance
@@ -1060,6 +1061,58 @@ def get_financial_data(symbol: str, timeframe: str = "1y", start_date: str = Non
         return json.dumps(data, indent=2)
     except Exception as e:
         return f"Error getting financial data: {str(e)}"
+
+@tool
+def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> str:
+    """
+    Get financial data for multiple stocks efficiently. 
+    
+    Args:
+        symbols: Comma-separated list of stock symbols (e.g., 'AAPL,MSFT,SPY')
+        timeframe: Time period for all stocks ('1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max')
+        start_date: Start date in 'YYYY-MM-DD' format (optional)
+        end_date: End date in 'YYYY-MM-DD' format (optional)
+    
+    Returns:
+        JSON string with data for all requested stocks
+    """
+    try:
+        if not symbols:
+            return "Error: symbols parameter is required"
+        
+        # Parse symbols
+        symbol_list = [s.strip().upper() for s in symbols.split(',')]
+        
+        if len(symbol_list) > 10:
+            return "Error: Maximum 10 stocks can be fetched at once"
+        
+        # Fetch data for each symbol
+        results = []
+        for symbol in symbol_list:
+            try:
+                data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
+                results.append(data)
+            except Exception as e:
+                results.append({
+                    "symbol": symbol,
+                    "status": "error",
+                    "message": f"Failed to fetch data: {str(e)}"
+                })
+        
+        # Return consolidated results
+        consolidated_data = {
+            "timeframe": timeframe,
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_symbols": len(symbol_list),
+            "successful_symbols": len([r for r in results if r.get("status") == "success"]),
+            "stocks": results
+        }
+        
+        return json.dumps(consolidated_data, indent=2)
+        
+    except Exception as e:
+        return f"Error getting multiple financial data: {str(e)}"
 
 @tool
 def search_financial_news(query: str) -> str:
@@ -1728,6 +1781,7 @@ def get_excel_formatting(template_type: str) -> dict:
 # Define the tools list that Strands can automatically detect
 enhanced_tools = [
     get_financial_data,
+    get_multiple_financial_data,
     search_financial_news, 
     get_technical_analysis,
     analyze_portfolio,  # Portfolio analysis with live yfinance data

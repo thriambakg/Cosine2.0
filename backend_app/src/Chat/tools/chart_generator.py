@@ -52,13 +52,17 @@ class UnifiedChartGenerator:
         Stock data indicators:
         - Has 'historical_data' key with OHLCV data
         - Has 'timeframe', 'data_points', 'date_range' keys
+        - Has 'stocks' key (multiple stocks data)
         
         Crypto data indicators:
         - Has 'chart_data' key with time/price data
         - Has 'name' key (coin name)
         - Chart data has 'time' and 'price' keys (not 'close')
         """
-        if 'historical_data' in data_dict:
+        # Check for multiple stocks data
+        if 'stocks' in data_dict and isinstance(data_dict['stocks'], list):
+            return 'multiple_stocks'
+        elif 'historical_data' in data_dict:
             return 'stock'
         elif 'chart_data' in data_dict:
             # Check chart data structure to confirm crypto
@@ -75,7 +79,33 @@ class UnifiedChartGenerator:
         """
         Normalize data from different sources into a consistent format.
         """
-        if data_type == 'stock':
+        if data_type == 'multiple_stocks':
+            # Handle multiple stocks data from get_multiple_financial_data
+            stocks_data = data_dict.get('stocks', [])
+            normalized_data = {}
+            
+            for stock in stocks_data:
+                if stock.get('status') == 'success' and 'historical_data' in stock:
+                    symbol = stock.get('symbol', 'UNKNOWN')
+                    historical_data = stock['historical_data']
+                    
+                    # Normalize each stock's data
+                    stock_normalized = []
+                    for point in historical_data:
+                        stock_normalized.append({
+                            'time': point.get('timestamp', point.get('date', 0)),
+                            'close': point.get('close', 0),
+                            'open': point.get('open', point.get('close', 0)),
+                            'high': point.get('high', point.get('close', 0)),
+                            'low': point.get('low', point.get('close', 0)),
+                            'volume': point.get('volume', 0)
+                        })
+                    
+                    normalized_data[symbol] = stock_normalized
+            
+            return normalized_data, data_dict.get('timeframe', 'Custom Range')
+            
+        elif data_type == 'stock':
             if 'historical_data' in data_dict:
                 # Stock data with historical_data (from get_financial_data)
                 historical_data = data_dict['historical_data']
@@ -204,69 +234,101 @@ class UnifiedChartGenerator:
             if not normalized_data:
                 return f"Error: No chart data found for {symbol}"
             
-            # Convert to DataFrame
-            df = pd.DataFrame(normalized_data)
-            
-            # Convert time to datetime
-            if df['time'].dtype == 'int64':
-                df['time'] = pd.to_datetime(df['time'], unit='s')
-            else:
-                df['time'] = pd.to_datetime(df['time'])
-            
-            df.set_index('time', inplace=True)
-            
             # Create figure with watermark
             fig, ax = plt.subplots(figsize=(12, 8))
             self._add_watermark(fig)
             
-            # Set title
-            if not title:
-                asset_name = data_dict.get('name', symbol)
-                title = f"{asset_name} Price Chart ({timeframe})"
-            ax.set_title(title, fontsize=16, fontweight='bold')
-            
-            # Generate chart based on type
-            if chart_type == "line":
-                ax.plot(df.index, df['close'], linewidth=2, color='#1f77b4')
-                ax.fill_between(df.index, df['close'], alpha=0.3, color='#1f77b4')
+            # Handle different data types
+            if data_type == 'multiple_stocks':
+                # Handle multiple stocks comparison
+                colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
                 
-            elif chart_type == "candlestick":
-                # Create candlestick chart
-                for i, (date, row) in enumerate(df.iterrows()):
-                    color = 'green' if row['close'] >= row['open'] else 'red'
-                    # Body
-                    body_height = abs(row['close'] - row['open'])
-                    body_bottom = min(row['open'], row['close'])
-                    ax.bar(date, body_height, bottom=body_bottom, 
-                          color=color, alpha=0.7, width=0.8)
-                    # Wicks
-                    ax.plot([date, date], [row['low'], row['high']], 
-                           color='black', linewidth=0.5)
-                    # Open/Close ticks
-                    ax.plot([date - pd.Timedelta(hours=2), date], [row['open'], row['open']], 
-                           color='black', linewidth=1)
-                    ax.plot([date, date + pd.Timedelta(hours=2)], [row['close'], row['close']], 
-                           color='black', linewidth=1)
-                            
-            elif chart_type == "volume":
-                if 'volume' in df.columns and df['volume'].sum() > 0:
-                    ax.bar(df.index, df['volume'], color='lightblue', alpha=0.7)
-                    ax.set_ylabel('Volume')
-                else:
-                    ax.text(0.5, 0.5, "Volume data not available for this asset/timeframe.", 
-                           horizontalalignment='center', verticalalignment='center', 
-                           transform=ax.transAxes, fontsize=12, color='gray')
-                    ax.set_ylabel('Volume (N/A)')
+                for i, (stock_symbol, stock_data) in enumerate(normalized_data.items()):
+                    if not stock_data:
+                        continue
                         
-            elif chart_type == "ohlc":
-                # OHLC chart (simplified candlestick)
-                for i, (date, row) in enumerate(df.iterrows()):
-                    # High-Low line
-                    ax.plot([date, date], [row['low'], row['high']], 
-                           color='black', linewidth=1)
-                    # Open-Close line
-                    ax.plot([date, date], [row['open'], row['close']], 
-                           color='blue', linewidth=3)
+                    # Convert to DataFrame
+                    df = pd.DataFrame(stock_data)
+                    
+                    # Convert time to datetime
+                    if df['time'].dtype == 'int64':
+                        df['time'] = pd.to_datetime(df['time'], unit='s')
+                    else:
+                        df['time'] = pd.to_datetime(df['time'])
+                    
+                    df.set_index('time', inplace=True)
+                    
+                    # Plot line for this stock
+                    color = colors[i % len(colors)]
+                    ax.plot(df.index, df['close'], linewidth=2, color=color, label=stock_symbol)
+                
+                # Set title for multiple stocks
+                if not title:
+                    stock_symbols = list(normalized_data.keys())
+                    title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
+                ax.set_title(title, fontsize=16, fontweight='bold')
+                ax.legend()
+                
+            else:
+                # Handle single stock/crypto
+                # Convert to DataFrame
+                df = pd.DataFrame(normalized_data)
+                
+                # Convert time to datetime
+                if df['time'].dtype == 'int64':
+                    df['time'] = pd.to_datetime(df['time'], unit='s')
+                else:
+                    df['time'] = pd.to_datetime(df['time'])
+                
+                df.set_index('time', inplace=True)
+                
+                # Set title
+                if not title:
+                    asset_name = data_dict.get('name', symbol)
+                    title = f"{asset_name} Price Chart ({timeframe})"
+                ax.set_title(title, fontsize=16, fontweight='bold')
+                
+                # Generate chart based on type
+                if chart_type == "line":
+                    ax.plot(df.index, df['close'], linewidth=2, color='#1f77b4')
+                    ax.fill_between(df.index, df['close'], alpha=0.3, color='#1f77b4')
+                elif chart_type == "candlestick":
+                    # Create candlestick chart
+                    for i, (date, row) in enumerate(df.iterrows()):
+                        color = 'green' if row['close'] >= row['open'] else 'red'
+                        # Body
+                        body_height = abs(row['close'] - row['open'])
+                        body_bottom = min(row['open'], row['close'])
+                        ax.bar(date, body_height, bottom=body_bottom, 
+                              color=color, alpha=0.7, width=0.8)
+                        # Wicks
+                        ax.plot([date, date], [row['low'], row['high']], 
+                               color='black', linewidth=0.5)
+                        # Open/Close ticks
+                        ax.plot([date - pd.Timedelta(hours=2), date], [row['open'], row['open']], 
+                               color='black', linewidth=1)
+                        ax.plot([date, date + pd.Timedelta(hours=2)], [row['close'], row['close']], 
+                               color='black', linewidth=1)
+                                
+                elif chart_type == "volume":
+                    if 'volume' in df.columns and df['volume'].sum() > 0:
+                        ax.bar(df.index, df['volume'], color='lightblue', alpha=0.7)
+                        ax.set_ylabel('Volume')
+                    else:
+                        ax.text(0.5, 0.5, "Volume data not available for this asset/timeframe.", 
+                               horizontalalignment='center', verticalalignment='center', 
+                               transform=ax.transAxes, fontsize=12, color='gray')
+                        ax.set_ylabel('Volume (N/A)')
+                            
+                elif chart_type == "ohlc":
+                    # OHLC chart (simplified candlestick)
+                    for i, (date, row) in enumerate(df.iterrows()):
+                        # High-Low line
+                        ax.plot([date, date], [row['low'], row['high']], 
+                               color='black', linewidth=1)
+                        # Open-Close line
+                        ax.plot([date, date], [row['open'], row['close']], 
+                               color='blue', linewidth=3)
             
             # Set labels and formatting
             ax.set_xlabel('Date')
@@ -282,7 +344,11 @@ class UnifiedChartGenerator:
             
             # Generate filename
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"{symbol}_{chart_type}_chart_{timestamp}.png"
+            if data_type == 'multiple_stocks':
+                stock_symbols = '_'.join(normalized_data.keys())
+                filename = f"comparison_{stock_symbols}_{chart_type}_chart_{timestamp}.png"
+            else:
+                filename = f"{symbol}_{chart_type}_chart_{timestamp}.png"
             
             return self._save_chart_to_s3(
                 fig, filename, symbol, chart_type, 
