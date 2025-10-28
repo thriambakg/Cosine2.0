@@ -187,6 +187,10 @@ class CryptoDataFetcher:
             # Prepare chart data
             chart_data = self._prepare_chart_data(data, timeframe)
             
+            # Compress chart data if it's large
+            from data_compression import DataCompression
+            compressed_chart_data = DataCompression.compress_data(chart_data, compression_threshold=2000)
+            
             # Get coin name
             coin_name = self._get_coin_name(symbol)
             
@@ -198,7 +202,7 @@ class CryptoDataFetcher:
                 "period_return": period_return,
                 "volatility": volatility,
                 "timeframe": timeframe,
-                "chart_data": chart_data,
+                "chart_data": compressed_chart_data,
                 "data_points": len(data),
                 "last_updated": datetime.utcnow().isoformat() + "Z"
             }

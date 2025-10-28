@@ -183,6 +183,10 @@ class UnifiedChartGenerator:
         try:
             data_dict = json.loads(data_json)
             
+            # Decompress data if it's compressed
+            from data_compression import DataCompression
+            data_dict = DataCompression.decompress_data(data_dict)
+            
             # Detect data type
             data_type = self._detect_data_type(data_dict)
             logger.info(f"Detected data type: {data_type} for symbol: {symbol}")

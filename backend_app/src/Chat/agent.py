@@ -233,7 +233,7 @@ class FinancialTools:
             returns = hist['Close'].pct_change().dropna()
             volatility = returns.std() * np.sqrt(252) * 100  # Annualized percentage
             
-            # Prepare historical data for chart generation
+            # Prepare full historical data for chart generation (will be compressed if large)
             historical_data = []
             for date, row in hist.iterrows():
                 historical_data.append({
@@ -244,6 +244,12 @@ class FinancialTools:
                     "close": float(row['Close']),
                     "volume": int(row['Volume'])
                 })
+            
+            # Import compression utility
+            from tools.data_compression import DataCompression
+            
+            # Compress historical data if it's large
+            compressed_historical_data = DataCompression.compress_data(historical_data, compression_threshold=2000)
             
             return {
                 "symbol": symbol,
@@ -268,7 +274,7 @@ class FinancialTools:
                     "start": hist.index[0].strftime('%Y-%m-%d'),
                     "end": hist.index[-1].strftime('%Y-%m-%d')
                 },
-                "historical_data": historical_data
+                "historical_data": compressed_historical_data
             }
                 
         except Exception as e:
@@ -972,6 +978,12 @@ FOR SESSION VARIABLES AND TILES QUESTIONS:
 - **Quantitative Analysis**: From advanced calculations using real data
 - **Investment Recommendation**: BUY/SELL/HOLD with confidence rating
 - **Risk Assessment**: Based on real volatility and correlation data
+
+🚀 PERFORMANCE OPTIMIZATION:
+- **Data Compression**: Large datasets are automatically compressed using gzip compression (70-90% size reduction)
+- **Tool Communication**: All tools automatically handle compressed data - no manual decompression needed
+- **Chart Generation**: Use generate_chart_tool with compressed data for best performance
+- **Memory Management**: Full historical data preserved while minimizing token usage
 
 ⚡ EXAMPLE CORRECTED BEHAVIOR:
 User: "Analyze S&P 500 volatility"
