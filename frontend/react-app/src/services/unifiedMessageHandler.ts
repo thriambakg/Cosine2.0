@@ -54,6 +54,8 @@ class UnifiedMessageHandlerService {
   private messageListeners: Set<(sessionId: string, messages: SharedMessage[]) => void> = new Set(); // Message update listeners
   private loadingStateListeners: Set<(sessionId: string, isLoading: boolean, source: 'chatpage' | 'sidebar') => void> = new Set(); // Loading state listeners
   private webSocketConnections: Map<string, WebSocket> = new Map(); // sessionId -> WebSocket connection
+  private cancelledMessages: Set<string> = new Set(); // messageId -> cancelled messages
+  private requestIdCounter: number = 0; // For generating unique request IDs
 
   private constructor() {
     // Listen for WebSocket responses and update local cache
@@ -72,9 +74,18 @@ class UnifiedMessageHandlerService {
    * Main entry point for processing all message types
    */
   async processMessage(messageData: UnifiedMessageData): Promise<SessionCreationResult> {
-    console.log('🎯 UnifiedMessageHandler: Processing message:', messageData.type, 'from:', messageData.source);
-    console.log('🔍 DEBUG: processMessage - messageData.contextItems:', messageData.contextItems);
-    console.log('🔍 DEBUG: processMessage - contextItems length:', messageData.contextItems?.length || 0);
+    // Generate unique request ID for tracking
+    const requestId = `req_${++this.requestIdCounter}_${Date.now()}`;
+    
+    console.log(`🎯 UnifiedMessageHandler: Processing message [${requestId}]:`, messageData.type, 'from:', messageData.source);
+    console.log(`🔍 DEBUG: processMessage [${requestId}] - messageData.contextItems:`, messageData.contextItems);
+    console.log(`🔍 DEBUG: processMessage [${requestId}] - contextItems length:`, messageData.contextItems?.length || 0);
+    
+    // Check if message was cancelled
+    if (this.cancelledMessages.has(messageData.messageId)) {
+      console.log('❌ UnifiedMessageHandler: Message was cancelled:', messageData.messageId);
+      return { sessionId: messageData.sessionId || '', success: false, error: 'Message was cancelled' };
+    }
     
     // Check if already processing this message
     if (this.processingQueue.has(messageData.messageId)) {
@@ -90,8 +101,106 @@ class UnifiedMessageHandlerService {
       const result = await processingPromise;
       return result;
     } finally {
-      // Remove from processing queue
+      // Remove from processing queue and cancelled messages
       this.processingQueue.delete(messageData.messageId);
+      this.cancelledMessages.delete(messageData.messageId);
+    }
+  }
+
+  /**
+   * Cancel a message that's currently being processed
+   */
+  cancelMessage(messageId: string): void {
+    const requestId = `cancel_${++this.requestIdCounter}_${Date.now()}`;
+    console.log(`🚫 UnifiedMessageHandler: Cancelling message [${requestId}]:`, messageId);
+    this.cancelledMessages.add(messageId);
+    
+    // Also remove from processing queue if it exists
+    if (this.processingQueue.has(messageId)) {
+      this.processingQueue.delete(messageId);
+    }
+  }
+
+  /**
+   * Cancel all messages for a session (useful for page refresh)
+   */
+  cancelAllMessagesForSession(sessionId: string): void {
+    const requestId = `cancel_all_${++this.requestIdCounter}_${Date.now()}`;
+    console.log(`🚫 UnifiedMessageHandler: Cancelling all messages for session [${requestId}]:`, sessionId);
+    
+    // Get all message IDs for this session from the cache
+    const sessionMessages = this.localCache.get(sessionId) || [];
+    console.log(`🚫 UnifiedMessageHandler: Found ${sessionMessages.length} messages to cancel for session ${sessionId}`);
+    
+    sessionMessages.forEach(message => {
+      this.cancelledMessages.add(message.id);
+    });
+    
+    // Clear the processing queue for this session
+    const sessionKeys = Array.from(this.processingQueue.keys()).filter(key => 
+      key.includes(sessionId) || key.startsWith('creating_')
+    );
+    console.log(`🚫 UnifiedMessageHandler: Found ${sessionKeys.length} processing queue items to cancel for session ${sessionId}`);
+    sessionKeys.forEach(key => this.processingQueue.delete(key));
+    
+    // Send kill signal to backend to stop agent processing
+    this.sendKillSignal(sessionId, 'timeout_cancellation');
+  }
+
+  /**
+   * Send kill signal to backend to stop agent processing
+   */
+  private async sendKillSignal(sessionId: string, reason: string): Promise<void> {
+    try {
+      console.log(`🚫 UnifiedMessageHandler: Sending kill signal for session ${sessionId}, reason: ${reason}`);
+      
+      // Send kill signal via WebSocket if connection exists
+      const ws = this.webSocketConnections.get(sessionId);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const killMessage = {
+          action: 'kill_session',
+          type: 'kill_signal',
+          sessionId: sessionId,
+          reason: reason,
+          timestamp: new Date().toISOString()
+        };
+        
+        ws.send(JSON.stringify(killMessage));
+        console.log(`🚫 UnifiedMessageHandler: Sent kill signal via WebSocket for session ${sessionId}`);
+      } else {
+        // Fallback: Send via API if WebSocket not available
+        console.log(`🚫 UnifiedMessageHandler: WebSocket not available, sending kill signal via API for session ${sessionId}`);
+        await this.sendKillSignalViaAPI(sessionId, reason);
+      }
+    } catch (error) {
+      console.error('❌ UnifiedMessageHandler: Error sending kill signal:', error);
+    }
+  }
+
+  /**
+   * Send kill signal via API as fallback
+   */
+  private async sendKillSignalViaAPI(sessionId: string, reason: string): Promise<void> {
+    try {
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/sessions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'kill_session',
+          session_id: sessionId,
+          reason: reason
+        })
+      });
+      
+      if (response.ok) {
+        console.log(`✅ UnifiedMessageHandler: Successfully sent kill signal via API for session ${sessionId}`);
+      } else {
+        console.error(`❌ UnifiedMessageHandler: Failed to send kill signal via API for session ${sessionId}:`, response.status);
+      }
+    } catch (error) {
+      console.error('❌ UnifiedMessageHandler: Error sending kill signal via API:', error);
     }
   }
 
@@ -546,9 +655,44 @@ class UnifiedMessageHandlerService {
       case 'connection_established':
         console.log('✅ UnifiedMessageHandler: Connection established for session:', sessionId);
         break;
+      case 'kill_signal_acknowledged':
+        this.handleKillSignalAcknowledgment(sessionId, data);
+        break;
       default:
         console.log('📨 UnifiedMessageHandler: Unknown message type:', data.type);
     }
+  }
+
+  /**
+   * Handle kill signal acknowledgment from backend
+   */
+  private handleKillSignalAcknowledgment(sessionId: string, data: any): void {
+    console.log('✅ UnifiedMessageHandler: Kill signal acknowledged for session:', sessionId, 'reason:', data.reason);
+    
+    // Clear loading state for all interfaces since processing was cancelled
+    this.broadcastLoadingState(sessionId, false, 'chatpage');
+    this.broadcastLoadingState(sessionId, false, 'sidebar');
+    
+    // Add cancellation message to show user what happened
+    const cancellationMessage: SharedMessage = {
+      id: `cancelled_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      sender: 'ai',
+      text: `🛑 **Processing Cancelled**: ${data.message || 'The AI response was cancelled due to timeout or user action.'}`,
+      timestamp: Date.now(),
+      sessionId: sessionId,
+      source: 'chatpage'
+    };
+
+    // Add to local cache
+    if (!this.localCache.has(sessionId)) {
+      this.localCache.set(sessionId, []);
+    }
+    this.localCache.get(sessionId)!.push(cancellationMessage);
+
+    // Notify listeners of message update
+    this.notifyMessageUpdate(sessionId, this.localCache.get(sessionId)!);
+    
+    console.log('✅ UnifiedMessageHandler: Added cancellation message to local cache');
   }
 
 
@@ -793,5 +937,9 @@ class UnifiedMessageHandlerService {
   }
 }
 
-export const unifiedMessageHandler = UnifiedMessageHandlerService.getInstance();
+// Create singleton instance
+const unifiedMessageHandlerInstance = UnifiedMessageHandlerService.getInstance();
+
+// Export the instance directly (it already has all methods including cancellation)
+export const unifiedMessageHandler = unifiedMessageHandlerInstance;
 export default unifiedMessageHandler;

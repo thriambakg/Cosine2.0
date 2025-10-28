@@ -110,7 +110,15 @@ def lambda_handler(event, context):
                 return list_sessions(user_id)
         elif http_method == 'POST':
             body = event.get('body', '{}')
-            return create_session(user_id, json.loads(body) if body else {})
+            body_data = json.loads(body) if body else {}
+            
+            # Check if this is a kill signal request
+            if body_data.get('action') == 'kill_session':
+                session_id = body_data.get('session_id')
+                reason = body_data.get('reason', 'user_cancellation')
+                return kill_session(user_id, session_id, reason)
+            else:
+                return create_session(user_id, body_data)
         elif http_method == 'PUT':
             if not session_id:
                 return {
@@ -442,6 +450,61 @@ def update_session_metadata(user_id: str, session_id: str, metadata: Dict[str, A
             'statusCode': 500,
             'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json_dumps_safe({'error': 'Failed to update session metadata'})
+        }
+
+def kill_session(user_id: str, session_id: str, reason: str = 'user_cancellation') -> Dict[str, Any]:
+    """Set kill flag for a session to stop any active processing"""
+    try:
+        logger.info(f"🔴 KILL: Setting kill flag for session {session_id}, reason: {reason}")
+        
+        if not session_id:
+            return {
+                'statusCode': 400,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe({'error': 'session_id is required'})
+            }
+        
+        # Set kill flag in the session to stop any active chat agent processing
+        try:
+            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression='SET killed_at = :kill_timestamp, kill_reason = :kill_reason',
+                ExpressionAttributeValues={
+                    ':kill_timestamp': timestamp_ms,
+                    ':kill_reason': reason
+                },
+                ConditionExpression='attribute_exists(user_id) AND attribute_exists(session_id)'
+            )
+            logger.info(f"🔴 KILL: Successfully set kill flag for session {session_id}")
+        except Exception as kill_error:
+            logger.error(f"❌ KILL: Failed to set kill flag for session {session_id}: {str(kill_error)}")
+            return {
+                'statusCode': 500,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe({'error': 'Failed to set kill flag'})
+            }
+        
+        return {
+            'statusCode': 200,
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+            'body': json_dumps_safe({
+                'message': 'Kill signal sent successfully',
+                'session_id': session_id,
+                'reason': reason,
+                'killed_at': timestamp_ms
+            })
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ KILL: Error setting kill flag: {str(e)}")
+        return {
+            'statusCode': 500,
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+            'body': json_dumps_safe({'error': 'Failed to set kill flag'})
         }
 
 def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:

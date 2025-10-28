@@ -554,7 +554,7 @@ export default function ChatPage() {
     }
   }, [pendingMessages, currentSession?.session_id, addPersistedMessage]);
 
-  // Safety timeout to clear loading state after 60 seconds for each session
+  // Improved timeout mechanism with 5-minute timeout and user guidance
   useEffect(() => {
     const currentSessionId = currentSession?.session_id;
     if (currentSessionId && sessionLoadingStates[currentSessionId]) {
@@ -563,24 +563,43 @@ export default function ChatPage() {
         clearTimeout(loadingTimeoutRef.current);
       }
       
-      // Set new timeout for this session
+      // Set new timeout for this session (5 minutes)
       loadingTimeoutRef.current = setTimeout(() => {
-        console.log('⏰ TIMEOUT: Clearing loading state after 60 seconds for session:', currentSessionId);
+        console.log('⏰ TIMEOUT: Agent response timeout after 5 minutes for session:', currentSessionId);
+        
+        // Clear loading state
         setSessionLoadingStates(prev => ({
           ...prev,
           [currentSessionId]: false
         }));
+        
+        // Add helpful timeout message to guide user
+        if (currentSessionId) {
+          addPersistedMessage({
+            id: `timeout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            text: "⏰ **Processing Extended**: Your request is taking longer than usual to process. The AI is still working on your request and may take up to 15 minutes to complete. Please refresh the page periodically to check for updates, or start a new conversation if you would like to talk about something else.",
+            sender: 'bot',
+            timestamp: new Date()
+          });
+        }
+        
         loadingTimeoutRef.current = null;
-      }, 60000); // 60 seconds
+      }, 300000); // 5 minutes (300,000 ms)
     }
     
-    // Cleanup on unmount
-    return () => {
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
-    };
-  }, [currentSession?.session_id, sessionLoadingStates]);
+  // Cleanup on unmount
+  return () => {
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+    }
+    
+    // Cancel all pending messages when component unmounts (page refresh)
+    if (currentSessionId) {
+      console.log('🧹 ChatPage: Cleaning up - cancelling all pending messages for session:', currentSessionId);
+      unifiedMessageHandler.cancelAllMessagesForSession(currentSessionId);
+    }
+  };
+  }, [currentSession?.session_id, sessionLoadingStates, addPersistedMessage]);
   const editContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

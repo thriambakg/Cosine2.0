@@ -185,6 +185,11 @@ def process_message(connection_id, user_id, session_id, message_data):
                 'body': json_dumps_safe({'message': 'Connection established'})
             }
         
+        # Handle kill signal message
+        if message_type == 'kill_signal':
+            logger.info(f"Processing kill signal message for connection {connection_id}")
+            return handle_kill_signal(connection_id, user_id, session_id, message_data)
+        
         # Note: File uploads are now handled via REST endpoint, not WebSocket
         
         # Handle agent file returns
@@ -470,6 +475,79 @@ def create_session_for_first_message(user_id, session_id, model):
         
     except Exception as e:
         logger.error(f"Error creating session for first message: {str(e)}")
+
+def handle_kill_signal(connection_id, user_id, session_id, message_data):
+    """
+    Handle kill signal message from frontend to stop agent processing
+    
+    Args:
+        connection_id: WebSocket connection ID
+        user_id: User ID
+        session_id: Session ID
+        message_data: Message data containing kill signal info
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        reason = message_data.get('reason', 'user_cancellation')
+        logger.info(f"🔴 KILL SIGNAL: Processing kill signal for session {session_id}, reason: {reason}")
+        
+        if not session_id:
+            logger.warning("🔴 KILL SIGNAL: No session_id provided, cannot set kill flag")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'No session_id provided'})
+            }
+        
+        # Set kill flag in DynamoDB to stop any active processing
+        try:
+            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            chat_sessions_table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression='SET killed_at = :killed_at, kill_reason = :kill_reason',
+                ExpressionAttributeValues={
+                    ':killed_at': timestamp_ms,
+                    ':kill_reason': reason
+                },
+                ConditionExpression='attribute_exists(user_id) AND attribute_exists(session_id)'
+            )
+            logger.info(f"🔴 KILL SIGNAL: Successfully set kill flag for session {session_id}")
+        except Exception as kill_error:
+            logger.error(f"❌ KILL SIGNAL: Failed to set kill flag for session {session_id}: {str(kill_error)}")
+            return {
+                'statusCode': 500,
+                'body': json_dumps_safe({'error': 'Failed to set kill flag'})
+            }
+        
+        # Send acknowledgment to frontend
+        ack_message = {
+            'type': 'kill_signal_acknowledged',
+            'session_id': session_id,
+            'reason': reason,
+            'timestamp': datetime.now().isoformat(),
+            'message': 'Processing cancelled successfully'
+        }
+        
+        if not send_message_to_client(connection_id, ack_message):
+            logger.warning(f"Failed to send kill signal acknowledgment to connection {connection_id}")
+        
+        logger.info(f"✅ KILL SIGNAL: Successfully processed kill signal for session {session_id}")
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({'message': 'Kill signal processed successfully'})
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ KILL SIGNAL: Error processing kill signal: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': f'Failed to process kill signal: {str(e)}'})
+        }
 
 def call_chat_agent(user_id, message_text, model, files, session_id, context_items=None, original_user_message=None, uploaded_files=None):
     """

@@ -1228,6 +1228,17 @@ const GlobalChatSidebar: React.FC = () => {
     }
   };
 
+  // Cleanup effect for message cancellation
+  useEffect(() => {
+    return () => {
+      // Cancel all pending messages when sidebar unmounts
+      if (activeSessionId) {
+        console.log('🧹 Sidebar: Cleaning up - cancelling all pending messages for session:', activeSessionId);
+        unifiedMessageHandler.cancelAllMessagesForSession(activeSessionId);
+      }
+    };
+  }, [activeSessionId]);
+
   // Resize handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

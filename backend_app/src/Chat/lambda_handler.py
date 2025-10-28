@@ -125,6 +125,88 @@ def get_context_aware_agent():
     
     return _context_aware_agent
 
+def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, session_context):
+    """
+    Process agent with periodic kill signal monitoring
+    
+    Args:
+        agent: The agent to process with
+        enhanced_message: The message to process
+        session_id: Session ID for kill signal checking
+        user_id: User ID for kill signal checking
+        session_context: Session context for kill signal checking
+        
+    Returns:
+        Agent response or kill signal response
+    """
+    import time
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+    
+    # Check if session is already killed
+    if session_context and session_context.get('killed_at'):
+        logger.warning(f"🔴 KILL: Session {session_id} already killed before processing")
+        raise Exception("Session has been terminated")
+    
+    # Create a flag to track if processing should stop
+    kill_flag = threading.Event()
+    
+    def check_kill_signal():
+        """Periodically check for kill signal"""
+        session_manager = get_session_manager()
+        check_interval = 10.0  # Check every 10 seconds (less frequent for longer timeouts)
+        
+        while not kill_flag.is_set():
+            try:
+                # Get fresh session context to check for kill signal
+                fresh_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
+                if fresh_context and fresh_context.get('killed_at'):
+                    logger.warning(f"🔴 KILL: Kill signal detected during processing for session {session_id}")
+                    kill_flag.set()
+                    break
+            except Exception as e:
+                logger.error(f"❌ Error checking kill signal: {str(e)}")
+            
+            time.sleep(check_interval)
+    
+    # Start kill signal monitoring in background thread
+    monitor_thread = threading.Thread(target=check_kill_signal, daemon=True)
+    monitor_thread.start()
+    
+    try:
+        # Process with timeout and kill signal monitoring
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            # Submit the agent processing task
+            future = executor.submit(agent, enhanced_message)
+            
+            # Wait for completion with periodic kill signal checks
+            while not future.done():
+                if kill_flag.is_set():
+                    logger.warning(f"🔴 KILL: Kill signal received, stopping agent processing for session {session_id}")
+                    # Cancel the future if possible
+                    future.cancel()
+                    raise Exception("Session has been terminated")
+                
+                time.sleep(2.0)  # Check every 2 seconds (less frequent for longer timeouts)
+            
+            # Get the result
+            if future.cancelled():
+                raise Exception("Session has been terminated")
+            
+            return future.result()
+            
+    except Exception as e:
+        if "Session has been terminated" in str(e):
+            logger.warning(f"🔴 KILL: Agent processing terminated for session {session_id}")
+            raise e
+        else:
+            logger.error(f"❌ Error in kill-monitored processing: {str(e)}")
+            raise e
+    finally:
+        # Signal the monitor thread to stop
+        kill_flag.set()
+        monitor_thread.join(timeout=1.0)  # Wait up to 1 second for thread to finish
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main AWS Lambda handler function for API Gateway integration
@@ -597,7 +679,25 @@ Session Context:
         
         try:
             logger.info("🔍 DEBUG: Calling session-aware agent...")
-            agent_response = agent(enhanced_message)
+            
+            # Check for kill signal before processing
+            if session_context and session_context.get('killed_at'):
+                logger.warning(f"🔴 KILL: Session {session_id} has been killed before agent processing")
+                return {
+                    'statusCode': 410,
+                    'body': {
+                        'error': 'Session terminated',
+                        'message': f'Session {session_id} has been terminated',
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'killed_at': session_context.get('killed_at'),
+                        'kill_reason': session_context.get('kill_reason', 'unknown')
+                    }
+                }
+            
+            # Process with kill signal monitoring
+            agent_response = process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, session_context)
+            
             logger.info(f"🔍 DEBUG: Agent response received: {agent_response}")
             logger.info(f"🔍 DEBUG: Agent response type: {type(agent_response)}")
             if hasattr(agent_response, 'message'):
