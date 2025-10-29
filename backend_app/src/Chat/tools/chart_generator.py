@@ -211,20 +211,32 @@ class UnifiedChartGenerator:
             Success message with file details
         """
         try:
+            logger.info(f"🔍 DEBUG: Chart generator received data type: {type(data_json)}")
             data_dict = json.loads(data_json)
+            logger.info(f"🔍 DEBUG: After JSON parsing, data type: {type(data_dict)}")
+            logger.info(f"🔍 DEBUG: After JSON parsing, keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
             
             # Decompress data if it's compressed
             from tools.data_compression import DataCompression
             
-            # Check if the entire response is compressed
+            # Check if the entire response is compressed (new approach)
             if isinstance(data_dict, dict) and data_dict.get("_compressed") is True:
-                # Entire response is compressed
+                # Entire response is compressed - decompress it
+                logger.info("🔍 DEBUG: Decompressing entire data object")
                 data_dict = DataCompression.decompress_data(data_dict)
+                logger.info(f"🔍 DEBUG: After decompression, keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
             elif isinstance(data_dict, dict) and 'historical_data' in data_dict:
-                # Only historical_data is compressed, decompress it
+                # Legacy: Only historical_data is compressed, decompress it
                 hist_data = data_dict['historical_data']
                 if isinstance(hist_data, dict) and hist_data.get("_compressed") is True:
+                    logger.info("🔍 DEBUG: Decompressing historical_data field only")
                     data_dict['historical_data'] = DataCompression.decompress_data(hist_data)
+            elif isinstance(data_dict, dict) and 'chart_data' in data_dict:
+                # Legacy: Only chart_data is compressed, decompress it
+                chart_data = data_dict['chart_data']
+                if isinstance(chart_data, dict) and chart_data.get("_compressed") is True:
+                    logger.info("🔍 DEBUG: Decompressing chart_data field only")
+                    data_dict['chart_data'] = DataCompression.decompress_data(chart_data)
             
             # Debug logging to see data structure
             logger.info(f"Data structure after decompression: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")

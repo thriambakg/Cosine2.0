@@ -617,8 +617,7 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
         # For asynchronous invocation, we don't get a response payload
         logger.info(f"✅ Chat agent invoked asynchronously: {response['StatusCode']}")
         
-        # Return null - loading state is handled by frontend
-        return None
+        # No return needed - loading state is handled by frontend
             
     except Exception as e:
         logger.error(f"Error calling chat agent: {str(e)}")

@@ -245,27 +245,7 @@ class FinancialTools:
                     "volume": int(row['Volume'])
                 })
             
-            # Import compression utility
-            from tools.data_compression import DataCompression
-            
-            # Debug logging for compression
-            logger.info(f"🔍 DEBUG: Historical data length before compression: {len(historical_data)} points")
-            logger.info(f"🔍 DEBUG: First few historical data points: {historical_data[:3] if len(historical_data) > 0 else 'Empty'}")
-            
-            # Compress historical data if it's large
-            compressed_historical_data = DataCompression.compress_data(historical_data, compression_threshold=2000)
-            
-            # Debug logging for compression result
-            logger.info(f"🔍 DEBUG: Compressed historical data type: {type(compressed_historical_data)}")
-            if isinstance(compressed_historical_data, dict):
-                logger.info(f"🔍 DEBUG: Compressed data keys: {list(compressed_historical_data.keys())}")
-                if compressed_historical_data.get("_compressed"):
-                    logger.info(f"🔍 DEBUG: Data was compressed successfully")
-                else:
-                    logger.info(f"🔍 DEBUG: Data was not compressed (below threshold)")
-            else:
-                logger.info(f"🔍 DEBUG: Compressed data is not a dict: {compressed_historical_data}")
-            
+            # Build the complete data object first
             result = {
                 "symbol": symbol,
                 "current_price": round(current_price, 2),
@@ -289,19 +269,31 @@ class FinancialTools:
                     "start": hist.index[0].strftime('%Y-%m-%d'),
                     "end": hist.index[-1].strftime('%Y-%m-%d')
                 },
-                "historical_data": compressed_historical_data
+                "historical_data": historical_data
             }
             
-            # Debug logging for final result
-            logger.info(f"🔍 DEBUG: Final result keys: {list(result.keys())}")
-            logger.info(f"🔍 DEBUG: Has historical_data key: {'historical_data' in result}")
-            if 'historical_data' in result:
-                hist_data = result['historical_data']
-                logger.info(f"🔍 DEBUG: Historical data type in result: {type(hist_data)}")
-                if isinstance(hist_data, dict):
-                    logger.info(f"🔍 DEBUG: Historical data dict keys: {list(hist_data.keys())}")
+            # Import compression utility
+            from tools.data_compression import DataCompression
             
-            return result
+            # Debug logging for compression
+            logger.info(f"🔍 DEBUG: Complete data object size before compression: {len(str(result))} characters")
+            logger.info(f"🔍 DEBUG: Historical data length: {len(historical_data)} points")
+            
+            # Compress the entire data object if it's large
+            compressed_result = DataCompression.compress_data(result, compression_threshold=2000)
+            
+            # Debug logging for compression result
+            logger.info(f"🔍 DEBUG: Compressed result type: {type(compressed_result)}")
+            if isinstance(compressed_result, dict):
+                logger.info(f"🔍 DEBUG: Compressed data keys: {list(compressed_result.keys())}")
+                if compressed_result.get("_compressed"):
+                    logger.info(f"🔍 DEBUG: Data was compressed successfully")
+                else:
+                    logger.info(f"🔍 DEBUG: Data was not compressed (below threshold)")
+            else:
+                logger.info(f"🔍 DEBUG: Compressed data is not a dict: {compressed_result}")
+            
+            return compressed_result
                 
         except Exception as e:
             return {"symbol": symbol, "status": "error", "message": str(e)}
@@ -1024,6 +1016,7 @@ FOR SESSION VARIABLES AND TILES QUESTIONS:
 - **Tool Communication**: All tools automatically handle compressed data - no manual decompression needed
 - **Chart Generation**: Use generate_chart_tool with compressed data for best performance
 - **Memory Management**: Full historical data preserved while minimizing token usage
+- **Compression Strategy**: Entire data objects are compressed when large, not just individual fields
 
 ⚡ EXAMPLE CORRECTED BEHAVIOR:
 User: "Analyze S&P 500 volatility"
@@ -1096,9 +1089,13 @@ Note: This is a simulated analysis. For actual research, use real Fama-French da
 def get_financial_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> str:
     """Get current stock price, market cap, and financial metrics for a given stock symbol. Supports custom timeframes and date ranges for chart generation."""
     try:
+        logger.info(f"🔍 DEBUG: get_financial_data called with symbol={symbol}, timeframe={timeframe}")
         data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
+        logger.info(f"🔍 DEBUG: get_financial_data result keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+        logger.info(f"🔍 DEBUG: get_financial_data has historical_data: {'historical_data' in data if isinstance(data, dict) else 'Not a dict'}")
         return json.dumps(data, indent=2)
     except Exception as e:
+        logger.error(f"🔍 DEBUG: get_financial_data exception: {str(e)}")
         return f"Error getting financial data: {str(e)}"
 
 @tool
