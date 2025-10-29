@@ -361,39 +361,38 @@ def process_message(connection_id, user_id, session_id, message_data):
         
         # Call the existing chat agent Lambda asynchronously (with enriched message if context present)
         # Pass original_user_message so the chat agent can store it for display
-        acknowledgment_message = call_chat_agent(
-            user_id, 
-            message_text,  # Enriched message for AI
-            model, 
-            files, 
-            session_id, 
-            context_items if has_context else None,
-            original_user_message if (has_context or has_files) else None,  # Original message for frontend display
-            uploaded_files if has_files else None  # Uploaded files for AI processing
-        )
-        
-        # For asynchronous invocation, we get an acknowledgment message
-        # The actual AI response will be delivered via SNS to this same Lambda
-        logger.info(f"Chat agent invoked asynchronously, acknowledgment: {acknowledgment_message}")
-        
-        # Send acknowledgment to user that processing has started
-        connection_info = get_connection_info(connection_id)
-        current_session_id = connection_info.get('session_id') if connection_info else None
-        
-        if current_session_id == session_id:
-            # Send processing acknowledgment to user
-            processing_message = {
+        try:
+            call_chat_agent(
+                user_id, 
+                message_text,  # Enriched message for AI
+                model, 
+                files, 
+                session_id, 
+                context_items if has_context else None,
+                original_user_message if (has_context or has_files) else None,  # Original message for frontend display
+                uploaded_files if has_files else None  # Uploaded files for AI processing
+            )
+            
+            # For asynchronous invocation, we don't get a response payload
+            logger.info(f"✅ Chat agent invoked asynchronously")
+            
+            # No need to send processing acknowledgment - frontend handles loading states
+            # The actual AI response will be delivered via SNS to this same Lambda
+                
+        except Exception as e:
+            logger.error(f"❌ Error calling chat agent: {str(e)}")
+            
+            # Send error response to frontend to clear loading state
+            error_message = {
                 'type': 'ai_response',
                 'message_id': f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}",
-                'content': acknowledgment_message,
+                'content': "I apologize, but I encountered an error processing your request. Please try again.",
                 'session_id': session_id,
                 'timestamp': datetime.now().isoformat()
             }
             
-            send_message_to_client(connection_id, processing_message)
-            logger.info(f"✅ Sent processing acknowledgment to session {session_id}")
-        else:
-            logger.warning(f"⚠️ Skipping acknowledgment - connection {connection_id} is now associated with session {current_session_id}, but message is for session {session_id}")
+            send_message_to_client(connection_id, error_message)
+            logger.info(f"✅ Sent error response to session {session_id}")
         
         return {
             'statusCode': 200,
@@ -621,7 +620,8 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
             
     except Exception as e:
         logger.error(f"Error calling chat agent: {str(e)}")
-        return 'I apologize, but I encountered an error processing your request. Please try again.'
+        # Re-raise the exception so it can be handled by the caller
+        raise e
 
 def send_message_to_client(connection_id, message):
     """

@@ -469,6 +469,29 @@ export default function ChatPage() {
     }
   }, [currentSession]);
 
+  // Clear stuck loading states and timeout messages on page load (in case of errors or page refresh)
+  useEffect(() => {
+    console.log('🧹 ChatPage: Clearing any stuck loading states on page load');
+    setSessionLoadingStates({});
+    
+    // Clear any timeout messages that might be stuck
+    if (currentSession?.messages) {
+      const timeoutMessages = currentSession.messages.filter(msg => 
+        msg.id.startsWith('timeout_') && msg.sender === 'bot'
+      );
+      
+      if (timeoutMessages.length > 0) {
+        console.log('🧹 ChatPage: Removing stuck timeout messages:', timeoutMessages.length);
+        const filteredMessages = currentSession.messages.filter(msg => 
+          !msg.id.startsWith('timeout_') || msg.sender !== 'bot'
+        );
+        
+        // Update the session with filtered messages
+        updateSessionContext(currentSession.session_id, filteredMessages);
+      }
+    }
+  }, []); // Run only once on mount
+
   // Handle session switching and message caching
   const previousSessionIdRef = useRef<string | null>(null);
   const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);

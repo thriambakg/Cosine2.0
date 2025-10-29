@@ -149,8 +149,7 @@ class SessionManager:
                             })
                 
                 logger.info(f"🔍 DEBUG: Built conversation history with {len(conversation_history)} entries")
-            else:
-                logger.info(f"🔍 DEBUG: Skipping conversation history build for efficiency (use chat history tools instead)")
+            # Skip conversation history build for efficiency (use chat history tools instead)
             
             # Combine metadata and context
             session_context = {

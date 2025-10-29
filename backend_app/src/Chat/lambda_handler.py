@@ -155,20 +155,26 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
     def check_kill_signal():
         """Periodically check for kill signal"""
         session_manager = get_session_manager()
-        check_interval = 10.0  # Check every 10 seconds (less frequent for longer timeouts)
+        check_interval = 30.0  # Check every 30 seconds (much less frequent to reduce polling)
+        max_checks = 30  # Maximum 30 checks (15 minutes total)
+        check_count = 0
         
-        while not kill_flag.is_set():
+        while not kill_flag.is_set() and check_count < max_checks:
             try:
                 # Get fresh session context to check for kill signal
                 fresh_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
                 if fresh_context and fresh_context.get('killed_at'):
                     logger.warning(f"🔴 KILL: Kill signal detected during processing for session {session_id}")
+                    logger.warning(f"🔴 KILL: Kill reason: {fresh_context.get('kill_reason', 'unknown')}")
+                    logger.warning(f"🔴 KILL: Killed at: {fresh_context.get('killed_at')}")
                     kill_flag.set()
                     break
             except Exception as e:
                 logger.error(f"❌ Error checking kill signal: {str(e)}")
             
-            time.sleep(check_interval)
+            check_count += 1
+            if check_count < max_checks:
+                time.sleep(check_interval)
     
     # Start kill signal monitoring in background thread
     monitor_thread = threading.Thread(target=check_kill_signal, daemon=True)
@@ -180,6 +186,10 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
             # Submit the agent processing task
             future = executor.submit(agent, enhanced_message)
             
+            # Set maximum timeout for the entire operation (12 minutes)
+            max_timeout = 720  # 12 minutes in seconds
+            start_time = time.time()
+            
             # Wait for completion with periodic kill signal checks
             while not future.done():
                 if kill_flag.is_set():
@@ -188,7 +198,13 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
                     future.cancel()
                     raise Exception("Session has been terminated")
                 
-                time.sleep(2.0)  # Check every 2 seconds (less frequent for longer timeouts)
+                # Check if we've exceeded the maximum timeout
+                if time.time() - start_time > max_timeout:
+                    logger.error(f"⏰ TIMEOUT: Maximum processing time exceeded for session {session_id}")
+                    future.cancel()
+                    raise Exception("Request timed out after 12 minutes. Please try again.")
+                
+                time.sleep(5.0)  # Check every 5 seconds (less frequent to reduce CPU usage)
             
             # Get the result
             if future.cancelled():
@@ -200,6 +216,10 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
         if "Session has been terminated" in str(e):
             logger.warning(f"🔴 KILL: Agent processing terminated for session {session_id}")
             raise e
+        elif "Read timed out" in str(e) or "TimeoutError" in str(e):
+            logger.error(f"⏰ TIMEOUT: Network timeout during agent processing for session {session_id}")
+            logger.error(f"⏰ TIMEOUT: This may be due to AWS Bedrock connectivity issues")
+            raise Exception(f"Request timed out due to network connectivity issues. Please try again.")
         else:
             logger.error(f"❌ Error in kill-monitored processing: {str(e)}")
             raise e
@@ -611,7 +631,9 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
             
             # Check for kill signal before processing
             if session_context.get('killed_at'):
-                logger.warning(f"🔴 KILL: Session {session_id} has been killed (killed_at: {session_context.get('killed_at')}, reason: {session_context.get('kill_reason', 'unknown')})")
+                logger.warning(f"🔴 KILL: Session {session_id} has been killed")
+                logger.warning(f"🔴 KILL: Kill reason: {session_context.get('kill_reason', 'unknown')}")
+                logger.warning(f"🔴 KILL: Killed at: {session_context.get('killed_at')}")
                 return {
                     'statusCode': 410,  # Gone status code
                     'body': {
@@ -684,6 +706,8 @@ Session Context:
             # Check for kill signal before processing
             if session_context and session_context.get('killed_at'):
                 logger.warning(f"🔴 KILL: Session {session_id} has been killed before agent processing")
+                logger.warning(f"🔴 KILL: Kill reason: {session_context.get('kill_reason', 'unknown')}")
+                logger.warning(f"🔴 KILL: Killed at: {session_context.get('killed_at')}")
                 return {
                     'statusCode': 410,
                     'body': {

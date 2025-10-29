@@ -710,10 +710,18 @@ class UnifiedMessageHandlerService {
     // Clear loading state for all interfaces
     this.broadcastLoadingState(sessionId, false, 'chatpage');
     
+    // Validate content before creating message
+    const validContent = content && content.trim() && content !== 'Processing your request...';
+    
+    if (!validContent) {
+      console.log('⚠️ UnifiedMessageHandler: Skipping AI response with invalid content:', content);
+      return;
+    }
+    
     const aiMessage: SharedMessage = {
       id: message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       sender: 'ai',
-      text: content || 'No response content',
+      text: content,
       timestamp: timestamp || Date.now(),
       sessionId: sessionId,
       source: 'chatpage'
