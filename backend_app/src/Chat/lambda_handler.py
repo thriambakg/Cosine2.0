@@ -710,7 +710,6 @@ Session Context:
 
         # Add context items to the enhanced message if present
         if context_items:
-            import json
             context_items_json = json.dumps(context_items)
             enhanced_message += f"""
 Context Items Available: {len(context_items)} items
