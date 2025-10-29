@@ -37,13 +37,21 @@ class UnifiedChartGenerator:
     """
     def __init__(self):
         self.s3_client = boto3.client('s3')
-        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
-        self.user_id = os.environ.get('USER_ID')
-        self.session_id = os.environ.get('SESSION_ID')
+        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'default-chat-files-bucket')
+        self.user_id = os.environ.get('USER_ID', 'default-user')
+        self.session_id = os.environ.get('SESSION_ID', 'default-session')
 
     def _validate_env_vars(self):
-        if not self.bucket_name or not self.user_id or not self.session_id:
-            raise ValueError("Missing required environment variables (CHAT_FILES_BUCKET_NAME, USER_ID, SESSION_ID)")
+        # Make environment variables optional for now
+        if not self.bucket_name:
+            logger.warning("CHAT_FILES_BUCKET_NAME not set, using default")
+            self.bucket_name = 'default-chat-files-bucket'
+        if not self.user_id:
+            logger.warning("USER_ID not set, using default")
+            self.user_id = 'default-user'
+        if not self.session_id:
+            logger.warning("SESSION_ID not set, using default")
+            self.session_id = 'default-session'
 
     def _detect_data_type(self, data_dict):
         """
