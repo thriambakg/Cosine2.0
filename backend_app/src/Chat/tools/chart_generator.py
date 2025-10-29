@@ -282,10 +282,11 @@ class UnifiedChartGenerator:
                 logger.error(f"❌ Available keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
                 logger.error(f"❌ Expected: 'historical_data' key for stocks or 'chart_data' key for crypto")
                 
-                # Check if this looks like a summary instead of full data
-                if isinstance(data_dict, dict) and 'symbol' in data_dict and 'current_price' in data_dict:
-                    return f"Error: You passed a summary of the data instead of the full result. Please call get_financial_data('{symbol}', timeframe) first, then pass the COMPLETE result to generate_chart_tool. Example: data = get_financial_data('{symbol}', '2y'); generate_chart_tool('{symbol}', data, 'line')"
-            else:
+                # Check if this looks like incomplete stock data
+                if isinstance(data_dict, dict) and 'data_points' in data_dict and 'symbol' in data_dict and 'current_price' in data_dict:
+                    logger.error(f"❌ This appears to be incomplete stock data - missing 'historical_data' field")
+                    return f"Error: You passed incomplete data for {symbol}. The data contains metadata (current_price, data_points, etc.) but is missing the 'historical_data' field needed for chart generation. Please call get_financial_data('{symbol}', '{data_dict.get('timeframe', '2y')}') again and pass the COMPLETE result to generate_chart_tool."
+                else:
                     return f"Error: Unable to detect data type for {symbol}. Please ensure you call get_financial_data(symbol, timeframe) first to fetch the data, then pass the COMPLETE result to generate_chart_tool. The data must contain 'historical_data' for stocks or 'chart_data' for crypto."
             
             # Check for errors

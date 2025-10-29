@@ -278,6 +278,8 @@ class FinancialTools:
             # Debug logging for compression
             logger.info(f"🔍 DEBUG: Complete data object size before compression: {len(str(result))} characters")
             logger.info(f"🔍 DEBUG: Historical data length: {len(historical_data)} points")
+            logger.info(f"🔍 DEBUG: Result keys before compression: {list(result.keys())}")
+            logger.info(f"🔍 DEBUG: Has historical_data in result: {'historical_data' in result}")
             
             # Compress the entire data object if it's large
             compressed_result = DataCompression.compress_data(result, compression_threshold=2000)
@@ -288,8 +290,10 @@ class FinancialTools:
                 logger.info(f"🔍 DEBUG: Compressed data keys: {list(compressed_result.keys())}")
                 if compressed_result.get("_compressed"):
                     logger.info(f"🔍 DEBUG: Data was compressed successfully")
+                    logger.info(f"🔍 DEBUG: Compressed data has original_data: {'original_data' in compressed_result}")
                 else:
                     logger.info(f"🔍 DEBUG: Data was not compressed (below threshold)")
+                    logger.info(f"🔍 DEBUG: Uncompressed data has historical_data: {'historical_data' in compressed_result}")
             else:
                 logger.info(f"🔍 DEBUG: Compressed data is not a dict: {compressed_result}")
             
