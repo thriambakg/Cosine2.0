@@ -555,37 +555,49 @@ export default function ChatPage() {
   }, [pendingMessages, currentSession?.session_id, addPersistedMessage]);
 
   // Improved timeout mechanism with 5-minute timeout and user guidance
+  // Only trigger timeout when loading state becomes true (not on every render)
+  const prevLoadingStatesRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
     const currentSessionId = currentSession?.session_id;
     if (currentSessionId && sessionLoadingStates[currentSessionId]) {
-      // Clear any existing timeout
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
+      const prevLoadingState = prevLoadingStatesRef.current[currentSessionId] || false;
       
-      // Set new timeout for this session (5 minutes)
-      loadingTimeoutRef.current = setTimeout(() => {
-        console.log('⏰ TIMEOUT: Agent response timeout after 5 minutes for session:', currentSessionId);
+      // Only set timeout if loading state just became true (transition from false to true)
+      if (!prevLoadingState) {
+        console.log('🔄 ChatPage: Loading state became true, setting 5-minute timeout for session:', currentSessionId);
         
-        // Clear loading state
-        setSessionLoadingStates(prev => ({
-          ...prev,
-          [currentSessionId]: false
-        }));
-        
-        // Add helpful timeout message to guide user
-        if (currentSessionId) {
-          addPersistedMessage({
-            id: `timeout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            text: "⏰ **Processing Extended**: Your request is taking longer than usual to process. The AI is still working on your request and may take up to 15 minutes to complete. Please refresh the page periodically to check for updates, or start a new conversation if you would like to talk about something else.",
-            sender: 'bot',
-            timestamp: new Date()
-          });
+        // Clear any existing timeout
+        if (loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
         }
         
-        loadingTimeoutRef.current = null;
-      }, 300000); // 5 minutes (300,000 ms)
+        // Set new timeout for this session (5 minutes)
+        loadingTimeoutRef.current = setTimeout(() => {
+          console.log('⏰ TIMEOUT: Agent response timeout after 5 minutes for session:', currentSessionId);
+          
+          // Clear loading state
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [currentSessionId]: false
+          }));
+          
+          // Add helpful timeout message to guide user
+          if (currentSessionId) {
+            addPersistedMessage({
+              id: `timeout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              text: "⏰ **Processing Extended**: Your request is taking longer than usual to process. The AI is still working on your request and may take up to 15 minutes to complete. Please refresh the page periodically to check for updates, or start a new conversation if you would like to talk about something else.",
+              sender: 'bot',
+              timestamp: new Date()
+            });
+          }
+          
+          loadingTimeoutRef.current = null;
+        }, 300000); // 5 minutes (300,000 ms)
+      }
     }
+    
+    // Update the ref to track previous loading states
+    prevLoadingStatesRef.current = { ...sessionLoadingStates };
   }, [currentSession?.session_id, sessionLoadingStates, addPersistedMessage]);
 
   // Track current session for cleanup

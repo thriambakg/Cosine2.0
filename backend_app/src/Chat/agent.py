@@ -248,10 +248,25 @@ class FinancialTools:
             # Import compression utility
             from tools.data_compression import DataCompression
             
+            # Debug logging for compression
+            logger.info(f"🔍 DEBUG: Historical data length before compression: {len(historical_data)} points")
+            logger.info(f"🔍 DEBUG: First few historical data points: {historical_data[:3] if len(historical_data) > 0 else 'Empty'}")
+            
             # Compress historical data if it's large
             compressed_historical_data = DataCompression.compress_data(historical_data, compression_threshold=2000)
             
-            return {
+            # Debug logging for compression result
+            logger.info(f"🔍 DEBUG: Compressed historical data type: {type(compressed_historical_data)}")
+            if isinstance(compressed_historical_data, dict):
+                logger.info(f"🔍 DEBUG: Compressed data keys: {list(compressed_historical_data.keys())}")
+                if compressed_historical_data.get("_compressed"):
+                    logger.info(f"🔍 DEBUG: Data was compressed successfully")
+                else:
+                    logger.info(f"🔍 DEBUG: Data was not compressed (below threshold)")
+            else:
+                logger.info(f"🔍 DEBUG: Compressed data is not a dict: {compressed_historical_data}")
+            
+            result = {
                 "symbol": symbol,
                 "current_price": round(current_price, 2),
                 "previous_close": round(previous_close, 2),
@@ -276,6 +291,17 @@ class FinancialTools:
                 },
                 "historical_data": compressed_historical_data
             }
+            
+            # Debug logging for final result
+            logger.info(f"🔍 DEBUG: Final result keys: {list(result.keys())}")
+            logger.info(f"🔍 DEBUG: Has historical_data key: {'historical_data' in result}")
+            if 'historical_data' in result:
+                hist_data = result['historical_data']
+                logger.info(f"🔍 DEBUG: Historical data type in result: {type(hist_data)}")
+                if isinstance(hist_data, dict):
+                    logger.info(f"🔍 DEBUG: Historical data dict keys: {list(hist_data.keys())}")
+            
+            return result
                 
         except Exception as e:
             return {"symbol": symbol, "status": "error", "message": str(e)}
