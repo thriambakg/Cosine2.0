@@ -808,6 +808,8 @@ Agent:
 ❌ WRONG: generate_chart_tool("AAPL", "some summary text", "line")
 ✅ CORRECT: generate_chart_tool("AAPL", data, "line") where data is the full result from get_financial_data OR get_crypto_data_tool
 
+📝 NOTE: The "pass data as-is" rule ONLY applies to generate_chart_tool. For other tools like generate_excel_file_tool, you should process and format the data as needed.
+
 🚨 NEVER SAY "I don't have access to previous context" - ALWAYS call get_session_context_tool first to check what's actually available!
 
 📊 PORTFOLIO TILES: When you see portfolio tiles in context data, they contain complete portfolio information:
