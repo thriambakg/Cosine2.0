@@ -983,7 +983,7 @@ resource "aws_iam_policy" "chat_agent_historical_s3_policy" {
         Action = [
           "s3:GetObject"
         ]
-        Resource = "${data.terraform_remote_state.base_infra.outputs.historical_data_bucket_arn}/*"
+        Resource = "${data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn}/*"
       }
     ]
   })
@@ -1103,7 +1103,7 @@ resource "aws_lambda_function" "chat_agent" {
       CHAT_FILES_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
 
       # S3 Configuration for historical stock data
-      HISTORICAL_DATA_BUCKET = data.terraform_remote_state.base_infra.outputs.historical_data_bucket_name
+      HISTORICAL_DATA_BUCKET = data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_name
 
       # File Return Lambda Function Name for direct invocation
       FILE_RETURN_LAMBDA_NAME = module.file_return_lambda.function_name
