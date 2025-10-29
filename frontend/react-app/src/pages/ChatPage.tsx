@@ -21,6 +21,7 @@ import {
   Avatar,
   FormControl,
   Select,
+  Menu,
   MenuItem,
   Chip,
   Button,
@@ -49,6 +50,7 @@ import {
   Delete as DeleteIcon,
   Edit as EditIcon,
   Dashboard as ContextIcon,
+  Chat as SidebarChatIcon,
   OpenInNew as OpenInNewIcon,
   ExpandLess as ExpandLessIcon,
   ExpandMore as ExpandMoreIcon,
@@ -244,6 +246,12 @@ export default function ChatPage() {
   // Session selection for context
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   
+  // Context menu for sessions
+  const [sessionContextMenu, setSessionContextMenu] = useState<{
+    mouseX: number;
+    mouseY: number;
+  } | null>(null);
+  
   // Message editing state
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
@@ -369,6 +377,14 @@ export default function ChatPage() {
         // Clear loading state when AI starts responding (with small delay to ensure loading wheel is visible)
         if (currentSession?.session_id) {
           console.log('🤖 ChatPage: AI started typing, clearing loading state for session:', currentSession.session_id);
+          
+          // Clear the timeout since AI is responding
+          if (loadingTimeoutRef.current) {
+            clearTimeout(loadingTimeoutRef.current);
+            loadingTimeoutRef.current = null;
+            console.log('🔄 ChatPage: Cleared timeout for session:', currentSession.session_id);
+          }
+          
           setTimeout(() => {
             setSessionLoadingStates(prev => ({
               ...prev,
@@ -622,6 +638,21 @@ export default function ChatPage() {
     // Update the ref to track previous loading states
     prevLoadingStatesRef.current = { ...sessionLoadingStates };
   }, [currentSession?.session_id, sessionLoadingStates, addPersistedMessage]);
+
+  // Clear timeout when loading state becomes false
+  useEffect(() => {
+    const currentSessionId = currentSession?.session_id;
+    if (currentSessionId && !sessionLoadingStates[currentSessionId]) {
+      const prevLoadingState = prevLoadingStatesRef.current[currentSessionId] || false;
+      
+      // Clear timeout if loading state just became false (transition from true to false)
+      if (prevLoadingState && loadingTimeoutRef.current) {
+        console.log('🔄 ChatPage: Loading state became false, clearing timeout for session:', currentSessionId);
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+    }
+  }, [sessionLoadingStates, currentSession?.session_id]);
 
   // Track current session for cleanup
   const currentSessionRef = useRef<string | null>(null);
@@ -933,6 +964,59 @@ export default function ChatPage() {
       }
       return newSet;
     });
+  };
+
+  // Context menu handlers for sessions
+  const handleSessionContextMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    setSessionContextMenu({
+      mouseX: event.clientX + 2,
+      mouseY: event.clientY - 6
+    });
+  };
+
+  const handleCloseSessionContextMenu = () => {
+    setSessionContextMenu(null);
+  };
+
+  // Add selected sessions to context
+  const handleAddSessionsToContext = (target: 'new' | 'sidebar') => {
+    if (selectedSessions.size === 0) {
+      console.log('No sessions selected to add to context');
+      return;
+    }
+
+    const selectedSessionsArray = Array.from(selectedSessions);
+    const sessionsToAdd = selectedSessionsArray
+      .map(sessionId => {
+        const session = sessions.find(s => s.session_id === sessionId);
+        if (!session) return null;
+        
+        return {
+          sessionId: session.session_id,
+          title: session.title,
+          model: session.model,
+          messageCount: session.messages?.length || 0,
+          sessionData: session
+        };
+      })
+      .filter((session): session is NonNullable<typeof session> => session !== null);
+
+    if (sessionsToAdd.length === 0) {
+      console.log('No valid sessions to add to context');
+      return;
+    }
+
+    // Import context manager
+    import('../components/tiles/common/contextManager').then(({ addMultipleChatSessionsToContext }) => {
+      addMultipleChatSessionsToContext(sessionsToAdd, target);
+    });
+
+    // Clear selection
+    setSelectedSessions(new Set());
+    handleCloseSessionContextMenu();
   };
 
 
@@ -1315,6 +1399,7 @@ export default function ChatPage() {
 
           {/* Chat Sessions */}
           <Box 
+            onContextMenu={handleSessionContextMenu}
             sx={{ 
               flex: 1, 
               overflow: 'auto', 
@@ -2321,6 +2406,50 @@ export default function ChatPage() {
           </Box>
         </GlassCard>
       </Box>
+
+      {/* Session Context Menu */}
+      <Menu
+        open={sessionContextMenu !== null}
+        onClose={handleCloseSessionContextMenu}
+        anchorReference="anchorPosition"
+        anchorPosition={
+          sessionContextMenu !== null
+            ? { top: sessionContextMenu.mouseY, left: sessionContextMenu.mouseX }
+            : undefined
+        }
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+            color: 'white',
+            minWidth: 200,
+          },
+        }}
+      >
+        <MenuItem 
+          onClick={() => handleAddSessionsToContext('new')} 
+          disabled={selectedSessions.size === 0}
+        >
+          <ListItemIcon>
+            <ContextIcon sx={{ color: '#3b82f6' }} />
+          </ListItemIcon>
+          <ListItemText>
+            Add to New Chat ({selectedSessions.size} selected)
+          </ListItemText>
+        </MenuItem>
+        
+        <MenuItem 
+          onClick={() => handleAddSessionsToContext('sidebar')} 
+          disabled={selectedSessions.size === 0}
+        >
+          <ListItemIcon>
+            <SidebarChatIcon sx={{ color: '#10b981' }} />
+          </ListItemIcon>
+          <ListItemText>
+            Add to Sidebar Chat ({selectedSessions.size} selected)
+          </ListItemText>
+        </MenuItem>
+      </Menu>
     </Box>
   );
 }
