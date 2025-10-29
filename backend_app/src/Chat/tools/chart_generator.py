@@ -235,6 +235,7 @@ class UnifiedChartGenerator:
                 try:
                     data_dict = DataCompression.decompress_data(data_dict)
                     logger.info(f"🔍 DEBUG: After decompression, keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
+                    logger.info(f"🔍 DEBUG: After decompression, has historical_data: {'historical_data' in data_dict if isinstance(data_dict, dict) else False}")
                 except Exception as decompress_error:
                     logger.error(f"❌ Failed to decompress data: {str(decompress_error)}")
                     logger.error("🔄 Attempting to use original data without compression...")
@@ -243,6 +244,7 @@ class UnifiedChartGenerator:
                     if 'original_data' in data_dict:
                         logger.info("📦 Using original_data field as fallback")
                         data_dict = data_dict['original_data']
+                        logger.info(f"🔍 DEBUG: Fallback data keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
                     else:
                         logger.error("❌ No fallback data available, returning error")
                         return f"Error: Unable to decompress data. The compressed data appears to be corrupted. Please try again."
@@ -402,7 +404,7 @@ class UnifiedChartGenerator:
             
             # Format x-axis
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-            ax.xaxis.set_major_locator(mdates.AutoLocator())
+            ax.xaxis.set_major_locator(mdates.MonthLocator())
             plt.xticks(rotation=45)
             
             plt.tight_layout()
