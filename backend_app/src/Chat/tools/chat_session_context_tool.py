@@ -30,6 +30,10 @@ def process_chat_session_context_tool(session_id: str, user_id: str, context_ite
         # Parse context items
         context_data = json.loads(context_items)
         
+        logger.info(f"🔍 DEBUG: Received context_items: {len(str(context_items))} characters")
+        logger.info(f"🔍 DEBUG: Parsed context_data type: {type(context_data)}")
+        logger.info(f"🔍 DEBUG: Context data length: {len(context_data) if isinstance(context_data, list) else 'not a list'}")
+        
         if not isinstance(context_data, list):
             return {
                 "success": False,
@@ -39,40 +43,64 @@ def process_chat_session_context_tool(session_id: str, user_id: str, context_ite
         
         processed_sessions = []
         
-        for item in context_data:
+        for i, item in enumerate(context_data):
+            logger.info(f"🔍 DEBUG: Processing context item {i}: type={item.get('type')}, keys={list(item.keys())}")
+            
             if item.get('type') != 'chat':
+                logger.info(f"🔍 DEBUG: Skipping non-chat item: {item.get('type')}")
                 continue
                 
             session_info = item.get('data', {})
             session_id_ref = session_info.get('session_id')
             
+            logger.info(f"🔍 DEBUG: Session info keys: {list(session_info.keys())}")
+            logger.info(f"🔍 DEBUG: Session ID: {session_id_ref}")
+            
             if not session_id_ref:
+                logger.warning(f"⚠️ No session_id found in context item {i}")
                 continue
                 
-            # Get chat history for this session
+            # Use the session data directly from context (no need for separate API call)
             try:
-                from tools.chat_history_tool import get_chat_history_tool
-                history_result = get_chat_history_tool(session_id_ref, user_id, limit=50, include_recent=True)
+                # Extract session data from context item
+                session_data = session_info.get('sessionData', {})
+                messages = session_data.get('messages', [])
                 
-                if history_result.get('success'):
-                    conversations = history_result.get('conversations', [])
-                    
-                    # Process the conversation data
-                    session_summary = {
-                        "session_id": session_id_ref,
-                        "title": item.get('title', f'Chat {session_id_ref[:8]}'),
-                        "model": session_info.get('model', 'unknown'),
-                        "message_count": session_info.get('message_count', 0),
-                        "conversations": conversations,
-                        "total_conversations": history_result.get('total_conversations', 0),
-                        "context_added_at": item.get('timestamp', 0)
-                    }
-                    
-                    processed_sessions.append(session_summary)
-                    
-                    logger.info(f"✅ Processed chat session context: {session_id_ref}")
-                else:
-                    logger.warning(f"⚠️ Failed to get history for session {session_id_ref}: {history_result.get('error', 'Unknown error')}")
+                # Convert messages to conversation format
+                conversations = []
+                for message in messages:
+                    if message.get('sender') == 'user':
+                        conversations.append({
+                            'timestamp': message.get('timestamp', 0),
+                            'user_message': message.get('text', ''),
+                            'agent_response': ''
+                        })
+                    elif message.get('sender') == 'bot':
+                        # Add to the last conversation entry or create new one
+                        if conversations and conversations[-1]['agent_response'] == '':
+                            conversations[-1]['agent_response'] = message.get('text', '')
+                        else:
+                            conversations.append({
+                                'timestamp': message.get('timestamp', 0),
+                                'user_message': '',
+                                'agent_response': message.get('text', '')
+                            })
+                
+                # Process the conversation data
+                session_summary = {
+                    "session_id": session_id_ref,
+                    "title": item.get('title', f'Chat {session_id_ref[:8]}'),
+                    "model": session_info.get('model', 'unknown'),
+                    "message_count": session_info.get('message_count', 0),
+                    "conversations": conversations,
+                    "total_conversations": len(conversations),
+                    "context_added_at": item.get('timestamp', 0),
+                    "session_data": session_data  # Include full session data for reference
+                }
+                
+                processed_sessions.append(session_summary)
+                
+                logger.info(f"✅ Processed chat session context: {session_id_ref} with {len(conversations)} conversations")
                     
             except Exception as e:
                 logger.error(f"❌ Error processing session {session_id_ref}: {str(e)}")
