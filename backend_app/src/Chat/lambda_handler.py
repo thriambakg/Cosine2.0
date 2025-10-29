@@ -569,6 +569,14 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         else:
             logger.info(f"🔍 DEBUG: No model found in event_body, using default: '{model}'")
         
+        # Extract context items
+        context_items = event_body.get('contextItems', [])
+        if context_items:
+            logger.info(f"🔍 DEBUG: Found {len(context_items)} context items in payload")
+            logger.info(f"🔍 DEBUG: Context items preview: {context_items[:1] if context_items else 'None'}")
+        else:
+            logger.info(f"🔍 DEBUG: No context items found in payload")
+        
         # Check for originalMessage (used when context is enriched)
         original_user_message = event_body.get('originalMessage')
         if original_user_message:
@@ -698,6 +706,18 @@ Session Context:
 - Mode: CHATTING MODE
 - SECURITY: You have access to the full conversation history through the CONVERSATION HISTORY section in your system prompt
 - Use the conversation history in your system prompt to reference previous messages in THIS conversation
+"""
+
+        # Add context items to the enhanced message if present
+        if context_items:
+            import json
+            context_items_json = json.dumps(context_items)
+            enhanced_message += f"""
+Context Items Available: {len(context_items)} items
+- Use process_chat_session_context_tool(session_id="{session_id}", user_id="{user_id}", context_items='{context_items_json}') to process these context items
+- Use analyze_chat_session_context_tool(session_id="{session_id}", user_id="{user_id}", context_items='{context_items_json}', analysis_type="summary") to analyze these context items
+- Context items contain chat session data that was added from the history sidebar
+- The context_items parameter should be passed as a JSON string
 """
         
         try:

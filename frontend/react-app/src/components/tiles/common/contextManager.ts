@@ -372,22 +372,48 @@ export const addMultipleChatSessionsToContext = (
   }>,
   target: 'new' | 'sidebar' = 'new'
 ): void => {
+  console.log('🔍 DEBUG: addMultipleChatSessionsToContext called with sessions:', sessions);
+  
   const contextItems: ContextItem[] = sessions.map(session => {
     const subtitle = `${session.model} • ${session.messageCount} message${session.messageCount !== 1 ? 's' : ''}`;
     
-    return {
+    console.log('🔍 DEBUG: Processing session:', {
+      sessionId: session.sessionId,
+      title: session.title,
+      model: session.model,
+      messageCount: session.messageCount,
+      sessionDataKeys: Object.keys(session.sessionData || {}),
+      sessionData: session.sessionData
+    });
+    
+    const contextItem: ContextItem = {
       id: `chat_${session.sessionId}_${Date.now()}_${Math.random()}`,
-      type: 'chat',
+      type: 'chat' as const,
       title: session.title,
       subtitle: subtitle,
       data: {
+        // Only store essential metadata, not the entire conversation
         session_id: session.sessionId,
+        user_id: session.sessionData?.user_id || 'unknown',
         model: session.model,
         message_count: session.messageCount,
-        ...session.sessionData
+        created_at: session.sessionData?.created_at || Date.now(),
+        last_updated: session.sessionData?.last_updated || Date.now(),
+        // Remove the full session data to reduce storage
+        // ...session.sessionData, // This was storing the entire conversation
       },
       timestamp: Date.now(),
     };
+    
+    console.log('🔍 DEBUG: Created context item:', {
+      id: contextItem.id,
+      type: contextItem.type,
+      title: contextItem.title,
+      dataKeys: Object.keys(contextItem.data),
+      session_id: contextItem.data.session_id
+    });
+    
+    return contextItem;
   });
   
   if (target === 'sidebar') {

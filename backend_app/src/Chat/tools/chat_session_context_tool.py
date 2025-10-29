@@ -60,11 +60,19 @@ def process_chat_session_context_tool(session_id: str, user_id: str, context_ite
                 logger.warning(f"⚠️ No session_id found in context item {i}")
                 continue
                 
-            # Use the session data directly from context (no need for separate API call)
+            # Since we only store metadata in context, we need to fetch the actual session data
             try:
-                # Extract session data from context item
-                session_data = session_info.get('sessionData', {})
-                messages = session_data.get('messages', [])
+                # Get the session data from the database using the session_id
+                from tools.session_database_access import SessionDatabaseAccess
+                db_access = SessionDatabaseAccess()
+                session_data = db_access.get_session_context(session_id_ref, user_id)
+                
+                if not session_data.get('exists', False):
+                    logger.warning(f"⚠️ Session {session_id_ref} not found in database")
+                    continue
+                    
+                # Extract messages from the session data
+                messages = session_data.get('session_metadata', {}).get('messages', [])
                 
                 # Convert messages to conversation format
                 conversations = []

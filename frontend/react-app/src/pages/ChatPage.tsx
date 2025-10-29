@@ -989,10 +989,26 @@ export default function ChatPage() {
     }
 
     const selectedSessionsArray = Array.from(selectedSessions);
+    console.log('🔍 DEBUG: Selected sessions array:', selectedSessionsArray);
+    console.log('🔍 DEBUG: Available sessions:', sessions.map(s => ({ id: s.session_id, title: s.title, messageCount: s.messages?.length })));
+    
     const sessionsToAdd = selectedSessionsArray
       .map(sessionId => {
         const session = sessions.find(s => s.session_id === sessionId);
-        if (!session) return null;
+        if (!session) {
+          console.log('🔍 DEBUG: Session not found for ID:', sessionId);
+          return null;
+        }
+        
+        console.log('🔍 DEBUG: Found session for context:', {
+          sessionId: session.session_id,
+          title: session.title,
+          model: session.model,
+          messageCount: session.messages?.length || 0,
+          sessionKeys: Object.keys(session),
+          hasMessages: !!session.messages,
+          messagesLength: session.messages?.length
+        });
         
         return {
           sessionId: session.session_id,

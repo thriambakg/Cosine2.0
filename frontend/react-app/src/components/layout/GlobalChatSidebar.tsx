@@ -852,13 +852,13 @@ const GlobalChatSidebar: React.FC = () => {
         console.log('📤 Sidebar: Sending context message via unified messaging system...');
         
         try {
-          // Send regular message - agent will fetch context from database
-          const result = await sendUnifiedMessage({
-            text: contextData.userMessage,
-            model: selectedModel, // Use persistent model selection
-            type: 'new_message',
-            sessionId: contextData.sessionId
-          });
+          // Send context message with context items
+          const result = await sendUnifiedContextMessage(
+            contextData.userMessage,
+            contextData.contextItems || [],
+            selectedModel,
+            contextData.sessionId
+          );
           
           if (result.success) {
             console.log('✅ Sidebar: Context message sent successfully via unified system');
