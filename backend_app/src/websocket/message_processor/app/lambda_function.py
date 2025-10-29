@@ -1636,21 +1636,18 @@ def get_active_connections_for_session(user_id, session_id):
     try:
         connections_table = dynamodb.Table(os.environ['CHAT_CONNECTIONS_TABLE_NAME'])
         
-        # Query connections for this user
+        # Query connections for this user using the correct index
         response = connections_table.query(
-            IndexName='user_id-index',
+            IndexName='UserConnectionsIndex',
             KeyConditionExpression=Key('user_id').eq(user_id),
-            FilterExpression=Attr('session_id').eq(session_id) & Attr('is_active').eq(True)
+            FilterExpression=Attr('session_id').eq(session_id) & Attr('expires_at').gt(int(datetime.now().timestamp()))
         )
         
         active_connections = []
-        current_time = int(datetime.now().timestamp())
         
         for connection in response.get('Items', []):
-            # Check if connection is still active (within last 5 minutes)
-            last_seen = connection.get('last_seen', 0)
-            if current_time - last_seen < 300:  # 5 minutes
-                active_connections.append(connection['connection_id'])
+            # Connection is already filtered by expiration time in the query
+            active_connections.append(connection['connection_id'])
         
         logger.info(f"🔍 Found {len(active_connections)} active connections for user {user_id}, session {session_id}")
         return active_connections
