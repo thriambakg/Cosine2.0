@@ -971,8 +971,8 @@ resource "aws_iam_role_policy_attachment" "chat_agent_sns_policy" {
 }
 
 # S3 policy for chat agent to read historical data
-resource "aws_iam_policy" "chat_agent_s3_policy" {
-  name        = "${var.project_name}-chat-agent-s3-policy-${var.environment}"
+resource "aws_iam_policy" "chat_agent_historical_s3_policy" {
+  name        = "${var.project_name}-chat-agent-historical-s3-policy-${var.environment}"
   description = "Policy for chat agent to read from historical data S3 bucket"
 
   policy = jsonencode({
@@ -989,10 +989,10 @@ resource "aws_iam_policy" "chat_agent_s3_policy" {
   })
 }
 
-# Attach S3 policy for chat agent
-resource "aws_iam_role_policy_attachment" "chat_agent_s3_policy" {
+# Attach S3 historical policy for chat agent
+resource "aws_iam_role_policy_attachment" "chat_agent_historical_s3_policy" {
   role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.chat_agent_s3_policy.arn
+  policy_arn = aws_iam_policy.chat_agent_historical_s3_policy.arn
 }
 
 
