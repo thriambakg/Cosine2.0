@@ -223,8 +223,29 @@ class UnifiedChartGenerator:
             if isinstance(data_dict, dict) and data_dict.get("_compressed") is True:
                 # Entire response is compressed - decompress it
                 logger.info("🔍 DEBUG: Decompressing entire data object")
-                data_dict = DataCompression.decompress_data(data_dict)
-                logger.info(f"🔍 DEBUG: After decompression, keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
+                logger.info(f"🔍 DEBUG: Compressed data structure: {list(data_dict.keys())}")
+                logger.info(f"🔍 DEBUG: Compressed data size: {data_dict.get('_compressed_size', 'unknown')}")
+                logger.info(f"🔍 DEBUG: Original data size: {data_dict.get('_original_size', 'unknown')}")
+                
+                # Check the base64 data before decompression
+                compressed_data = data_dict.get('data', '')
+                logger.info(f"🔍 DEBUG: Base64 data length: {len(compressed_data)}")
+                logger.info(f"🔍 DEBUG: Base64 data preview: {compressed_data[:100]}...")
+                
+                try:
+                    data_dict = DataCompression.decompress_data(data_dict)
+                    logger.info(f"🔍 DEBUG: After decompression, keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
+                except Exception as decompress_error:
+                    logger.error(f"❌ Failed to decompress data: {str(decompress_error)}")
+                    logger.error("🔄 Attempting to use original data without compression...")
+                    
+                    # Try to extract the original data if available
+                    if 'original_data' in data_dict:
+                        logger.info("📦 Using original_data field as fallback")
+                        data_dict = data_dict['original_data']
+                    else:
+                        logger.error("❌ No fallback data available, returning error")
+                        return f"Error: Unable to decompress data. The compressed data appears to be corrupted. Please try again."
             elif isinstance(data_dict, dict) and 'historical_data' in data_dict:
                 # Legacy: Only historical_data is compressed, decompress it
                 hist_data = data_dict['historical_data']

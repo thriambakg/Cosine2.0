@@ -38,13 +38,14 @@ class DataCompression:
             compressed_bytes = gzip.compress(json_str.encode('utf-8'))
             compressed_b64 = base64.b64encode(compressed_bytes).decode('utf-8')
             
-            # Return compressed data structure
+            # Return compressed data structure with fallback
             compressed_data = {
                 "_compressed": True,
                 "_original_size": len(json_str),
                 "_compressed_size": len(compressed_b64),
                 "_compression_ratio": round(len(compressed_b64) / len(json_str), 3),
-                "data": compressed_b64
+                "data": compressed_b64,
+                "original_data": data  # Store original data as fallback
             }
             
             logger.info(f"Compressed data: {len(json_str)} -> {len(compressed_b64)} chars ({compressed_data['_compression_ratio']:.1%} of original)")
@@ -70,7 +71,25 @@ class DataCompression:
             if isinstance(data, dict) and data.get("_compressed") is True:
                 # Decompress the data
                 compressed_b64 = data.get("data", "")
-                compressed_bytes = base64.b64decode(compressed_b64.encode('utf-8'))
+                
+                # Validate base64 string length
+                if len(compressed_b64) % 4 != 0:
+                    logger.error(f"Invalid base64 string length: {len(compressed_b64)} (not multiple of 4)")
+                    logger.error(f"Base64 string preview: {compressed_b64[:100]}...")
+                    # Try to pad the string
+                    missing_padding = 4 - (len(compressed_b64) % 4)
+                    compressed_b64 += '=' * missing_padding
+                    logger.info(f"Padded base64 string to length: {len(compressed_b64)}")
+                
+                # Validate base64 characters
+                try:
+                    compressed_bytes = base64.b64decode(compressed_b64.encode('utf-8'))
+                except Exception as b64_error:
+                    logger.error(f"Base64 decode error: {str(b64_error)}")
+                    logger.error(f"Base64 string (first 200 chars): {compressed_b64[:200]}")
+                    logger.error(f"Base64 string (last 200 chars): {compressed_b64[-200:]}")
+                    raise b64_error
+                
                 json_str = gzip.decompress(compressed_bytes).decode('utf-8')
                 
                 logger.info(f"Decompressed data: {data.get('_compressed_size', 0)} -> {data.get('_original_size', 0)} chars")
@@ -81,6 +100,12 @@ class DataCompression:
                 
         except Exception as e:
             logger.error(f"Error decompressing data: {str(e)}")
+            logger.error(f"Data type: {type(data)}")
+            if isinstance(data, dict):
+                logger.error(f"Data keys: {list(data.keys())}")
+                if 'data' in data:
+                    logger.error(f"Compressed data length: {len(str(data['data']))}")
+                    logger.error(f"Compressed data preview: {str(data['data'])[:100]}...")
             return data  # Return original data if decompression fails
     
     @staticmethod
