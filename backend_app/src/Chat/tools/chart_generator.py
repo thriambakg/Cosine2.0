@@ -156,7 +156,7 @@ class UnifiedChartGenerator:
 
         buffer = BytesIO()
         plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
-            buffer.seek(0)
+        buffer.seek(0)
         plt.close(fig)  # Close the plot to free memory
 
         # Use unified file upload function
