@@ -35,11 +35,11 @@ class UnifiedChartGenerator:
     Unified chart generator that can handle both stock and cryptocurrency data.
     Automatically detects data type and generates appropriate charts.
     """
-    def __init__(self):
+    def __init__(self, user_id=None, session_id=None):
         self.s3_client = boto3.client('s3')
-        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'default-chat-files-bucket')
-        self.user_id = os.environ.get('USER_ID', 'default-user')
-        self.session_id = os.environ.get('SESSION_ID', 'default-session')
+        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+        self.user_id = user_id or os.environ.get('USER_ID', 'default-user')
+        self.session_id = session_id or os.environ.get('SESSION_ID', 'default-session')
 
     def _validate_env_vars(self):
         # Make environment variables optional for now
@@ -452,4 +452,6 @@ def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", t
     Returns:
         Success message with file details
     """
+    # Create a new instance with current environment variables
+    chart_generator = UnifiedChartGenerator()
     return chart_generator.generate_chart(symbol, data_json, chart_type, title)
