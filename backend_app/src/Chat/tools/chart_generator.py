@@ -37,28 +37,34 @@ class UnifiedChartGenerator:
     """
     def __init__(self):
         self.s3_client = boto3.client('s3')
-        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
-        self.user_id = os.environ.get('USER_ID', 'default-user')
-        self.session_id = os.environ.get('SESSION_ID', 'default-session')
+        # Don't set user_id and session_id here - get them dynamically when needed
+    
+    def _get_user_id(self):
+        """Get user ID dynamically from environment variables"""
+        return os.environ.get('USER_ID', 'default-user')
+    
+    def _get_session_id(self):
+        """Get session ID dynamically from environment variables"""
+        return os.environ.get('SESSION_ID', 'default-session')
+    
+    def _get_bucket_name(self):
+        """Get bucket name dynamically from environment variables"""
+        return os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+
+    def _validate_env_vars(self):
+        # Get current values dynamically
+        bucket_name = self._get_bucket_name()
+        user_id = self._get_user_id()
+        session_id = self._get_session_id()
         
         # Debug logging to see what environment variables are available
         logger.info(f"🔍 DEBUG: Chart generator environment variables:")
         logger.info(f"🔍 DEBUG: USER_ID = {os.environ.get('USER_ID', 'NOT SET')}")
         logger.info(f"🔍 DEBUG: SESSION_ID = {os.environ.get('SESSION_ID', 'NOT SET')}")
         logger.info(f"🔍 DEBUG: CHAT_FILES_BUCKET_NAME = {os.environ.get('CHAT_FILES_BUCKET_NAME', 'NOT SET')}")
-        logger.info(f"🔍 DEBUG: Using user_id = {self.user_id}, session_id = {self.session_id}")
-
-    def _validate_env_vars(self):
-        # Make environment variables optional for now
-        if not self.bucket_name:
-            logger.warning("CHAT_FILES_BUCKET_NAME not set, using default")
-            self.bucket_name = 'default-chat-files-bucket'
-        if not self.user_id:
-            logger.warning("USER_ID not set, using default")
-            self.user_id = 'default-user'
-        if not self.session_id:
-            logger.warning("SESSION_ID not set, using default")
-            self.session_id = 'default-session'
+        logger.info(f"🔍 DEBUG: Using user_id = {user_id}, session_id = {session_id}")
+        
+        return bucket_name, user_id, session_id
 
     def _detect_data_type(self, data_dict):
         """
@@ -125,9 +131,10 @@ class UnifiedChartGenerator:
                 # Stock data with historical_data (from get_financial_data)
                 historical_data = data_dict['historical_data']
                 normalized_data = []
+                logger.info(f"🔍 DEBUG: Processing {len(historical_data)} historical data points")
                 for point in historical_data:
                     normalized_data.append({
-                        'time': point.get('timestamp', point.get('date', 0)),
+                        'time': point.get('date', point.get('timestamp', 0)),  # Try 'date' first since that's what we have
                         'close': point.get('close', 0),
                         'open': point.get('open', point.get('close', 0)),
                         'high': point.get('high', point.get('close', 0)),
@@ -178,6 +185,9 @@ class UnifiedChartGenerator:
         try:
             from lambda_invocation import upload_file_and_notify
             
+            # Get environment variables dynamically for file upload
+            bucket_name, user_id, session_id = self._validate_env_vars()
+            
             metadata = {
                 'generated_by': 'agent',
                 'symbol': symbol,
@@ -190,8 +200,8 @@ class UnifiedChartGenerator:
             result = upload_file_and_notify(
                 content=buffer.getvalue(),
                 filename=filename,
-                user_id=self.user_id,
-                session_id=self.session_id,
+                user_id=user_id,
+                session_id=session_id,
                 file_type='png',
                 content_type='image/png',
                 folder="agent-files",
@@ -225,6 +235,9 @@ class UnifiedChartGenerator:
         Returns:
             Success message with file details
         """
+        # Get environment variables dynamically
+        bucket_name, user_id, session_id = self._validate_env_vars()
+        
         try:
             logger.info(f"🔍 DEBUG: Chart generator received data type: {type(data_json)}")
             data_dict = json.loads(data_json)
@@ -316,18 +329,27 @@ class UnifiedChartGenerator:
             if not normalized_data:
                 return f"Error: No chart data found for {symbol}"
             
-            # Create figure with watermark
-            fig, ax = plt.subplots(figsize=(12, 8))
-            self._add_watermark(fig)
+            # Create figure with professional styling
+            fig, ax = plt.subplots(figsize=(14, 8))
+            
+            # Set professional background colors
+            fig.patch.set_facecolor('#F0F2F5')
+            ax.set_facecolor('#F0F2F5')
+            
+            # Log total data points being processed
+            total_data_points = sum(len(data) for data in normalized_data.values()) if isinstance(normalized_data, dict) else len(normalized_data)
+            logger.info(f"🔍 DEBUG: Chart maker processing {total_data_points} total data points")
             
             # Handle different data types
             if data_type == 'multiple_stocks':
                 # Handle multiple stocks comparison
-                colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+                colors = ['#F06292', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD']
                 
                 for i, (stock_symbol, stock_data) in enumerate(normalized_data.items()):
                     if not stock_data:
                         continue
+                    
+                    logger.info(f"🔍 DEBUG: Processing {len(stock_data)} data points for {stock_symbol}")
                         
                     # Convert to DataFrame
                     df = pd.DataFrame(stock_data)
@@ -340,19 +362,21 @@ class UnifiedChartGenerator:
                     
                     df.set_index('time', inplace=True)
                     
-                    # Plot line for this stock
+                    # Plot line for this stock with professional styling
                     color = colors[i % len(colors)]
-                    ax.plot(df.index, df['close'], linewidth=2, color=color, label=stock_symbol)
+                    ax.plot(df.index, df['close'], linewidth=3, color=color, alpha=0.9, label=stock_symbol)
                 
                 # Set title for multiple stocks
                 if not title:
                     stock_symbols = list(normalized_data.keys())
                     title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
-                ax.set_title(title, fontsize=16, fontweight='bold')
+                ax.set_title(title, fontsize=18, fontweight='bold', pad=20)
                 ax.legend()
             
             else:
                 # Handle single stock/crypto
+                logger.info(f"🔍 DEBUG: Processing {len(normalized_data)} data points for single {data_type}")
+                
                 # Convert to DataFrame
                 df = pd.DataFrame(normalized_data)
                 
@@ -362,18 +386,28 @@ class UnifiedChartGenerator:
                 else:
                     df['time'] = pd.to_datetime(df['time'])
                 
+                # Debug logging to check data
+                logger.info(f"🔍 DEBUG: DataFrame shape: {df.shape}")
+                logger.info(f"🔍 DEBUG: Final data points in chart: {len(df)}")
+                logger.info(f"🔍 DEBUG: Date range: {df.index.min()} to {df.index.max()}")
+                logger.info(f"🔍 DEBUG: Price range: {df['close'].min():.2f} to {df['close'].max():.2f}")
+                logger.info(f"🔍 DEBUG: First few rows:")
+                logger.info(f"🔍 DEBUG: {df.head()}")
+                
                 df.set_index('time', inplace=True)
                 
                 # Set title
                 if not title:
                     asset_name = data_dict.get('name', symbol)
                     title = f"{asset_name} Price Chart ({timeframe})"
-                ax.set_title(title, fontsize=16, fontweight='bold')
+                ax.set_title(title, fontsize=18, fontweight='bold', pad=20)
                 
                 # Generate chart based on type
                 if chart_type == "line":
-                    ax.plot(df.index, df['close'], linewidth=2, color='#1f77b4')
-                    ax.fill_between(df.index, df['close'], alpha=0.3, color='#1f77b4')
+                    # Professional line chart styling
+                    line_color = '#F06292'  # Pink color like the 7Y chart
+                    ax.plot(df.index, df['close'], linewidth=3, color=line_color, alpha=0.9, label=f'{symbol} Price')
+                    ax.fill_between(df.index, df['close'], alpha=0.1, color=line_color)
                 elif chart_type == "candlestick":
                     # Create candlestick chart
                     for i, (date, row) in enumerate(df.iterrows()):
@@ -412,15 +446,27 @@ class UnifiedChartGenerator:
                         ax.plot([date, date], [row['open'], row['close']], 
                                color='blue', linewidth=3)
             
-            # Set labels and formatting
-            ax.set_xlabel('Date')
-            ax.set_ylabel('Price ($)')
-            ax.grid(True, alpha=0.3)
+            # Set professional labels and formatting
+            ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Price ($)', fontsize=12, fontweight='bold')
             
-            # Format x-axis
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-            ax.xaxis.set_major_locator(mdates.MonthLocator())
-            plt.xticks(rotation=45)
+            # Professional grid styling
+            ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+            ax.set_axisbelow(True)
+            
+            # Format x-axis with better date labels
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))  # Every 3 months
+            plt.xticks(rotation=45, fontsize=10)
+            plt.yticks(fontsize=10)
+            
+            # Add legend for single stock charts
+            if data_type != 'multiple_stocks':
+                ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
+            
+            # Add watermark
+            fig.text(0.99, 0.01, 'investcosine.com', fontsize=10, color='gray', 
+                    ha='right', va='bottom', alpha=0.7, transform=fig.transFigure)
             
             plt.tight_layout()
             
