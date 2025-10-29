@@ -10,6 +10,10 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import math
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from compression_helper import CompressionHelper
 
 # Configure logging
 logger = logging.getLogger()
@@ -205,8 +209,7 @@ class CryptoDataFetcher:
             }
             
             # Compress the entire data object if it's large
-            from tools.data_compression import DataCompression
-            compressed_result = DataCompression.compress_data(result, compression_threshold=2000)
+            compressed_result = CompressionHelper.compress_data(result, compression_threshold=2000)
             
             return compressed_result
             

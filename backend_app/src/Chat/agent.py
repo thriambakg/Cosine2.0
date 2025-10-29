@@ -273,7 +273,7 @@ class FinancialTools:
             }
             
             # Import compression utility
-            from tools.data_compression import DataCompression
+            from compression_helper import CompressionHelper
             
             # Debug logging for compression
             logger.info(f"🔍 DEBUG: Complete data object size before compression: {len(str(result))} characters")
@@ -282,7 +282,7 @@ class FinancialTools:
             logger.info(f"🔍 DEBUG: Has historical_data in result: {'historical_data' in result}")
             
             # Compress the entire data object if it's large
-            compressed_result = DataCompression.compress_data(result, compression_threshold=2000)
+            compressed_result = CompressionHelper.compress_data(result, compression_threshold=2000)
             
             # Debug logging for compression result
             logger.info(f"🔍 DEBUG: Compressed result type: {type(compressed_result)}")
@@ -789,6 +789,8 @@ When users request charts (e.g., "generate a chart for AAPL", "show me TSLA pric
 
 ⚠️ COMPRESSION HANDLING: If get_financial_data OR get_crypto_data_tool returns compressed data (with _compressed: true), pass the ENTIRE compressed object to generate_chart_tool. Do NOT extract or modify the data - pass it as-is!
 
+🚨 CRITICAL: NEVER extract historical_data or create a subset! Always pass the complete result object directly!
+
 📋 CORRECT CHART GENERATION EXAMPLES:
 
 STOCK CHART:
@@ -806,7 +808,9 @@ Agent:
 3. Call generate_chart_tool("BTC", data, "candlestick") - pass the ENTIRE data object
 
 ❌ WRONG: generate_chart_tool("AAPL", "some summary text", "line")
-✅ CORRECT: generate_chart_tool("AAPL", data, "line") where data is the full result from get_financial_data OR get_crypto_data_tool
+❌ WRONG: generate_chart_tool("AAPL", {"symbol": "AAPL", "historical_data": [...]}, "line") - extracting subset
+❌ WRONG: generate_chart_tool("AAPL", data["historical_data"], "line") - extracting field
+✅ CORRECT: generate_chart_tool("AAPL", data, "line") where data is the FULL result from get_financial_data OR get_crypto_data_tool
 
 📝 NOTE: The "pass data as-is" rule ONLY applies to generate_chart_tool. For other tools like generate_excel_file_tool, you should process and format the data as needed.
 
