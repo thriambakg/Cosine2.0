@@ -187,181 +187,9 @@ class FinancialTools:
         except Exception as e:
             return {"status": "error", "message": str(e)}
     
-    @staticmethod
-    def _should_use_s3(timeframe: str, start_date: str = None, end_date: str = None) -> bool:
-        """Determine if we should use S3 (long-term) or yfinance (short-term) based on timeframe"""
-        # Check date range if provided
-        if start_date and end_date:
-            try:
-                from datetime import datetime
-                delta = datetime.strptime(end_date, '%Y-%m-%d') - datetime.strptime(start_date, '%Y-%m-%d')
-                return delta.days >= 14  # 2 weeks threshold
-            except:
-                pass
-        
-        # Check timeframe
-        long_term_timeframes = ['1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'max']
-        return timeframe in long_term_timeframes
 
-    @staticmethod
-    def _fetch_from_s3(symbol: str, timeframe: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
-        """Fetch long-term historical data from S3 bucket"""
-        try:
-            import boto3
-            s3_client = boto3.client('s3')
-            
-            # Get S3 bucket name from environment
-            bucket_name = os.environ.get('HISTORICAL_DATA_BUCKET', 'cosine-stock-historical-production')
-            
-            # Determine S3 key based on symbol priority
-            s3_key = FinancialTools._get_s3_key(symbol)
-            
-            logger.info(f"🔍 DEBUG: Fetching from S3 - bucket: {bucket_name}, key: {s3_key}")
-            
-            # Fetch data from S3
-            response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
-            s3_data = json.loads(response['Body'].read().decode('utf-8'))
-            
-            # Convert S3 data to standard format
-            result = FinancialTools._convert_s3_to_standard_format(s3_data, symbol, timeframe, start_date, end_date)
-            
-            logger.info(f"🔍 DEBUG: S3 fetch successful - {len(result.get('historical_data', []))} points")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error fetching from S3: {str(e)}")
-            # Fallback to yfinance
-            return FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
 
-    @staticmethod
-    def _get_s3_key(symbol: str) -> str:
-        """Generate S3 key for historical data based on symbol priority"""
-        # Check if symbol is in highcap, midcap, or lowcap
-        try:
-            # Read CSV files to determine priority
-            import csv
-            import io
-            
-            # Check highcap first
-            highcap_path = os.path.join(os.path.dirname(__file__), 'stocks', 'highcap.csv')
-            logger.info(f"🔍 DEBUG: Checking highcap CSV at {highcap_path}")
-            try:
-                with open(highcap_path, 'r') as f:
-                    reader = csv.reader(f)
-                    for row in reader:
-                        if len(row) >= 1 and row[0].upper() == symbol.upper():
-                            logger.info(f"🔍 DEBUG: Found {symbol} in highcap CSV")
-                            return f"historical/high/{symbol.upper()}.json"
-                logger.info(f"🔍 DEBUG: {symbol} not found in highcap CSV")
-            except Exception as e:
-                logger.warning(f"🔍 DEBUG: Error reading highcap CSV: {str(e)}")
-                pass
-            
-            # Check midcap
-            midcap_path = os.path.join(os.path.dirname(__file__), 'stocks', 'midcap.csv')
-            logger.info(f"🔍 DEBUG: Checking midcap CSV at {midcap_path}")
-            try:
-                with open(midcap_path, 'r') as f:
-                    reader = csv.reader(f)
-                    for row in reader:
-                        if len(row) >= 1 and row[0].upper() == symbol.upper():
-                            logger.info(f"🔍 DEBUG: Found {symbol} in midcap CSV")
-                            return f"historical/medium/{symbol.upper()}.json"
-                logger.info(f"🔍 DEBUG: {symbol} not found in midcap CSV")
-            except Exception as e:
-                logger.warning(f"🔍 DEBUG: Error reading midcap CSV: {str(e)}")
-                pass
-            
-            # Default to lowcap
-            logger.info(f"🔍 DEBUG: Defaulting to lowcap for {symbol}")
-            return f"historical/low/{symbol.upper()}.json"
-            
-        except Exception as e:
-            logger.warning(f"Could not determine S3 key priority for {symbol}: {str(e)}")
-            # Default to high priority
-            return f"historical/high/{symbol.upper()}.json"
 
-    @staticmethod
-    def _convert_s3_to_standard_format(s3_data: dict, symbol: str, timeframe: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
-        """Convert S3 data to standard format expected by chart generator"""
-        try:
-            history = s3_data.get('history', [])
-            
-            # Filter by date range if provided
-            if start_date and end_date:
-                from datetime import datetime
-                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-                
-                filtered_history = []
-                for point in history:
-                    point_date = datetime.strptime(point['date'][:10], '%Y-%m-%d')
-                    if start_dt <= point_date <= end_dt:
-                        filtered_history.append(point)
-                history = filtered_history
-            
-            if not history:
-                raise ValueError("No data found in S3 for the specified date range")
-            
-            # Calculate current price (last close)
-            current_price = history[-1]['close'] if history else 0
-            
-            # Calculate price change
-            price_change = 0
-            if len(history) >= 2:
-                prev_close = history[-2]['close']
-                price_change = ((current_price - prev_close) / prev_close) * 100
-            
-            # Convert to historical_data format
-            historical_data = []
-            for point in history:
-                historical_data.append({
-                    "date": point['date'][:10],  # Extract date part
-                    "timestamp": point['timestamp'],
-                    "open": float(point['open']),
-                    "high": float(point['high']),
-                    "low": float(point['low']),
-                    "close": float(point['close']),
-                    "volume": int(point['volume'])
-                })
-            
-            # Calculate volatility from historical data
-            closes = [point['close'] for point in history]
-            if len(closes) > 1:
-                returns = [closes[i] / closes[i-1] - 1 for i in range(1, len(closes))]
-                volatility = np.std(returns) * np.sqrt(252) * 100  # Annualized percentage
-            else:
-                volatility = 0
-            
-            return {
-                "symbol": symbol.upper(),
-                "current_price": round(current_price, 2),
-                "previous_close": round(history[-2]['close'], 2) if len(history) >= 2 else round(current_price, 2),
-                "price_change": round(price_change, 2),
-                "price_change_percent": round(price_change, 2),
-                "market_cap": s3_data.get('market_cap', 0),
-                "volume": history[-1]['volume'] if history else 0,
-                "pe_ratio": 'N/A',  # Not available in S3 data
-                "52_week_high": round(max(point['high'] for point in history), 2),
-                "52_week_low": round(min(point['low'] for point in history), 2),
-                "volatility_annual": round(volatility, 2),
-                "dividend_yield": 0,  # Not available in S3 data
-                "sector": s3_data.get('sector', 'N/A'),
-                "industry": s3_data.get('industry', 'N/A'),
-                "status": "success",
-                "source": "S3 Historical Data",
-                "timeframe": timeframe,
-                "data_points": len(historical_data),
-                "date_range": {
-                    "start": historical_data[0]['date'] if historical_data else None,
-                    "end": historical_data[-1]['date'] if historical_data else None
-                },
-                "historical_data": historical_data
-            }
-            
-        except Exception as e:
-            logger.error(f"Error converting S3 data: {str(e)}")
-            raise
 
     @staticmethod
     def _fetch_from_yfinance(symbol: str, timeframe: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
@@ -449,7 +277,7 @@ class FinancialTools:
     @staticmethod
     def get_stock_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """
-        Get stock data using S3 for long-term data (>2 weeks) and yfinance for short-term data (<2 weeks)
+        Get stock data using yfinance
         
         Args:
             symbol: Stock ticker symbol
@@ -460,24 +288,8 @@ class FinancialTools:
         try:
             logger.info(f"🔍 DEBUG: get_stock_data called with symbol={symbol}, timeframe={timeframe}")
             
-            # Determine data source
-            use_s3 = FinancialTools._should_use_s3(timeframe, start_date, end_date)
-            use_yfinance = not use_s3
-            
-            logger.info(f"🔍 DEBUG: Data source decision - S3: {use_s3}, yfinance: {use_yfinance}")
-            
-            if use_s3:
-                # Use S3 for long-term historical data
-                result = FinancialTools._fetch_from_s3(symbol, timeframe, start_date, end_date)
-                data_source = "S3 Historical Data"
-            else:
-                # Use yfinance for short-term data
-                result = FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
-                data_source = "yfinance"
-            
-            # Update source in result
-            if isinstance(result, dict) and 'source' in result:
-                result['source'] = data_source
+            # Use yfinance for all data
+            result = FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
             
             # Check for errors
             if isinstance(result, dict) and result.get('status') == 'error':
@@ -1004,6 +816,8 @@ When users request charts (e.g., "generate a chart for AAPL", "show me TSLA pric
 3. NEVER extract historical_data or create subsets
 4. The chart generator will automatically decompress the data
 5. NEVER call generate_chart_tool twice - call it ONCE with the complete data
+6. DO NOT create summaries, extracts, or modified versions of the data
+7. DO NOT call generate_chart_tool with partial data
 
 📋 COMPRESSION FORMAT:
 - Compressed data has structure: {"_compressed": true, "data": "base64_compressed_data", "original_data": {...}}
@@ -1012,6 +826,7 @@ When users request charts (e.g., "generate a chart for AAPL", "show me TSLA pric
 
 🚨 CRITICAL: NEVER extract historical_data or create a subset! Always pass the complete result object directly!
 🚨 CRITICAL: NEVER call generate_chart_tool multiple times! Call it ONCE with the complete data!
+🚨 CRITICAL: DO NOT create summaries or extracts! Pass the raw compressed data as-is!
 
 📋 CORRECT CHART GENERATION EXAMPLES:
 
@@ -1030,9 +845,11 @@ Agent:
 3. Call generate_chart_tool("BTC", data, "candlestick") - pass the ENTIRE data object
 
 ❌ WRONG: generate_chart_tool("AAPL", "some summary text", "line")
-❌ WRONG: generate_chart_tool("AAPL", {"symbol": "AAPL", "historical_data": [...]}, "line") - extracting subset
-❌ WRONG: generate_chart_tool("AAPL", data["historical_data"], "line") - extracting field
-✅ CORRECT: generate_chart_tool("AAPL", data, "line") where data is the FULL result from get_financial_data OR get_crypto_data_tool
+❌ WRONG: generate_chart_tool("AAPL", {"symbol": "AAPL", "summary": "..."}, "line")
+❌ WRONG: generate_chart_tool("AAPL", data["historical_data"], "line")
+❌ WRONG: generate_chart_tool("AAPL", {"symbol": "AAPL", "historical_data": [...]}, "line")
+❌ WRONG: Calling generate_chart_tool multiple times
+✅ CORRECT: generate_chart_tool("AAPL", data, "line") where data is the complete result from get_financial_data
 
 📝 NOTE: The "pass data as-is" rule ONLY applies to generate_chart_tool. For other tools like generate_excel_file_tool, you should process and format the data as needed.
 

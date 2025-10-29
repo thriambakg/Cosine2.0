@@ -970,34 +970,6 @@ resource "aws_iam_role_policy_attachment" "chat_agent_sns_policy" {
   policy_arn = aws_iam_policy.chat_agent_sns_policy.arn
 }
 
-# S3 policy for chat agent to read historical data
-resource "aws_iam_policy" "chat_agent_historical_s3_policy" {
-  name        = "${var.project_name}-chat-agent-historical-s3-policy-${var.environment}"
-  description = "Policy for chat agent to read from historical data S3 bucket"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn,
-          "${data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn}/*"
-        ]
-      }
-    ]
-  })
-}
-
-# Attach S3 historical policy for chat agent
-resource "aws_iam_role_policy_attachment" "chat_agent_historical_s3_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.chat_agent_historical_s3_policy.arn
-}
 
 
 # Bedrock policy for chat agent
@@ -1106,8 +1078,6 @@ resource "aws_lambda_function" "chat_agent" {
       # S3 Configuration for file uploads
       CHAT_FILES_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
 
-      # S3 Configuration for historical stock data
-      HISTORICAL_DATA_BUCKET = data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_name
 
       # File Return Lambda Function Name for direct invocation
       FILE_RETURN_LAMBDA_NAME = module.file_return_lambda.function_name
