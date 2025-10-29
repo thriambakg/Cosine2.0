@@ -188,16 +188,175 @@ class FinancialTools:
             return {"status": "error", "message": str(e)}
     
     @staticmethod
-    def get_stock_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
-        """
-        Get current stock data using yfinance for real-time data with custom timeframe support
+    def _should_use_s3(timeframe: str, start_date: str = None, end_date: str = None) -> bool:
+        """Determine if we should use S3 (long-term) or yfinance (short-term) based on timeframe"""
+        # Check date range if provided
+        if start_date and end_date:
+            try:
+                from datetime import datetime
+                delta = datetime.strptime(end_date, '%Y-%m-%d') - datetime.strptime(start_date, '%Y-%m-%d')
+                return delta.days >= 14  # 2 weeks threshold
+            except:
+                pass
         
-        Args:
-            symbol: Stock ticker symbol
-            timeframe: Time period ('1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max')
-            start_date: Start date in 'YYYY-MM-DD' format (optional)
-            end_date: End date in 'YYYY-MM-DD' format (optional)
-        """
+        # Check timeframe
+        long_term_timeframes = ['1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'max']
+        return timeframe in long_term_timeframes
+
+    @staticmethod
+    def _fetch_from_s3(symbol: str, timeframe: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """Fetch long-term historical data from S3 bucket"""
+        try:
+            import boto3
+            s3_client = boto3.client('s3')
+            
+            # Get S3 bucket name from environment
+            bucket_name = os.environ.get('HISTORICAL_DATA_BUCKET', 'cosine-stock-historical-production')
+            
+            # Determine S3 key based on symbol priority
+            s3_key = FinancialTools._get_s3_key(symbol)
+            
+            logger.info(f"🔍 DEBUG: Fetching from S3 - bucket: {bucket_name}, key: {s3_key}")
+            
+            # Fetch data from S3
+            response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+            s3_data = json.loads(response['Body'].read().decode('utf-8'))
+            
+            # Convert S3 data to standard format
+            result = FinancialTools._convert_s3_to_standard_format(s3_data, symbol, timeframe, start_date, end_date)
+            
+            logger.info(f"🔍 DEBUG: S3 fetch successful - {len(result.get('historical_data', []))} points")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error fetching from S3: {str(e)}")
+            # Fallback to yfinance
+            return FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
+
+    @staticmethod
+    def _get_s3_key(symbol: str) -> str:
+        """Generate S3 key for historical data based on symbol priority"""
+        # Check if symbol is in highcap, midcap, or lowcap
+        try:
+            # Read CSV files to determine priority
+            import csv
+            import io
+            
+            # Check highcap first
+            highcap_path = '/opt/python/highcap.csv'  # In Lambda layer
+            try:
+                with open(highcap_path, 'r') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        if len(row) >= 1 and row[0].upper() == symbol.upper():
+                            return f"historical/high/{symbol.upper()}.json"
+            except:
+                pass
+            
+            # Check midcap
+            midcap_path = '/opt/python/midcap.csv'
+            try:
+                with open(midcap_path, 'r') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        if len(row) >= 1 and row[0].upper() == symbol.upper():
+                            return f"historical/medium/{symbol.upper()}.json"
+            except:
+                pass
+            
+            # Default to lowcap
+            return f"historical/low/{symbol.upper()}.json"
+            
+        except Exception as e:
+            logger.warning(f"Could not determine S3 key priority for {symbol}: {str(e)}")
+            # Default to high priority
+            return f"historical/high/{symbol.upper()}.json"
+
+    @staticmethod
+    def _convert_s3_to_standard_format(s3_data: dict, symbol: str, timeframe: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """Convert S3 data to standard format expected by chart generator"""
+        try:
+            history = s3_data.get('history', [])
+            
+            # Filter by date range if provided
+            if start_date and end_date:
+                from datetime import datetime
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                
+                filtered_history = []
+                for point in history:
+                    point_date = datetime.strptime(point['date'][:10], '%Y-%m-%d')
+                    if start_dt <= point_date <= end_dt:
+                        filtered_history.append(point)
+                history = filtered_history
+            
+            if not history:
+                raise ValueError("No data found in S3 for the specified date range")
+            
+            # Calculate current price (last close)
+            current_price = history[-1]['close'] if history else 0
+            
+            # Calculate price change
+            price_change = 0
+            if len(history) >= 2:
+                prev_close = history[-2]['close']
+                price_change = ((current_price - prev_close) / prev_close) * 100
+            
+            # Convert to historical_data format
+            historical_data = []
+            for point in history:
+                historical_data.append({
+                    "date": point['date'][:10],  # Extract date part
+                    "timestamp": point['timestamp'],
+                    "open": float(point['open']),
+                    "high": float(point['high']),
+                    "low": float(point['low']),
+                    "close": float(point['close']),
+                    "volume": int(point['volume'])
+                })
+            
+            # Calculate volatility from historical data
+            closes = [point['close'] for point in history]
+            if len(closes) > 1:
+                returns = [closes[i] / closes[i-1] - 1 for i in range(1, len(closes))]
+                volatility = np.std(returns) * np.sqrt(252) * 100  # Annualized percentage
+            else:
+                volatility = 0
+            
+            return {
+                "symbol": symbol.upper(),
+                "current_price": round(current_price, 2),
+                "previous_close": round(history[-2]['close'], 2) if len(history) >= 2 else round(current_price, 2),
+                "price_change": round(price_change, 2),
+                "price_change_percent": round(price_change, 2),
+                "market_cap": s3_data.get('market_cap', 0),
+                "volume": history[-1]['volume'] if history else 0,
+                "pe_ratio": 'N/A',  # Not available in S3 data
+                "52_week_high": round(max(point['high'] for point in history), 2),
+                "52_week_low": round(min(point['low'] for point in history), 2),
+                "volatility_annual": round(volatility, 2),
+                "dividend_yield": 0,  # Not available in S3 data
+                "sector": s3_data.get('sector', 'N/A'),
+                "industry": s3_data.get('industry', 'N/A'),
+                "status": "success",
+                "source": "S3 Historical Data",
+                "timeframe": timeframe,
+                "data_points": len(historical_data),
+                "date_range": {
+                    "start": historical_data[0]['date'] if historical_data else None,
+                    "end": historical_data[-1]['date'] if historical_data else None
+                },
+                "historical_data": historical_data
+            }
+            
+        except Exception as e:
+            logger.error(f"Error converting S3 data: {str(e)}")
+            raise
+
+    @staticmethod
+    def _fetch_from_yfinance(symbol: str, timeframe: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """Fetch short-term data using yfinance (original implementation)"""
         try:
             # Create yfinance ticker object
             ticker = yf.Ticker(symbol)
@@ -233,11 +392,12 @@ class FinancialTools:
             returns = hist['Close'].pct_change().dropna()
             volatility = returns.std() * np.sqrt(252) * 100  # Annualized percentage
             
-            # Prepare full historical data for chart generation (will be compressed if large)
+            # Prepare full historical data for chart generation
             historical_data = []
             for date, row in hist.iterrows():
                 historical_data.append({
                     "date": date.strftime('%Y-%m-%d'),
+                    "timestamp": int(date.timestamp()),
                     "open": float(row['Open']),
                     "high": float(row['High']),
                     "low": float(row['Low']),
@@ -245,7 +405,7 @@ class FinancialTools:
                     "volume": int(row['Volume'])
                 })
             
-            # Build the complete data object first
+            # Build the complete data object
             result = {
                 "symbol": symbol,
                 "current_price": round(current_price, 2),
@@ -272,12 +432,54 @@ class FinancialTools:
                 "historical_data": historical_data
             }
             
+            return result
+                
+        except Exception as e:
+            return {"symbol": symbol, "status": "error", "message": str(e)}
+
+    @staticmethod
+    def get_stock_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """
+        Get stock data using S3 for long-term data (>2 weeks) and yfinance for short-term data (<2 weeks)
+        
+        Args:
+            symbol: Stock ticker symbol
+            timeframe: Time period ('1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max')
+            start_date: Start date in 'YYYY-MM-DD' format (optional)
+            end_date: End date in 'YYYY-MM-DD' format (optional)
+        """
+        try:
+            logger.info(f"🔍 DEBUG: get_stock_data called with symbol={symbol}, timeframe={timeframe}")
+            
+            # Determine data source
+            use_s3 = FinancialTools._should_use_s3(timeframe, start_date, end_date)
+            use_yfinance = not use_s3
+            
+            logger.info(f"🔍 DEBUG: Data source decision - S3: {use_s3}, yfinance: {use_yfinance}")
+            
+            if use_s3:
+                # Use S3 for long-term historical data
+                result = FinancialTools._fetch_from_s3(symbol, timeframe, start_date, end_date)
+                data_source = "S3 Historical Data"
+            else:
+                # Use yfinance for short-term data
+                result = FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
+                data_source = "yfinance"
+            
+            # Update source in result
+            if isinstance(result, dict) and 'source' in result:
+                result['source'] = data_source
+            
+            # Check for errors
+            if isinstance(result, dict) and result.get('status') == 'error':
+                return result
+            
             # Import compression utility
             from compression_helper import CompressionHelper
             
             # Debug logging for compression
             logger.info(f"🔍 DEBUG: Complete data object size before compression: {len(str(result))} characters")
-            logger.info(f"🔍 DEBUG: Historical data length: {len(historical_data)} points")
+            logger.info(f"🔍 DEBUG: Historical data length: {len(result.get('historical_data', []))} points")
             logger.info(f"🔍 DEBUG: Result keys before compression: {list(result.keys())}")
             logger.info(f"🔍 DEBUG: Has historical_data in result: {'historical_data' in result}")
             
@@ -310,6 +512,7 @@ class FinancialTools:
             return compressed_result
                 
         except Exception as e:
+            logger.error(f"Error in get_stock_data: {str(e)}")
             return {"symbol": symbol, "status": "error", "message": str(e)}
     
     @staticmethod
@@ -785,9 +988,17 @@ When users request charts (e.g., "generate a chart for AAPL", "show me TSLA pric
    - "I want a chart for AAPL past 2 years" → data = get_financial_data("AAPL", "2y") → generate_chart_tool("AAPL", data, "line")
    - "Generate a BTC candlestick chart" → data = get_crypto_data_tool("BTC", "1y") → generate_chart_tool("BTC", data, "candlestick")
 
-🚨 CRITICAL: The data_json parameter in generate_chart_tool must be the COMPLETE result from get_financial_data or get_crypto_data_tool, not just a summary!
+🚨 CRITICAL DATA HANDLING RULES:
 
-⚠️ COMPRESSION HANDLING: If get_financial_data OR get_crypto_data_tool returns compressed data (with _compressed: true), pass the ENTIRE compressed object to generate_chart_tool. Do NOT extract or modify the data - pass it as-is!
+1. get_financial_data and get_crypto_data_tool return COMPRESSED data by default
+2. ALWAYS pass the COMPLETE compressed result to generate_chart_tool
+3. NEVER extract historical_data or create subsets
+4. The chart generator will automatically decompress the data
+
+📋 COMPRESSION FORMAT:
+- Compressed data has structure: {"_compressed": true, "data": "base64_compressed_data", "original_data": {...}}
+- Pass this ENTIRE structure to generate_chart_tool
+- Do NOT extract or modify any fields
 
 🚨 CRITICAL: NEVER extract historical_data or create a subset! Always pass the complete result object directly!
 
