@@ -359,9 +359,9 @@ def process_message(connection_id, user_id, session_id, message_data):
         else:
             logger.info(f"📌 No context or files, sending original message: '{message_text}'")
         
-        # Call the existing chat agent Lambda (with enriched message if context present)
+        # Call the existing chat agent Lambda asynchronously (with enriched message if context present)
         # Pass original_user_message so the chat agent can store it for display
-        ai_response = call_chat_agent(
+        acknowledgment_message = call_chat_agent(
             user_id, 
             message_text,  # Enriched message for AI
             model, 
@@ -372,41 +372,28 @@ def process_message(connection_id, user_id, session_id, message_data):
             uploaded_files if has_files else None  # Uploaded files for AI processing
         )
         
-        # Note: AI response is already added by the chat agent Lambda
-        # No need to add it here to avoid duplicates
-        ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
-        logger.info(f"AI response already processed by chat agent: {ai_message_id}")
+        # For asynchronous invocation, we get an acknowledgment message
+        # The actual AI response will be delivered via SNS to this same Lambda
+        logger.info(f"Chat agent invoked asynchronously, acknowledgment: {acknowledgment_message}")
         
-        # Send AI response to client (only if connection is still associated with this session)
+        # Send acknowledgment to user that processing has started
         connection_info = get_connection_info(connection_id)
         current_session_id = connection_info.get('session_id') if connection_info else None
         
         if current_session_id == session_id:
-            # Check if this is a file return response
-            if isinstance(ai_response, dict) and ai_response.get('type') == 'file_return':
-                ai_response_message = {
-                    'type': 'ai_response',
-                    'message_id': ai_message_id,
-                    'content': ai_response.get('message', ''),
-                    'file_data': ai_response.get('file_data', []),
-                    'session_id': session_id,
-                    'timestamp': datetime.now().isoformat()
-                }
-            else:
-                ai_response_message = {
-                    'type': 'ai_response',
-                    'message_id': ai_message_id,
-                    'content': ai_response,
-                    'session_id': session_id,  # Include session_id for proper routing
-                    'timestamp': datetime.now().isoformat()
-                }
+            # Send processing acknowledgment to user
+            processing_message = {
+                'type': 'ai_response',
+                'message_id': f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}",
+                'content': acknowledgment_message,
+                'session_id': session_id,
+                'timestamp': datetime.now().isoformat()
+            }
             
-            send_message_to_client(connection_id, ai_response_message)
-            logger.info(f"✅ Sent AI response to session {session_id}")
+            send_message_to_client(connection_id, processing_message)
+            logger.info(f"✅ Sent processing acknowledgment to session {session_id}")
         else:
-            logger.warning(f"⚠️ Skipping AI response - connection {connection_id} is now associated with session {current_session_id}, but response is for session {session_id}")
-            # Store the response in the correct session for later retrieval
-            # The user can refresh or reload the session to see the response
+            logger.warning(f"⚠️ Skipping acknowledgment - connection {connection_id} is now associated with session {current_session_id}, but message is for session {session_id}")
         
         return {
             'statusCode': 200,
@@ -623,41 +610,15 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
         
         response = lambda_client.invoke(
             FunctionName=chat_agent_function_name,
-            InvocationType='RequestResponse',
+            InvocationType='Event',  # Asynchronous to prevent timeouts
             Payload=json_dumps_safe(payload)
         )
         
-        # Parse the response
-        response_payload = json.loads(response['Payload'].read().decode('utf-8'))
-        logger.info(f"Chat agent response: {json_dumps_safe(response_payload)}")
+        # For asynchronous invocation, we don't get a response payload
+        logger.info(f"✅ Chat agent invoked asynchronously: {response['StatusCode']}")
         
-        if response_payload.get('statusCode') == 200:
-            response_body = json.loads(response_payload.get('body', '{}'))
-            
-            # Check if this is a file return response with structured data
-            if 'file_data' in response_body:
-                logger.info(f"📁 FILE RETURN: Detected file return response with {len(response_body.get('file_data', []))} files")
-                # Return the structured response for direct frontend processing
-                return {
-                    'type': 'file_return',
-                    'message': response_body.get('response', 'Files returned successfully'),
-                    'file_data': response_body.get('file_data', [])
-                }
-            
-            
-            # Regular text response
-            return response_body.get('response', 'I apologize, but I encountered an error processing your request.')
-        elif response_payload.get('statusCode') == 404:
-            # Session not found (404) - this should not happen after our session creation check
-            logger.error(f"❌ Session not found: {response_payload}")
-            return 'Session not found. Please refresh the page and try again.'
-        elif response_payload.get('statusCode') == 410:
-            # Session terminated (410 Gone)
-            logger.warning(f"🔴 KILL: Chat agent returned 410 - session terminated")
-            return "Session has been terminated. Please start a new conversation."
-        else:
-            logger.error(f"Chat agent returned error: {response_payload}")
-            return 'I apologize, but I encountered an error processing your request. Please try again.'
+        # Send acknowledgment to user that processing has started
+        return 'Your request is being processed. You will receive a response shortly.'
             
     except Exception as e:
         logger.error(f"Error calling chat agent: {str(e)}")
@@ -1661,6 +1622,176 @@ def handle_session_update(event):
             'body': json_dumps_safe({'error': str(e)})
         }
 
+def get_active_connections_for_session(user_id, session_id):
+    """
+    Get all active WebSocket connections for a specific user and session
+    
+    Args:
+        user_id: User ID
+        session_id: Session ID
+        
+    Returns:
+        List of active connection IDs
+    """
+    try:
+        connections_table = dynamodb.Table(os.environ['CHAT_CONNECTIONS_TABLE_NAME'])
+        
+        # Query connections for this user
+        response = connections_table.query(
+            IndexName='user_id-index',
+            KeyConditionExpression=Key('user_id').eq(user_id),
+            FilterExpression=Attr('session_id').eq(session_id) & Attr('is_active').eq(True)
+        )
+        
+        active_connections = []
+        current_time = int(datetime.now().timestamp())
+        
+        for connection in response.get('Items', []):
+            # Check if connection is still active (within last 5 minutes)
+            last_seen = connection.get('last_seen', 0)
+            if current_time - last_seen < 300:  # 5 minutes
+                active_connections.append(connection['connection_id'])
+        
+        logger.info(f"🔍 Found {len(active_connections)} active connections for user {user_id}, session {session_id}")
+        return active_connections
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting active connections: {str(e)}")
+        return []
+
+def handle_sns_chat_response(event):
+    """
+    Handle SNS notification for async chat response delivery
+    
+    Args:
+        event: SNS event containing chat response data
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        logger.info("📨 Processing SNS chat response notification")
+        
+        # Extract SNS message
+        sns_record = event['Records'][0]
+        sns_message = json.loads(sns_record['Sns']['Message'])
+        
+        logger.info(f"📨 SNS Message: {json_dumps_safe(sns_message)}")
+        logger.info(f"📨 SNS Message keys: {list(sns_message.keys())}")
+        
+        # Extract response data
+        session_id = sns_message.get('session_id')
+        user_id = sns_message.get('user_id')
+        response_content = sns_message.get('response')
+        message_id = sns_message.get('message_id')
+        
+        logger.info(f"📨 Extracted - session_id: {session_id}, user_id: {user_id}, message_id: {message_id}")
+        logger.info(f"📨 Response content length: {len(response_content) if response_content else 'None'}")
+        
+        if not all([session_id, user_id, response_content]):
+            logger.error("❌ Missing required fields in SNS message")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Missing required fields'})
+            }
+        
+        logger.info(f"📨 Processing response for session {session_id}, user {user_id}")
+        
+        # Store AI response in DynamoDB (same as user messages)
+        try:
+            logger.info(f"📝 Storing AI response in session {session_id}")
+            
+            # Get current session messages
+            chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
+            session_response = chat_sessions_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id}
+            )
+            
+            if 'Item' in session_response:
+                messages = session_response['Item'].get('messages', [])
+                timestamp = int(datetime.now().timestamp())
+                
+                # Add AI response message
+                ai_message = {
+                    'id': message_id or f"msg_{timestamp}_{uuid.uuid4().hex[:8]}",
+                    'text': response_content,
+                    'sender': 'bot',
+                    'timestamp': timestamp,
+                    'message_type': 'text'
+                }
+                messages.append(ai_message)
+                
+                # Update session with new AI response
+                chat_sessions_table.update_item(
+                    Key={'user_id': user_id, 'session_id': session_id},
+                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                    ExpressionAttributeValues={
+                        ':messages': messages,
+                        ':count': len(messages),
+                        ':timestamp': timestamp
+                    }
+                )
+                
+                logger.info(f"✅ Stored AI response in session {session_id}")
+            else:
+                logger.warning(f"⚠️ Session {session_id} not found for AI response storage")
+                
+        except Exception as e:
+            logger.error(f"❌ Error storing AI response: {str(e)}")
+            # Continue with streaming even if storage fails
+        
+        # Check if there are any active WebSocket connections for this user/session
+        active_connections = get_active_connections_for_session(user_id, session_id)
+        
+        if not active_connections:
+            logger.info(f"📨 No active connections found for user {user_id}, session {session_id} - response will be visible when user reconnects")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'No active connections, response stored in session'})
+            }
+        
+        # Send response to all active connections using same format as synchronous flow
+        response_sent = False
+        for connection_id in active_connections:
+            try:
+                # Create AI response message in same format as current synchronous flow
+                ai_response_message = {
+                    'type': 'ai_response',
+                    'message_id': message_id or f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}",
+                    'content': response_content,
+                    'session_id': session_id,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                if send_message_to_client(connection_id, ai_response_message):
+                    logger.info(f"✅ Sent response to connection {connection_id}")
+                    response_sent = True
+                else:
+                    logger.warning(f"⚠️ Failed to send response to connection {connection_id}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Error sending response to connection {connection_id}: {str(e)}")
+        
+        if response_sent:
+            logger.info(f"✅ Successfully delivered response to active connections")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'Response delivered to active connections'})
+            }
+        else:
+            logger.warning(f"⚠️ Failed to deliver response to any active connections")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'No active connections available for delivery'})
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Error processing SNS chat response: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': f'Failed to process SNS chat response: {str(e)}'})
+        }
+
 def lambda_handler(event, context):
     """
     Lambda handler for WebSocket message processing, S3 event notifications, and File Handler invocations
@@ -1683,6 +1814,11 @@ def lambda_handler(event, context):
         if 'Records' in event and event['Records'][0].get('EventSource') == 'aws:s3':
             logger.info("Processing S3 event notification")
             return handle_s3_event_notification(event)
+        
+        # Check if this is an SNS notification for chat response
+        if 'Records' in event and event['Records'][0].get('EventSource') == 'aws:sns':
+            logger.info("Processing SNS notification for chat response")
+            return handle_sns_chat_response(event)
         
         # Extract connection ID from the request context
         connection_id = event.get('requestContext', {}).get('connectionId')

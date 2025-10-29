@@ -745,12 +745,25 @@ When users request charts (e.g., "generate a chart for AAPL", "show me TSLA pric
 2. **FOR CRYPTO**: Use get_crypto_data_tool(symbol, timeframe, start_date, end_date) to fetch historical data
 3. **TIMEFRAMES**: '1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max' (stocks) | '1d', '7d', '30d', '1y', '2y', '5y', 'max' (crypto)
 4. **DATE RANGES**: Use start_date and end_date parameters for custom date ranges (format: 'YYYY-MM-DD')
-5. **THEN**: Use generate_chart_tool(symbol, data_json, chart_type, title) - automatically detects stock vs crypto data
-6. **CHART TYPES**: 'line' (default), 'candlestick', 'volume', 'ohlc' - all work for both stocks and crypto
-7. **RESULT**: Chart is automatically saved to S3 agent-files folder and will appear in the files section
-8. **EXAMPLES**: 
-   - "I want a chart for AAPL past 2 years" → get_financial_data("AAPL", "2y") → generate_chart_tool("AAPL", data_json, "line")
-   - "Generate a BTC candlestick chart" → get_crypto_data_tool("BTC", "1y") → generate_chart_tool("BTC", data_json, "candlestick")
+5. **CRITICAL**: You MUST pass the EXACT result from get_financial_data/get_crypto_data_tool to generate_chart_tool
+6. **CHART GENERATION**: Use generate_chart_tool(symbol, data_json, chart_type, title) where data_json is the FULL result from step 1 or 2
+7. **CHART TYPES**: 'line' (default), 'candlestick', 'volume', 'ohlc' - all work for both stocks and crypto
+8. **RESULT**: Chart is automatically saved to S3 agent-files folder and will appear in the files section
+9. **EXAMPLES**: 
+   - "I want a chart for AAPL past 2 years" → data = get_financial_data("AAPL", "2y") → generate_chart_tool("AAPL", data, "line")
+   - "Generate a BTC candlestick chart" → data = get_crypto_data_tool("BTC", "1y") → generate_chart_tool("BTC", data, "candlestick")
+
+🚨 CRITICAL: The data_json parameter in generate_chart_tool must be the COMPLETE result from get_financial_data or get_crypto_data_tool, not just a summary!
+
+📋 CORRECT CHART GENERATION EXAMPLE:
+User: "Generate a chart for AAPL past 2 years"
+Agent: 
+1. Call get_financial_data("AAPL", "2y") 
+2. Store the FULL result in a variable (e.g., data = get_financial_data("AAPL", "2y"))
+3. Call generate_chart_tool("AAPL", data, "line") - pass the ENTIRE data object
+
+❌ WRONG: generate_chart_tool("AAPL", "some summary text", "line")
+✅ CORRECT: generate_chart_tool("AAPL", data, "line") where data is the full result from get_financial_data
 
 🚨 NEVER SAY "I don't have access to previous context" - ALWAYS call get_session_context_tool first to check what's actually available!
 

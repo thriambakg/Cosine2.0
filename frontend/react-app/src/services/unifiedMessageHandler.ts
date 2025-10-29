@@ -467,19 +467,8 @@ class UnifiedMessageHandlerService {
           console.log('✅ UnifiedMessageHandler: WebSocket connected for session:', sessionId);
           clearTimeout(timeout);
           
-          // Send connection establishment message
-          const connectionMessage = {
-            type: 'connection_establish',
-            userId: userId,
-            timestamp: new Date().toISOString()
-          };
-          
-          try {
-            ws.send(JSON.stringify(connectionMessage));
-            console.log('📤 UnifiedMessageHandler: Sent connection establishment message');
-          } catch (error) {
-            console.error('❌ UnifiedMessageHandler: Error sending connection message:', error);
-          }
+          // Note: Removed connection establishment message to prevent duplicate processing
+          console.log('📤 UnifiedMessageHandler: WebSocket connected, ready for messages');
           
           // Store the connection
           this.setWebSocketConnection(sessionId, ws);

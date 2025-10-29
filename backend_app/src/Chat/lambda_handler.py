@@ -10,6 +10,7 @@ import os
 import logging
 import sys
 import time
+import uuid
 from typing import Dict, Any
 
 # Fix OpenTelemetry context issue in Lambda environment
@@ -772,21 +773,69 @@ Session Context:
             else:
                 logger.warning(f"⚠️ Cannot update session context - session_context: {session_context is not None}, user_id: {user_id is not None}")
             
-            # Regular text response
-            response_body = {
-                'response': response_content,
-                'session_id': session_id,
-                'user_id': user_id,
-                'timestamp': int(time.time())
-            }
-            
-            logger.info(f"🔍 DEBUG: Response body being returned: {response_body}")
-            logger.info(f"🔍 DEBUG: Response body type: {type(response_body)}")
-            
-            return {
-                'statusCode': 200,
-                'body': response_body
-            }
+            # Publish response to SNS for async delivery
+            try:
+                sns_topic_arn = os.environ.get('CHAT_RESPONSE_SNS_TOPIC_ARN')
+                if sns_topic_arn:
+                    import boto3
+                    sns_client = boto3.client('sns')
+                    
+                    # Create SNS message
+                    sns_message = {
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'response': response_content,
+                        'message_id': f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}",
+                        'timestamp': int(time.time()),
+                        'message_type': 'ai_response'
+                    }
+                    
+                    # Publish to SNS
+                    response = sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps(sns_message),
+                        Subject=f"Chat Response for Session {session_id}"
+                    )
+                    
+                    logger.info(f"✅ Published response to SNS: {response['MessageId']}")
+                    
+                    # Return acknowledgment
+                    return {
+                        'statusCode': 200,
+                        'body': {
+                            'message': 'Response published for async delivery',
+                            'session_id': session_id,
+                            'user_id': user_id,
+                            'sns_message_id': response['MessageId']
+                        }
+                    }
+                else:
+                    logger.warning("⚠️ CHAT_RESPONSE_SNS_TOPIC_ARN not configured, falling back to direct response")
+                    # Fallback to direct response if SNS not configured
+                    response_body = {
+                        'response': response_content,
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'timestamp': int(time.time())
+                    }
+                    return {
+                        'statusCode': 200,
+                        'body': response_body
+                    }
+                    
+            except Exception as sns_error:
+                logger.error(f"❌ Error publishing to SNS: {str(sns_error)}")
+                # Fallback to direct response on SNS error
+                response_body = {
+                    'response': response_content,
+                    'session_id': session_id,
+                    'user_id': user_id,
+                    'timestamp': int(time.time())
+                }
+                return {
+                    'statusCode': 200,
+                    'body': response_body
+                }
         
     except Exception as e:
         logger.error(f"🔍 DEBUG: Error in chat processing: {str(e)}")

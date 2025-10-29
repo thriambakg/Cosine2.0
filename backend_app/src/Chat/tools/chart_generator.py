@@ -156,7 +156,7 @@ class UnifiedChartGenerator:
 
         buffer = BytesIO()
         plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
-        buffer.seek(0)
+            buffer.seek(0)
         plt.close(fig)  # Close the plot to free memory
 
         # Use unified file upload function
@@ -231,18 +231,29 @@ class UnifiedChartGenerator:
             logger.info(f"Data type: {type(data_dict)}")
             if isinstance(data_dict, dict):
                 logger.info(f"Has 'historical_data' key: {'historical_data' in data_dict}")
+                logger.info(f"Full data structure: {data_dict}")
                 if 'historical_data' in data_dict:
                     hist_data = data_dict['historical_data']
                     logger.info(f"Historical data type: {type(hist_data)}")
                     if isinstance(hist_data, list) and len(hist_data) > 0:
                         logger.info(f"First historical data point: {hist_data[0]}")
+                else:
+                    logger.error(f"Missing 'historical_data' key! Available keys: {list(data_dict.keys())}")
             
             # Detect data type
             data_type = self._detect_data_type(data_dict)
             logger.info(f"Detected data type: {data_type} for symbol: {symbol}")
             
             if data_type == 'unknown':
-                return f"Error: Unable to detect data type for {symbol}. Please ensure data is from get_financial_data or get_crypto_data_tool."
+                logger.error(f"❌ Chart Generation Failed: Data type unknown for {symbol}")
+                logger.error(f"❌ Available keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
+                logger.error(f"❌ Expected: 'historical_data' key for stocks or 'chart_data' key for crypto")
+                
+                # Check if this looks like a summary instead of full data
+                if isinstance(data_dict, dict) and 'symbol' in data_dict and 'current_price' in data_dict:
+                    return f"Error: You passed a summary of the data instead of the full result. Please call get_financial_data('{symbol}', timeframe) first, then pass the COMPLETE result to generate_chart_tool. Example: data = get_financial_data('{symbol}', '2y'); generate_chart_tool('{symbol}', data, 'line')"
+            else:
+                    return f"Error: Unable to detect data type for {symbol}. Please ensure you call get_financial_data(symbol, timeframe) first to fetch the data, then pass the COMPLETE result to generate_chart_tool. The data must contain 'historical_data' for stocks or 'chart_data' for crypto."
             
             # Check for errors
             if "error" in data_dict:
@@ -287,8 +298,8 @@ class UnifiedChartGenerator:
                     stock_symbols = list(normalized_data.keys())
                     title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
                 ax.set_title(title, fontsize=16, fontweight='bold')
-                ax.legend()
-                
+        ax.legend()
+    
             else:
                 # Handle single stock/crypto
                 # Convert to DataFrame

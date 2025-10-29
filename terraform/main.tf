@@ -943,6 +943,33 @@ resource "aws_iam_role_policy_attachment" "chat_agent_lambda_invoke_policy" {
   policy_arn = aws_iam_policy.lambda_invoke_policy.arn
 }
 
+# SNS policy for chat agent to publish responses
+resource "aws_iam_policy" "chat_agent_sns_policy" {
+  name        = "${var.project_name}-chat-agent-sns-policy-${var.environment}"
+  description = "Policy for chat agent to publish to SNS topic"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "SNS:Publish"
+        ]
+        Resource = module.chat_response_sns_topic.topic_arn
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Attach SNS policy for chat agent
+resource "aws_iam_role_policy_attachment" "chat_agent_sns_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.chat_agent_sns_policy.arn
+}
+
 
 # Bedrock policy for chat agent
 resource "aws_iam_role_policy" "chat_agent_bedrock_policy" {
@@ -1055,6 +1082,9 @@ resource "aws_lambda_function" "chat_agent" {
 
       # Agent Files Processor Lambda Function Name for direct invocation
       AGENT_FILES_PROCESSOR_FUNCTION_NAME = module.agent_files_processor_lambda.function_name
+
+      # SNS Topic for async response delivery
+      CHAT_RESPONSE_SNS_TOPIC_ARN = module.chat_response_sns_topic.topic_arn
     }
   }
 
@@ -1158,6 +1188,37 @@ module "websocket_api" {
   message_lambda_name    = module.websocket_message_lambda.function_name
 
   tags = var.common_tags
+}
+
+# ============================================================================
+# SNS TOPIC FOR ASYNC CHAT RESPONSES
+# ============================================================================
+
+# SNS Topic for async chat agent responses
+module "chat_response_sns_topic" {
+  source = "./modules/sns"
+
+  topic_name   = "${var.project_name}-chat-response-${var.environment}"
+  display_name = "Chat Response Notifications"
+  purpose      = "Async chat agent response delivery"
+  kms_key_arn  = data.terraform_remote_state.base_infra.outputs.kms_key_arn
+
+  # Allow Lambda functions to publish
+  allow_lambda_publish = true
+
+  # Subscribe WebSocket message lambda to this topic
+  lambda_function_arns = [module.websocket_message_lambda.function_arn]
+
+  tags = var.common_tags
+}
+
+# Lambda permission for SNS to invoke WebSocket message lambda
+resource "aws_lambda_permission" "allow_sns_invoke_websocket" {
+  statement_id  = "AllowExecutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = module.websocket_message_lambda.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = module.chat_response_sns_topic.topic_arn
 }
 
 # ============================================================================
