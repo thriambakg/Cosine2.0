@@ -243,28 +243,37 @@ class FinancialTools:
             import io
             
             # Check highcap first
-            highcap_path = '/opt/python/highcap.csv'  # In Lambda layer
+            highcap_path = os.path.join(os.path.dirname(__file__), 'stocks', 'highcap.csv')
+            logger.info(f"🔍 DEBUG: Checking highcap CSV at {highcap_path}")
             try:
                 with open(highcap_path, 'r') as f:
                     reader = csv.reader(f)
                     for row in reader:
                         if len(row) >= 1 and row[0].upper() == symbol.upper():
+                            logger.info(f"🔍 DEBUG: Found {symbol} in highcap CSV")
                             return f"historical/high/{symbol.upper()}.json"
-            except:
+                logger.info(f"🔍 DEBUG: {symbol} not found in highcap CSV")
+            except Exception as e:
+                logger.warning(f"🔍 DEBUG: Error reading highcap CSV: {str(e)}")
                 pass
             
             # Check midcap
-            midcap_path = '/opt/python/midcap.csv'
+            midcap_path = os.path.join(os.path.dirname(__file__), 'stocks', 'midcap.csv')
+            logger.info(f"🔍 DEBUG: Checking midcap CSV at {midcap_path}")
             try:
                 with open(midcap_path, 'r') as f:
                     reader = csv.reader(f)
                     for row in reader:
                         if len(row) >= 1 and row[0].upper() == symbol.upper():
+                            logger.info(f"🔍 DEBUG: Found {symbol} in midcap CSV")
                             return f"historical/medium/{symbol.upper()}.json"
-            except:
+                logger.info(f"🔍 DEBUG: {symbol} not found in midcap CSV")
+            except Exception as e:
+                logger.warning(f"🔍 DEBUG: Error reading midcap CSV: {str(e)}")
                 pass
             
             # Default to lowcap
+            logger.info(f"🔍 DEBUG: Defaulting to lowcap for {symbol}")
             return f"historical/low/{symbol.upper()}.json"
             
         except Exception as e:
@@ -994,6 +1003,7 @@ When users request charts (e.g., "generate a chart for AAPL", "show me TSLA pric
 2. ALWAYS pass the COMPLETE compressed result to generate_chart_tool
 3. NEVER extract historical_data or create subsets
 4. The chart generator will automatically decompress the data
+5. NEVER call generate_chart_tool twice - call it ONCE with the complete data
 
 📋 COMPRESSION FORMAT:
 - Compressed data has structure: {"_compressed": true, "data": "base64_compressed_data", "original_data": {...}}
@@ -1001,6 +1011,7 @@ When users request charts (e.g., "generate a chart for AAPL", "show me TSLA pric
 - Do NOT extract or modify any fields
 
 🚨 CRITICAL: NEVER extract historical_data or create a subset! Always pass the complete result object directly!
+🚨 CRITICAL: NEVER call generate_chart_tool multiple times! Call it ONCE with the complete data!
 
 📋 CORRECT CHART GENERATION EXAMPLES:
 

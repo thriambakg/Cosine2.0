@@ -981,9 +981,13 @@ resource "aws_iam_policy" "chat_agent_historical_s3_policy" {
       {
         Effect = "Allow"
         Action = [
-          "s3:GetObject"
+          "s3:GetObject",
+          "s3:ListBucket"
         ]
-        Resource = "${data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn}/*"
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn}/*"
+        ]
       }
     ]
   })
