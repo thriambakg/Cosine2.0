@@ -291,11 +291,21 @@ class FinancialTools:
                 if compressed_result.get("_compressed"):
                     logger.info(f"🔍 DEBUG: Data was compressed successfully")
                     logger.info(f"🔍 DEBUG: Compressed data has original_data: {'original_data' in compressed_result}")
+                    logger.info(f"🔍 DEBUG: Compressed data size: {compressed_result.get('_compressed_size', 'unknown')}")
                 else:
                     logger.info(f"🔍 DEBUG: Data was not compressed (below threshold)")
                     logger.info(f"🔍 DEBUG: Uncompressed data has historical_data: {'historical_data' in compressed_result}")
             else:
                 logger.info(f"🔍 DEBUG: Compressed data is not a dict: {compressed_result}")
+            
+            # Additional debugging for tool calling
+            logger.info(f"🔍 DEBUG: Returning data for tool calling - type: {type(compressed_result)}")
+            if isinstance(compressed_result, dict):
+                logger.info(f"🔍 DEBUG: Return data keys: {list(compressed_result.keys())}")
+                if compressed_result.get("_compressed"):
+                    logger.info(f"🔍 DEBUG: This is compressed data - agent should pass it as-is to generate_chart_tool")
+                else:
+                    logger.info(f"🔍 DEBUG: This is uncompressed data - agent should pass it as-is to generate_chart_tool")
             
             return compressed_result
                 

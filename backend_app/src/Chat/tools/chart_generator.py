@@ -35,11 +35,18 @@ class UnifiedChartGenerator:
     Unified chart generator that can handle both stock and cryptocurrency data.
     Automatically detects data type and generates appropriate charts.
     """
-    def __init__(self, user_id=None, session_id=None):
+    def __init__(self):
         self.s3_client = boto3.client('s3')
         self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
-        self.user_id = user_id or os.environ.get('USER_ID', 'default-user')
-        self.session_id = session_id or os.environ.get('SESSION_ID', 'default-session')
+        self.user_id = os.environ.get('USER_ID', 'default-user')
+        self.session_id = os.environ.get('SESSION_ID', 'default-session')
+        
+        # Debug logging to see what environment variables are available
+        logger.info(f"🔍 DEBUG: Chart generator environment variables:")
+        logger.info(f"🔍 DEBUG: USER_ID = {os.environ.get('USER_ID', 'NOT SET')}")
+        logger.info(f"🔍 DEBUG: SESSION_ID = {os.environ.get('SESSION_ID', 'NOT SET')}")
+        logger.info(f"🔍 DEBUG: CHAT_FILES_BUCKET_NAME = {os.environ.get('CHAT_FILES_BUCKET_NAME', 'NOT SET')}")
+        logger.info(f"🔍 DEBUG: Using user_id = {self.user_id}, session_id = {self.session_id}")
 
     def _validate_env_vars(self):
         # Make environment variables optional for now
@@ -452,6 +459,9 @@ def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", t
     Returns:
         Success message with file details
     """
-    # Create a new instance with current environment variables
-    chart_generator = UnifiedChartGenerator()
+    # Debug logging to see what data is being passed
+    logger.info(f"🔍 DEBUG: generate_chart_tool called with symbol={symbol}, chart_type={chart_type}")
+    logger.info(f"🔍 DEBUG: data_json length: {len(data_json)} characters")
+    logger.info(f"🔍 DEBUG: data_json preview: {data_json[:200]}...")
+    
     return chart_generator.generate_chart(symbol, data_json, chart_type, title)
