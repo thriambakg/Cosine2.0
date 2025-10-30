@@ -496,7 +496,8 @@ const GlobalChatSidebar: React.FC = () => {
     sendMessage: sendUnifiedMessage,
     sendContextMessage: sendUnifiedContextMessage,
     sendFileMessage: sendUnifiedFileMessage,
-    sendFollowupMessage: sendUnifiedFollowupMessage
+    sendFollowupMessage: sendUnifiedFollowupMessage,
+    sendEditMessage: sendUnifiedEditMessage
   } = useUnifiedMessaging({
     sessionId: activeSessionId,
     userId: user?.id,
@@ -507,7 +508,16 @@ const GlobalChatSidebar: React.FC = () => {
   });
 
   // Use unified messages directly - no need for local state syncing
-  const messages = React.useMemo(() => unifiedMessages.filter(msg => msg.sessionId === activeSessionId), [unifiedMessages, activeSessionId]);
+  // Filter by activeSessionId, but if no activeSessionId, show all messages (for debugging)
+  const messages = React.useMemo(() => {
+    if (!activeSessionId) {
+      console.warn('⚠️ Sidebar: No activeSessionId, showing all unifiedMessages:', unifiedMessages.length);
+      return unifiedMessages;
+    }
+    const filtered = unifiedMessages.filter(msg => msg.sessionId === activeSessionId);
+    console.log(`📨 Sidebar: Filtered messages - activeSessionId: ${activeSessionId}, unifiedMessages: ${unifiedMessages.length}, filtered: ${filtered.length}`);
+    return filtered;
+  }, [unifiedMessages, activeSessionId]);
 
 
   // Only auto-scroll when user is near bottom AND new message appended (length or last id changed)
@@ -637,67 +647,28 @@ const GlobalChatSidebar: React.FC = () => {
   };
 
   const handleSaveEdit = async () => {
-    if (!editingMessage || editingMessageIndex === null || !editText.trim() || !activeSessionId) return;
+    if (!editingMessage || editingMessageIndex === null || !editText.trim() || !activeSessionId || isLoadingMessage) return;
     
     try {
-      // COMMENTED OUT: No longer using direct messaging service (replaced with ChatPage mirroring)
-      // const messageData = {
-      //   action: 'chat' as const,
-      //   type: 'chat_message' as const,
-      //   messageId: editingMessage.id,
-      //   message: editText,
-      //   files: [],
-      //   sessionId: activeSessionId,
-      //   userId: user?.id!,
-      //   model: selectedModel,
-      //   context: {
-      //     currentPage: window.location.pathname,
-      //     sessionId: activeSessionId
-      //   }
-      // };
-
-      // Note: Message editing is now handled by the unified messaging system
+      console.log('✏️ Sidebar: Sending edit message via unified system');
       
-      // Send via ChatPage's WebSocket connection (unified architecture)
-      const editMessageEvent = new CustomEvent('sidebar-send-message', {
-        detail: {
-          messageId: editingMessage.id,
-          message: editText, // Changed from 'text' to 'message'
-          sender: 'user',
-          timestamp: Date.now(),
-          sessionId: activeSessionId!,
-          userId: user?.id,
-          model: selectedModel,
-          files: [],
-          isEdit: true,
-          originalMessageId: editingMessage.id
-        }
-      });
-      window.dispatchEvent(editMessageEvent);
-      console.log('✅ Sidebar sent edit message via ChatPage WebSocket');
+      // Send edit message via unified system (same as ChatPage)
+      const result = await sendUnifiedEditMessage(editText, editingMessage.id, selectedModel);
       
-      // Clear editing state
-      setEditingMessage(null);
-      setEditingMessageIndex(null);
-      setEditText('');
-      
-      // Set loading state
-      setIsLoadingMessage(true);
-      
-      // Dispatch event to ChatPage to mirror the edit
-      const editEvent = new CustomEvent('sidebar-edit-message', {
-        detail: {
-          messageId: editingMessage.id,
-          newText: editText,
-          sessionId: activeSessionId,
-          userId: user?.id,
-          timestamp: Date.now()
-        }
-      });
-      window.dispatchEvent(editEvent);
-      console.log('📡 Sidebar dispatched edit event to ChatPage');
+      if (result.success) {
+        console.log('✅ Sidebar: Edit message sent successfully');
+        
+        // Clear editing state
+        setEditingMessage(null);
+        setEditingMessageIndex(null);
+        setEditText('');
+        
+        // Loading state will be managed by the unified handler
+      } else {
+        console.error('❌ Sidebar: Failed to send edit message:', result.error);
+      }
     } catch (error) {
-      console.error('Error sending edit message:', error);
+      console.error('❌ Sidebar: Error sending edit message:', error);
     }
   };
 

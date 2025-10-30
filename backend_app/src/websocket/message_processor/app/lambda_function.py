@@ -844,75 +844,46 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
         send_message_to_client(connection_id, ack_message)
         logger.info(f"✅ EDIT: Sent edit_acknowledged to frontend for message {message_id}")
         
-        # Call chat agent to generate new response with updated context
-        logger.info(f"🔍 EDIT: Calling chat agent with new context (session will automatically get truncated messages)")
-        ai_response = call_chat_agent(user_id, new_text, model, [], session_id)
-        
-        if ai_response:
-            logger.info(f"✅ EDIT: Chat agent generated response, length: {len(ai_response)}")
+        # Call chat agent asynchronously to generate new response
+        # The agent will save the bot response via SNS, and the SNS handler will save it to DynamoDB
+        # Pass is_edit flag so agent knows not to save the user message (already saved in truncation above)
+        logger.info(f"🔍 EDIT: Calling chat agent asynchronously with new context (user message already saved in truncation)")
+        try:
+            # Prepare payload for chat agent with edit flag
+            chat_agent_function_name = os.environ.get('CHAT_AGENT_FUNCTION_NAME', 'cosine-chat-agent-production')
             
-            # Add AI response to session
-            ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
-            ai_timestamp = int(datetime.now().timestamp())
-            ai_message = {
-                'id': ai_message_id,
-                'text': ai_response,  # ai_response is already a string
-                'sender': 'bot',
-                'timestamp': ai_timestamp,
-                'message_type': 'text'
+            agent_payload = {
+                'action': 'chat',
+                'message': new_text,
+                'userId': user_id,
+                'model': model,
+                'files': [],
+                'sessionId': session_id,
+                'is_edit': True,  # Flag to tell agent not to save user message
+                'edited_message_id': message_id,  # Pass the edited message ID
+                'context': {
+                    'currentPage': 'chat',
+                    'sessionId': session_id
+                }
             }
             
-            # Add AI response to truncated messages
-            updated_messages = truncated_messages + [ai_message]
-            
-            logger.info(f"✅ EDIT: Adding AI response to session, total messages now: {len(updated_messages)}")
-            
-            # Update session with new AI response
-            chat_sessions_table.update_item(
-                Key={
-                    'user_id': user_id,
-                    'session_id': session_id
-                },
-                UpdateExpression='SET messages = :messages, message_count = :message_count, last_updated = :last_updated',
-                ExpressionAttributeValues={
-                    ':messages': updated_messages,
-                    ':message_count': len(updated_messages),
-                    ':last_updated': ai_timestamp
-                }
+            # Invoke chat agent asynchronously (response will come via SNS)
+            lambda_client.invoke(
+                FunctionName=chat_agent_function_name,
+                InvocationType='Event',  # Asynchronous
+                Payload=json_dumps_safe(agent_payload)
             )
             
-            logger.info(f"✅ EDIT: Updated session {session_id} with new AI response in DynamoDB")
-            
-            # Send AI response to client
-            ai_response_message = {
-                'type': 'ai_response',
-                'message_id': ai_message_id,
-                'content': ai_response,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            # Only send response if connection is still associated with this session
-            connection_info = get_connection_info(connection_id)
-            current_session_id = connection_info.get('session_id') if connection_info else None
-            
-            if current_session_id == session_id:
-                send_message_to_client(connection_id, ai_response_message)
-                logger.info(f"✅ EDIT: Successfully sent AI response for edited message {message_id}")
-            else:
-                logger.warning(f"⚠️ EDIT: Skipping AI response - connection {connection_id} is now associated with session {current_session_id}, but response is for session {session_id}")
-        else:
-            logger.error(f"❌ EDIT: Failed to get AI response for edited message {message_id}")
+            logger.info(f"✅ EDIT: Chat agent invoked asynchronously - response will arrive via SNS")
+        except Exception as e:
+            logger.error(f"❌ EDIT: Failed to invoke chat agent: {str(e)}")
             error_message = {
                 'type': 'error',
-                'message': 'Failed to generate response for edited message',
+                'message': 'Failed to process edited message',
                 'timestamp': datetime.now().isoformat()
             }
-            # Only send error if connection is still associated with this session
-            connection_info = get_connection_info(connection_id)
-            current_session_id = connection_info.get('session_id') if connection_info else None
-            
-            if current_session_id == session_id:
-                send_message_to_client(connection_id, error_message)
+            send_message_to_client(connection_id, error_message)
+        
         
         return {
             'statusCode': 200,

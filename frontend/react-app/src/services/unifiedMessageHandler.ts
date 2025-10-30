@@ -83,7 +83,13 @@ class UnifiedMessageHandlerService {
     console.log(`🔍 DEBUG: processMessage [${requestId}] - messageData.contextItems:`, messageData.contextItems);
     console.log(`🔍 DEBUG: processMessage [${requestId}] - contextItems length:`, messageData.contextItems?.length || 0);
     
-    // Check if message was cancelled
+    // For edit messages, clear cancelled status since user is explicitly resending
+    if (messageData.type === 'edit_message' && this.cancelledMessages.has(messageData.messageId)) {
+      console.log('✏️ UnifiedMessageHandler: Clearing cancelled status for edit message:', messageData.messageId);
+      this.cancelledMessages.delete(messageData.messageId);
+    }
+    
+    // Check if message was cancelled (after clearing edit messages)
     if (this.cancelledMessages.has(messageData.messageId)) {
       console.log('❌ UnifiedMessageHandler: Message was cancelled:', messageData.messageId);
       return { sessionId: messageData.sessionId || '', success: false, error: 'Message was cancelled' };
@@ -603,22 +609,36 @@ class UnifiedMessageHandlerService {
       throw new Error(`No WebSocket connection for session: ${sessionId}`);
     }
 
-    const messageRequest = {
-      action: 'chat',
-      type: 'chat_message',
-      message: messageData.text,
-      userId: messageData.userId,
-      sessionId: sessionId,
-      model: messageData.model,
-      files: messageData.files || [],
-      messageId: messageData.messageId,
-      contextItems: messageData.contextItems || [],
-      context: messageData.context
-    };
+    const isEdit = messageData.type === 'edit_message';
+    const messageRequest = isEdit
+      ? {
+          action: 'chat',
+          type: 'edit_message',
+          // Backend expects newText for edits
+          newText: messageData.text,
+          messageId: messageData.messageId,
+          userId: messageData.userId,
+          sessionId: sessionId,
+          model: messageData.model
+        }
+      : {
+          action: 'chat',
+          type: 'chat_message',
+          message: messageData.text,
+          userId: messageData.userId,
+          sessionId: sessionId,
+          model: messageData.model,
+          files: messageData.files || [],
+          messageId: messageData.messageId,
+          contextItems: messageData.contextItems || [],
+          context: messageData.context
+        };
 
     console.log('🔍 DEBUG: sendWebSocketMessage - messageRequest being sent to WebSocket:', messageRequest);
-    console.log('🔍 DEBUG: sendWebSocketMessage - contextItems in messageRequest:', messageRequest.contextItems);
-    console.log('🔍 DEBUG: sendWebSocketMessage - contextItems length:', messageRequest.contextItems.length);
+    if (!isEdit) {
+      console.log('🔍 DEBUG: sendWebSocketMessage - contextItems in messageRequest:', (messageRequest as any).contextItems);
+      console.log('🔍 DEBUG: sendWebSocketMessage - contextItems length:', ((messageRequest as any).contextItems || []).length);
+    }
 
     try {
       ws.send(JSON.stringify(messageRequest));
@@ -710,6 +730,9 @@ class UnifiedMessageHandlerService {
       case 'kill_signal_acknowledged':
         this.handleKillSignalAcknowledgment(sessionId, data);
         break;
+      case 'error':
+        this.handleErrorMessage(sessionId, data);
+        break;
       default:
         console.log('📨 UnifiedMessageHandler: Unknown message type:', data.type);
     }
@@ -794,6 +817,18 @@ class UnifiedMessageHandlerService {
       // Keep loading until ai_response arrives
       this.broadcastLoadingState(sessionId, true, 'chatpage');
     }
+  }
+
+  /**
+   * Handle error message from WebSocket
+   */
+  private handleErrorMessage(sessionId: string, data: any): void {
+    const errorMessage = data.message || data.error || 'An error occurred';
+    console.error('❌ UnifiedMessageHandler: Received error from WebSocket:', errorMessage, 'for session:', sessionId);
+    
+    // Clear loading state for all interfaces since there was an error
+    this.broadcastLoadingState(sessionId, false, 'chatpage');
+    this.broadcastLoadingState(sessionId, false, 'sidebar');
   }
 
   /**
