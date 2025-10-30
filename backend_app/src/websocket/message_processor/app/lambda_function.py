@@ -553,24 +553,23 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
         AI response text
     """
     try:
-        # Check for kill signal before calling chat agent
-        logger.info(f"🔍 KILL CHECK: Checking for kill signal on session {session_id}")
+        # Clear any stale kill flags on new user message so the next turn proceeds
+        try:
+            chat_sessions_table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression='REMOVE killed_at, kill_reason',
+                ConditionExpression='attribute_exists(user_id) AND attribute_exists(session_id)'
+            )
+            logger.info(f"🟢 KILL RESET: Cleared kill flags for session {session_id} before agent call")
+        except Exception as _kill_clear_err:
+            # It's okay if attributes don't exist; proceed
+            logger.info(f"ℹ️ KILL RESET: No kill flags to clear or not applicable for session {session_id}")
         
-        # Get session to check for kill signal
-        session_response = chat_sessions_table.get_item(
-            Key={
-                'user_id': user_id,
-                'session_id': session_id
-            }
-        )
-        
-        if 'Item' in session_response:
-            session_item = session_response['Item']
-            if session_item.get('killed_at'):
-                logger.warning(f"🔴 KILL: Session {session_id} has been killed, aborting chat agent call")
-                return "Session has been terminated. Please start a new conversation."
-        
-        logger.info(f"✅ KILL CHECK: Session {session_id} is active, proceeding with chat agent call")
+        # Proceed with chat agent call
+        logger.info(f"✅ KILL CHECK: Proceeding with chat agent call for session {session_id}")
         
         # Prepare payload for chat agent
         payload = {
