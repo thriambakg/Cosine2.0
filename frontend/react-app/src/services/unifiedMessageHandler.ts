@@ -245,31 +245,40 @@ class UnifiedMessageHandlerService {
       // Store user ID for this session
       this.sessionUserIds.set(sessionId, messageData.userId);
 
-      // Step 2: Add user message to local cache immediately (for instant display)
-      this.addUserMessageToLocalCache(sessionId, messageData);
-
-      // Step 3: Broadcast loading state to all interfaces
-      this.broadcastLoadingState(sessionId, true, messageData.source);
-
-      // Step 4: Process message based on type
+      // Step 2-4: Process message types with correct local UI handling
       switch (messageData.type) {
         case 'new_message':
+          // Add user message locally and start loading
+          this.addUserMessageToLocalCache(sessionId, messageData);
+          this.broadcastLoadingState(sessionId, true, messageData.source);
           await this.processNewMessage(sessionId, messageData);
           break;
         
         case 'context_message':
+          // Add user message locally and start loading
+          this.addUserMessageToLocalCache(sessionId, messageData);
+          this.broadcastLoadingState(sessionId, true, messageData.source);
           await this.processContextMessage(sessionId, messageData);
           break;
         
         case 'file_message':
+          // Start loading during file processing
+          this.broadcastLoadingState(sessionId, true, messageData.source);
           await this.processFileMessage(sessionId, messageData);
           break;
         
         case 'followup_message':
+          // Add user message locally and start loading
+          this.addUserMessageToLocalCache(sessionId, messageData);
+          this.broadcastLoadingState(sessionId, true, messageData.source);
           await this.processFollowupMessage(sessionId, messageData);
           break;
         
         case 'edit_message':
+          // Edit flow: update existing user message in-place and truncate UI immediately
+          this.applyLocalEditAndTruncate(sessionId, messageData);
+          // Start loading while waiting for new AI response
+          this.broadcastLoadingState(sessionId, true, messageData.source);
           await this.processEditMessage(sessionId, messageData);
           break;
       }
@@ -437,6 +446,25 @@ class UnifiedMessageHandlerService {
     // Send message via WebSocket
     await this.sendWebSocketMessage(sessionId, messageData);
     console.log('✅ UnifiedMessageHandler: Edit message sent for session:', sessionId);
+  }
+
+  /**
+   * Apply edit locally: replace text and truncate messages after the edited one
+   */
+  private applyLocalEditAndTruncate(sessionId: string, messageData: UnifiedMessageData): void {
+    const messages = this.localCache.get(sessionId) || [];
+    const idx = messages.findIndex(m => m.id === messageData.messageId && m.sender === 'user');
+    if (idx === -1) {
+      console.warn('⚠️ UnifiedMessageHandler: Edited message not found locally; skipping local truncate');
+      return;
+    }
+    // Replace text
+    messages[idx] = { ...messages[idx], text: messageData.text, timestamp: Date.now() };
+    // Truncate after edited message
+    const truncated = messages.slice(0, idx + 1);
+    this.localCache.set(sessionId, truncated);
+    this.notifyMessageUpdate(sessionId, truncated);
+    console.log('✏️ UnifiedMessageHandler: Applied local edit and truncated messages at index:', idx);
   }
 
   /**
@@ -667,6 +695,9 @@ class UnifiedMessageHandlerService {
       case 'ai_response':
         this.handleAIResponse(sessionId, data);
         break;
+      case 'edit_acknowledged':
+        this.handleEditAcknowledged(sessionId, data);
+        break;
       case 'session_updated':
         this.handleSessionUpdate(sessionId, data);
         break;
@@ -748,6 +779,21 @@ class UnifiedMessageHandlerService {
     window.dispatchEvent(typingEvent);
     
     console.log('✅ UnifiedMessageHandler: Added AI response to local cache:', aiMessage.id);
+  }
+
+  /**
+   * Handle edit acknowledged from backend
+   */
+  private handleEditAcknowledged(sessionId: string, data: any): void {
+    console.log('✏️ UnifiedMessageHandler: Edit acknowledged for session:', sessionId, 'unchanged:', data.unchanged);
+    if (data.unchanged) {
+      // Nothing to wait for
+      this.broadcastLoadingState(sessionId, false, 'chatpage');
+      this.broadcastLoadingState(sessionId, false, 'sidebar');
+    } else {
+      // Keep loading until ai_response arrives
+      this.broadcastLoadingState(sessionId, true, 'chatpage');
+    }
   }
 
   /**
