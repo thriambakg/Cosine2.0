@@ -248,18 +248,8 @@ class SessionManager:
                 messages.append(user_message)
                 logger.info(f"✅ Added user message: {user_message['id']}")
             
-            # Add agent response
-            if agent_response:
-                agent_message = {
-                    'id': f'msg_{timestamp + 1}_{uuid.uuid4().hex[:8]}',
-                    'text': agent_response,
-                    'sender': 'bot',
-                    'timestamp': timestamp + 1,
-                    'message_type': 'text',
-                    'model': model or 'claude-sonnet-4'  # Include model information
-                }
-                messages.append(agent_message)
-                logger.info(f"✅ Added agent message: {agent_message['id']} with model: {model}")
+            # Note: Agent responses are handled by the WebSocket processor via SNS
+            # The session manager should only handle user messages to avoid duplicates
             
             logger.info(f"🔍 DEBUG: Total messages after adding: {len(messages)}")
             

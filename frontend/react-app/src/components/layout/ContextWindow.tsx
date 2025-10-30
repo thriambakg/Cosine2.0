@@ -144,20 +144,41 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       setSendProgress(`Preparing context metadata for ${contextItems.length} items...`);
       
       // Create lightweight context metadata (no heavy data fetching)
-      const enrichedContextItems = contextItems.map((item: ContextItem) => ({
-        id: item.id,
-        type: item.type,
-        title: item.title,
-        subtitle: item.subtitle,
-        timestamp: item.timestamp,
-        // Include only essential metadata, not full data
-        data: {
-          tileType: item.data?.tileType,
-          symbol: item.data?.symbol,
-          timeframe: item.data?.timeframe,
-          // Don't include heavy backendData or processed data
+      const enrichedContextItems = contextItems.map((item: ContextItem) => {
+        // For chat sessions, preserve essential metadata
+        if (item.type === 'chat') {
+          return {
+            id: item.id,
+            type: item.type,
+            title: item.title,
+            subtitle: item.subtitle,
+            timestamp: item.timestamp,
+            data: {
+              session_id: item.data?.session_id,
+              user_id: item.data?.user_id,
+              model: item.data?.model,
+              message_count: item.data?.message_count,
+              created_at: item.data?.created_at,
+              last_updated: item.data?.last_updated,
+            }
+          };
         }
-      }));
+        
+        // For other types (tiles, stocks, etc.), use lightweight metadata
+        return {
+          id: item.id,
+          type: item.type,
+          title: item.title,
+          subtitle: item.subtitle,
+          timestamp: item.timestamp,
+          data: {
+            tileType: item.data?.tileType,
+            symbol: item.data?.symbol,
+            timeframe: item.data?.timeframe,
+            // Don't include heavy backendData or processed data
+          }
+        };
+      });
       
       console.log('✅ Prepared context metadata:', enrichedContextItems.length);
       

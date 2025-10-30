@@ -319,7 +319,7 @@ class UnifiedChartGenerator:
                 if isinstance(data_dict, dict) and 'data_points' in data_dict and 'symbol' in data_dict and 'current_price' in data_dict:
                     logger.error(f"❌ This appears to be incomplete stock data - missing 'historical_data' field")
                     return f"Error: You passed incomplete data for {symbol}. The data contains metadata (current_price, data_points, etc.) but is missing the 'historical_data' field needed for chart generation. Please call get_financial_data('{symbol}', '{data_dict.get('timeframe', '2y')}') again and pass the COMPLETE result to generate_chart_tool."
-                else:
+            else:
                     return f"Error: Unable to detect data type for {symbol}. Please ensure you call get_financial_data(symbol, timeframe) first to fetch the data, then pass the COMPLETE result to generate_chart_tool. The data must contain 'historical_data' for stocks or 'chart_data' for crypto."
             
             # Check for errors
@@ -374,8 +374,8 @@ class UnifiedChartGenerator:
                     stock_symbols = list(normalized_data.keys())
                     title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
                 ax.set_title(title, fontsize=18, fontweight='bold', pad=20)
-                ax.legend()
-            
+        ax.legend()
+    
             else:
                 # Handle single stock/crypto
                 logger.info(f"🔍 DEBUG: Processing {len(normalized_data)} data points for single {data_type}")
