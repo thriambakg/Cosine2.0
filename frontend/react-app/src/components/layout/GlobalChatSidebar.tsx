@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
 import {
   Box,
@@ -11,25 +11,24 @@ import {
   Select,
   MenuItem,
   SelectChangeEvent,
-  Collapse,
   List,
   ListItem,
   ListItemText,
   Tooltip,
+  Drawer,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
   Delete as DeleteIcon,
   Send as SendIcon,
   Close as CloseIcon,
-  ExpandLess as ExpandLessIcon,
-  ExpandMore as ExpandMoreIcon,
   Edit as EditIcon,
   AttachFile as AttachFileIcon,
   InsertDriveFile as FileIcon,
   Download as DownloadIcon,
   Person as PersonIcon,
   SmartToy as SmartToyIcon,
+  Dashboard as ContextIcon,
 } from '@mui/icons-material';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -134,6 +133,75 @@ interface ChatSession {
   };
 }
 
+// Hoisted input bar to preserve local state across parent re-renders
+const SidebarMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabled: boolean; placeholder: string; onSend: (text: string) => Promise<void> | void }) => {
+  const [value, setValue] = useState('');
+  const onSendClick = async () => {
+    if (!value.trim()) return;
+    const text = value;
+    setValue('');
+    await onSend(text);
+  };
+  const onKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void onSendClick();
+    }
+  };
+  return (
+    <>
+      <TextField
+        fullWidth
+        multiline
+        maxRows={3}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyPress={onKeyPress}
+        placeholder={placeholder}
+        disabled={disabled}
+        sx={{
+          '& .MuiOutlinedInput-root': {
+            backgroundColor: 'rgba(31, 41, 55, 0.8)',
+            border: '1px solid #374151',
+            borderRadius: 2,
+            '&:hover': {
+              borderColor: '#6b7280',
+            },
+            '&.Mui-focused': {
+              borderColor: '#3b82f6',
+            },
+          },
+          '& .MuiOutlinedInput-input': {
+            color: '#ffffff',
+            fontSize: '0.875rem',
+            '&::placeholder': {
+              color: '#9ca3af',
+              opacity: 1,
+            },
+          },
+        }}
+      />
+      <IconButton
+        onClick={() => void onSendClick()}
+        disabled={disabled}
+        sx={{
+          color: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          '&:hover': {
+            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+          },
+          '&:disabled': {
+            color: '#6b7280',
+            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+          },
+        }}
+      >
+        <SendIcon />
+      </IconButton>
+    </>
+  );
+});
+
 const GlobalChatSidebar: React.FC = () => {
   const { isVisible, setIsVisible, activeSessionId, setActiveSessionId, close } = useGlobalChat();
   const { user } = useAuth();
@@ -147,7 +215,6 @@ const GlobalChatSidebar: React.FC = () => {
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
   const previousContextRef = useRef<ContextItem[]>([]);
-  const [inputMessage, setInputMessage] = useState('');
   
   // Function to detect if context has changed
   const hasContextChanged = useCallback(() => {
@@ -193,9 +260,10 @@ const GlobalChatSidebar: React.FC = () => {
   
   const { selectedModel, setSelectedModel } = usePersistentModel();
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
-  const [isContextExpanded, setIsContextExpanded] = useState(false);
-  const [isFilesExpanded, setIsFilesExpanded] = useState(false);
+  // Removed inline collapses; using side panels instead
+  const [isFilesPanelOpen, setIsFilesPanelOpen] = useState(false);
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
+  const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   
   // File upload state
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -210,6 +278,11 @@ const GlobalChatSidebar: React.FC = () => {
   const [editText, setEditText] = useState('');
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState<number>(56);
+  const [visibleCount, setVisibleCount] = useState<number>(50);
+  const userNearBottomRef = useRef<boolean>(true);
   const editContainerRef = useRef<HTMLDivElement>(null);
   // Note: Message deduplication is now handled by unified messaging system
   const [sidebarWidth, setSidebarWidth] = useState(400);
@@ -434,8 +507,32 @@ const GlobalChatSidebar: React.FC = () => {
   });
 
   // Use unified messages directly - no need for local state syncing
-  const messages = unifiedMessages.filter(msg => msg.sessionId === activeSessionId);
+  const messages = React.useMemo(() => unifiedMessages.filter(msg => msg.sessionId === activeSessionId), [unifiedMessages, activeSessionId]);
 
+
+  // Only auto-scroll when user is near bottom AND new message appended (length or last id changed)
+  const prevMessagesMetaRef = useRef<{ length: number; lastId?: string }>({ length: 0, lastId: undefined });
+  useEffect(() => {
+    const currLength = messages?.length || 0;
+    const lastId = currLength > 0 ? messages[currLength - 1].id : undefined;
+    const { length: prevLength, lastId: prevLastId } = prevMessagesMetaRef.current;
+    const appended = currLength > prevLength || (lastId && lastId !== prevLastId);
+    if (appended && userNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+    prevMessagesMetaRef.current = { length: currLength, lastId };
+  }, [messages]);
+
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const nearTop = el.scrollTop <= 50;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 50;
+    userNearBottomRef.current = nearBottom;
+    if (nearTop) {
+      setVisibleCount((prev) => Math.min((messages?.length || 0), prev + 50));
+    }
+  }, [messages?.length]);
 
   // Listen for AI response typing events from unified messaging system
   useEffect(() => {
@@ -495,10 +592,7 @@ const GlobalChatSidebar: React.FC = () => {
     { value: 'gpt-oss-20b', label: 'Smart', tooltip: 'Intelligent reasoning, complex problem-solving, efficient' },
   ];
 
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  // Removed unconditional smooth scroll; handled by guarded effect above
 
   // Debug uploaded files changes
   useEffect(() => {
@@ -1140,99 +1234,13 @@ const GlobalChatSidebar: React.FC = () => {
   }, [inputMessage, activeSessionId, user?.id, selectedModel, setActiveSessionId, uploadedFiles, sessionContext]);
   */
 
-  // NEW: Unified messaging system-based message sending
-  const handleSendMessage = useCallback(async () => {
-    if ((!inputMessage.trim() && uploadedFiles.length === 0) || !user?.id || isUnifiedProcessing) return;
-
-    console.log('📤 Sidebar: Sending message via unified messaging system');
-    
-    // Show loading state
-    setIsLoadingMessage(true);
-    
-    // Broadcast loading state to other interfaces
-    if (activeSessionId) {
-      unifiedMessageHandler.broadcastLoadingState(activeSessionId, true, 'sidebar');
-    }
-    
-    try {
-      let result;
-      
-      // Determine message type and send accordingly
-      if (uploadedFiles.length > 0) {
-        // File message
-        console.log(`📁 Sidebar: Sending file message with ${uploadedFiles.length} files`);
-        result = await sendUnifiedFileMessage(inputMessage, uploadedFiles as unknown as File[], selectedModel);
-      } else if (sessionContext.length > 0 && hasContextChanged()) {
-        // Context has changed - send context data for initial message, agent will fetch from database for follow-ups
-        console.log(`📋 Sidebar: Context changed (${sessionContext.length} items) - sending context message with tile data`);
-        console.log('🔍 DEBUG: sessionContext state:', sessionContext);
-        console.log('🔍 DEBUG: sessionContext.length:', sessionContext.length);
-        console.log('🔍 DEBUG: hasContextChanged():', hasContextChanged());
-        console.log('🔍 DEBUG: previousContextRef.current:', previousContextRef.current);
-        console.log('🎯 Sidebar: USER SENDING MESSAGE - Context change detection triggered, context data ready to be sent!');
-        console.log('🔍 DEBUG: Sidebar: About to send contextItems to WebSocket:', sessionContext);
-        console.log('🔍 DEBUG: Sidebar: sessionContext state when sending message:', sessionContext);
-        console.log('🔍 DEBUG: Sidebar: sessionContext length when sending message:', sessionContext.length);
-        console.log('🔍 DEBUG: Sidebar: sessionContext content when sending message:', JSON.stringify(sessionContext, null, 2));
-        result = await sendUnifiedContextMessage(inputMessage, sessionContext, selectedModel);
-        // Update previous context after sending
-        previousContextRef.current = [...sessionContext];
-      } else if (activeSessionId) {
-        // Followup message (existing session)
-        console.log('🔄 Sidebar: Sending followup message to existing session');
-        result = await sendUnifiedFollowupMessage(inputMessage, selectedModel);
-      } else {
-        // New message (no session)
-        console.log('🆕 Sidebar: Sending new message (will create session)');
-        result = await sendUnifiedMessage({
-          text: inputMessage,
-          model: selectedModel,
-          type: 'new_message'
-        });
-      }
-      
-      if (result.success) {
-        console.log('✅ Sidebar: Message sent successfully via unified system');
-        
-        // Clear input and files
-        setInputMessage('');
-        setUploadedFiles([]);
-        
-        // Update session ID if a new session was created
-        if (result.sessionId && result.sessionId !== activeSessionId) {
-          console.log('🔄 Sidebar: New session created, updating active session:', result.sessionId);
-          setActiveSessionId(result.sessionId);
-        }
-      } else {
-        console.error('❌ Sidebar: Failed to send message:', result.error);
-        setIsLoadingMessage(false);
-        // Broadcast loading state clearing to other interfaces
-        if (activeSessionId) {
-          unifiedMessageHandler.broadcastLoadingState(activeSessionId, false, 'sidebar');
-        }
-      }
-    } catch (error) {
-      console.error('❌ Sidebar: Error sending message via unified system:', error);
-      setIsLoadingMessage(false);
-      // Broadcast loading state clearing to other interfaces
-      if (activeSessionId) {
-        unifiedMessageHandler.broadcastLoadingState(activeSessionId, false, 'sidebar');
-      }
-    }
-  }, [inputMessage, activeSessionId, user?.id, selectedModel, uploadedFiles, sessionContext, isUnifiedProcessing, sendUnifiedMessage, sendUnifiedContextMessage, sendUnifiedFileMessage, sendUnifiedFollowupMessage, setActiveSessionId]);
-
-  const handleKeyPress = (event: React.KeyboardEvent) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      handleSendMessage();
-    }
-  };
+  // NOTE: Unused MessageInputBar component removed - using SidebarMessageInputBar instead defined at the top
 
   // Cleanup effect for message cancellation
   useEffect(() => {
     return () => {
       // Cancel all pending messages when sidebar unmounts
-      if (activeSessionId) {
+    if (activeSessionId) {
         console.log('🧹 Sidebar: Cleaning up - cancelling all pending messages for session:', activeSessionId);
         unifiedMessageHandler.cancelAllMessagesForSession(activeSessionId);
       }
@@ -1272,7 +1280,7 @@ const GlobalChatSidebar: React.FC = () => {
       document.addEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
-    } else {
+      } else {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = '';
@@ -1291,11 +1299,24 @@ const GlobalChatSidebar: React.FC = () => {
     setSelectedModel(event.target.value);
   };
 
+  // Measure header height to anchor in-panel menus just below it
+  useEffect(() => {
+    const measure = () => {
+      if (headerRef.current) {
+        setHeaderHeight(headerRef.current.offsetHeight);
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
   if (!isVisible) {
     return null;
   }
 
   return (
+    <>
     <Box
       ref={sidebarRef}
       sx={{
@@ -1339,6 +1360,7 @@ const GlobalChatSidebar: React.FC = () => {
       />
       {/* Header */}
       <Box
+        ref={headerRef}
         sx={{
           p: 2,
           borderBottom: '1px solid #374151',
@@ -1366,6 +1388,43 @@ const GlobalChatSidebar: React.FC = () => {
         </Box>
 
         <Box sx={{ display: 'flex', gap: 0.5 }}>
+          {/* Open Files side panel */}
+          <IconButton
+            size="small"
+            onClick={() => {
+              setIsFilesPanelOpen((v) => !v);
+              // ensure other panel closes if desired
+              if (!isFilesPanelOpen) setIsContextPanelOpen(false);
+            }}
+            title={isFilesPanelOpen ? 'Hide Files' : 'Show Files'}
+            sx={{
+              color: '#3b82f6',
+              '&:hover': {
+                color: '#60a5fa',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              },
+            }}
+          >
+            <FileIcon fontSize="small" />
+          </IconButton>
+          {/* Open Context side panel */}
+          <IconButton
+            size="small"
+            onClick={() => {
+              setIsContextPanelOpen((v) => !v);
+              if (!isContextPanelOpen) setIsFilesPanelOpen(false);
+            }}
+            title={isContextPanelOpen ? 'Hide Context' : 'Show Context'}
+            sx={{
+              color: '#10b981',
+              '&:hover': {
+                color: '#34d399',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+              },
+            }}
+          >
+            <ContextIcon fontSize="small" />
+          </IconButton>
           {activeSessionId && (
             <IconButton
               size="small"
@@ -1389,7 +1448,7 @@ const GlobalChatSidebar: React.FC = () => {
               setActiveSessionId(null);
               setCurrentSession(null);
               setSessionContext([]);
-              setInputMessage('');
+              // Input state is local to MessageInputBar; nothing to clear here
               setIsLoadingMessage(false);
               console.log('🗑️ Chat cleared');
             }}
@@ -1422,453 +1481,12 @@ const GlobalChatSidebar: React.FC = () => {
         </Box>
       </Box>
 
-      {/* Context Items */}
-      {sessionContext.length > 0 && (
-        <Box sx={{ borderBottom: '1px solid #374151' }}>
-          <Box
-            sx={{
-              p: 1,
-              display: 'flex',
-              alignItems: 'center',
-              cursor: 'pointer',
-              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
-            }}
-            onClick={() => setIsContextExpanded(!isContextExpanded)}
-          >
-            <Typography variant="body2" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-              Context ({sessionContext.length} items)
-            </Typography>
-            {isContextExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-          </Box>
-          <Collapse in={isContextExpanded}>
-            <List dense sx={{ py: 0 }}>
-              {sessionContext.map((item, index) => (
-                <ListItem 
-                  key={index} 
-                  sx={{ 
-                    py: 0.5, 
-                    px: 1,
-                    '&:hover': {
-                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                      '& .remove-context-btn': {
-                        opacity: 1,
-                      }
-                    }
-                  }}
-                  secondaryAction={
-                    <IconButton
-                      edge="end"
-                      size="small"
-                      className="remove-context-btn"
-                      onClick={async () => {
-                        const newContext = sessionContext.filter((_, i) => i !== index);
-                        setSessionContext(newContext);
-                        console.log(`🗑️ Removed context item: ${item.title}`);
-                        
-                        // Notify ChatPage of context change
-                        if (activeSessionId) {
-                          const syncEvent = new CustomEvent('session-context-updated', {
-                            detail: { sessionId: activeSessionId, contextItems: newContext }
-                          });
-                          window.dispatchEvent(syncEvent);
-                        }
-                        
-                        // Persist the updated context to backend immediately
-                        if (activeSessionId && user?.id) {
-                          try {
-                            await sessionManagementAPI.updateSession(activeSessionId, user.id, {
-                              session_variables: {
-                                context_items: newContext,
-                                context_added_at: Date.now(),
-                              }
-                            });
-                            console.log('✅ Updated context in backend');
-                          } catch (error) {
-                            console.error('❌ Failed to update context in backend:', error);
-                          }
-                        }
-                      }}
-                      sx={{ 
-                        opacity: 0,
-                        transition: 'opacity 0.2s',
-                        color: '#dc2626',
-                        '&:hover': { color: '#ef4444' }
-                      }}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  }
-                >
-                  <ListItemText
-                    primary={item.title}
-                    secondary={item.subtitle}
-                    primaryTypographyProps={{
-                      fontSize: '0.75rem',
-                      color: '#ffffff',
-                    }}
-                    secondaryTypographyProps={{
-                      fontSize: '0.65rem',
-                      color: '#9ca3af',
-                    }}
-                  />
-                </ListItem>
-              ))}
-            </List>
-          </Collapse>
-        </Box>
-      )}
+      {/* Context Items (moved below messages to match ChatPage layout) */}
 
-      {/* Files Section - User Files and Agent Files */}
-      {((currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0) || 
-        (currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0)) ? (
-        <Box sx={{ borderBottom: '1px solid #374151' }}>
-          <Box
-            sx={{
-              p: 1,
-              display: 'flex',
-              alignItems: 'center',
-              cursor: 'pointer',
-              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
-            }}
-            onClick={() => setIsFilesExpanded(!isFilesExpanded)}
-          >
-            <Typography variant="body2" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-              Files
-            </Typography>
-            {isFilesExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-          </Box>
-          <Collapse in={isFilesExpanded}>
-            <Box sx={{ 
-              py: 1, 
-              px: 1, 
-              maxHeight: 200, 
-              overflow: 'auto',
-              '&::-webkit-scrollbar': {
-                width: '6px',
-              },
-              '&::-webkit-scrollbar-track': {
-                backgroundColor: 'rgba(55, 65, 81, 0.3)',
-              },
-              '&::-webkit-scrollbar-thumb': {
-                backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                borderRadius: '3px',
-              },
-              '&::-webkit-scrollbar-thumb:hover': {
-                backgroundColor: 'rgba(59, 130, 246, 0.7)',
-              },
-            }}>
-              {/* User Files Section */}
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle2" sx={{ 
-                  fontWeight: 600, 
-                  color: '#3b82f6', 
-                  mb: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 0.5,
-                  fontSize: '0.75rem'
-                }}>
-                  <PersonIcon fontSize="small" />
-                  User Files ({currentSession?.session_variables?.uploaded_files?.length || 0})
-                </Typography>
-                
-                {currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0 ? (
-                  <List dense sx={{ py: 0 }}>
-                    {currentSession.session_variables.uploaded_files.map((file: any, index: number) => (
-                      <ListItem 
-                        key={index} 
-                        sx={{ 
-                          py: 0.5, 
-                          px: 1,
-                          '&:hover': {
-                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                            '& .remove-file-btn': {
-                              opacity: 1,
-                            }
-                          }
-                        }}
-                        secondaryAction={
-                          <Box sx={{ display: 'flex', gap: 0.5 }}>
-                            <IconButton
-                              size="small"
-                              className="remove-file-btn"
-                              onClick={async () => {
-                                if (!activeSessionId || !user?.id) {
-                                  console.error('Missing session ID or user ID for file download');
-                                  return;
-                                }
+      {/* Files Section moved below messages to match ChatPage layout */}
 
-                                try {
-                                  console.log('📥 Downloading file:', file.filename);
-                                  
-                                  // Request fresh presigned URL from file return Lambda
-                                  const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                                  const response = await fetch(`${apiUrl}/file-download`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                      user_id: user.id,
-                                      session_id: activeSessionId,
-                                      filename: file.filename,
-                                      s3_key: file.s3_key
-                                    })
-                                  });
-                                  
-                                  if (!response.ok) {
-                                    throw new Error(`Download request failed: ${response.status}`);
-                                  }
-                                  
-                                  const { download_url } = await response.json();
-                                  
-                                  // Create download link and trigger download in new tab
-                                  const link = document.createElement('a');
-                                  link.href = download_url;
-                                  link.download = file.filename;
-                                  link.target = '_blank';  // Open in new tab to avoid redirect issues
-                                  document.body.appendChild(link);
-                                  link.click();
-                                  document.body.removeChild(link);
-                                  
-                                  console.log('✅ File download started');
-                                } catch (error) {
-                                  console.error('❌ Download failed:', error);
-                                }
-                              }}
-                              sx={{ 
-                                opacity: 0,
-                                transition: 'opacity 0.2s',
-                                color: '#3b82f6',
-                                '&:hover': { color: '#60a5fa' }
-                              }}
-                            >
-                              <DownloadIcon fontSize="small" />
-                            </IconButton>
-                            <IconButton
-                              edge="end"
-                              size="small"
-                              className="remove-file-btn"
-                              onClick={async () => {
-                                const newFiles = currentSession.session_variables?.uploaded_files?.filter((_: any, i: number) => i !== index) || [];
-                                
-                                // Update the local session state
-                                const updatedSession = {
-                                  ...currentSession,
-                                  session_variables: {
-                                    ...currentSession.session_variables,
-                                    uploaded_files: newFiles
-                                  }
-                                };
-                                setCurrentSession(updatedSession);
-                                console.log(`🗑️ Removed file: ${file.filename}`);
-                                
-                                // Persist the updated files to backend immediately
-                                if (activeSessionId && user?.id) {
-                                  try {
-                                    await sessionManagementAPI.updateSession(activeSessionId, user.id, {
-                                      session_variables: {
-                                        ...currentSession.session_variables,
-                                        uploaded_files: newFiles,
-                                        files_added_at: Date.now(),
-                                      }
-                                    });
-                                    console.log('✅ Updated files in backend');
-                                  } catch (error) {
-                                    console.error('❌ Failed to update files in backend:', error);
-                                  }
-                                }
-                              }}
-                              sx={{ 
-                                opacity: 0,
-                                transition: 'opacity 0.2s',
-                                color: '#dc2626',
-                                '&:hover': { color: '#ef4444' }
-                              }}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Box>
-                        }
-                      >
-                        <ListItemText
-                          primary={file.filename}
-                          secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type}`}
-                          primaryTypographyProps={{
-                            fontSize: '0.75rem',
-                            color: '#ffffff',
-                          }}
-                          secondaryTypographyProps={{
-                            fontSize: '0.65rem',
-                            color: '#9ca3af',
-                          }}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
-                ) : (
-                  <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem', fontStyle: 'italic' }}>
-                    No user files uploaded
-                  </Typography>
-                )}
-              </Box>
-
-              {/* Agent Files Section */}
-              <Box sx={{ mb: 1 }}>
-                <Typography variant="subtitle2" sx={{ 
-                  fontWeight: 600, 
-                  color: '#22c55e', 
-                  mb: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 0.5,
-                  fontSize: '0.75rem'
-                }}>
-                  <SmartToyIcon fontSize="small" />
-                  Agent Files ({currentSession?.session_variables?.agent_files?.length || 0})
-                </Typography>
-                
-                {currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0 ? (
-                  <List dense sx={{ py: 0 }}>
-                    {currentSession.session_variables.agent_files.map((file: any, index: number) => (
-                      <ListItem 
-                        key={index} 
-                        sx={{ 
-                          py: 0.5, 
-                          px: 1,
-                          backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                          border: '1px solid rgba(34, 197, 94, 0.3)',
-                          borderRadius: '4px',
-                          mb: 0.5,
-                          '&:hover': {
-                            backgroundColor: 'rgba(34, 197, 94, 0.15)',
-                            '& .remove-file-btn': {
-                              opacity: 1,
-                            }
-                          }
-                        }}
-                        secondaryAction={
-                          <Box sx={{ display: 'flex', gap: 0.5 }}>
-                            <IconButton
-                              size="small"
-                              className="remove-file-btn"
-                              onClick={async () => {
-                                if (!activeSessionId || !user?.id) {
-                                  console.error('Missing session ID or user ID for file download');
-                                  return;
-                                }
-
-                                try {
-                                  console.log('📥 Downloading agent file:', file.filename);
-                                  
-                                  // Request fresh presigned URL from file return Lambda
-                                  const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                                  const response = await fetch(`${apiUrl}/file-download`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                      user_id: user.id,
-                                      session_id: activeSessionId,
-                                      filename: file.filename,
-                                      s3_key: file.s3_key
-                                    })
-                                  });
-                                  
-                                  if (!response.ok) {
-                                    throw new Error(`Download request failed: ${response.status}`);
-                                  }
-                                  
-                                  const { download_url } = await response.json();
-                                  
-                                  // Create download link and trigger download in new tab
-                                  const link = document.createElement('a');
-                                  link.href = download_url;
-                                  link.download = file.filename;
-                                  link.target = '_blank';  // Open in new tab to avoid redirect issues
-                                  document.body.appendChild(link);
-                                  link.click();
-                                  document.body.removeChild(link);
-                                  
-                                  console.log('✅ Agent file download started');
-                                } catch (error) {
-                                  console.error('❌ Agent file download failed:', error);
-                                }
-                              }}
-                              sx={{ 
-                                opacity: 0,
-                                transition: 'opacity 0.2s',
-                                color: '#22c55e',
-                                '&:hover': { color: '#16a34a' }
-                              }}
-                            >
-                              <DownloadIcon fontSize="small" />
-                            </IconButton>
-                            <IconButton
-                              edge="end"
-                              size="small"
-                              className="remove-file-btn"
-                              onClick={async () => {
-                                const newFiles = currentSession.session_variables?.agent_files?.filter((_: any, i: number) => i !== index) || [];
-                                
-                                // Update the session using the hook function
-                                if (activeSessionId) {
-                                  updateSessionAgentFiles(activeSessionId, newFiles);
-                                }
-                                console.log(`🗑️ Removed agent file: ${file.filename}`);
-                                
-                                // Persist the updated files to backend immediately
-                                if (activeSessionId && user?.id) {
-                                  try {
-                                    await sessionManagementAPI.updateSession(activeSessionId, user.id, {
-                                      session_variables: {
-                                        ...currentSession.session_variables,
-                                        agent_files: newFiles,
-                                      }
-                                    });
-                                    console.log('✅ Updated agent files in backend');
-                                  } catch (error) {
-                                    console.error('❌ Failed to update agent files in backend:', error);
-                                  }
-                                }
-                              }}
-                              sx={{ 
-                                opacity: 0,
-                                transition: 'opacity 0.2s',
-                                color: '#dc2626',
-                                '&:hover': { color: '#ef4444' }
-                              }}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Box>
-                        }
-                      >
-                        <ListItemText
-                          primary={file.filename}
-                          secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type} • Generated`}
-                          primaryTypographyProps={{
-                            fontSize: '0.75rem',
-                            color: '#ffffff',
-                          }}
-                          secondaryTypographyProps={{
-                            fontSize: '0.65rem',
-                            color: '#9ca3af',
-                          }}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
-                ) : (
-                  <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem', fontStyle: 'italic' }}>
-                    No agent files generated
-                  </Typography>
-                )}
-              </Box>
-            </Box>
-          </Collapse>
-        </Box>
-      ) : null}
-
-      {/* Messages */}
-      <Box
+      {/* Messages - fixed height container that won't resize when menus expand */}
+      <Box ref={messagesContainerRef} onScroll={handleMessagesScroll}
         sx={{
           flex: 1,
           overflowY: 'auto',
@@ -1876,6 +1494,7 @@ const GlobalChatSidebar: React.FC = () => {
           display: 'flex',
           flexDirection: 'column',
           gap: 1,
+          minHeight: 0, // Important: allows flex child to shrink below content size
           '&::-webkit-scrollbar': {
             width: '6px',
           },
@@ -1891,7 +1510,7 @@ const GlobalChatSidebar: React.FC = () => {
           },
         }}
       >
-        {messages.map((message, messageIndex) => (
+        {(messages.slice(Math.max(0, messages.length - visibleCount))).map((message, messageIndex) => (
           <Box
             key={message.id}
             sx={{
@@ -2094,9 +1713,12 @@ const GlobalChatSidebar: React.FC = () => {
         <div ref={messagesEndRef} />
       </Box>
 
+      {/* Files/Context inline sections removed in favor of side panels */}
+
       {/* Input Area */}
       <Box
         sx={{
+          flexShrink: 0,
           p: 2,
           borderTop: '1px solid #374151',
           backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -2208,58 +1830,222 @@ const GlobalChatSidebar: React.FC = () => {
               <AttachFileIcon />
             </IconButton>
           </Tooltip>
-          <TextField
-            fullWidth
-            multiline
-            maxRows={3}
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type your message..."
+          <SidebarMessageInputBar
             disabled={isLoadingMessage}
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                border: '1px solid #374151',
-                borderRadius: 2,
-                '&:hover': {
-                  borderColor: '#6b7280',
-                },
-                '&.Mui-focused': {
-                  borderColor: '#3b82f6',
-                },
-              },
-              '& .MuiOutlinedInput-input': {
-                color: '#ffffff',
-                fontSize: '0.875rem',
-                '&::placeholder': {
-                  color: '#9ca3af',
-                  opacity: 1,
-                },
-              },
+            placeholder="Type your message..."
+            onSend={async (text: string) => {
+              // Use the same logic as the inline input bar previously
+              if ((!text.trim() && uploadedFiles.length === 0) || !user?.id || isUnifiedProcessing) return;
+              setIsLoadingMessage(true);
+              if (activeSessionId) {
+                unifiedMessageHandler.broadcastLoadingState(activeSessionId, true, 'sidebar');
+              }
+              try {
+                let result;
+                if (uploadedFiles.length > 0) {
+                  result = await sendUnifiedFileMessage(text, uploadedFiles as unknown as File[], selectedModel);
+                } else if (sessionContext.length > 0 && hasContextChanged()) {
+                  result = await sendUnifiedContextMessage(text, sessionContext, selectedModel, activeSessionId || undefined);
+                  previousContextRef.current = [...sessionContext];
+                } else if (activeSessionId) {
+                  result = await sendUnifiedFollowupMessage(text, selectedModel);
+                } else {
+                  result = await sendUnifiedMessage({ text, model: selectedModel, type: 'new_message' });
+                }
+                if (!result.success) {
+                  setIsLoadingMessage(false);
+                  if (activeSessionId) {
+                    unifiedMessageHandler.broadcastLoadingState(activeSessionId, false, 'sidebar');
+                  }
+                } else {
+                  setUploadedFiles([]);
+                }
+              } catch (e) {
+                setIsLoadingMessage(false);
+                if (activeSessionId) {
+                  unifiedMessageHandler.broadcastLoadingState(activeSessionId, false, 'sidebar');
+                }
+              }
             }}
           />
-          <IconButton
-            onClick={handleSendMessage}
-            disabled={isLoadingMessage || (!inputMessage.trim() && uploadedFiles.length === 0)}
-            sx={{
-              color: '#3b82f6',
-              backgroundColor: 'rgba(59, 130, 246, 0.1)',
-              '&:hover': {
-                backgroundColor: 'rgba(59, 130, 246, 0.2)',
-              },
-              '&:disabled': {
-                color: '#6b7280',
-                backgroundColor: 'rgba(55, 65, 81, 0.3)',
-              },
-            }}
-          >
-            <SendIcon />
-          </IconButton>
         </Box>
 
       </Box>
     </Box>
+    {/* Files Side Panel */}
+    <Drawer
+      anchor="right"
+      open={isFilesPanelOpen}
+      variant="persistent"
+      PaperProps={{
+        sx: {
+          width: 360,
+          top: `${64 + headerHeight}px`,
+          height: `calc((100vh - ${64 + headerHeight}px) / 2)`,
+          backgroundColor: 'rgba(15, 23, 42, 0.98)',
+          borderLeft: '1px solid #374151',
+        }
+      }}
+      ModalProps={{ keepMounted: true }}
+      sx={{ zIndex: 1300 }}
+    >
+      <Box sx={{ p: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #374151' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <FileIcon sx={{ color: '#3b82f6', fontSize: '1rem' }} />
+          <Typography variant="body2" sx={{ color: '#3b82f6', fontSize: '0.85rem', fontWeight: 600 }}>Files</Typography>
+        </Box>
+        <IconButton size="small" onClick={() => setIsFilesPanelOpen(false)} sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}>
+          <CloseIcon fontSize="small" />
+          </IconButton>
+      </Box>
+      <Box sx={{ p: 1, overflow: 'auto', '&::-webkit-scrollbar': { width: '6px' }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' }, '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' } }}>
+        {/* User Files */}
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#3b82f6', mb: 1, display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.8rem' }}>
+            <PersonIcon fontSize="small" />
+            User Files ({currentSession?.session_variables?.uploaded_files?.length || 0})
+          </Typography>
+          {(currentSession?.session_variables?.uploaded_files?.length ?? 0) > 0 ? (
+            <List dense sx={{ py: 0 }}>
+              {(currentSession?.session_variables?.uploaded_files ?? []).map((file: any, index: number) => (
+                <ListItem key={index} sx={{ py: 0.5, px: 1, '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', '& .remove-file-btn': { opacity: 1 } } }}
+                  secondaryAction={
+                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                      <IconButton size="small" className="remove-file-btn" onClick={async () => {
+                        if (!activeSessionId || !user?.id) return;
+                        try {
+                          const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                          const response = await fetch(`${apiUrl}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: activeSessionId, filename: file.filename, s3_key: file.s3_key }) });
+                          if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
+                          const { download_url } = await response.json();
+                          const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                        } catch (error) { console.error('❌ Download failed:', error); }
+                      }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#3b82f6', '&:hover': { color: '#60a5fa' } }}>
+                        <DownloadIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton edge="end" size="small" className="remove-file-btn" onClick={async () => {
+                        const newFiles = (currentSession?.session_variables?.uploaded_files ?? []).filter((_: any, i: number) => i !== index);
+                        const updatedSession = currentSession ? ({ ...currentSession, session_variables: { ...currentSession.session_variables, uploaded_files: newFiles } } as ChatSession) : null;
+                        setCurrentSession(updatedSession);
+                        if (activeSessionId && user?.id) {
+                          try {
+                            await sessionManagementAPI.updateSession(activeSessionId, user.id, { session_variables: { ...(currentSession?.session_variables || {}), uploaded_files: newFiles, files_added_at: Date.now() } });
+                          } catch (error) { console.error('❌ Failed to update files in backend:', error); }
+                        }
+                      }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', '&:hover': { color: '#ef4444' } }}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  }>
+                  <ListItemText primary={file.filename} secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type}`} primaryTypographyProps={{ fontSize: '0.8rem', color: '#ffffff' }} secondaryTypographyProps={{ fontSize: '0.7rem', color: '#9ca3af' }} />
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem', fontStyle: 'italic' }}>No user files uploaded</Typography>
+          )}
+        </Box>
+
+        {/* Agent Files */}
+        <Box sx={{ mb: 1 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#22c55e', mb: 1, display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.8rem' }}>
+            <SmartToyIcon fontSize="small" />
+            Agent Files ({currentSession?.session_variables?.agent_files?.length || 0})
+          </Typography>
+          {(currentSession?.session_variables?.agent_files?.length ?? 0) > 0 ? (
+            <List dense sx={{ py: 0 }}>
+              {(currentSession?.session_variables?.agent_files ?? []).map((file: any, index: number) => (
+                <ListItem key={index} sx={{ py: 0.5, px: 1, backgroundColor: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '4px', mb: 0.5, '&:hover': { backgroundColor: 'rgba(34, 197, 94, 0.15)', '& .remove-file-btn': { opacity: 1 } } }}
+                  secondaryAction={
+                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                      <IconButton size="small" className="remove-file-btn" onClick={async () => {
+                        if (!activeSessionId || !user?.id) return;
+                        try {
+                          const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                          const response = await fetch(`${apiUrl}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: activeSessionId, filename: file.filename, s3_key: file.s3_key }) });
+                          if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
+                          const { download_url } = await response.json();
+                          const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                        } catch (error) { console.error('❌ Agent file download failed:', error); }
+                      }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#22c55e', '&:hover': { color: '#16a34a' } }}>
+                        <DownloadIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton edge="end" size="small" className="remove-file-btn" onClick={async () => {
+                        const newFiles = (currentSession?.session_variables?.agent_files ?? []).filter((_: any, i: number) => i !== index);
+                        if (activeSessionId) updateSessionAgentFiles(activeSessionId, newFiles);
+                        if (activeSessionId && user?.id) {
+                          try {
+                            await sessionManagementAPI.updateSession(activeSessionId, user.id, { session_variables: { ...(currentSession?.session_variables || {}), agent_files: newFiles } });
+                          } catch (error) { console.error('❌ Failed to update agent files in backend:', error); }
+                        }
+                      }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', '&:hover': { color: '#ef4444' } }}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+      </Box>
+                  }>
+                  <ListItemText primary={file.filename} secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type} • Generated`} primaryTypographyProps={{ fontSize: '0.8rem', color: '#ffffff' }} secondaryTypographyProps={{ fontSize: '0.7rem', color: '#9ca3af' }} />
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem', fontStyle: 'italic' }}>No agent files generated</Typography>
+          )}
+    </Box>
+      </Box>
+    </Drawer>
+
+    {/* Context Side Panel */}
+    <Drawer
+      anchor="right"
+      open={isContextPanelOpen}
+      variant="persistent"
+      PaperProps={{
+        sx: {
+          width: 320,
+          top: `${64 + headerHeight}px`,
+          height: `calc((100vh - ${64 + headerHeight}px) / 2)`,
+          backgroundColor: 'rgba(15, 23, 42, 0.98)',
+          borderLeft: '1px solid #374151',
+        }
+      }}
+      ModalProps={{ keepMounted: true }}
+      sx={{ zIndex: 1300 }}
+    >
+      <Box sx={{ p: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #374151' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <ContextIcon sx={{ color: '#10b981', fontSize: '1rem' }} />
+          <Typography variant="body2" sx={{ color: '#10b981', fontSize: '0.85rem', fontWeight: 600 }}>Context</Typography>
+        </Box>
+        <IconButton size="small" onClick={() => setIsContextPanelOpen(false)} sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </Box>
+      <Box sx={{ p: 1, overflow: 'auto', '&::-webkit-scrollbar': { width: '6px' }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' }, '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' } }}>
+        <List dense sx={{ py: 0, px: 1 }}>
+          {sessionContext.map((item, index) => (
+            <ListItem key={index} sx={{ py: 0.5, px: 1, borderRadius: '4px', display: 'flex', alignItems: 'center', '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', '& .remove-context-btn': { opacity: 1 } } }}>
+              <IconButton size="small" className="remove-context-btn" onClick={async () => {
+                const newContext = sessionContext.filter((_, i) => i !== index);
+                setSessionContext(newContext);
+                if (activeSessionId) {
+                  const syncEvent = new CustomEvent('session-context-updated', { detail: { sessionId: activeSessionId, contextItems: newContext } });
+                  window.dispatchEvent(syncEvent);
+                }
+                if (activeSessionId && user?.id) {
+                  try {
+                    await sessionManagementAPI.updateSession(activeSessionId, user.id, { session_variables: { context_items: newContext, context_added_at: Date.now() } });
+                  } catch (error) { console.error('❌ Failed to update context in backend:', error); }
+                }
+              }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', mr: 1, '&:hover': { color: '#ef4444' } }}>
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+              <ListItemText primary={item.title} secondary={item.subtitle} primaryTypographyProps={{ fontSize: '0.8rem', color: '#ffffff' }} secondaryTypographyProps={{ fontSize: '0.7rem', color: '#9ca3af' }} />
+            </ListItem>
+          ))}
+        </List>
+      </Box>
+    </Drawer>
+    </>
   );
 };
 

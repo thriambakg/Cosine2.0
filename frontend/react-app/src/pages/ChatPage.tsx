@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatPersistence } from '@/hooks/useChatPersistence';
@@ -200,6 +200,73 @@ const FilePreview = ({ children, ...props }: any) => (
   </Box>
 );
 
+// Hoisted input bar to preserve local state across parent re-renders
+const ChatMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabled: boolean; placeholder: string; onSend: (text: string) => void }) => {
+  const [value, setValue] = useState('');
+  const onSendClick = () => {
+    if (value.trim()) {
+      onSend(value);
+      setValue('');
+    }
+  };
+  const onKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSendClick();
+    }
+  };
+  return (
+    <>
+      <TextField
+        fullWidth
+        multiline
+        maxRows={3}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyPress={onKeyPress}
+        placeholder={placeholder}
+        disabled={disabled}
+        sx={{
+          '& .MuiOutlinedInput-root': {
+            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+            color: 'white',
+            '& fieldset': {
+              borderColor: '#374151',
+            },
+            '&:hover fieldset': {
+              borderColor: '#6b7280',
+            },
+            '&.Mui-focused fieldset': {
+              borderColor: '#3b82f6',
+            },
+          },
+          '& .MuiInputBase-input::placeholder': {
+            color: '#9ca3af',
+            opacity: 1,
+          },
+        }}
+      />
+      <IconButton
+        onClick={onSendClick}
+        disabled={disabled || !value.trim()}
+        sx={{
+          color: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          '&:hover': {
+            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+          },
+          '&:disabled': {
+            color: '#6b7280',
+            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+          },
+        }}
+      >
+        <SendIcon />
+      </IconButton>
+    </>
+  );
+});
+
 export default function ChatPage() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
@@ -224,7 +291,6 @@ export default function ChatPage() {
   
   // Use messages from current session
   const messages = currentSession?.messages || [];
-  const [inputMessage, setInputMessage] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const { selectedModel, setSelectedModel } = usePersistentModel();
   const [missedResponseNotification] = useState<string | null>(null);
@@ -472,6 +538,9 @@ export default function ChatPage() {
   
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState<number>(50);
+  const userNearBottomRef = useRef<boolean>(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Clear loading state when session is deleted or changed
@@ -800,9 +869,25 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Only auto-scroll when user is near the bottom and a new message is appended
   useEffect(() => {
-    scrollToBottom();
+    if (!messages || messages.length === 0) return;
+    if (userNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
   }, [messages]);
+
+  // Track user scroll position and lazy-load older messages on scroll-up
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const nearTop = el.scrollTop <= 50;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 50;
+    userNearBottomRef.current = nearBottom;
+    if (nearTop) {
+      setVisibleCount((prev) => Math.min((messages?.length || 0), prev + 50));
+    }
+  }, [messages?.length]);
 
   // Remove auto-creation - let user start typing first
   // Sessions will be created when user actually sends a message
@@ -1157,13 +1242,12 @@ export default function ChatPage() {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || getCurrentSessionLoading() || isUnifiedProcessing) return;
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim() || getCurrentSessionLoading() || isUnifiedProcessing) return;
 
     console.log('📤 ChatPage: Sending message via unified messaging system');
     
-    // Clear input and files immediately when sending
-    setInputMessage('');
+    // Clear files immediately when sending (text input is local to child)
     if (uploadedFiles.length > 0) {
       console.log('📁 ChatPage: Clearing uploaded files immediately on send');
       setUploadedFiles([]);
@@ -1187,7 +1271,7 @@ export default function ChatPage() {
       if (uploadedFiles.length > 0) {
         // File message
         console.log(`📁 ChatPage: Sending file message with ${uploadedFiles.length} files`);
-        result = await sendUnifiedFileMessage(inputMessage, uploadedFiles as unknown as File[], selectedModel);
+        result = await sendUnifiedFileMessage(text, uploadedFiles as unknown as File[], selectedModel);
       } else if (sessionContext.length > 0 && hasContextChanged()) {
         // Context has changed - send context data for initial message, agent will fetch from database for follow-ups
         console.log(`📋 ChatPage: Context changed (${sessionContext.length} items) - sending context message with tile data`);
@@ -1200,18 +1284,18 @@ export default function ChatPage() {
         console.log('🔍 DEBUG: ChatPage: sessionContext state when sending message:', sessionContext);
         console.log('🔍 DEBUG: ChatPage: sessionContext length when sending message:', sessionContext.length);
         console.log('🔍 DEBUG: ChatPage: sessionContext content when sending message:', JSON.stringify(sessionContext, null, 2));
-        result = await sendUnifiedContextMessage(inputMessage, sessionContext, selectedModel);
+        result = await sendUnifiedContextMessage(text, sessionContext, selectedModel);
         // Update previous context after sending
         previousContextRef.current = [...sessionContext];
       } else if (currentSession?.session_id) {
         // Followup message (existing session)
         console.log('🔄 ChatPage: Sending followup message to existing session');
-        result = await sendUnifiedFollowupMessage(inputMessage, selectedModel);
+        result = await sendUnifiedFollowupMessage(text, selectedModel);
       } else {
         // New message (no session)
         console.log('🆕 ChatPage: Sending new message (will create session)');
         result = await sendUnifiedMessage({
-          text: inputMessage,
+          text,
             model: selectedModel,
           type: 'new_message'
         });
@@ -1266,12 +1350,6 @@ export default function ChatPage() {
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
 
 
   if (isLoading) {
@@ -1640,7 +1718,7 @@ export default function ChatPage() {
         </Box>
 
         {/* Messages */}
-        <Box sx={{ 
+        <Box ref={messagesContainerRef} onScroll={handleMessagesScroll} sx={{ 
           flex: 1, 
           overflow: 'auto', 
           p: 2, 
@@ -1682,7 +1760,7 @@ export default function ChatPage() {
                 </Typography>
               </Box>
             )}
-            {messages.map((message, messageIndex) => (
+            {(messages.slice(Math.max(0, messages.length - visibleCount))).map((message, messageIndex) => (
               <Box key={message.id} display="flex" gap={2}>
                 <Avatar sx={{ bgcolor: message.sender === 'user' ? '#3b82f6' : '#374151', width: 32, height: 32 }}>
                   {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}
@@ -2373,52 +2451,11 @@ export default function ChatPage() {
                 <AttachFileIcon />
               </IconButton>
             </Tooltip>
-            <TextField
-              fullWidth
-              multiline
-              maxRows={3}
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask me about stocks, crypto, portfolio optimization..."
+            <ChatMessageInputBar
               disabled={getCurrentSessionLoading()}
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                  color: 'white',
-                  '& fieldset': {
-                    borderColor: '#374151',
-                  },
-                  '&:hover fieldset': {
-                    borderColor: '#6b7280',
-                  },
-                  '&.Mui-focused fieldset': {
-                    borderColor: '#3b82f6',
-                  },
-                },
-                '& .MuiInputBase-input::placeholder': {
-                  color: '#9ca3af',
-                  opacity: 1,
-                },
-              }}
+              placeholder="Ask me about stocks, crypto, portfolio optimization..."
+              onSend={handleSendMessage}
             />
-            <IconButton
-              onClick={handleSendMessage}
-              disabled={getCurrentSessionLoading() || !inputMessage.trim()}
-              sx={{
-                color: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                '&:hover': {
-                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                },
-                '&:disabled': {
-                  color: '#6b7280',
-                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                },
-              }}
-            >
-              <SendIcon />
-            </IconButton>
           </Box>
         </GlassCard>
       </Box>
