@@ -795,26 +795,17 @@ Context Items Available: {len(context_items)} items
             logger.info(f"🔍 DEBUG: Extracted and cleaned response content: {response_content}")
             logger.info(f"🔍 DEBUG: Response content type: {type(response_content)}")
             
-            # Update session context with new conversation
-            if session_context and user_id:
-                logger.info(f"🔍 DEBUG: Updating session context for session {session_id}")
-                # Use original_user_message for display if provided (context-enriched case)
-                # Otherwise use user_message (normal case)
-                message_for_display = original_user_message if original_user_message else user_message
-                logger.info(f"📌 Saving message for display: '{message_for_display[:100]}...'")
-                
-                # Extract file information from event body if available
-                files = event_body.get('uploaded_files', [])
-                
-                update_success = session_manager.update_session_context(
-                    session_id, user_id, message_for_display, response_content, model=model, files=files
-                )
-                if update_success:
-                    logger.info(f"✅ Successfully updated session context for session {session_id}")
-                else:
-                    logger.error(f"❌ Failed to update session context for session {session_id}")
+            # WebSocket processor now handles all user message saving
+            # Chat agent only processes and generates responses - no message saving needed
+            is_edit = event_body.get('is_edit', False)
+            edited_message_id = event_body.get('edited_message_id')
+            
+            if is_edit:
+                logger.info(f"✏️ EDIT: This is an edit message - user message already saved by WebSocket processor")
+                logger.info(f"✏️ EDIT: Edited message ID: {edited_message_id}")
             else:
-                logger.warning(f"⚠️ Cannot update session context - session_context: {session_context is not None}, user_id: {user_id is not None}")
+                logger.info(f"📌 Normal message - user message already saved by WebSocket processor")
+                logger.info(f"📌 Chat agent only processes and generates response (no message saving)")
             
             # Publish response to SNS for async delivery
             try:

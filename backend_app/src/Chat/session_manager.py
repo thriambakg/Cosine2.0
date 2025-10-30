@@ -179,22 +179,30 @@ class SessionManager:
                              model: Optional[str] = None,
                              files: Optional[List[Dict[str, Any]]] = None) -> bool:
         """
-        Update session context with new conversation data
+        Update session context with session variables only
+        
+        NOTE: This method NO LONGER saves user messages or agent responses.
+        - User messages are saved by the WebSocket processor
+        - Agent responses are saved by the SNS handler (via WebSocket processor)
+        
+        This method is kept for backward compatibility and only updates session_variables if provided.
         
         Args:
             session_id: Unique identifier for the session
             user_id: User ID for validation
-            new_message: User's new message
-            agent_response: Agent's response
-            updated_variables: Updated session variables
-            model: Model used to process the message
-            files: Optional list of file metadata for display
+            new_message: (DEPRECATED - ignored) User's message is saved by WebSocket processor
+            agent_response: (DEPRECATED - ignored) Agent response is saved by SNS handler
+            updated_variables: Updated session variables (optional)
+            model: (DEPRECATED - ignored)
+            files: (DEPRECATED - ignored)
             
         Returns:
             success: True if update was successful
         """
         try:
             logger.info(f"🔍 DEBUG: update_session_context called for session {session_id}, user {user_id}")
+            logger.info(f"📌 NOTE: User messages and agent responses are now saved by WebSocket processor/SNS handler")
+            logger.info(f"📌 This method only updates session_variables if provided")
             
             # Validate session access
             if not self._validate_session_access(session_id, user_id):
@@ -204,79 +212,24 @@ class SessionManager:
             logger.info(f"✅ Session validation passed for session {session_id}")
             timestamp = int(time.time())
             
-            # Get current session
-            response = self.chat_sessions_table.get_item(
-                Key={
-                    'user_id': user_id,
-                    'session_id': session_id
-                }
-            )
-            
-            logger.info(f"🔍 DEBUG: Session get_item response: {'Item' in response}")
-            if 'Item' not in response:
-                logger.error(f"❌ Session {session_id} not found for user {user_id}")
-                return False
-            
-            logger.info(f"✅ Session {session_id} found for user {user_id}")
-            
-            session_item = response['Item']
-            messages = session_item.get('messages', [])
-            
-            # Add user message
-            if new_message:
-                user_message = {
-                    'id': f'msg_{timestamp}_{uuid.uuid4().hex[:8]}',
-                    'text': new_message,
-                    'sender': 'user',
-                    'timestamp': timestamp,
-                    'message_type': 'text'
-                }
-                
-                # Add file information if provided
-                if files:
-                    # Convert uploaded files to frontend format
-                    file_metadata = []
-                    for file_info in files:
-                        file_metadata.append({
-                            'name': file_info.get('filename', 'Unknown'),
-                            'size': file_info.get('file_size', 0),
-                            'type': file_info.get('content_type', 'application/octet-stream')
-                        })
-                    user_message['files'] = file_metadata
-                    logger.info(f"✅ Added {len(file_metadata)} files to user message")
-                
-                messages.append(user_message)
-                logger.info(f"✅ Added user message: {user_message['id']}")
-            
-            # Note: Agent responses are handled by the WebSocket processor via SNS
-            # The session manager should only handle user messages to avoid duplicates
-            
-            logger.info(f"🔍 DEBUG: Total messages after adding: {len(messages)}")
-            
-            # Update session with new messages
-            update_expression_parts = ['SET messages = :messages, message_count = :count, last_updated = :timestamp']
-            expression_attribute_values = {
-                ':messages': messages,
-                ':count': len(messages),
-                ':timestamp': timestamp
-            }
-            
-            # Update session variables if provided
+            # Only update session_variables if provided (user messages and agent responses handled elsewhere)
             if updated_variables:
-                update_expression_parts.append('session_variables = :vars')
-                expression_attribute_values[':vars'] = updated_variables
+                logger.info(f"📌 Updating session_variables for session {session_id}")
+                self.chat_sessions_table.update_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    UpdateExpression='SET session_variables = :vars, last_updated = :timestamp',
+                    ExpressionAttributeValues={
+                        ':vars': updated_variables,
+                        ':timestamp': timestamp
+                    }
+                )
+                logger.info(f"✅ Successfully updated session_variables for session {session_id}")
+            else:
+                logger.info(f"📌 No session_variables to update, skipping")
             
-            logger.info(f"🔍 DEBUG: Updating DynamoDB with {len(messages)} messages")
-            self.chat_sessions_table.update_item(
-                Key={
-                    'user_id': user_id,
-                    'session_id': session_id
-                },
-                UpdateExpression=' '.join(update_expression_parts),
-                ExpressionAttributeValues=expression_attribute_values
-            )
-            
-            logger.info(f"✅ Successfully updated context for session {session_id} with {len(messages)} messages")
             return True
             
         except Exception as e:

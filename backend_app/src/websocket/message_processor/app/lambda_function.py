@@ -217,8 +217,64 @@ def process_message(connection_id, user_id, session_id, message_data):
             if not send_message_to_client(connection_id, welcome_message):
                 logger.warning(f"Failed to send welcome message to connection {connection_id}")
         
-        # Note: User message will be added by the chat agent Lambda
-        # No need to add it here to avoid duplicates
+        # Save user message to database BEFORE calling agent (websocket processor handles all message saving)
+        logger.info(f"📌 Saving user message to database before agent processing: {message_id}")
+        try:
+            # Get current session to append message (use ConsistentRead to avoid race conditions)
+            session_response = chat_sessions_table.get_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                ConsistentRead=True
+            )
+            
+            if 'Item' in session_response:
+                messages = session_response['Item'].get('messages', [])
+                
+                # Create user message
+                user_message = {
+                    'id': message_id,
+                    'text': message_text,
+                    'sender': 'user',
+                    'timestamp': int(datetime.now().timestamp()),
+                    'message_type': 'text'
+                }
+                
+                # Add file metadata if present
+                if files:
+                    file_metadata = []
+                    for file_info in files:
+                        file_metadata.append({
+                            'name': file_info.get('name', 'Unknown'),
+                            'size': file_info.get('size', 0),
+                            'type': file_info.get('type', 'application/octet-stream')
+                        })
+                    user_message['files'] = file_metadata
+                
+                # Append user message
+                messages.append(user_message)
+                
+                # Update session with user message
+                chat_sessions_table.update_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                    ExpressionAttributeValues={
+                        ':messages': messages,
+                        ':count': len(messages),
+                        ':timestamp': int(datetime.now().timestamp())
+                    }
+                )
+                logger.info(f"✅ Saved user message to database: {message_id}")
+            else:
+                logger.warning(f"⚠️ Session {session_id} not found, user message will be saved by agent")
+        except Exception as e:
+            logger.error(f"❌ Failed to save user message in websocket processor: {e}")
+            # Continue anyway - agent can save as fallback
+        
         logger.info(f"User message will be processed by chat agent: {message_id}")
         
         # Send acknowledgment to user
