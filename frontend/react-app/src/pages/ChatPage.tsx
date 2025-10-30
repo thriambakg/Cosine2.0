@@ -865,9 +865,7 @@ export default function ChatPage() {
 
   // Note: All message handling is now done by the unified messaging system
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  
 
   // Only auto-scroll when user is near the bottom and a new message is appended
   useEffect(() => {
