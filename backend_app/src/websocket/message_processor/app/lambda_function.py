@@ -821,11 +821,13 @@ def handle_edit_message(connection_id, user_id, session_id, message_data):
                 'user_id': user_id,
                 'session_id': session_id
             },
-            UpdateExpression='SET messages = :messages, message_count = :message_count, last_updated = :last_updated REMOVE killed_at',
+            UpdateExpression='SET messages = :messages, message_count = :message_count, last_updated = :last_updated, last_edit_at = :last_edit_at, last_edited_message_id = :edited_id REMOVE killed_at',
             ExpressionAttributeValues={
                 ':messages': truncated_messages,
                 ':message_count': len(truncated_messages),
-                ':last_updated': timestamp
+                ':last_updated': timestamp,
+                ':last_edit_at': timestamp,
+                ':edited_id': message_id
             }
         )
         
@@ -1697,10 +1699,11 @@ def handle_sns_chat_response(event):
         try:
             logger.info(f"📝 Storing AI response in session {session_id}")
             
-            # Get current session messages
+            # Get current session messages (strongly consistent to avoid race with edits)
             chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
             session_response = chat_sessions_table.get_item(
-                Key={'user_id': user_id, 'session_id': session_id}
+                Key={'user_id': user_id, 'session_id': session_id},
+                ConsistentRead=True
             )
             
             if 'Item' in session_response:
@@ -1715,18 +1718,47 @@ def handle_sns_chat_response(event):
                     'timestamp': timestamp,
                     'message_type': 'text'
                 }
-                messages.append(ai_message)
-                
-                # Update session with new AI response
-                chat_sessions_table.update_item(
-                    Key={'user_id': user_id, 'session_id': session_id},
-                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
-                    ExpressionAttributeValues={
-                        ':messages': messages,
-                        ':count': len(messages),
-                        ':timestamp': timestamp
-                    }
-                )
+                # Avoid duplicate bot message if an identical response already exists (race-safe)
+                if any(m.get('sender') == 'bot' and m.get('text') == response_content for m in messages):
+                    logger.info(f"🛑 SNS: Duplicate AI response detected, skipping store for session {session_id}")
+                else:
+                    messages.append(ai_message)
+                    
+                    # Use conditional write to prevent overwriting newer edits
+                    try:
+                        chat_sessions_table.update_item(
+                            Key={'user_id': user_id, 'session_id': session_id},
+                            UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                            ExpressionAttributeValues={
+                                ':messages': messages,
+                                ':count': len(messages),
+                                ':timestamp': timestamp
+                            },
+                            ConditionExpression='attribute_not_exists(last_edit_at) OR last_edit_at <= :timestamp'
+                        )
+                    except Exception as cond_e:
+                        # On conditional failure, refetch consistently and try merge once more
+                        logger.warning(f"⚠️ SNS: Conditional update failed (likely due to edit). Refetching and retrying once. Error: {cond_e}")
+                        latest = chat_sessions_table.get_item(
+                            Key={'user_id': user_id, 'session_id': session_id},
+                            ConsistentRead=True
+                        )
+                        if 'Item' in latest:
+                            latest_messages = latest['Item'].get('messages', [])
+                            # Skip if response already present
+                            if any(m.get('sender') == 'bot' and m.get('text') == response_content for m in latest_messages):
+                                logger.info(f"🛑 SNS: Duplicate AI response detected after refetch, skipping")
+                            else:
+                                latest_messages.append(ai_message)
+                                chat_sessions_table.update_item(
+                                    Key={'user_id': user_id, 'session_id': session_id},
+                                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                                    ExpressionAttributeValues={
+                                        ':messages': latest_messages,
+                                        ':count': len(latest_messages),
+                                        ':timestamp': timestamp
+                                    }
+                                )
                 
                 logger.info(f"✅ Stored AI response in session {session_id}")
             else:
