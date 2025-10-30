@@ -374,8 +374,8 @@ class UnifiedChartGenerator:
                     stock_symbols = list(normalized_data.keys())
                     title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
                 ax.set_title(title, fontsize=18, fontweight='bold', pad=20)
-        ax.legend()
-    
+                ax.legend()
+            
             else:
                 # Handle single stock/crypto
                 logger.info(f"🔍 DEBUG: Processing {len(normalized_data)} data points for single {data_type}")
