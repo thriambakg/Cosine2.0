@@ -58,6 +58,7 @@ class UnifiedMessageHandlerService {
   private cancelledMessages: Set<string> = new Set(); // messageId -> cancelled messages
   private requestIdCounter: number = 0; // For generating unique request IDs
   private sessionUserIds: Map<string, string> = new Map(); // sessionId -> userId mapping
+  private recentSendTimestamps: Map<string, number> = new Map(); // queueKey -> last send timestamp (prevents rapid duplicates)
 
   private constructor() {
     // Listen for WebSocket responses and update local cache
@@ -95,23 +96,45 @@ class UnifiedMessageHandlerService {
       return { sessionId: messageData.sessionId || '', success: false, error: 'Message was cancelled' };
     }
     
+    // For edit messages, use a composite key (messageId + sessionId + source) to prevent duplicates across interfaces
+    // For other messages, just use messageId
+    const queueKey = messageData.type === 'edit_message' 
+      ? `edit_${messageData.messageId}_${messageData.sessionId}_${messageData.source}`
+      : messageData.messageId;
+    
     // Check if already processing this message
-    if (this.processingQueue.has(messageData.messageId)) {
-      console.log('⏳ UnifiedMessageHandler: Message already being processed:', messageData.messageId);
+    if (this.processingQueue.has(queueKey)) {
+      console.log('⏳ UnifiedMessageHandler: Message already being processed:', queueKey);
       return { sessionId: messageData.sessionId || '', success: false, error: 'Message already being processed' };
     }
+    
+    // Prevent rapid duplicate sends (within 500ms) - helps catch double-clicks or rapid retries
+    const lastSendTime = this.recentSendTimestamps.get(queueKey);
+    const now = Date.now();
+    if (lastSendTime && (now - lastSendTime) < 500) {
+      console.log('⏳ UnifiedMessageHandler: Duplicate send detected (too soon after previous send):', queueKey, 'ms since last:', now - lastSendTime);
+      return { sessionId: messageData.sessionId || '', success: false, error: 'Duplicate send detected' };
+    }
+    this.recentSendTimestamps.set(queueKey, now);
 
     // Add to processing queue to prevent duplicate processing
     const processingPromise = this.handleMessageProcessing(messageData);
-    this.processingQueue.set(messageData.messageId, processingPromise as unknown as Promise<void>);
+    this.processingQueue.set(queueKey, processingPromise as unknown as Promise<void>);
 
     try {
       const result = await processingPromise;
       return result;
     } finally {
-      // Remove from processing queue and cancelled messages
-      this.processingQueue.delete(messageData.messageId);
+      // Remove from processing queue and cancelled messages using the same key
+      const queueKey = messageData.type === 'edit_message' 
+        ? `edit_${messageData.messageId}_${messageData.sessionId}_${messageData.source}`
+        : messageData.messageId;
+      this.processingQueue.delete(queueKey);
       this.cancelledMessages.delete(messageData.messageId);
+      // Clean up timestamp after a delay to prevent memory leaks (but allow rapid prevention)
+      setTimeout(() => {
+        this.recentSendTimestamps.delete(queueKey);
+      }, 1000);
     }
   }
 

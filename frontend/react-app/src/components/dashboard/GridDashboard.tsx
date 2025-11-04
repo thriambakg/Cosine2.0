@@ -242,9 +242,11 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       });
 
       // Find first available position
+      // Note: Use a reasonable maximum width for initial placement, will be adjusted by gridDimensions
+      const maxPlacementWidth = Math.max(gridColumns, 50); // Allow up to 50 columns for initial placement
       let foundPosition = false;
       for (let y = 0; y < MAX_GRID_ROWS && !foundPosition; y++) {
-        for (let x = 0; x < gridColumns - gridSize.width + 1 && !foundPosition; x++) {
+        for (let x = 0; x < maxPlacementWidth - gridSize.width + 1 && !foundPosition; x++) {
           let canPlace = true;
           for (let dx = 0; dx < gridSize.width; dx++) {
             for (let dy = 0; dy < gridSize.height; dy++) {
@@ -281,11 +283,68 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     };
   }, [tileGridProps]);
 
+  // Handle drag start
+  const handleDragStart = useCallback((tileId: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    const tile = tiles.find(t => t.id === tileId);
+    if (!tile) {
+      return;
+    }
+
+    const { position } = getDefaultGridProps(tile);
+    
+    setDragState({
+      isDragging: true,
+      dragTileId: tileId,
+      dragStart: { x: event.clientX, y: event.clientY },
+      currentPosition: position,
+    });
+  }, [tiles, getDefaultGridProps]);
+
+  // Calculate grid dimensions based on tile positions (including drag preview)
+  const gridDimensions = useMemo(() => {
+    let maxX = 0;
+    let maxY = 0;
+
+    // Check all tiles
+    tiles.forEach(tile => {
+      let position: GridPosition;
+      let size: GridSize;
+      
+      // If this tile is being dragged, use drag preview position, otherwise use actual position
+      if (dragState.dragTileId === tile.id && dragState.currentPosition) {
+        position = dragState.currentPosition;
+        const tileProps = getDefaultGridProps(tile);
+        size = tileProps.size;
+      } else {
+        const tileProps = getDefaultGridProps(tile);
+        position = tileProps.position;
+        size = tileProps.size;
+      }
+      
+      const tileRight = position.x + size.width;
+      const tileBottom = position.y + size.height;
+      
+      if (tileRight > maxX) {
+        maxX = tileRight;
+      }
+      if (tileBottom > maxY) {
+        maxY = tileBottom;
+      }
+    });
+
+    // Add some padding (2 rows/columns) for visual spacing
+    const calculatedWidth = Math.max(gridColumns, maxX + 2);
+    const calculatedHeight = Math.max(10, maxY + 2);
+
+    return { width: calculatedWidth, height: calculatedHeight };
+  }, [tiles, getDefaultGridProps, gridColumns, dragState.dragTileId, dragState.currentPosition]);
+
   // Check if a grid area is available
   const isAreaAvailable = useCallback((position: GridPosition, size: GridSize, excludeTileId?: string): boolean => {
-    // Check bounds - allow flexible sizing within reasonable limits
+    // Check bounds - use dynamic grid dimensions instead of fixed gridColumns
     if (position.x < 0 || position.y < 0 || 
-        position.x + size.width > gridColumns || 
+        position.x + size.width > gridDimensions.width || 
         position.y + size.height > MAX_GRID_ROWS) {
       return false;
     }
@@ -306,25 +365,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     }
 
     return true;
-  }, [tiles, getDefaultGridProps, gridColumns]);
-
-  // Handle drag start
-  const handleDragStart = useCallback((tileId: string, event: React.MouseEvent) => {
-    event.preventDefault();
-    const tile = tiles.find(t => t.id === tileId);
-    if (!tile) {
-      return;
-    }
-
-    const { position } = getDefaultGridProps(tile);
-    
-    setDragState({
-      isDragging: true,
-      dragTileId: tileId,
-      dragStart: { x: event.clientX, y: event.clientY },
-      currentPosition: position,
-    });
-  }, [tiles, getDefaultGridProps]);
+  }, [tiles, getDefaultGridProps, gridDimensions]);
 
   // Handle drag move with time-based throttling for smoother control
   const handleDragMove = useCallback((event: MouseEvent) => {
@@ -337,8 +378,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     }
 
     const rect = containerRef.current.getBoundingClientRect();
-    const relativeX = event.clientX - rect.left;
-    const relativeY = event.clientY - rect.top;
+    // Account for padding when calculating relative position
+    const relativeX = event.clientX - rect.left - GRID_PADDING;
+    const relativeY = event.clientY - rect.top - GRID_PADDING;
 
     // Convert to grid coordinates
     const gridX = Math.round(relativeX / (cellSize + GRID_GAP));
@@ -347,8 +389,10 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const tile = tiles.find(t => t.id === dragState.dragTileId);
     if (tile) {
       const { size } = getDefaultGridProps(tile);
+      // Use dynamic grid dimensions instead of fixed gridColumns
+      const maxX = gridDimensions.width - size.width;
       const constrainedPos = {
-        x: Math.max(0, Math.min(gridX, gridColumns - size.width)),
+        x: Math.max(0, Math.min(gridX, maxX)),
         y: Math.max(0, gridY),
       };
 
@@ -366,7 +410,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         }));
       }
     }
-  }, [dragState, tiles, getDefaultGridProps, gridColumns, cellSize]);
+  }, [dragState, tiles, getDefaultGridProps, gridDimensions, cellSize]);
 
   // Handle drag end
   const handleDragEnd = useCallback(() => {
@@ -397,7 +441,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       currentPosition: null,
       lastUpdateTime: undefined,
     });
-  }, [dragState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile, gridColumns, cellSize]);
+  }, [dragState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile, gridDimensions, cellSize]);
 
   // Handle resize start
   const handleResizeStart = useCallback((tileId: string, event: React.MouseEvent) => {
@@ -1183,14 +1227,15 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           onContextMenu={handleGridContextMenu}
           sx={{
             display: 'grid',
-            gridTemplateColumns: `repeat(${gridColumns}, ${cellSize}px)`,
-            gridAutoRows: `${cellSize}px`,
+            gridTemplateColumns: `repeat(${gridDimensions.width}, ${cellSize}px)`,
+            gridTemplateRows: `repeat(${gridDimensions.height}, ${cellSize}px)`,
             gap: `${GRID_GAP}px`,
-            minHeight: '600px',
             padding: `${GRID_PADDING}px`,
-            // Allow grid to expand beyond viewport
+            // Allow grid to expand based on tile positions
             width: 'fit-content',
             minWidth: '100%', // At minimum, fill the container
+            height: 'fit-content',
+            minHeight: '600px', // Minimum height for visual consistency
             position: 'relative',
           }}
         >

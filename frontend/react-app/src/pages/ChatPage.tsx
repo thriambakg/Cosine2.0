@@ -430,6 +430,24 @@ export default function ChatPage() {
     }
   }, [unifiedMessages, currentSession?.session_id, currentSession?.messages, addPersistedMessage]);
 
+  // Subscribe to loading state updates from unified messaging system
+  useEffect(() => {
+    const unsubscribe = unifiedMessageHandler.subscribeToLoadingState((sessionId, isLoading, source) => {
+      // Only update if it's for chatpage source or cross-interface loading
+      if (source === 'chatpage' || (source === 'sidebar' && isLoading)) {
+        console.log(`🔄 ChatPage: Received loading state update - Session: ${sessionId}, Loading: ${isLoading}, Source: ${source}`);
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [sessionId]: isLoading
+        }));
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   // Listen for AI response typing events from unified messaging system
   useEffect(() => {
     const handleAITyping = (event: CustomEvent) => {
@@ -950,8 +968,14 @@ export default function ChatPage() {
     setEditText(message.text);
   };
 
+  // Ref to prevent duplicate edit sends
+  const isSavingEditRef = useRef(false);
+  
   const handleSaveEdit = async () => {
-    if (!editingMessage || editingMessageIndex === null || !editText.trim() || isUnifiedProcessing) return;
+    if (!editingMessage || editingMessageIndex === null || !editText.trim() || isUnifiedProcessing || isSavingEditRef.current) return;
+    
+    // Prevent double-clicks by setting ref immediately
+    isSavingEditRef.current = true;
     
     try {
       console.log('✏️ ChatPage: Sending edit message via unified system');
@@ -974,6 +998,8 @@ export default function ChatPage() {
       }
     } catch (error) {
       console.error('❌ ChatPage: Error sending edit message:', error);
+    } finally {
+      isSavingEditRef.current = false;
     }
   };
 

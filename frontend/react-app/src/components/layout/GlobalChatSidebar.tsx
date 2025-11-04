@@ -646,14 +646,21 @@ const GlobalChatSidebar: React.FC = () => {
     setEditText(message.text);
   };
 
+  // Ref to prevent duplicate edit sends
+  const isSavingEditRef = useRef(false);
+  
   const handleSaveEdit = async () => {
-    if (!editingMessage || editingMessageIndex === null || !editText.trim() || !activeSessionId || isLoadingMessage) return;
+    if (!editingMessage || editingMessageIndex === null || !editText.trim() || !activeSessionId || isLoadingMessage || isSavingEditRef.current) return;
     
+    // Prevent double-clicks by setting ref immediately
+    isSavingEditRef.current = true;
+    
+    let result;
     try {
       console.log('✏️ Sidebar: Sending edit message via unified system');
       
       // Send edit message via unified system (same as ChatPage)
-      const result = await sendUnifiedEditMessage(editText, editingMessage.id, selectedModel);
+      result = await sendUnifiedEditMessage(editText, editingMessage.id, selectedModel);
       
       if (result.success) {
         console.log('✅ Sidebar: Edit message sent successfully');
@@ -666,9 +673,13 @@ const GlobalChatSidebar: React.FC = () => {
         // Loading state will be managed by the unified handler
       } else {
         console.error('❌ Sidebar: Failed to send edit message:', result.error);
+        setIsLoadingMessage(false);
       }
     } catch (error) {
       console.error('❌ Sidebar: Error sending edit message:', error);
+      setIsLoadingMessage(false);
+    } finally {
+      isSavingEditRef.current = false;
     }
   };
 
