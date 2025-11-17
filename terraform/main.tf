@@ -672,8 +672,8 @@ resource "aws_iam_policy" "lambda_sqs_policy" {
           "sqs:ChangeMessageVisibility"
         ]
         Resource = [
-          aws_sqs_queue.agent_logs_queue.arn,
-          aws_sqs_queue.agent_logs_dlq.arn
+          module.agent_logs_sqs_queue.queue_arn,
+          module.agent_logs_sqs_queue.dlq_arn
         ]
       }
     ]
@@ -984,7 +984,7 @@ resource "aws_iam_policy" "chat_agent_sqs_policy" {
           "sqs:SendMessage",
           "sqs:GetQueueAttributes"
         ]
-        Resource = aws_sqs_queue.agent_logs_queue.arn
+        Resource = module.agent_logs_sqs_queue.queue_arn
       }
     ]
   })
@@ -1114,7 +1114,7 @@ resource "aws_lambda_function" "chat_agent" {
       AGENT_FILES_PROCESSOR_FUNCTION_NAME = module.agent_files_processor_lambda.function_name
 
       # SQS Queue for agent log streaming
-      AGENT_LOGS_SQS_QUEUE_URL = aws_sqs_queue.agent_logs_queue.url
+      AGENT_LOGS_SQS_QUEUE_URL = module.agent_logs_sqs_queue.queue_url
     }
   }
 
@@ -1189,7 +1189,7 @@ module "websocket_message_lambda" {
     ENVIRONMENT                 = var.environment
     LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
     # SQS Queue for agent log streaming
-    AGENT_LOGS_SQS_QUEUE_URL = aws_sqs_queue.agent_logs_queue.url
+    AGENT_LOGS_SQS_QUEUE_URL = module.agent_logs_sqs_queue.queue_url
   }
 
   # Attach core layer
@@ -1228,46 +1228,35 @@ module "websocket_api" {
 # ============================================================================
 
 # SQS Queue for agent log streaming (replaces SNS for high-volume logs)
-resource "aws_sqs_queue" "agent_logs_queue" {
-  name                       = "${var.project_name}-agent-logs-${var.environment}"
+module "agent_logs_sqs_queue" {
+  source = "./modules/sqs"
+
+  project_name = var.project_name
+  environment  = var.environment
+  queue_name   = "agent-logs"
+  purpose      = "High-volume agent log streaming to WebSocket"
+
+  # Queue configuration
   message_retention_seconds  = 345600 # 4 days
-  visibility_timeout_seconds = 300    # 5 minutes (should be > Lambda timeout)
+  visibility_timeout_seconds = 1200   # 20 minutes (must be > Lambda timeout of 900s)
   receive_wait_time_seconds  = 20     # Long polling
+  max_receive_count          = 3
 
-  # KMS encryption
-  kms_master_key_id                 = data.terraform_remote_state.base_infra.outputs.kms_key_arn
+  # Dead letter queue configuration
+  enable_dlq                     = true
+  dlq_message_retention_seconds  = 1209600 # 14 days
+  dlq_visibility_timeout_seconds = 30
+
+  # KMS encryption - extract key ID from ARN if needed
+  kms_key_id                        = data.terraform_remote_state.base_infra.outputs.kms_key_arn
   kms_data_key_reuse_period_seconds = 300
 
-  # Dead letter queue for failed processing
-  redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.agent_logs_dlq.arn
-    maxReceiveCount     = 3
-  })
-
-  tags = merge(var.common_tags, {
-    Name        = "${var.project_name}-agent-logs-${var.environment}"
-    Purpose     = "High-volume agent log streaming to WebSocket"
-    Environment = var.environment
-  })
+  tags = var.common_tags
 }
 
-# Dead Letter Queue for failed agent log processing
-resource "aws_sqs_queue" "agent_logs_dlq" {
-  name                              = "${var.project_name}-agent-logs-dlq-${var.environment}"
-  message_retention_seconds         = 1209600 # 14 days
-  kms_master_key_id                 = data.terraform_remote_state.base_infra.outputs.kms_key_arn
-  kms_data_key_reuse_period_seconds = 300
-
-  tags = merge(var.common_tags, {
-    Name        = "${var.project_name}-agent-logs-dlq-${var.environment}"
-    Purpose     = "Dead letter queue for failed agent log processing"
-    Environment = var.environment
-  })
-}
-
-# SQS Queue Policy - Allow Lambda to receive messages
+# SQS Queue Policy - Allow Lambda service and chat agent role to access queue
 resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
-  queue_url = aws_sqs_queue.agent_logs_queue.id
+  queue_url = module.agent_logs_sqs_queue.queue_id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1282,7 +1271,7 @@ resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes"
         ]
-        Resource = aws_sqs_queue.agent_logs_queue.arn
+        Resource = module.agent_logs_sqs_queue.queue_arn
         Condition = {
           ArnEquals = {
             "aws:SourceArn" = module.websocket_message_lambda.function_arn
@@ -1298,7 +1287,7 @@ resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
           "sqs:SendMessage",
           "sqs:GetQueueAttributes"
         ]
-        Resource = aws_sqs_queue.agent_logs_queue.arn
+        Resource = module.agent_logs_sqs_queue.queue_arn
       }
     ]
   })
@@ -1306,7 +1295,7 @@ resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
 
 # Event source mapping for SQS to trigger WebSocket message lambda
 resource "aws_lambda_event_source_mapping" "agent_logs_sqs_trigger" {
-  event_source_arn                   = aws_sqs_queue.agent_logs_queue.arn
+  event_source_arn                   = module.agent_logs_sqs_queue.queue_arn
   function_name                      = module.websocket_message_lambda.function_arn
   batch_size                         = 10 # Process up to 10 messages per invocation
   maximum_batching_window_in_seconds = 5  # Wait up to 5 seconds to batch
