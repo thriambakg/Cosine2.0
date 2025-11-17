@@ -697,12 +697,12 @@ def handle_chat_message(event_body: Dict[str, Any]) -> Dict[str, Any]:
         
         # Initialize agent logger with session context for WebSocket streaming
         from agent_logger import get_agent_logger
+        import agent as agent_module  # Import with alias to avoid shadowing the agent instance variable
         message_id = event_body.get('messageId') or f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         agent_logger = get_agent_logger(session_id, user_id, message_id)
         
-        # Update the global agent_logger instance in agent.py
-        import agent
-        agent.agent_logger = agent_logger
+        # Update the global agent_logger instance in agent.py module
+        agent_module.agent_logger = agent_logger
         
         # Create enhanced message with session context for the agent
         enhanced_message = f"""
@@ -753,9 +753,9 @@ Context Items Available: {len(context_items)} items
             
             # Flush any remaining logs to WebSocket before returning
             try:
-                import agent
-                if hasattr(agent, 'agent_logger'):
-                    agent.agent_logger.flush()
+                import agent as agent_module  # Import with alias to avoid shadowing
+                if hasattr(agent_module, 'agent_logger'):
+                    agent_module.agent_logger.flush()
             except Exception as flush_error:
                 logger.warning(f"Failed to flush agent logs: {str(flush_error)}")
             
