@@ -673,7 +673,9 @@ resource "aws_iam_policy" "lambda_sqs_policy" {
         ]
         Resource = [
           module.agent_logs_sqs_queue.queue_arn,
-          module.agent_logs_sqs_queue.dlq_arn
+          module.agent_logs_sqs_queue.dlq_arn,
+          module.chat_response_sqs_queue.queue_arn,
+          module.chat_response_sqs_queue.dlq_arn
         ]
       }
     ]
@@ -970,10 +972,10 @@ resource "aws_iam_role_policy_attachment" "chat_agent_lambda_invoke_policy" {
   policy_arn = aws_iam_policy.lambda_invoke_policy.arn
 }
 
-# SQS policy for chat agent to send logs
+# SQS policy for chat agent to send logs and responses
 resource "aws_iam_policy" "chat_agent_sqs_policy" {
   name        = "${var.project_name}-chat-agent-sqs-policy-${var.environment}"
-  description = "Policy for chat agent to send logs to SQS queue"
+  description = "Policy for chat agent to send logs and responses to SQS queues"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -984,7 +986,10 @@ resource "aws_iam_policy" "chat_agent_sqs_policy" {
           "sqs:SendMessage",
           "sqs:GetQueueAttributes"
         ]
-        Resource = module.agent_logs_sqs_queue.queue_arn
+        Resource = [
+          module.agent_logs_sqs_queue.queue_arn,
+          module.chat_response_sqs_queue.queue_arn
+        ]
       }
     ]
   })
@@ -1115,6 +1120,9 @@ resource "aws_lambda_function" "chat_agent" {
 
       # SQS Queue for agent log streaming
       AGENT_LOGS_SQS_QUEUE_URL = module.agent_logs_sqs_queue.queue_url
+
+      # SQS Queue for chat response delivery
+      CHAT_RESPONSE_SQS_QUEUE_URL = module.chat_response_sqs_queue.queue_url
     }
   }
 
@@ -1271,7 +1279,10 @@ resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes"
         ]
-        Resource = module.agent_logs_sqs_queue.queue_arn
+        Resource = [
+          module.agent_logs_sqs_queue.queue_arn,
+          module.chat_response_sqs_queue.queue_arn
+        ]
         Condition = {
           ArnEquals = {
             "aws:SourceArn" = module.websocket_message_lambda.function_arn
@@ -1287,7 +1298,10 @@ resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
           "sqs:SendMessage",
           "sqs:GetQueueAttributes"
         ]
-        Resource = module.agent_logs_sqs_queue.queue_arn
+        Resource = [
+          module.agent_logs_sqs_queue.queue_arn,
+          module.chat_response_sqs_queue.queue_arn
+        ]
       }
     ]
   })
@@ -1305,6 +1319,93 @@ resource "aws_lambda_event_source_mapping" "agent_logs_sqs_trigger" {
 
   depends_on = [
     aws_sqs_queue_policy.agent_logs_queue_policy,
+    module.websocket_message_lambda,
+    aws_iam_policy.lambda_sqs_policy
+  ]
+}
+
+# ============================================================================
+# SQS QUEUE FOR CHAT RESPONSES
+# ============================================================================
+
+# SQS Queue for chat response delivery (replaces SNS)
+module "chat_response_sqs_queue" {
+  source = "./modules/sqs"
+
+  project_name = var.project_name
+  environment  = var.environment
+  queue_name   = "chat-response"
+  purpose      = "Async chat response delivery to WebSocket"
+
+  # Queue configuration
+  message_retention_seconds  = 345600 # 4 days
+  visibility_timeout_seconds = 300    # 5 minutes (sufficient for response processing)
+  receive_wait_time_seconds  = 20     # Long polling
+  max_receive_count          = 3
+
+  # Dead letter queue configuration
+  enable_dlq                     = true
+  dlq_message_retention_seconds  = 1209600 # 14 days
+  dlq_visibility_timeout_seconds = 30
+
+  # KMS encryption
+  kms_key_id                        = data.terraform_remote_state.base_infra.outputs.kms_key_arn
+  kms_data_key_reuse_period_seconds = 300
+
+  tags = var.common_tags
+}
+
+# SQS Queue Policy - Allow Lambda service and chat agent role to access queue
+resource "aws_sqs_queue_policy" "chat_response_queue_policy" {
+  queue_url = module.chat_response_sqs_queue.queue_id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = module.chat_response_sqs_queue.queue_arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = module.websocket_message_lambda.function_arn
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.chat_agent_execution_role.arn
+        }
+        Action = [
+          "sqs:SendMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = module.chat_response_sqs_queue.queue_arn
+      }
+    ]
+  })
+}
+
+# Event source mapping for SQS to trigger WebSocket message lambda for chat responses
+resource "aws_lambda_event_source_mapping" "chat_response_sqs_trigger" {
+  event_source_arn                   = module.chat_response_sqs_queue.queue_arn
+  function_name                      = module.websocket_message_lambda.function_arn
+  batch_size                         = 10 # Process up to 10 messages per invocation
+  maximum_batching_window_in_seconds = 5  # Wait up to 5 seconds to batch
+
+  # Enable partial batch failure reporting
+  function_response_types = ["ReportBatchItemFailures"]
+
+  depends_on = [
+    aws_sqs_queue_policy.chat_response_queue_policy,
     module.websocket_message_lambda,
     aws_iam_policy.lambda_sqs_policy
   ]

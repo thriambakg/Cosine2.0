@@ -824,45 +824,55 @@ Context Items Available: {len(context_items)} items
                 logger.info(f"📌 Normal message - user message already saved by WebSocket processor")
                 logger.info(f"📌 Chat agent only processes and generates response (no message saving)")
             
-            # Publish response to SNS for async delivery
+            # Send response to SQS for async delivery
             try:
-                sns_topic_arn = os.environ.get('CHAT_RESPONSE_SNS_TOPIC_ARN')
-                if sns_topic_arn:
+                sqs_queue_url = os.environ.get('CHAT_RESPONSE_SQS_QUEUE_URL')
+                if sqs_queue_url:
                     import boto3
-                    sns_client = boto3.client('sns')
+                    sqs_client = boto3.client('sqs')
                     
-                    # Create SNS message
-                    sns_message = {
+                    # Create SQS message
+                    message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+                    sqs_message = {
+                        'type': 'chat_response',
                         'session_id': session_id,
                         'user_id': user_id,
-                        'response': response_content,
-                        'message_id': f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}",
-                        'timestamp': int(time.time()),
-                        'message_type': 'ai_response'
+                        'payload': {
+                            'session_id': session_id,
+                            'user_id': user_id,
+                            'response': response_content,
+                            'message_id': message_id,
+                            'timestamp': int(time.time()),
+                            'message_type': 'ai_response'
+                        }
                     }
                     
-                    # Publish to SNS
-                    response = sns_client.publish(
-                        TopicArn=sns_topic_arn,
-                        Message=json.dumps(sns_message),
-                        Subject=f"Chat Response for Session {session_id}"
+                    # Send to SQS
+                    response = sqs_client.send_message(
+                        QueueUrl=sqs_queue_url,
+                        MessageBody=json.dumps(sqs_message),
+                        MessageAttributes={
+                            'session_id': {'StringValue': session_id, 'DataType': 'String'},
+                            'user_id': {'StringValue': user_id, 'DataType': 'String'},
+                            'message_type': {'StringValue': 'chat_response', 'DataType': 'String'}
+                        }
                     )
                     
-                    logger.info(f"✅ Published response to SNS: {response['MessageId']}")
+                    logger.info(f"✅ Sent response to SQS: {response['MessageId']}")
                     
                     # Return acknowledgment
                     return {
                         'statusCode': 200,
                         'body': {
-                            'message': 'Response published for async delivery',
+                            'message': 'Response sent for async delivery',
                             'session_id': session_id,
                             'user_id': user_id,
-                            'sns_message_id': response['MessageId']
+                            'sqs_message_id': response['MessageId']
                         }
                     }
                 else:
-                    logger.warning("⚠️ CHAT_RESPONSE_SNS_TOPIC_ARN not configured, falling back to direct response")
-                    # Fallback to direct response if SNS not configured
+                    logger.warning("⚠️ CHAT_RESPONSE_SQS_QUEUE_URL not configured, falling back to direct response")
+                    # Fallback to direct response if SQS not configured
                     response_body = {
                         'response': response_content,
                         'session_id': session_id,
@@ -874,9 +884,9 @@ Context Items Available: {len(context_items)} items
                         'body': response_body
                     }
                     
-            except Exception as sns_error:
-                logger.error(f"❌ Error publishing to SNS: {str(sns_error)}")
-                # Fallback to direct response on SNS error
+            except Exception as sqs_error:
+                logger.error(f"❌ Error sending to SQS: {str(sqs_error)}")
+                # Fallback to direct response on SQS error
                 response_body = {
                     'response': response_content,
                     'session_id': session_id,

@@ -1736,6 +1736,219 @@ def handle_sqs_agent_logs(event):
             'body': json_dumps_safe({'error': str(e)})
         }
 
+def handle_sqs_chat_responses(event):
+    """
+    Handle SQS events containing chat response messages.
+    
+    Args:
+        event: SQS event containing one or more chat response messages
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        logger.info("📨 Processing SQS event for chat responses")
+        
+        successful_processed = 0
+        failed_processed = 0
+        
+        # Process each SQS record
+        for record in event.get('Records', []):
+            try:
+                # Parse SQS message body
+                message_body = json.loads(record.get('body', '{}'))
+                
+                # Extract payload (same structure as old SNS message)
+                payload = message_body.get('payload', message_body)
+                
+                # Call the existing handler with the payload
+                result = handle_chat_response_payload(payload)
+                
+                if result.get('statusCode') == 200:
+                    successful_processed += 1
+                else:
+                    failed_processed += 1
+                    
+            except Exception as record_error:
+                logger.error(f"❌ Error processing SQS chat response record: {str(record_error)}")
+                failed_processed += 1
+                continue
+        
+        logger.info(f"📨 SQS chat response processing complete: {successful_processed} successful, {failed_processed} failed")
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({
+                'message': 'SQS chat responses processed',
+                'successful': successful_processed,
+                'failed': failed_processed
+            })
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error handling SQS chat responses: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': str(e)})
+        }
+
+def handle_chat_response_payload(payload):
+    """
+    Handle chat response payload (extracted from SNS/SQS message).
+    This is the core logic that was in handle_sns_chat_response.
+    
+    Args:
+        payload: Chat response payload with session_id, user_id, response, etc.
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        logger.info("📨 Processing chat response payload")
+        
+        # Extract response data
+        session_id = payload.get('session_id')
+        user_id = payload.get('user_id')
+        response_content = payload.get('response')
+        message_id = payload.get('message_id')
+        
+        logger.info(f"📨 Extracted - session_id: {session_id}, user_id: {user_id}, message_id: {message_id}")
+        logger.info(f"📨 Response content length: {len(response_content) if response_content else 'None'}")
+        
+        if not all([session_id, user_id, response_content]):
+            logger.error("❌ Missing required fields in chat response payload")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Missing required fields'})
+            }
+        
+        logger.info(f"📨 Processing response for session {session_id}, user {user_id}")
+        
+        # Store AI response in DynamoDB (same as user messages)
+        try:
+            logger.info(f"📝 Storing AI response in session {session_id}")
+            
+            # Get current session messages (strongly consistent to avoid race with edits)
+            chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
+            session_response = chat_sessions_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id},
+                ConsistentRead=True
+            )
+            
+            if 'Item' in session_response:
+                messages = session_response['Item'].get('messages', [])
+                timestamp = int(datetime.now().timestamp())
+                
+                # Add AI response message
+                ai_message = {
+                    'id': message_id or f"msg_{timestamp}_{uuid.uuid4().hex[:8]}",
+                    'text': response_content,
+                    'sender': 'bot',
+                    'timestamp': timestamp,
+                    'message_type': 'text'
+                }
+                # Avoid duplicate bot message if an identical response already exists (race-safe)
+                if any(m.get('sender') == 'bot' and m.get('text') == response_content for m in messages):
+                    logger.info(f"🛑 Duplicate AI response detected, skipping store for session {session_id}")
+                else:
+                    messages.append(ai_message)
+                    
+                    # Use conditional write to prevent overwriting newer edits
+                    try:
+                        chat_sessions_table.update_item(
+                            Key={'user_id': user_id, 'session_id': session_id},
+                            UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                            ExpressionAttributeValues={
+                                ':messages': messages,
+                                ':count': len(messages),
+                                ':timestamp': timestamp
+                            },
+                            ConditionExpression='attribute_not_exists(last_edit_at) OR last_edit_at <= :timestamp'
+                        )
+                    except Exception as cond_e:
+                        # On conditional failure, refetch consistently and try merge once more
+                        logger.warning(f"⚠️ Conditional update failed (likely due to edit). Refetching and retrying once. Error: {cond_e}")
+                        latest = chat_sessions_table.get_item(
+                            Key={'user_id': user_id, 'session_id': session_id},
+                            ConsistentRead=True
+                        )
+                        if 'Item' in latest:
+                            latest_messages = latest['Item'].get('messages', [])
+                            # Skip if response already present
+                            if any(m.get('sender') == 'bot' and m.get('text') == response_content for m in latest_messages):
+                                logger.info(f"🛑 Duplicate AI response detected after refetch, skipping")
+                            else:
+                                latest_messages.append(ai_message)
+                                chat_sessions_table.update_item(
+                                    Key={'user_id': user_id, 'session_id': session_id},
+                                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                                    ExpressionAttributeValues={
+                                        ':messages': latest_messages,
+                                        ':count': len(latest_messages),
+                                        ':timestamp': timestamp
+                                    }
+                                )
+                
+                logger.info(f"✅ Stored AI response in session {session_id}")
+            else:
+                logger.warning(f"⚠️ Session {session_id} not found for AI response storage")
+                
+        except Exception as e:
+            logger.error(f"❌ Error storing AI response: {str(e)}")
+            # Continue with streaming even if storage fails
+        
+        # Check if there are any active WebSocket connections for this user/session
+        active_connections = get_active_connections_for_session(user_id, session_id)
+        
+        if not active_connections:
+            logger.info(f"📨 No active connections found for user {user_id}, session {session_id} - response will be visible when user reconnects")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'No active connections, response stored in session'})
+            }
+        
+        # Send response to all active connections using same format as synchronous flow
+        response_sent = False
+        for connection_id in active_connections:
+            try:
+                # Create AI response message in same format as current synchronous flow
+                ai_response_message = {
+                    'type': 'ai_response',
+                    'message_id': message_id or f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}",
+                    'content': response_content,
+                    'session_id': session_id,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                if send_message_to_client(connection_id, ai_response_message):
+                    logger.info(f"✅ Sent response to connection {connection_id}")
+                    response_sent = True
+                else:
+                    logger.warning(f"⚠️ Failed to send response to connection {connection_id}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Error sending response to connection {connection_id}: {str(e)}")
+        
+        if response_sent:
+            logger.info(f"✅ Successfully delivered response to active connections")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'Response delivered to active connections'})
+            }
+        else:
+            logger.warning(f"⚠️ Failed to deliver response to any active connections")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'No active connections available for delivery'})
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Error processing chat response payload: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': f'Failed to process chat response: {str(e)}'})
+        }
+
 def handle_agent_log(event):
     """
     Handle agent log streaming from chat agent lambda.
@@ -2039,21 +2252,36 @@ def lambda_handler(event, context):
             logger.info("Processing S3 event notification")
             return handle_s3_event_notification(event)
         
-        # Check if this is an SQS event (for agent logs) - check BEFORE SNS since both have Records
+        # Check if this is an SQS event - check BEFORE SNS since both have Records
         if 'Records' in event and len(event.get('Records', [])) > 0:
             first_record = event['Records'][0]
             # SQS events have 'eventSource' (lowercase) while SNS has 'EventSource' (uppercase)
             event_source = first_record.get('eventSource') or first_record.get('EventSource', '')
             if event_source == 'aws:sqs' or 'sqs' in event_source.lower():
-                logger.info("Processing SQS event for agent logs")
-                return handle_sqs_agent_logs(event)
+                # Determine which SQS queue this is from by checking message attributes or body
+                message_body = json.loads(first_record.get('body', '{}'))
+                message_type = message_body.get('type', '')
+                
+                if message_type == 'agent_log':
+                    logger.info("Processing SQS event for agent logs")
+                    return handle_sqs_agent_logs(event)
+                elif message_type == 'chat_response':
+                    logger.info("Processing SQS event for chat responses")
+                    return handle_sqs_chat_responses(event)
+                else:
+                    # Fallback: try to determine from queue name or default to agent logs
+                    logger.info("Processing SQS event (type unknown, defaulting to agent logs)")
+                    return handle_sqs_agent_logs(event)
         
-        # Check if this is an SNS notification for chat response
+        # Check if this is an SNS notification for chat response (legacy support)
         if 'Records' in event and len(event.get('Records', [])) > 0:
             first_record = event['Records'][0]
             if first_record.get('EventSource') == 'aws:sns':
-                logger.info("Processing SNS notification for chat response")
-                return handle_sns_chat_response(event)
+                logger.info("Processing SNS notification for chat response (legacy)")
+                # Convert SNS format to payload format for unified handler
+                sns_record = event['Records'][0]
+                sns_message = json.loads(sns_record['Sns']['Message'])
+                return handle_chat_response_payload(sns_message)
         
         # Extract connection ID from the request context
         connection_id = event.get('requestContext', {}).get('connectionId')
