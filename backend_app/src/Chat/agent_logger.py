@@ -194,30 +194,22 @@ class AgentLogger:
             # Send via SQS (preferred) or Lambda invocation (fallback)
             if self.use_sqs and self.sqs_client and self.sqs_queue_url:
                 # Send to SQS queue for better handling of high-volume logs
+                # Use same structure as chat responses for consistent routing
                 try:
-                    message_body = json.dumps({
-                        'type': 'agent_log',
-                        'user_id': self.user_id,
+                    sqs_message = {
+                        'type': 'agent_log',  # Marker to ensure processor routes to handle_sqs_agent_logs
                         'session_id': self.session_id,
+                        'user_id': self.user_id,
                         'payload': unique_payload
-                    })
+                    }
                     
                     response = self.sqs_client.send_message(
                         QueueUrl=self.sqs_queue_url,
-                        MessageBody=message_body,
+                        MessageBody=json.dumps(sqs_message),
                         MessageAttributes={
-                            'session_id': {
-                                'StringValue': self.session_id,
-                                'DataType': 'String'
-                            },
-                            'user_id': {
-                                'StringValue': self.user_id,
-                                'DataType': 'String'
-                            },
-                            'message_type': {
-                                'StringValue': 'agent_log',
-                                'DataType': 'String'
-                            }
+                            'session_id': {'StringValue': self.session_id, 'DataType': 'String'},
+                            'user_id': {'StringValue': self.user_id, 'DataType': 'String'},
+                            'message_type': {'StringValue': 'agent_log', 'DataType': 'String'}
                         }
                     )
                     

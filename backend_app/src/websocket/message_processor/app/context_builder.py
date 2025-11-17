@@ -349,7 +349,7 @@ def format_article_context(index: int, item: Dict[str, Any]) -> str:
     if article_data.get('published_date'):
         result += f"Published: {article_data.get('published_date')}\n"
     
-    result += "\nNote: Full article content can be retrieved if needed using the web_article_reader tool.\n"
+    result += "\nNote: Full article content can be retrieved if needed.\n"
     
     return result
 
