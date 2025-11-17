@@ -1683,6 +1683,118 @@ def get_active_connections_for_session(user_id, session_id):
         logger.error(f"❌ Error getting active connections: {str(e)}")
         return []
 
+def handle_agent_log(event):
+    """
+    Handle agent log streaming from chat agent lambda.
+    
+    STUB IMPLEMENTATION: Currently just prints/logs what it receives for testing.
+    
+    Args:
+        event: Event containing unique payload with user_id, session_id, logs, and metadata
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        logger.info("📊 Processing agent log message from chat agent")
+        
+        # Extract all markers from unique payload structure
+        user_id = event.get('user_id')
+        session_id = event.get('session_id')
+        payload = event.get('payload', {}) if 'payload' in event else event
+        
+        # Print all received data for debugging
+        print("=" * 80)
+        print("AGENT LOG RECEIVED - STUB IMPLEMENTATION")
+        print("=" * 80)
+        print(f"User ID: {user_id}")
+        print(f"Session ID: {session_id}")
+        print(f"Payload keys: {list(payload.keys()) if isinstance(payload, dict) else 'Not a dict'}")
+        print()
+        
+        # Extract log batch metadata from unique payload
+        logs = payload.get('logs', [])
+        message_id = payload.get('message_id')
+        log_batch_id = payload.get('log_batch_id')
+        batch_size = payload.get('batch_size', len(logs))
+        batch_timestamp = payload.get('batch_timestamp')
+        
+        print(f"Message ID: {message_id}")
+        print(f"Log Batch ID: {log_batch_id}")
+        print(f"Batch Size: {batch_size}")
+        print(f"Batch Timestamp: {batch_timestamp}")
+        print(f"Number of Logs: {len(logs)}")
+        print()
+        
+        # Print each log entry
+        if logs:
+            print("LOG ENTRIES:")
+            print("-" * 80)
+            for i, log_entry in enumerate(logs, 1):
+                log_id = log_entry.get('log_id', 'N/A')
+                level = log_entry.get('level', 'N/A')
+                message = log_entry.get('message', 'N/A')
+                timestamp = log_entry.get('timestamp', 'N/A')
+                relative_time = log_entry.get('relative_time', 'N/A')
+                
+                print(f"[{i}] Log ID: {log_id}")
+                print(f"    Level: {level}")
+                print(f"    Message: {message[:200]}..." if len(message) > 200 else f"    Message: {message}")
+                print(f"    Timestamp: {timestamp}")
+                print(f"    Relative Time: {relative_time}s")
+                if log_entry.get('module'):
+                    print(f"    Module: {log_entry.get('module')}.{log_entry.get('function', 'N/A')}")
+                print()
+        else:
+            print("No logs in batch")
+        
+        print("=" * 80)
+        print()
+        
+        # Also log to CloudWatch for visibility
+        logger.info(f"📊 Agent log batch received: session={session_id}, user={user_id}, batch_id={log_batch_id}, size={batch_size}")
+        logger.info(f"📊 Log batch contains {len(logs)} log entries")
+        
+        # Validate required fields
+        if not user_id or not session_id:
+            logger.error("Missing user_id or session_id in agent log event")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Missing user_id or session_id'})
+            }
+        
+        if not logs:
+            logger.warning(f"Empty log batch received for session {session_id}")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'Empty log batch (stub - no action taken)'})
+            }
+        
+        # STUB: For now, just return success without actually sending to WebSocket
+        # TODO: Implement actual WebSocket routing in next step
+        logger.info(f"📊 STUB: Would send {len(logs)} logs to WebSocket for session {session_id}")
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({
+                'message': 'Agent log received (stub implementation)',
+                'session_id': session_id,
+                'user_id': user_id,
+                'batch_id': log_batch_id,
+                'logs_received': len(logs),
+                'note': 'Logs printed to console and CloudWatch, not yet sent to WebSocket'
+            })
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error handling agent logs: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': str(e)})
+        }
+
 def handle_sns_chat_response(event):
     """
     Handle SNS notification for async chat response delivery
@@ -1853,6 +1965,11 @@ def lambda_handler(event, context):
     try:
         # Log the incoming event for debugging
         logger.info(f"Received event: {json_dumps_safe(event)}")
+        
+        # Check if this is an agent log message (direct Lambda invocation from chat agent)
+        if 'type' in event and event.get('type') == 'agent_log':
+            logger.info("Processing agent log message from chat agent")
+            return handle_agent_log(event)
         
         # Check if this is a direct Lambda invocation from File Handler
         if 'type' in event and event.get('type') == 'chat':

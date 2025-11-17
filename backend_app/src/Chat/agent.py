@@ -8,15 +8,18 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-# Configure logging
-logger = logging.getLogger()
+# Import AgentLogger for unified logging (CloudWatch + WebSocket streaming)
+from agent_logger import get_agent_logger
+
+# Initialize agent logger (will be updated with session context when available)
+agent_logger = get_agent_logger()
 
 # Try to import requests - this should be available in the layer
 try:
     import requests
-    logger.info("Successfully imported requests from layer")
+    agent_logger.debug("Successfully imported requests from layer")
 except ImportError as e:
-    logger.error(f"Failed to import requests: {e}")
+    agent_logger.error(f"Failed to import requests: {e}")
     # Try to add layer paths to sys.path
     import sys
     import os
@@ -24,36 +27,36 @@ except ImportError as e:
     for path in layer_paths:
         if os.path.exists(path) and path not in sys.path:
             sys.path.insert(0, path)
-            logger.info(f"Added {path} to sys.path")
+            agent_logger.debug(f"Added {path} to sys.path")
     
     # Try importing again
     try:
         import requests
-        logger.info("Successfully imported requests after adding layer paths")
+        agent_logger.debug("Successfully imported requests after adding layer paths")
     except ImportError as e2:
-        logger.error(f"Still failed to import requests after path adjustment: {e2}")
+        agent_logger.error(f"Still failed to import requests after path adjustment: {e2}")
         raise
 
 # Try to import dotenv - this should be available in the layer
 try:
     from dotenv import load_dotenv
-    logger.info("Successfully imported dotenv from layer")
+    agent_logger.debug("Successfully imported dotenv from layer")
 except ImportError as e:
-    logger.error(f"Failed to import dotenv: {e}")
+    agent_logger.error(f"Failed to import dotenv: {e}")
     # Try to add layer paths to sys.path if not already done
     if '/opt/python' not in sys.path:
         layer_paths = ['/opt/python', '/opt/python/lib/python3.11/site-packages', '/opt/python/lib/python3.11/dist-packages']
         for path in layer_paths:
             if os.path.exists(path) and path not in sys.path:
                 sys.path.insert(0, path)
-                logger.info(f"Added {path} to sys.path")
+                agent_logger.debug(f"Added {path} to sys.path")
     
     # Try importing again
     try:
         from dotenv import load_dotenv
-        logger.info("Successfully imported dotenv after adding layer paths")
+        agent_logger.debug("Successfully imported dotenv after adding layer paths")
     except ImportError as e2:
-        logger.error(f"Still failed to import dotenv after path adjustment: {e2}")
+        agent_logger.error(f"Still failed to import dotenv after path adjustment: {e2}")
         raise
 
 # OpenTelemetry environment variables are set in Terraform to disable instrumentation
@@ -62,12 +65,12 @@ except ImportError as e:
 try:
     from strands import Agent
     from strands.models import BedrockModel
-    logger.info("Successfully imported Strands Agents SDK from layer")
+    agent_logger.debug("Successfully imported Strands Agents SDK from layer")
 except ImportError as e:
-    logger.error(f"Failed to import Strands Agents SDK: {e}")
+    agent_logger.error(f"Failed to import Strands Agents SDK: {e}")
     raise
 except Exception as e:
-    logger.error(f"Error importing Strands Agents SDK: {e}")
+    agent_logger.error(f"Error importing Strands Agents SDK: {e}")
     raise
 
 from typing import Dict, Any, List, Optional
@@ -77,9 +80,9 @@ try:
     import yfinance as yf
     import numpy as np
     import pandas as pd
-    logger.info("Successfully imported financial libraries (yfinance, numpy, pandas) from layer")
+    agent_logger.debug("Successfully imported financial libraries (yfinance, numpy, pandas) from layer")
 except ImportError as e:
-    logger.error(f"Failed to import financial libraries: {e}")
+    agent_logger.error(f"Failed to import financial libraries: {e}")
     raise
 
 # Connection pooling for better performance
@@ -287,7 +290,7 @@ class FinancialTools:
             end_date: End date in 'YYYY-MM-DD' format (optional)
         """
         try:
-            logger.info(f"🔍 DEBUG: get_stock_data called with symbol={symbol}, timeframe={timeframe}")
+            agent_logger.info(f"🔍 DEBUG: get_stock_data called with symbol={symbol}, timeframe={timeframe}")
             
             # Use yfinance for all data
             result = FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
@@ -300,41 +303,41 @@ class FinancialTools:
             from compression_helper import CompressionHelper
             
             # Debug logging for compression
-            logger.info(f"🔍 DEBUG: Complete data object size before compression: {len(str(result))} characters")
-            logger.info(f"🔍 DEBUG: Historical data length: {len(result.get('historical_data', []))} points")
-            logger.info(f"🔍 DEBUG: Result keys before compression: {list(result.keys())}")
-            logger.info(f"🔍 DEBUG: Has historical_data in result: {'historical_data' in result}")
+            agent_logger.info(f"🔍 DEBUG: Complete data object size before compression: {len(str(result))} characters")
+            agent_logger.info(f"🔍 DEBUG: Historical data length: {len(result.get('historical_data', []))} points")
+            agent_logger.info(f"🔍 DEBUG: Result keys before compression: {list(result.keys())}")
+            agent_logger.info(f"🔍 DEBUG: Has historical_data in result: {'historical_data' in result}")
             
             # Compress the entire data object if it's large
             compressed_result = CompressionHelper.compress_data(result, compression_threshold=2000)
             
             # Debug logging for compression result
-            logger.info(f"🔍 DEBUG: Compressed result type: {type(compressed_result)}")
+            agent_logger.info(f"🔍 DEBUG: Compressed result type: {type(compressed_result)}")
             if isinstance(compressed_result, dict):
-                logger.info(f"🔍 DEBUG: Compressed data keys: {list(compressed_result.keys())}")
+                agent_logger.info(f"🔍 DEBUG: Compressed data keys: {list(compressed_result.keys())}")
                 if compressed_result.get("_compressed"):
-                    logger.info(f"🔍 DEBUG: Data was compressed successfully")
-                    logger.info(f"🔍 DEBUG: Compressed data has original_data: {'original_data' in compressed_result}")
-                    logger.info(f"🔍 DEBUG: Compressed data size: {compressed_result.get('_compressed_size', 'unknown')}")
+                    agent_logger.info(f"🔍 DEBUG: Data was compressed successfully")
+                    agent_logger.info(f"🔍 DEBUG: Compressed data has original_data: {'original_data' in compressed_result}")
+                    agent_logger.info(f"🔍 DEBUG: Compressed data size: {compressed_result.get('_compressed_size', 'unknown')}")
                 else:
-                    logger.info(f"🔍 DEBUG: Data was not compressed (below threshold)")
-                    logger.info(f"🔍 DEBUG: Uncompressed data has historical_data: {'historical_data' in compressed_result}")
+                    agent_logger.info(f"🔍 DEBUG: Data was not compressed (below threshold)")
+                    agent_logger.info(f"🔍 DEBUG: Uncompressed data has historical_data: {'historical_data' in compressed_result}")
             else:
-                logger.info(f"🔍 DEBUG: Compressed data is not a dict: {compressed_result}")
+                agent_logger.info(f"🔍 DEBUG: Compressed data is not a dict: {compressed_result}")
             
             # Additional debugging for tool calling
-            logger.info(f"🔍 DEBUG: Returning data for tool calling - type: {type(compressed_result)}")
+            agent_logger.info(f"🔍 DEBUG: Returning data for tool calling - type: {type(compressed_result)}")
             if isinstance(compressed_result, dict):
-                logger.info(f"🔍 DEBUG: Return data keys: {list(compressed_result.keys())}")
+                agent_logger.info(f"🔍 DEBUG: Return data keys: {list(compressed_result.keys())}")
                 if compressed_result.get("_compressed"):
-                    logger.info(f"🔍 DEBUG: This is compressed data - agent should pass it as-is to generate_chart_tool")
+                    agent_logger.info(f"🔍 DEBUG: This is compressed data - agent should pass it as-is to generate_chart_tool")
                 else:
-                    logger.info(f"🔍 DEBUG: This is uncompressed data - agent should pass it as-is to generate_chart_tool")
+                    agent_logger.info(f"🔍 DEBUG: This is uncompressed data - agent should pass it as-is to generate_chart_tool")
             
             return compressed_result
                 
         except Exception as e:
-            logger.error(f"Error in get_stock_data: {str(e)}")
+            agent_logger.error(f"Error in get_stock_data: {str(e)}")
             return {"symbol": symbol, "status": "error", "message": str(e)}
     
     @staticmethod
@@ -1167,13 +1170,13 @@ Note: This is a simulated analysis. For actual research, use real Fama-French da
 def get_financial_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> str:
     """Get current stock price, market cap, and financial metrics for a given stock symbol. Supports custom timeframes and date ranges for chart generation."""
     try:
-        logger.info(f"🔍 DEBUG: get_financial_data called with symbol={symbol}, timeframe={timeframe}")
+        agent_logger.info(f"🔍 DEBUG: get_financial_data called with symbol={symbol}, timeframe={timeframe}")
         data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
-        logger.info(f"🔍 DEBUG: get_financial_data result keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
-        logger.info(f"🔍 DEBUG: get_financial_data has historical_data: {'historical_data' in data if isinstance(data, dict) else 'Not a dict'}")
+        agent_logger.info(f"🔍 DEBUG: get_financial_data result keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+        agent_logger.info(f"🔍 DEBUG: get_financial_data has historical_data: {'historical_data' in data if isinstance(data, dict) else 'Not a dict'}")
         return json.dumps(data, indent=2)
     except Exception as e:
-        logger.error(f"🔍 DEBUG: get_financial_data exception: {str(e)}")
+        agent_logger.error(f"🔍 DEBUG: get_financial_data exception: {str(e)}")
         return f"Error getting financial data: {str(e)}"
 
 @tool
@@ -1508,7 +1511,7 @@ File Information:
         return result
         
     except Exception as e:
-        logger.error(f"Error in read_s3_file_tool: {str(e)}")
+        agent_logger.error(f"Error in read_s3_file_tool: {str(e)}")
         return f"Error reading file: {str(e)}"
 
 @tool
@@ -1540,15 +1543,15 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
                 metadata={'generated_by': 'agent'}
             )
             
-            logger.info(f"Generated agent file: {filename}")
+            agent_logger.info(f"Generated agent file: {filename}")
             return result
             
         except ImportError:
-            logger.warning("lambda_invocation module not available - falling back to manual upload")
+            agent_logger.warning("lambda_invocation module not available - falling back to manual upload")
             return "Error: Shared file upload module not available"
         
     except Exception as e:
-        logger.error(f"Error in generate_agent_file_tool: {str(e)}")
+        agent_logger.error(f"Error in generate_agent_file_tool: {str(e)}")
         return f"Error generating file: {str(e)}"
 
 @tool
@@ -1599,15 +1602,15 @@ def generate_excel_file_tool(filename: str, content: str, template_type: str = "
                 }
             )
             
-            logger.info(f"Generated CSV file: {filename}")
+            agent_logger.info(f"Generated CSV file: {filename}")
             return result
             
         except ImportError:
-            logger.warning("lambda_invocation module not available - falling back to manual upload")
+            agent_logger.warning("lambda_invocation module not available - falling back to manual upload")
             return "Error: Shared file upload module not available"
         
     except Exception as e:
-        logger.error(f"Error in generate_excel_file_tool: {str(e)}")
+        agent_logger.error(f"Error in generate_excel_file_tool: {str(e)}")
         return f"Error generating Excel file: {str(e)}"
 
 def generate_excel_content(template_type: str, content: str, include_charts: bool) -> bytes:
@@ -1653,7 +1656,7 @@ def generate_excel_content(template_type: str, content: str, include_charts: boo
         return excel_content.encode('utf-8')
         
     except Exception as e:
-        logger.error(f"Error generating Excel content: {str(e)}")
+        agent_logger.error(f"Error generating Excel content: {str(e)}")
         # Fallback to simple CSV format
         fallback_content = f"# {template_type.upper().replace('_', ' ')} TEMPLATE\n# Generated by Cosine Financial Analysis Agent\n\n{content}"
         return fallback_content.encode('utf-8')
@@ -1942,11 +1945,11 @@ def create_financial_agent(model_name: str = 'claude-sonnet-4') -> Agent:
         Agent: Configured financial agent
     """
     if model_name not in MODELS:
-        logger.warning(f"Unknown model '{model_name}', falling back to claude-sonnet-4")
+        agent_logger.warning(f"Unknown model '{model_name}', falling back to claude-sonnet-4")
         model_name = 'claude-sonnet-4'
     
     selected_model = MODELS[model_name]
-    logger.info(f"Creating financial agent with model: {model_name}")
+    agent_logger.info(f"Creating financial agent with model: {model_name}")
     
     return Agent(
         system_prompt=FINANCIAL_ANALYSIS_PROMPT,
