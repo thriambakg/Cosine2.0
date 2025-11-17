@@ -11,15 +11,23 @@ import logging
 import time
 import threading
 import uuid
+import json
 from typing import List, Dict, Any, Optional
 import os
 
-# Try to import lambda_invocation for WebSocket streaming
+# Try to import lambda_invocation for WebSocket streaming (fallback)
 try:
     from lambda_invocation import invoke_websocket_processor
-    WEBSOCKET_STREAMING_AVAILABLE = True
+    LAMBDA_INVOCATION_AVAILABLE = True
 except ImportError:
-    WEBSOCKET_STREAMING_AVAILABLE = False
+    LAMBDA_INVOCATION_AVAILABLE = False
+
+# Try to import boto3 for SQS (preferred method for high-volume logs)
+try:
+    import boto3
+    SQS_AVAILABLE = True
+except ImportError:
+    SQS_AVAILABLE = False
 
 
 class AgentLogger:
@@ -83,7 +91,21 @@ class AgentLogger:
         ]
         
         # Enable WebSocket streaming only if session context is available
-        self.websocket_enabled = bool(session_id and user_id and WEBSOCKET_STREAMING_AVAILABLE)
+        # Prefer SQS if available, fallback to Lambda invocation
+        self.websocket_enabled = bool(session_id and user_id and (SQS_AVAILABLE or LAMBDA_INVOCATION_AVAILABLE))
+        self.use_sqs = SQS_AVAILABLE  # Prefer SQS for high-volume logs
+        self.sqs_queue_url = os.environ.get('AGENT_LOGS_SQS_QUEUE_URL') if self.use_sqs else None
+        
+        # Initialize SQS client if using SQS
+        if self.use_sqs and self.sqs_queue_url:
+            try:
+                self.sqs_client = boto3.client('sqs')
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize SQS client: {e}, falling back to Lambda invocation")
+                self.use_sqs = False
+                self.sqs_client = None
+        else:
+            self.sqs_client = None
     
     @classmethod
     def get_instance(cls, session_id: Optional[str] = None, user_id: Optional[str] = None, message_id: Optional[str] = None) -> 'AgentLogger':
@@ -106,7 +128,7 @@ class AgentLogger:
                 cls._instance.session_id = session_id
                 cls._instance.user_id = user_id
                 cls._instance.message_id = message_id
-                cls._instance.websocket_enabled = bool(session_id and user_id and WEBSOCKET_STREAMING_AVAILABLE)
+                cls._instance.websocket_enabled = bool(session_id and user_id and (SQS_AVAILABLE or LAMBDA_INVOCATION_AVAILABLE))
                 cls._instance.start_time = time.time()
             return cls._instance
     
@@ -169,13 +191,59 @@ class AgentLogger:
                 'version': '1.0'
             }
             
-            # Invoke websocket processor with unique payload
-            invoke_websocket_processor(
-                user_id=self.user_id,
-                session_id=self.session_id,
-                message_type='agent_log',
-                payload=unique_payload
-            )
+            # Send via SQS (preferred) or Lambda invocation (fallback)
+            if self.use_sqs and self.sqs_client and self.sqs_queue_url:
+                # Send to SQS queue for better handling of high-volume logs
+                try:
+                    message_body = json.dumps({
+                        'type': 'agent_log',
+                        'user_id': self.user_id,
+                        'session_id': self.session_id,
+                        'payload': unique_payload
+                    })
+                    
+                    response = self.sqs_client.send_message(
+                        QueueUrl=self.sqs_queue_url,
+                        MessageBody=message_body,
+                        MessageAttributes={
+                            'session_id': {
+                                'StringValue': self.session_id,
+                                'DataType': 'String'
+                            },
+                            'user_id': {
+                                'StringValue': self.user_id,
+                                'DataType': 'String'
+                            },
+                            'message_type': {
+                                'StringValue': 'agent_log',
+                                'DataType': 'String'
+                            }
+                        }
+                    )
+                    
+                    # Successfully sent to SQS
+                    return
+                    
+                except Exception as sqs_error:
+                    # If SQS fails, fallback to Lambda invocation
+                    self.logger.warning(f"SQS send failed: {sqs_error}, falling back to Lambda invocation")
+                    if LAMBDA_INVOCATION_AVAILABLE:
+                        invoke_websocket_processor(
+                            user_id=self.user_id,
+                            session_id=self.session_id,
+                            message_type='agent_log',
+                            payload=unique_payload
+                        )
+            elif LAMBDA_INVOCATION_AVAILABLE:
+                # Fallback to direct Lambda invocation
+                invoke_websocket_processor(
+                    user_id=self.user_id,
+                    session_id=self.session_id,
+                    message_type='agent_log',
+                    payload=unique_payload
+                )
+            else:
+                self.logger.warning("Neither SQS nor Lambda invocation available for log streaming")
             
         except Exception as e:
             # Log error but don't break agent
@@ -286,7 +354,7 @@ class AgentLogger:
         self.user_id = user_id
         if message_id:
             self.message_id = message_id
-        self.websocket_enabled = bool(session_id and user_id and WEBSOCKET_STREAMING_AVAILABLE)
+        self.websocket_enabled = bool(session_id and user_id and (SQS_AVAILABLE or LAMBDA_INVOCATION_AVAILABLE))
         self.start_time = time.time()
         # Clear buffer when session changes
         with self.buffer_lock:

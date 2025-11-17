@@ -655,6 +655,33 @@ resource "aws_iam_policy" "lambda_websocket_policy" {
   tags = var.common_tags
 }
 
+# IAM Policy for Lambda functions to receive messages from SQS
+resource "aws_iam_policy" "lambda_sqs_policy" {
+  name        = "${var.project_name}-lambda-sqs-policy-${var.environment}"
+  description = "Policy for Lambda functions to receive messages from SQS queues"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:ChangeMessageVisibility"
+        ]
+        Resource = [
+          aws_sqs_queue.agent_logs_queue.arn,
+          aws_sqs_queue.agent_logs_dlq.arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
 # SES Module for email sending capabilities
 module "ses" {
   source = "./modules/ses"
@@ -943,10 +970,10 @@ resource "aws_iam_role_policy_attachment" "chat_agent_lambda_invoke_policy" {
   policy_arn = aws_iam_policy.lambda_invoke_policy.arn
 }
 
-# SNS policy for chat agent to publish responses
-resource "aws_iam_policy" "chat_agent_sns_policy" {
-  name        = "${var.project_name}-chat-agent-sns-policy-${var.environment}"
-  description = "Policy for chat agent to publish to SNS topic"
+# SQS policy for chat agent to send logs
+resource "aws_iam_policy" "chat_agent_sqs_policy" {
+  name        = "${var.project_name}-chat-agent-sqs-policy-${var.environment}"
+  description = "Policy for chat agent to send logs to SQS queue"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -954,9 +981,10 @@ resource "aws_iam_policy" "chat_agent_sns_policy" {
       {
         Effect = "Allow"
         Action = [
-          "SNS:Publish"
+          "sqs:SendMessage",
+          "sqs:GetQueueAttributes"
         ]
-        Resource = module.chat_response_sns_topic.topic_arn
+        Resource = aws_sqs_queue.agent_logs_queue.arn
       }
     ]
   })
@@ -964,10 +992,10 @@ resource "aws_iam_policy" "chat_agent_sns_policy" {
   tags = var.common_tags
 }
 
-# Attach SNS policy for chat agent
-resource "aws_iam_role_policy_attachment" "chat_agent_sns_policy" {
+# Attach SQS policy for chat agent
+resource "aws_iam_role_policy_attachment" "chat_agent_sqs_policy" {
   role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.chat_agent_sns_policy.arn
+  policy_arn = aws_iam_policy.chat_agent_sqs_policy.arn
 }
 
 
@@ -1085,8 +1113,8 @@ resource "aws_lambda_function" "chat_agent" {
       # Agent Files Processor Lambda Function Name for direct invocation
       AGENT_FILES_PROCESSOR_FUNCTION_NAME = module.agent_files_processor_lambda.function_name
 
-      # SNS Topic for async response delivery
-      CHAT_RESPONSE_SNS_TOPIC_ARN = module.chat_response_sns_topic.topic_arn
+      # SQS Queue for agent log streaming
+      AGENT_LOGS_SQS_QUEUE_URL = aws_sqs_queue.agent_logs_queue.url
     }
   }
 
@@ -1160,6 +1188,8 @@ module "websocket_message_lambda" {
     CHAT_FILES_BUCKET_NAME      = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
     ENVIRONMENT                 = var.environment
     LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
+    # SQS Queue for agent log streaming
+    AGENT_LOGS_SQS_QUEUE_URL = aws_sqs_queue.agent_logs_queue.url
   }
 
   # Attach core layer
@@ -1170,7 +1200,8 @@ module "websocket_message_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
-    aws_iam_policy.lambda_websocket_policy.arn
+    aws_iam_policy.lambda_websocket_policy.arn,
+    aws_iam_policy.lambda_sqs_policy.arn
   ]
 
   tags = var.common_tags
@@ -1193,34 +1224,101 @@ module "websocket_api" {
 }
 
 # ============================================================================
-# SNS TOPIC FOR ASYNC CHAT RESPONSES
+# SQS QUEUE FOR AGENT LOGS
 # ============================================================================
 
-# SNS Topic for async chat agent responses
-module "chat_response_sns_topic" {
-  source = "./modules/sns"
+# SQS Queue for agent log streaming (replaces SNS for high-volume logs)
+resource "aws_sqs_queue" "agent_logs_queue" {
+  name                       = "${var.project_name}-agent-logs-${var.environment}"
+  message_retention_seconds  = 345600 # 4 days
+  visibility_timeout_seconds = 300    # 5 minutes (should be > Lambda timeout)
+  receive_wait_time_seconds  = 20     # Long polling
 
-  topic_name   = "${var.project_name}-chat-response-${var.environment}"
-  display_name = "Chat Response Notifications"
-  purpose      = "Async chat agent response delivery"
-  kms_key_arn  = data.terraform_remote_state.base_infra.outputs.kms_key_arn
+  # KMS encryption
+  kms_master_key_id                 = data.terraform_remote_state.base_infra.outputs.kms_key_arn
+  kms_data_key_reuse_period_seconds = 300
 
-  # Allow Lambda functions to publish
-  allow_lambda_publish = true
+  # Dead letter queue for failed processing
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.agent_logs_dlq.arn
+    maxReceiveCount     = 3
+  })
 
-  # Subscribe WebSocket message lambda to this topic
-  lambda_function_arns = [module.websocket_message_lambda.function_arn]
-
-  tags = var.common_tags
+  tags = merge(var.common_tags, {
+    Name        = "${var.project_name}-agent-logs-${var.environment}"
+    Purpose     = "High-volume agent log streaming to WebSocket"
+    Environment = var.environment
+  })
 }
 
-# Lambda permission for SNS to invoke WebSocket message lambda
-resource "aws_lambda_permission" "allow_sns_invoke_websocket" {
-  statement_id  = "AllowExecutionFromSNS"
-  action        = "lambda:InvokeFunction"
-  function_name = module.websocket_message_lambda.function_name
-  principal     = "sns.amazonaws.com"
-  source_arn    = module.chat_response_sns_topic.topic_arn
+# Dead Letter Queue for failed agent log processing
+resource "aws_sqs_queue" "agent_logs_dlq" {
+  name                              = "${var.project_name}-agent-logs-dlq-${var.environment}"
+  message_retention_seconds         = 1209600 # 14 days
+  kms_master_key_id                 = data.terraform_remote_state.base_infra.outputs.kms_key_arn
+  kms_data_key_reuse_period_seconds = 300
+
+  tags = merge(var.common_tags, {
+    Name        = "${var.project_name}-agent-logs-dlq-${var.environment}"
+    Purpose     = "Dead letter queue for failed agent log processing"
+    Environment = var.environment
+  })
+}
+
+# SQS Queue Policy - Allow Lambda to receive messages
+resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
+  queue_url = aws_sqs_queue.agent_logs_queue.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = aws_sqs_queue.agent_logs_queue.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = module.websocket_message_lambda.function_arn
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.chat_agent_execution_role.arn
+        }
+        Action = [
+          "sqs:SendMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = aws_sqs_queue.agent_logs_queue.arn
+      }
+    ]
+  })
+}
+
+# Event source mapping for SQS to trigger WebSocket message lambda
+resource "aws_lambda_event_source_mapping" "agent_logs_sqs_trigger" {
+  event_source_arn                   = aws_sqs_queue.agent_logs_queue.arn
+  function_name                      = module.websocket_message_lambda.function_arn
+  batch_size                         = 10 # Process up to 10 messages per invocation
+  maximum_batching_window_in_seconds = 5  # Wait up to 5 seconds to batch
+
+  # Enable partial batch failure reporting
+  function_response_types = ["ReportBatchItemFailures"]
+
+  depends_on = [
+    aws_sqs_queue_policy.agent_logs_queue_policy,
+    module.websocket_message_lambda,
+    aws_iam_policy.lambda_sqs_policy
+  ]
 }
 
 # ============================================================================

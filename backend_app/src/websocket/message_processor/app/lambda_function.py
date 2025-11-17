@@ -1683,6 +1683,59 @@ def get_active_connections_for_session(user_id, session_id):
         logger.error(f"❌ Error getting active connections: {str(e)}")
         return []
 
+def handle_sqs_agent_logs(event):
+    """
+    Handle SQS events containing agent log batches.
+    
+    Args:
+        event: SQS event containing one or more agent log messages
+        
+    Returns:
+        API Gateway response
+    """
+    try:
+        logger.info("📊 Processing SQS event for agent logs")
+        
+        successful_processed = 0
+        failed_processed = 0
+        
+        # Process each SQS record
+        for record in event.get('Records', []):
+            try:
+                # Parse SQS message body
+                message_body = json.loads(record.get('body', '{}'))
+                
+                # Handle the agent log message (same structure as direct Lambda invocation)
+                result = handle_agent_log(message_body)
+                
+                if result.get('statusCode') == 200:
+                    successful_processed += 1
+                else:
+                    failed_processed += 1
+                    
+            except Exception as record_error:
+                logger.error(f"❌ Error processing SQS record: {str(record_error)}")
+                failed_processed += 1
+                continue
+        
+        logger.info(f"📊 SQS processing complete: {successful_processed} successful, {failed_processed} failed")
+        
+        return {
+            'statusCode': 200,
+            'body': json_dumps_safe({
+                'message': 'SQS agent logs processed',
+                'successful': successful_processed,
+                'failed': failed_processed
+            })
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error handling SQS agent logs: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json_dumps_safe({'error': str(e)})
+        }
+
 def handle_agent_log(event):
     """
     Handle agent log streaming from chat agent lambda.
@@ -1986,10 +2039,21 @@ def lambda_handler(event, context):
             logger.info("Processing S3 event notification")
             return handle_s3_event_notification(event)
         
+        # Check if this is an SQS event (for agent logs) - check BEFORE SNS since both have Records
+        if 'Records' in event and len(event.get('Records', [])) > 0:
+            first_record = event['Records'][0]
+            # SQS events have 'eventSource' (lowercase) while SNS has 'EventSource' (uppercase)
+            event_source = first_record.get('eventSource') or first_record.get('EventSource', '')
+            if event_source == 'aws:sqs' or 'sqs' in event_source.lower():
+                logger.info("Processing SQS event for agent logs")
+                return handle_sqs_agent_logs(event)
+        
         # Check if this is an SNS notification for chat response
-        if 'Records' in event and event['Records'][0].get('EventSource') == 'aws:sns':
-            logger.info("Processing SNS notification for chat response")
-            return handle_sns_chat_response(event)
+        if 'Records' in event and len(event.get('Records', [])) > 0:
+            first_record = event['Records'][0]
+            if first_record.get('EventSource') == 'aws:sns':
+                logger.info("Processing SNS notification for chat response")
+                return handle_sns_chat_response(event)
         
         # Extract connection ID from the request context
         connection_id = event.get('requestContext', {}).get('connectionId')
