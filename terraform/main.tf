@@ -1262,7 +1262,7 @@ module "agent_logs_sqs_queue" {
   tags = var.common_tags
 }
 
-# SQS Queue Policy - Allow Lambda service and chat agent role to access queue
+# SQS Queue Policy - Allow Lambda service and chat agent role to access agent logs queue
 resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
   queue_url = module.agent_logs_sqs_queue.queue_id
 
@@ -1279,10 +1279,7 @@ resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes"
         ]
-        Resource = [
-          module.agent_logs_sqs_queue.queue_arn,
-          module.chat_response_sqs_queue.queue_arn
-        ]
+        Resource = module.agent_logs_sqs_queue.queue_arn
         Condition = {
           ArnEquals = {
             "aws:SourceArn" = module.websocket_message_lambda.function_arn
@@ -1298,10 +1295,7 @@ resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
           "sqs:SendMessage",
           "sqs:GetQueueAttributes"
         ]
-        Resource = [
-          module.agent_logs_sqs_queue.queue_arn,
-          module.chat_response_sqs_queue.queue_arn
-        ]
+        Resource = module.agent_logs_sqs_queue.queue_arn
       }
     ]
   })
@@ -1339,7 +1333,7 @@ module "chat_response_sqs_queue" {
 
   # Queue configuration
   message_retention_seconds  = 345600 # 4 days
-  visibility_timeout_seconds = 300    # 5 minutes (sufficient for response processing)
+  visibility_timeout_seconds = 1200   # 20 minutes (must be > Lambda timeout of 900s)
   receive_wait_time_seconds  = 20     # Long polling
   max_receive_count          = 3
 
