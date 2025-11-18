@@ -3,6 +3,12 @@ Context-Aware Agent System
 Creates session-specific agents with proper context isolation
 """
 
+# Disable Strands metrics/telemetry to prevent hanging during Agent initialization
+import os
+os.environ.setdefault('STRANDS_DISABLE_METRICS', 'true')
+os.environ.setdefault('STRANDS_DISABLE_TELEMETRY', 'true')
+os.environ.setdefault('STRANDS_METRICS_ENABLED', 'false')
+
 import json
 import logging
 from typing import Dict, Any, List, Optional
@@ -126,11 +132,47 @@ class ContextAwareAgent:
             
             # Create agent with enhanced system prompt that includes conversation history
             get_logger().info(f"🔍 DEBUG: Creating new agent with model {model_name}")
-            session_agent = Agent(
-                system_prompt=enhanced_system_prompt,
-                tools=session_tools,
-                model=selected_model
-            )
+            
+            # Wrap Agent creation in timeout to prevent hanging on MetricsClient initialization
+            import threading
+            
+            def create_agent_with_timeout():
+                """Create agent with timeout protection"""
+                try:
+                    return Agent(
+                        system_prompt=enhanced_system_prompt,
+                        tools=session_tools,
+                        model=selected_model
+                    )
+                except Exception as e:
+                    get_logger().error(f"Error creating Agent: {str(e)}")
+                    raise
+            
+            # Use threading with timeout to prevent hanging
+            agent_result = [None]
+            agent_exception = [None]
+            
+            def agent_creator():
+                try:
+                    agent_result[0] = create_agent_with_timeout()
+                except Exception as e:
+                    agent_exception[0] = e
+            
+            agent_thread = threading.Thread(target=agent_creator, daemon=True)
+            agent_thread.start()
+            agent_thread.join(timeout=10.0)  # 10 second timeout for Agent creation
+            
+            if agent_thread.is_alive():
+                get_logger().error("⚠️ Agent creation timed out after 10 seconds - MetricsClient may be hanging")
+                raise Exception("Agent creation timed out - Strands MetricsClient initialization may be hanging. Check network connectivity or disable metrics.")
+            
+            if agent_exception[0]:
+                raise agent_exception[0]
+            
+            if agent_result[0] is None:
+                raise Exception("Agent creation failed - no agent returned")
+            
+            session_agent = agent_result[0]
             get_logger().info(f"🔍 DEBUG: Agent created with {len(session_agent.messages)} messages (empty - conversation history is in system prompt)")
             get_logger().info(f"🔍 DEBUG: Agent tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in session_tools]}")
             get_logger().info(f"🔍 DEBUG: Agent created with enhanced system prompt containing conversation history")

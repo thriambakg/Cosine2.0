@@ -4,6 +4,11 @@ os.environ.setdefault('OTEL_SDK_DISABLED', 'true')
 os.environ.setdefault('OTEL_PYTHON_DISABLED_INSTRUMENTATIONS', 'all')
 os.environ.setdefault('OTEL_PYTHON_CONTEXT', 'contextvars_context')
 
+# Disable Strands metrics/telemetry to prevent hanging during Agent initialization
+os.environ.setdefault('STRANDS_DISABLE_METRICS', 'true')
+os.environ.setdefault('STRANDS_DISABLE_TELEMETRY', 'true')
+os.environ.setdefault('STRANDS_METRICS_ENABLED', 'false')
+
 import json
 import logging
 from datetime import datetime, timedelta
@@ -1951,11 +1956,46 @@ def create_financial_agent(model_name: str = 'claude-sonnet-4') -> Agent:
     selected_model = MODELS[model_name]
     agent_logger.info(f"Creating financial agent with model: {model_name}")
     
-    return Agent(
-        system_prompt=FINANCIAL_ANALYSIS_PROMPT,
-        tools=enhanced_tools,
-        model=selected_model
-    )
+    # Wrap Agent creation in timeout to prevent hanging on MetricsClient initialization
+    import threading
+    
+    def create_agent_with_timeout():
+        """Create agent with timeout protection"""
+        try:
+            return Agent(
+                system_prompt=FINANCIAL_ANALYSIS_PROMPT,
+                tools=enhanced_tools,
+                model=selected_model
+            )
+        except Exception as e:
+            agent_logger.error(f"Error creating Agent: {str(e)}")
+            raise
+    
+    # Use threading with timeout to prevent hanging
+    agent_result = [None]
+    agent_exception = [None]
+    
+    def agent_creator():
+        try:
+            agent_result[0] = create_agent_with_timeout()
+        except Exception as e:
+            agent_exception[0] = e
+    
+    agent_thread = threading.Thread(target=agent_creator, daemon=True)
+    agent_thread.start()
+    agent_thread.join(timeout=10.0)  # 10 second timeout for Agent creation
+    
+    if agent_thread.is_alive():
+        agent_logger.error("⚠️ Agent creation timed out after 10 seconds - MetricsClient may be hanging")
+        raise Exception("Agent creation timed out - Strands MetricsClient initialization may be hanging. Check network connectivity or disable metrics.")
+    
+    if agent_exception[0]:
+        raise agent_exception[0]
+    
+    if agent_result[0] is None:
+        raise Exception("Agent creation failed - no agent returned")
+    
+    return agent_result[0]
 
 # Default financial agent (for backward compatibility) - removed to prevent unnecessary creation at import time
 # financial_agent = create_financial_agent('claude-opus-4-1')
