@@ -1952,8 +1952,10 @@ export default function ChatPage() {
                 </Avatar>
                 <Box display="flex" alignItems="center" gap={1}>
                   <CircularProgress size={20} sx={{ color: '#22c55e' }} />
-                  <Typography variant="body2" color="#9ca3af" sx={{ textTransform: 'uppercase' }}>
-                    AI is thinking...
+                  <Typography variant="body2" color="#9ca3af" sx={{ textTransform: 'none' }}>
+                    {currentSession?.session_id && agentLogs[currentSession.session_id] 
+                      ? agentLogs[currentSession.session_id]
+                      : 'AI is thinking...'}
                   </Typography>
                 </Box>
               </Box>
