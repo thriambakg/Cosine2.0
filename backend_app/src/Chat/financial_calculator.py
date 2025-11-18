@@ -14,7 +14,7 @@ logger = logging.getLogger()
 # Import Strands types (available in Lambda layer)
 try:
     from strands.types.tools import ToolResult, ToolUse
-    logger.info("Successfully imported Strands types from layer")
+    # Import successful - no need to log
 except ImportError as e:
     logger.error(f"Failed to import Strands types: {e}")
     raise

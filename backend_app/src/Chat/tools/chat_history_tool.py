@@ -28,7 +28,7 @@ except:
 try:
     from strands.types.tools import ToolResult, ToolUse
     from strands import tool
-    logger.info("Successfully imported Strands types from layer")
+    # Import successful - no need to log
 except ImportError as e:
     logger.warning(f"Could not import Strands types: {e}")
     # Define fallback types for local development
