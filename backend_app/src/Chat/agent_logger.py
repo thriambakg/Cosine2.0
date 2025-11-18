@@ -135,6 +135,7 @@ class AgentLogger:
     def _should_skip_for_websocket(self, message: str, level: str) -> bool:
         """
         Check if log should be skipped for WebSocket streaming.
+        Only send tool-related logs to WebSocket for better UX.
         
         Args:
             message: Log message
@@ -143,12 +144,38 @@ class AgentLogger:
         Returns:
             True if should skip, False otherwise
         """
-        # Skip DEBUG level logs
+        # Only send tool-related logs to WebSocket
+        import re
+        
+        # Check if this is a tool call log
+        # These patterns match Strands agent tool call logs
+        tool_patterns = [
+            r'Tool\s*#\d+:',           # "Tool #1:", "Tool #2:", etc. (Strands format)
+            r'Tool\s*#\d+\s*:',        # "Tool #1 :" (with spaces)
+            r'Tool\s*#\d+\s*[:\-]',    # "Tool #1:", "Tool #1 -", etc.
+            r'get_\w+_tool',           # Tool function names like "get_chat_history_tool"
+            r'generate_\w+_tool',      # "generate_chart_tool"
+            r'read_\w+_tool',          # "read_pdf_tool"
+            r'analyze_\w+_tool',       # "analyze_pdf_content_tool"
+            r'search_\w+_tool',       # "search_chat_history_tool"
+            r'process_\w+_tool',      # "process_chat_session_context_tool"
+            r'compare_\w+_tool',       # "compare_crypto_tool"
+            r'calculate_\w+_tool',     # Tool functions
+            r'get_\w+_data',           # "get_financial_data"
+            r'get_\w+_filing',         # "get_filing_document"
+        ]
+        
+        is_tool_related = any(re.search(pattern, message, re.IGNORECASE) for pattern in tool_patterns)
+        
+        # Skip everything except tool-related logs
+        if not is_tool_related:
+            return True
+        
+        # Skip DEBUG level logs (even for tools)
         if level == 'DEBUG':
             return True
         
         # Skip noisy patterns
-        import re
         for pattern in self.skip_patterns:
             if re.search(pattern, message, re.IGNORECASE):
                 return True
