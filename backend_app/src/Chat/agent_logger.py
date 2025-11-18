@@ -65,6 +65,14 @@ class AgentLogger(logging.Handler):
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
         
+        # Internal logger for AgentLogger errors (doesn't go through AgentLogger handler to avoid loops)
+        self._internal_logger = logging.getLogger('agent_logger_internal')
+        if not self._internal_logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            self._internal_logger.addHandler(handler)
+            self._internal_logger.setLevel(logging.WARNING)
+        
         # Add this handler to intercept logs from 'agent' logger
         # Also attach to root logger to catch logs from Strands framework (which may use different logger names)
         root_logger = logging.getLogger()
@@ -107,7 +115,7 @@ class AgentLogger(logging.Handler):
             try:
                 self.sqs_client = boto3.client('sqs')
             except Exception as e:
-                self.logger.warning(f"Failed to initialize SQS client: {e}, falling back to Lambda invocation")
+                self._internal_logger.warning(f"Failed to initialize SQS client: {e}, falling back to Lambda invocation")
                 self.use_sqs = False
                 self.sqs_client = None
         else:
@@ -188,13 +196,14 @@ class AgentLogger(logging.Handler):
                         }
                     )
                     
-                    # Log successful send
-                    self.logger.info(f"✅ Sent tool call log to SQS: {response['MessageId']} (session: {self.session_id})")
+                    # Log successful send (use internal logger to avoid loop)
+                    self._internal_logger.info(f"✅ Sent tool call log to SQS: {response['MessageId']} (session: {self.session_id})")
                     return
                     
                 except Exception as sqs_error:
                     # If SQS fails, fallback to Lambda invocation
-                    self.logger.warning(f"SQS send failed: {sqs_error}, falling back to Lambda invocation")
+                    # Use internal logger to avoid infinite loop
+                    self._internal_logger.warning(f"SQS send failed: {sqs_error}, falling back to Lambda invocation")
                     if LAMBDA_INVOCATION_AVAILABLE:
                         invoke_websocket_processor(
                             user_id=self.user_id,
@@ -211,12 +220,13 @@ class AgentLogger(logging.Handler):
                     payload=unique_payload
                 )
             else:
-                self.logger.warning("Neither SQS nor Lambda invocation available for log streaming")
+                self._internal_logger.warning("Neither SQS nor Lambda invocation available for log streaming")
             
         except Exception as e:
             # Log error but don't break agent
+            # Use internal logger to avoid infinite loop (don't send this error to WebSocket)
             # Errors here are non-critical - logs still go to CloudWatch
-            self.logger.warning(f"Failed to send log to WebSocket: {str(e)}")
+            self._internal_logger.warning(f"Failed to send log to WebSocket: {str(e)}")
     
     def emit(self, record: logging.LogRecord):
         """
