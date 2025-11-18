@@ -13,6 +13,16 @@ from decimal import Decimal
 # Configure logging
 logger = logging.getLogger()
 
+# Import agent_logger for WebSocket streaming
+try:
+    import sys
+    import os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from agent_logger import get_agent_logger
+    agent_logger = get_agent_logger()
+except:
+    agent_logger = logger
+
 def convert_decimals_to_json(obj):
     """
     Convert Decimal objects to JSON-serializable types
@@ -261,6 +271,7 @@ def get_session_files_tool(session_id: str, user_id: str, file_type: str = "all"
         String with session files information or error message
     """
     try:
+        agent_logger.info(f"Getting session files (type: {file_type})")
         if not session_id or not user_id:
             return "Error: session_id and user_id parameters are required"
         

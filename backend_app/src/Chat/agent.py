@@ -1124,6 +1124,7 @@ Note: This is a simulated analysis. For actual research, use real Fama-French da
 def get_financial_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> str:
     """Get current stock price, market cap, and financial metrics for a given stock symbol. Supports custom timeframes and date ranges for chart generation."""
     try:
+        agent_logger.info(f"Getting financial data for {symbol}")
         logger.debug(f"get_financial_data called with symbol={symbol}, timeframe={timeframe}")
         data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
         return json.dumps(data, indent=2)
@@ -1146,6 +1147,7 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
         JSON string with data for all requested stocks
     """
     try:
+        agent_logger.info(f"Getting financial data for multiple stocks: {symbols}")
         if not symbols:
             return "Error: symbols parameter is required"
         
@@ -1187,6 +1189,7 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
 def search_financial_news(query: str) -> str:
     """Search for recent financial news and developments about a stock or financial topic."""
     try:
+        agent_logger.info(f"Searching financial news for: {query}")
         news = FinancialTools.search_financial_news(query)
         return json.dumps(news, indent=2)
     except Exception as e:
@@ -1196,6 +1199,7 @@ def search_financial_news(query: str) -> str:
 def get_technical_analysis(symbol: str) -> str:
     """Get technical indicators like RSI, moving averages, MACD, and Bollinger Bands for a stock."""
     try:
+        agent_logger.info(f"Getting technical analysis for {symbol}")
         indicators = FinancialTools.calculate_technical_indicators(symbol)
         return json.dumps(indicators, indent=2)
     except Exception as e:
@@ -1205,6 +1209,7 @@ def get_technical_analysis(symbol: str) -> str:
 def analyze_portfolio(portfolio_data: str, period: str = "1y") -> str:
     """Analyze a portfolio of stocks with risk metrics, returns, and correlations. Portfolio format: [{"ticker": "AAPL", "shares": 100, "price": 150.0}, {"ticker": "MSFT", "shares": 50, "price": 300.0}]"""
     try:
+        agent_logger.info("Analyzing portfolio")
         metrics = FinancialTools.calculate_portfolio_metrics(portfolio_data, period)
         return json.dumps(metrics, indent=2)
     except Exception as e:
@@ -1214,6 +1219,7 @@ def analyze_portfolio(portfolio_data: str, period: str = "1y") -> str:
 def calculate_stock_correlation(tickers: str, period: str = "1y") -> str:
     """Calculate correlation matrix between multiple stocks. Tickers should be comma-separated like 'AAPL,MSFT,GOOGL'"""
     try:
+        agent_logger.info(f"Calculating stock correlation for: {tickers}")
         ticker_list = [t.strip().upper() for t in tickers.split(',')]
         correlation = FinancialTools.calculate_correlation(ticker_list, period)
         return json.dumps(correlation, indent=2)
@@ -1224,6 +1230,7 @@ def calculate_stock_correlation(tickers: str, period: str = "1y") -> str:
 def get_volatility_surface(symbol: str) -> str:
     """Calculate implied volatility surface and historical volatility patterns for a stock using real market data."""
     try:
+        agent_logger.info(f"Getting volatility surface for {symbol}")
         volatility_data = FinancialTools.calculate_volatility_surface(symbol)
         return json.dumps(volatility_data, indent=2)
     except Exception as e:
@@ -1233,6 +1240,7 @@ def get_volatility_surface(symbol: str) -> str:
 def python_financial_calculator(calculation: str) -> str:
     """Execute advanced financial calculations including Fama-French 5-factor regression analysis, correlations, cointegration tests, Sharpe ratios, and Value at Risk calculations."""
     try:
+        agent_logger.info(f"Running financial calculation: {calculation[:50]}...")
         # Use the enhanced financial calculator from our module
         calculator = financial_calculator.EnhancedFinancialCalculator()
         
@@ -1435,6 +1443,7 @@ class S3FileReader:
 def read_s3_file_tool(s3_key: str, file_type: str = "auto") -> str:
     """Read uploaded files from S3 storage. When you see an uploaded file context with an S3 key, use this tool to read the file content. Pass the S3 key exactly as provided in the context."""
     try:
+        agent_logger.info(f"Reading S3 file: {s3_key}")
         if not s3_key:
             return "Error: s3_key parameter is required"
         
@@ -1470,6 +1479,7 @@ File Information:
 def generate_agent_file_tool(filename: str, content: str = "", file_type: str = "txt") -> str:
     """Generate a file in the agent-files folder for the current session. Use this to create files that the user can download."""
     try:
+        agent_logger.info(f"Generating agent file: {filename}")
         # Get environment variables
         user_id = os.environ.get('USER_ID')
         session_id = os.environ.get('SESSION_ID')

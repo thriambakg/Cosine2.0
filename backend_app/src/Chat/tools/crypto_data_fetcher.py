@@ -18,6 +18,13 @@ from compression_helper import CompressionHelper
 # Configure logging
 logger = logging.getLogger()
 
+# Import agent_logger for WebSocket streaming
+try:
+    from agent_logger import get_agent_logger
+    agent_logger = get_agent_logger()
+except:
+    agent_logger = logger
+
 # Import Strands types (available in Lambda layer)
 try:
     from strands.types.tools import ToolResult, ToolUse
@@ -288,11 +295,12 @@ def get_crypto_data_tool(symbol: str, timeframe: str = "7d", start_date: str = N
         timeframe: Time period for analysis ('1d', '7d', '30d', '1y', '2y', '5y', 'max')
         start_date: Start date in 'YYYY-MM-DD' format (optional)
         end_date: End date in 'YYYY-MM-DD' format (optional)
-        
+    
     Returns:
         String with cryptocurrency data including price, returns, and volatility
     """
     try:
+        agent_logger.info(f"Getting crypto data for {symbol}")
         if not symbol:
             return "Error: symbol parameter is required"
         

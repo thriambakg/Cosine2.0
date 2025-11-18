@@ -13,6 +13,16 @@ import time
 # Configure logging
 logger = logging.getLogger()
 
+# Import agent_logger for WebSocket streaming
+try:
+    import sys
+    import os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from agent_logger import get_agent_logger
+    agent_logger = get_agent_logger()
+except:
+    agent_logger = logger
+
 # Import Strands types (available in Lambda layer)
 try:
     from strands.types.tools import ToolResult, ToolUse

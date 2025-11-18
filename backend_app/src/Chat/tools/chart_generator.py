@@ -12,6 +12,16 @@ from typing import Dict, Any
 # Configure logging
 logger = logging.getLogger()
 
+# Import agent_logger for WebSocket streaming
+try:
+    import sys
+    import os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from agent_logger import get_agent_logger
+    agent_logger = get_agent_logger()
+except:
+    agent_logger = logger
+
 # Import Strands types (available in Lambda layer)
 try:
     from strands.types.tools import ToolResult, ToolUse
@@ -507,9 +517,14 @@ def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", t
     Returns:
         Success message with file details
     """
-    # Debug logging to see what data is being passed
-    logger.info(f"🔍 DEBUG: generate_chart_tool called with symbol={symbol}, chart_type={chart_type}")
-    logger.info(f"🔍 DEBUG: data_json length: {len(data_json)} characters")
-    logger.info(f"🔍 DEBUG: data_json preview: {data_json[:200]}...")
-    
-    return chart_generator.generate_chart(symbol, data_json, chart_type, title)
+    try:
+        agent_logger.info(f"Generating {chart_type} chart for {symbol}")
+        # Debug logging to see what data is being passed
+        logger.info(f"🔍 DEBUG: generate_chart_tool called with symbol={symbol}, chart_type={chart_type}")
+        logger.info(f"🔍 DEBUG: data_json length: {len(data_json)} characters")
+        logger.info(f"🔍 DEBUG: data_json preview: {data_json[:200]}...")
+        
+        return chart_generator.generate_chart(symbol, data_json, chart_type, title)
+    except Exception as e:
+        logger.error(f"Error generating chart for {symbol}: {str(e)}")
+        return f"❌ Error generating chart: {str(e)}"

@@ -13,6 +13,16 @@ from strands import tool
 
 logger = logging.getLogger(__name__)
 
+# Import agent_logger for WebSocket streaming
+try:
+    import sys
+    import os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from agent_logger import get_agent_logger
+    agent_logger = get_agent_logger()
+except:
+    agent_logger = logger
+
 @tool
 def process_chat_session_context_tool(session_id: str, user_id: str, context_items: str) -> Dict[str, Any]:
     """
@@ -27,6 +37,7 @@ def process_chat_session_context_tool(session_id: str, user_id: str, context_ite
         Dictionary containing processed chat session context information
     """
     try:
+        agent_logger.info("Processing chat session context")
         # Parse context items
         context_data = json.loads(context_items)
         

@@ -14,6 +14,16 @@ from decimal import Decimal
 # Configure logging
 logger = logging.getLogger()
 
+# Import agent_logger for WebSocket streaming
+try:
+    import sys
+    import os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from agent_logger import get_agent_logger
+    agent_logger = get_agent_logger()
+except:
+    agent_logger = logger
+
 # Import Strands types (available in Lambda layer)
 try:
     from strands.types.tools import ToolResult, ToolUse
@@ -324,6 +334,7 @@ def get_chat_history_tool(session_id: str, user_id: str, limit: int = 10, includ
         JSON string with chat history and metadata
     """
     try:
+        agent_logger.info(f"Getting chat history (limit: {limit})")
         # Validate inputs
         if not session_id or not user_id:
             return json.dumps({
@@ -361,6 +372,7 @@ def search_chat_history_tool(session_id: str, user_id: str, search_term: str, li
         JSON string with matching conversations
     """
     try:
+        agent_logger.info(f"Searching chat history for: {search_term}")
         # Validate inputs
         if not session_id or not user_id or not search_term:
             return json.dumps({
