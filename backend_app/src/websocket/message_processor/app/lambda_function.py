@@ -1969,57 +1969,22 @@ def handle_agent_log(event):
         session_id = event.get('session_id')
         payload = event.get('payload', {}) if 'payload' in event else event
         
-        # Print all received data for debugging
+        # Print all received data for debugging (stub implementation)
         print("=" * 80)
         print("AGENT LOG RECEIVED - STUB IMPLEMENTATION")
         print("=" * 80)
         print(f"User ID: {user_id}")
         print(f"Session ID: {session_id}")
-        print(f"Payload keys: {list(payload.keys()) if isinstance(payload, dict) else 'Not a dict'}")
-        print()
-        
-        # Extract log batch metadata from unique payload
-        logs = payload.get('logs', [])
-        message_id = payload.get('message_id')
-        log_batch_id = payload.get('log_batch_id')
-        batch_size = payload.get('batch_size', len(logs))
-        batch_timestamp = payload.get('batch_timestamp')
-        
-        print(f"Message ID: {message_id}")
-        print(f"Log Batch ID: {log_batch_id}")
-        print(f"Batch Size: {batch_size}")
-        print(f"Batch Timestamp: {batch_timestamp}")
-        print(f"Number of Logs: {len(logs)}")
-        print()
-        
-        # Print each log entry
-        if logs:
-            print("LOG ENTRIES:")
-            print("-" * 80)
-            for i, log_entry in enumerate(logs, 1):
-                log_id = log_entry.get('log_id', 'N/A')
-                level = log_entry.get('level', 'N/A')
-                message = log_entry.get('message', 'N/A')
-                timestamp = log_entry.get('timestamp', 'N/A')
-                relative_time = log_entry.get('relative_time', 'N/A')
-                
-                print(f"[{i}] Log ID: {log_id}")
-                print(f"    Level: {level}")
-                print(f"    Message: {message[:200]}..." if len(message) > 200 else f"    Message: {message}")
-                print(f"    Timestamp: {timestamp}")
-                print(f"    Relative Time: {relative_time}s")
-                if log_entry.get('module'):
-                    print(f"    Module: {log_entry.get('module')}.{log_entry.get('function', 'N/A')}")
-                print()
-        else:
-            print("No logs in batch")
-        
+        print(f"Message ID: {payload.get('message_id', 'N/A')}")
+        print(f"Log ID: {payload.get('log_id', 'N/A')}")
+        print(f"Level: {payload.get('level', 'N/A')}")
+        print(f"Message: {payload.get('message', 'N/A')}")
+        print(f"Timestamp: {payload.get('log_timestamp', payload.get('timestamp', 'N/A'))}")
+        print(f"Relative Time: {payload.get('relative_time', 'N/A')}s")
+        print(f"Source: {payload.get('source', 'N/A')}")
+        print(f"Log Type: {payload.get('log_type', 'N/A')}")
         print("=" * 80)
         print()
-        
-        # Also log to CloudWatch for visibility
-        logger.info(f"📊 Agent log batch received: session={session_id}, user={user_id}, batch_id={log_batch_id}, size={batch_size}")
-        logger.info(f"📊 Log batch contains {len(logs)} log entries")
         
         # Validate required fields
         if not user_id or not session_id:
@@ -2029,16 +1994,13 @@ def handle_agent_log(event):
                 'body': json_dumps_safe({'error': 'Missing user_id or session_id'})
             }
         
-        if not logs:
-            logger.warning(f"Empty log batch received for session {session_id}")
-            return {
-                'statusCode': 200,
-                'body': json_dumps_safe({'message': 'Empty log batch (stub - no action taken)'})
-            }
+        # Log to CloudWatch for visibility
+        log_message = payload.get('message', 'N/A')
+        logger.info(f"📊 Agent log received: session={session_id}, user={user_id}, level={payload.get('level')}, message={log_message[:100]}...")
         
         # STUB: For now, just return success without actually sending to WebSocket
         # TODO: Implement actual WebSocket routing in next step
-        logger.info(f"📊 STUB: Would send {len(logs)} logs to WebSocket for session {session_id}")
+        logger.info(f"📊 STUB: Would send log to WebSocket for session {session_id}")
         
         return {
             'statusCode': 200,
@@ -2046,9 +2008,9 @@ def handle_agent_log(event):
                 'message': 'Agent log received (stub implementation)',
                 'session_id': session_id,
                 'user_id': user_id,
-                'batch_id': log_batch_id,
-                'logs_received': len(logs),
-                'note': 'Logs printed to console and CloudWatch, not yet sent to WebSocket'
+                'log_id': payload.get('log_id'),
+                'level': payload.get('level'),
+                'note': 'Log printed to console and CloudWatch, not yet sent to WebSocket'
             })
         }
         
