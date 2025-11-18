@@ -16,17 +16,6 @@ from botocore.exceptions import ClientError
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Try to use agent_logger if available (for WebSocket streaming)
-def get_logger():
-    """Get logger - prefer agent_logger if available, fallback to standard logger"""
-    try:
-        import agent
-        if hasattr(agent, 'agent_logger') and agent.agent_logger:
-            return agent.agent_logger
-    except:
-        pass
-    return logger
-
 class SessionManager:
     """
     Manages multi-session context for chat agents
@@ -50,7 +39,7 @@ class SessionManager:
         self.context_ttl_days = int(os.environ.get('CONTEXT_TTL_DAYS', '7'))
         self.max_context_size = int(os.environ.get('MAX_CONTEXT_SIZE', '100000'))  # 100KB
         
-        get_logger().info(f"SessionManager initialized with table: {self.chat_sessions_table_name}")
+        logger.info(f"SessionManager initialized with table: {self.chat_sessions_table_name}")
     
     def create_session(self, user_id: str, page_context: Dict[str, Any], model: str = 'claude-sonnet-4') -> str:
         """
@@ -96,11 +85,11 @@ class SessionManager:
             # Store session metadata
             self.chat_sessions_table.put_item(Item=metadata_item)
             
-            get_logger().info(f"Created new session {session_id} for user {user_id}")
+            logger.info(f"Created new session {session_id} for user {user_id}")
             return session_id
             
         except Exception as e:
-            get_logger().error(f"Error creating session: {str(e)}")
+            logger.error(f"Error creating session: {str(e)}")
             raise
     
     def get_session_context(self, session_id: str, user_id: str, include_conversation_history: bool = False) -> Optional[Dict[str, Any]]:
@@ -125,21 +114,21 @@ class SessionManager:
             )
             
             if 'Item' not in session_response:
-                get_logger().warning(f"Session not found: {session_id}")
+                logger.warning(f"Session not found: {session_id}")
                 return None
             
             session_item = session_response['Item']
             
             # Validate user ownership (already done by the key structure)
             if session_item.get('user_id') != user_id:
-                get_logger().warning(f"Invalid session access attempt: {session_id} by {user_id}")
+                logger.warning(f"Invalid session access attempt: {session_id} by {user_id}")
                 return None
             
             # Only build conversation history if explicitly requested
             conversation_history = []
             if include_conversation_history:
                 messages = session_item.get('messages', [])
-                get_logger().info(f"🔍 DEBUG: Building conversation history from {len(messages)} messages")
+                logger.info(f"🔍 DEBUG: Building conversation history from {len(messages)} messages")
                 
                 for message in messages:
                     if message.get('sender') == 'user':
@@ -159,7 +148,7 @@ class SessionManager:
                                 'agent_response': message.get('text', '')
                             })
                 
-                get_logger().info(f"🔍 DEBUG: Built conversation history with {len(conversation_history)} entries")
+                logger.info(f"🔍 DEBUG: Built conversation history with {len(conversation_history)} entries")
             # Skip conversation history build for efficiency (use chat history tools instead)
             
             # Combine metadata and context
@@ -177,11 +166,11 @@ class SessionManager:
             # Update last activity
             self._update_session_activity(session_id, user_id)
             
-            get_logger().info(f"Retrieved context for session {session_id}")
+            logger.info(f"Retrieved context for session {session_id}")
             return session_context
             
         except Exception as e:
-            get_logger().error(f"Error retrieving session context: {str(e)}")
+            logger.error(f"Error retrieving session context: {str(e)}")
             return None
     
     def update_session_context(self, session_id: str, user_id: str, 
@@ -211,21 +200,21 @@ class SessionManager:
             success: True if update was successful
         """
         try:
-            get_logger().info(f"🔍 DEBUG: update_session_context called for session {session_id}, user {user_id}")
-            get_logger().info(f"📌 NOTE: User messages and agent responses are now saved by WebSocket processor/SNS handler")
-            get_logger().info(f"📌 This method only updates session_variables if provided")
+            logger.info(f"🔍 DEBUG: update_session_context called for session {session_id}, user {user_id}")
+            logger.info(f"📌 NOTE: User messages and agent responses are now saved by WebSocket processor/SNS handler")
+            logger.info(f"📌 This method only updates session_variables if provided")
             
             # Validate session access
             if not self._validate_session_access(session_id, user_id):
-                get_logger().error(f"❌ Session validation failed for session {session_id}, user {user_id}")
+                logger.error(f"❌ Session validation failed for session {session_id}, user {user_id}")
                 return False
             
-            get_logger().info(f"✅ Session validation passed for session {session_id}")
+            logger.info(f"✅ Session validation passed for session {session_id}")
             timestamp = int(time.time())
             
             # Only update session_variables if provided (user messages and agent responses handled elsewhere)
             if updated_variables:
-                get_logger().info(f"📌 Updating session_variables for session {session_id}")
+                logger.info(f"📌 Updating session_variables for session {session_id}")
                 self.chat_sessions_table.update_item(
                     Key={
                         'user_id': user_id,
@@ -237,14 +226,14 @@ class SessionManager:
                         ':timestamp': timestamp
                     }
                 )
-                get_logger().info(f"✅ Successfully updated session_variables for session {session_id}")
+                logger.info(f"✅ Successfully updated session_variables for session {session_id}")
             else:
-                get_logger().info(f"📌 No session_variables to update, skipping")
+                logger.info(f"📌 No session_variables to update, skipping")
             
             return True
             
         except Exception as e:
-            get_logger().error(f"Error updating session context: {str(e)}")
+            logger.error(f"Error updating session context: {str(e)}")
             return False
     
     def get_user_sessions(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
@@ -286,7 +275,7 @@ class SessionManager:
             return sessions
             
         except Exception as e:
-            get_logger().error(f"Error retrieving user sessions: {str(e)}")
+            logger.error(f"Error retrieving user sessions: {str(e)}")
             return []
     
     def archive_session(self, session_id: str, user_id: str) -> bool:
@@ -343,11 +332,11 @@ class SessionManager:
                         }
                     )
             
-            get_logger().info(f"Archived session {session_id} for user {user_id}")
+            logger.info(f"Archived session {session_id} for user {user_id}")
             return True
             
         except Exception as e:
-            get_logger().error(f"Error archiving session: {str(e)}")
+            logger.error(f"Error archiving session: {str(e)}")
             return False
     
     def _extract_webpage_info(self, page_context: Dict[str, Any]) -> Dict[str, Any]:
@@ -427,7 +416,7 @@ class SessionManager:
             return 'Item' in response
             
         except Exception as e:
-            get_logger().error(f"Error validating session access: {str(e)}")
+            logger.error(f"Error validating session access: {str(e)}")
             return False
     
     def _update_session_activity(self, session_id: str, user_id: str) -> None:
@@ -444,7 +433,7 @@ class SessionManager:
                 }
             )
         except Exception as e:
-            get_logger().error(f"Error updating session activity: {str(e)}")
+            logger.error(f"Error updating session activity: {str(e)}")
     
 
 # Global session manager instance

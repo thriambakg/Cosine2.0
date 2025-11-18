@@ -1531,6 +1531,7 @@ def generate_excel_file_tool(filename: str, content: str, template_type: str = "
         Success message with file details
     """
     try:
+        agent_logger.info(f"Generating Excel file: {filename} (type: {template_type})")
         # Get environment variables
         user_id = os.environ.get('USER_ID')
         session_id = os.environ.get('SESSION_ID')
