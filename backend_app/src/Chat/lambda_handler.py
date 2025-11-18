@@ -811,7 +811,7 @@ Context Items Available: {len(context_items)} items
                         }
                     )
                     
-                    logger.info(f"Sent response to SQS: {response['MessageId']}")
+                    logger.info(f"✅ Sent chat response to SQS queue: {response['MessageId']} (session: {session_id}, user: {user_id})")
                     
                     # Return acknowledgment
                     return {
