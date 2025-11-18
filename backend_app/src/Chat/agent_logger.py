@@ -34,9 +34,9 @@ class AgentLogger(logging.Handler):
     """
     Unified logging handler for agent that processes logs for both CloudWatch and WebSocket.
     
-    Sends tool call logs immediately to SQS for WebSocket streaming.
+    Sends all logs immediately to SQS for WebSocket streaming.
     - Immediate delivery (no batching)
-    - Log filtering to reduce noise (only tool calls)
+    - No filtering - all logs sent to both CloudWatch and SQS
     - Session/user isolation
     """
     
@@ -138,55 +138,6 @@ class AgentLogger(logging.Handler):
                 cls._instance.start_time = time.time()
             return cls._instance
     
-    def _should_skip_for_websocket(self, message: str, level: str) -> bool:
-        """
-        Check if log should be skipped for WebSocket streaming.
-        Only send tool-related logs to WebSocket for better UX.
-        
-        Args:
-            message: Log message
-            level: Log level
-            
-        Returns:
-            True if should skip, False otherwise
-        """
-        # Only send tool-related logs to WebSocket
-        import re
-        
-        # Check if this is a tool call log
-        # These patterns match Strands agent tool call logs
-        tool_patterns = [
-            r'Tool\s*#\d+:',           # "Tool #1:", "Tool #2:", etc. (Strands format)
-            r'Tool\s*#\d+\s*:',        # "Tool #1 :" (with spaces)
-            r'Tool\s*#\d+\s*[:\-]',    # "Tool #1:", "Tool #1 -", etc.
-            r'get_\w+_tool',           # Tool function names like "get_chat_history_tool"
-            r'generate_\w+_tool',      # "generate_chart_tool"
-            r'read_\w+_tool',          # "read_pdf_tool"
-            r'analyze_\w+_tool',       # "analyze_pdf_content_tool"
-            r'search_\w+_tool',       # "search_chat_history_tool"
-            r'process_\w+_tool',      # "process_chat_session_context_tool"
-            r'compare_\w+_tool',       # "compare_crypto_tool"
-            r'calculate_\w+_tool',     # Tool functions
-            r'get_\w+_data',           # "get_financial_data"
-            r'get_\w+_filing',         # "get_filing_document"
-        ]
-        
-        is_tool_related = any(re.search(pattern, message, re.IGNORECASE) for pattern in tool_patterns)
-        
-        # Only send tool-related logs to WebSocket
-        if not is_tool_related:
-            return True  # Skip non-tool logs
-        
-        # Skip DEBUG level logs (even for tools) - we want INFO level tool calls
-        if level == 'DEBUG':
-            return True
-        
-        # Skip noisy patterns
-        for pattern in self.skip_patterns:
-            if re.search(pattern, message, re.IGNORECASE):
-                return True
-        
-        return False
     
     def _send_log_to_websocket(self, log_entry: Dict[str, Any]):
         """Send single log entry immediately to WebSocket processor via SQS"""
@@ -280,33 +231,27 @@ class AgentLogger(logging.Handler):
             message = record.getMessage()
             level = record.levelname
             
-            # Only process logs that contain tool calls (filter early to avoid processing everything)
-            # This handler is attached to root logger, so it will see ALL logs
-            # We need to filter to only process tool-related logs
-            
-            # Send to WebSocket if enabled and it's a tool-related log
+            # Send to WebSocket if enabled (no filtering - send all logs)
             if self.websocket_enabled:
-                # Check if should skip (only tool-related logs are sent)
-                if not self._should_skip_for_websocket(message, level):
-                    # Create structured log entry
-                    current_time = time.time()
-                    log_entry = {
-                        'log_id': f"log_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:8]}",
-                        'level': level,
-                        'message': message,
-                        'timestamp': current_time,
-                        'relative_time': current_time - self.start_time
-                    }
-                    
-                    # Send immediately (no batching)
-                    self._send_log_to_websocket(log_entry)
+                # Create structured log entry
+                current_time = time.time()
+                log_entry = {
+                    'log_id': f"log_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:8]}",
+                    'level': level,
+                    'message': message,
+                    'timestamp': current_time,
+                    'relative_time': current_time - self.start_time
+                }
+                
+                # Send immediately to SQS (no filtering)
+                self._send_log_to_websocket(log_entry)
         except Exception as e:
             # Don't break logging if WebSocket send fails
             self.handleError(record)
     
     def _send_to_websocket(self, level: str, message: str, **kwargs):
         """
-        Send log immediately to WebSocket processor via SQS (no batching).
+        Send log immediately to WebSocket processor via SQS (no batching, no filtering).
         This is used when calling agent_logger.info() directly.
         
         Args:
@@ -317,11 +262,7 @@ class AgentLogger(logging.Handler):
         if not self.websocket_enabled:
             return
         
-        # Check if should skip (only tool-related logs are sent)
-        if self._should_skip_for_websocket(message, level):
-            return
-        
-        # Create structured log entry
+        # Create structured log entry (no filtering - send all logs)
         current_time = time.time()
         log_entry = {
             'log_id': f"log_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:8]}",
@@ -332,31 +273,31 @@ class AgentLogger(logging.Handler):
             **kwargs
         }
         
-        # Send immediately (no batching)
+        # Send immediately to SQS (no filtering)
         self._send_log_to_websocket(log_entry)
     
     def info(self, message: str, **kwargs):
-        """Log info message to both CloudWatch and WebSocket (immediate send for tool calls)"""
+        """Log info message to both CloudWatch and WebSocket (immediate send)"""
         self.logger.info(message)
         self._send_to_websocket('INFO', message, **kwargs)
     
     def debug(self, message: str, **kwargs):
-        """Log debug message to CloudWatch only (not streamed to WebSocket)"""
+        """Log debug message to both CloudWatch and WebSocket (immediate send)"""
         self.logger.debug(message)
-        # Debug logs are not sent to WebSocket
+        self._send_to_websocket('DEBUG', message, **kwargs)
     
     def warning(self, message: str, **kwargs):
-        """Log warning message to both CloudWatch and WebSocket (immediate send for tool calls)"""
+        """Log warning message to both CloudWatch and WebSocket (immediate send)"""
         self.logger.warning(message)
         self._send_to_websocket('WARNING', message, **kwargs)
     
     def error(self, message: str, **kwargs):
-        """Log error message to both CloudWatch and WebSocket (immediate send for tool calls)"""
+        """Log error message to both CloudWatch and WebSocket (immediate send)"""
         self.logger.error(message)
         self._send_to_websocket('ERROR', message, **kwargs)
     
     def critical(self, message: str, **kwargs):
-        """Log critical message to both CloudWatch and WebSocket (immediate send for tool calls)"""
+        """Log critical message to both CloudWatch and WebSocket (immediate send)"""
         self.logger.critical(message)
         self._send_to_websocket('CRITICAL', message, **kwargs)
     
