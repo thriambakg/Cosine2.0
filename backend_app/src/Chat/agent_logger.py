@@ -73,15 +73,9 @@ class AgentLogger(logging.Handler):
             self._internal_logger.addHandler(handler)
             self._internal_logger.setLevel(logging.WARNING)
         
-        # Add this handler to intercept logs from 'agent' logger
-        # Also attach to root logger to catch logs from Strands framework (which may use different logger names)
-        root_logger = logging.getLogger()
-        if self not in root_logger.handlers:
-            root_logger.addHandler(self)
-        
-        # Also attach to 'agent' logger specifically
-        if self not in self.logger.handlers:
-            self.logger.addHandler(self)
+        # DO NOT attach as handler to root logger or any logger
+        # Only logs explicitly sent via agent_logger.info/debug/warning/error/critical() will be sent to SQS
+        # This prevents intercepting all application logs
         
         # WebSocket streaming configuration
         self.session_id = session_id
@@ -230,34 +224,16 @@ class AgentLogger(logging.Handler):
     
     def emit(self, record: logging.LogRecord):
         """
-        Override logging.Handler.emit to intercept all logs.
-        This is called automatically by Python's logging system for every log message.
+        Override logging.Handler.emit (not used - we don't attach as handler).
+        This method exists because AgentLogger extends logging.Handler, but we don't use it.
+        Only logs explicitly sent via agent_logger.info/debug/warning/error/critical() go to SQS.
         
         Args:
             record: LogRecord from Python's logging system
         """
-        try:
-            # Get log message and level
-            message = record.getMessage()
-            level = record.levelname
-            
-            # Send to WebSocket if enabled (no filtering - send all logs)
-            if self.websocket_enabled:
-                # Create structured log entry
-                current_time = time.time()
-                log_entry = {
-                    'log_id': f"log_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:8]}",
-                    'level': level,
-                    'message': message,
-                    'timestamp': current_time,
-                    'relative_time': current_time - self.start_time
-                }
-                
-                # Send immediately to SQS (no filtering)
-                self._send_log_to_websocket(log_entry)
-        except Exception as e:
-            # Don't break logging if WebSocket send fails
-            self.handleError(record)
+        # This method is not used - we don't attach AgentLogger as a handler
+        # Only explicit calls to agent_logger methods send logs to SQS
+        pass
     
     def _send_to_websocket(self, level: str, message: str, **kwargs):
         """
