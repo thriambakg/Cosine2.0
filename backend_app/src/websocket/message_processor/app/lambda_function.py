@@ -1952,11 +1952,10 @@ def handle_chat_response_payload(payload):
 def handle_agent_log(event):
     """
     Handle agent log streaming from chat agent lambda.
-    
-    STUB IMPLEMENTATION: Currently just prints/logs what it receives for testing.
+    Sends agent logs to active WebSocket connections for the session.
     
     Args:
-        event: Event containing unique payload with user_id, session_id, logs, and metadata
+        event: Event containing unique payload with user_id, session_id, payload with log data
         
     Returns:
         API Gateway response
@@ -1969,23 +1968,6 @@ def handle_agent_log(event):
         session_id = event.get('session_id')
         payload = event.get('payload', {}) if 'payload' in event else event
         
-        # Print all received data for debugging (stub implementation)
-        print("=" * 80)
-        print("AGENT LOG RECEIVED - STUB IMPLEMENTATION")
-        print("=" * 80)
-        print(f"User ID: {user_id}")
-        print(f"Session ID: {session_id}")
-        print(f"Message ID: {payload.get('message_id', 'N/A')}")
-        print(f"Log ID: {payload.get('log_id', 'N/A')}")
-        print(f"Level: {payload.get('level', 'N/A')}")
-        print(f"Message: {payload.get('message', 'N/A')}")
-        print(f"Timestamp: {payload.get('log_timestamp', payload.get('timestamp', 'N/A'))}")
-        print(f"Relative Time: {payload.get('relative_time', 'N/A')}s")
-        print(f"Source: {payload.get('source', 'N/A')}")
-        print(f"Log Type: {payload.get('log_type', 'N/A')}")
-        print("=" * 80)
-        print()
-        
         # Validate required fields
         if not user_id or not session_id:
             logger.error("Missing user_id or session_id in agent log event")
@@ -1994,25 +1976,88 @@ def handle_agent_log(event):
                 'body': json_dumps_safe({'error': 'Missing user_id or session_id'})
             }
         
+        # Validate payload has message
+        log_message = payload.get('message')
+        if not log_message:
+            logger.warning("Agent log payload missing message field")
+            return {
+                'statusCode': 400,
+                'body': json_dumps_safe({'error': 'Missing message in payload'})
+            }
+        
         # Log to CloudWatch for visibility
-        log_message = payload.get('message', 'N/A')
         logger.info(f"📊 Agent log received: session={session_id}, user={user_id}, level={payload.get('level')}, message={log_message[:100]}...")
         
-        # STUB: For now, just return success without actually sending to WebSocket
-        # TODO: Implement actual WebSocket routing in next step
-        logger.info(f"📊 STUB: Would send log to WebSocket for session {session_id}")
+        # Get active WebSocket connections for this user/session
+        active_connections = get_active_connections_for_session(user_id, session_id)
         
-        return {
-            'statusCode': 200,
-            'body': json_dumps_safe({
-                'message': 'Agent log received (stub implementation)',
-                'session_id': session_id,
-                'user_id': user_id,
-                'log_id': payload.get('log_id'),
-                'level': payload.get('level'),
-                'note': 'Log printed to console and CloudWatch, not yet sent to WebSocket'
-            })
-        }
+        if not active_connections:
+            logger.info(f"📊 No active connections found for user {user_id}, session {session_id} - log will not be delivered")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({
+                    'message': 'Agent log received but no active connections',
+                    'session_id': session_id,
+                    'user_id': user_id,
+                    'log_id': payload.get('log_id')
+                })
+            }
+        
+        # Send agent log to all active connections
+        # Structure matches what frontend expects: { type: 'agent_log', payload: {...} }
+        log_sent = False
+        for connection_id in active_connections:
+            try:
+                # Create agent log message in format expected by frontend
+                agent_log_message = {
+                    'type': 'agent_log',
+                    'session_id': session_id,
+                    'user_id': user_id,
+                    'payload': {
+                        'message': log_message,
+                        'level': payload.get('level', 'INFO'),
+                        'log_id': payload.get('log_id'),
+                        'log_timestamp': payload.get('log_timestamp', payload.get('timestamp')),
+                        'relative_time': payload.get('relative_time'),
+                        'source': payload.get('source', 'agent_lambda'),
+                        'log_type': payload.get('log_type', 'agent_tool_call'),
+                        'message_id': payload.get('message_id'),
+                        'version': payload.get('version', '1.0')
+                    }
+                }
+                
+                if send_message_to_client(connection_id, agent_log_message):
+                    logger.info(f"✅ Sent agent log to connection {connection_id}")
+                    log_sent = True
+                else:
+                    logger.warning(f"⚠️ Failed to send agent log to connection {connection_id}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Error sending agent log to connection {connection_id}: {str(e)}")
+        
+        if log_sent:
+            logger.info(f"✅ Successfully delivered agent log to active connections")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({
+                    'message': 'Agent log delivered to active connections',
+                    'session_id': session_id,
+                    'user_id': user_id,
+                    'log_id': payload.get('log_id'),
+                    'level': payload.get('level')
+                })
+            }
+        else:
+            logger.warning(f"⚠️ Failed to deliver agent log to any active connections")
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({
+                    'message': 'Agent log received but failed to deliver to connections',
+                    'session_id': session_id,
+                    'user_id': user_id,
+                    'log_id': payload.get('log_id')
+                })
+            }
         
     except Exception as e:
         logger.error(f"❌ Error handling agent logs: {str(e)}")

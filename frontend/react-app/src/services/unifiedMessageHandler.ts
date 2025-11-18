@@ -59,6 +59,8 @@ class UnifiedMessageHandlerService {
   private requestIdCounter: number = 0; // For generating unique request IDs
   private sessionUserIds: Map<string, string> = new Map(); // sessionId -> userId mapping
   private recentSendTimestamps: Map<string, number> = new Map(); // queueKey -> last send timestamp (prevents rapid duplicates)
+  private agentLogs: Map<string, string> = new Map(); // sessionId -> current agent log message
+  private agentLogListeners: Set<(sessionId: string, logMessage: string | null) => void> = new Set(); // Agent log update listeners
 
   private constructor() {
     // Listen for WebSocket responses and update local cache
@@ -756,6 +758,9 @@ class UnifiedMessageHandlerService {
       case 'error':
         this.handleErrorMessage(sessionId, data);
         break;
+      case 'agent_log':
+        this.handleAgentLog(sessionId, data);
+        break;
       default:
         console.log('📨 UnifiedMessageHandler: Unknown message type:', data.type);
     }
@@ -786,6 +791,9 @@ class UnifiedMessageHandlerService {
     
     // Clear loading state for all interfaces
     this.broadcastLoadingState(sessionId, false, 'chatpage');
+    
+    // Clear agent log when AI response arrives
+    this.clearAgentLog(sessionId);
     
     // Validate content before creating message
     const validContent = content && content.trim() && content !== 'Processing your request...';
@@ -872,6 +880,81 @@ class UnifiedMessageHandlerService {
     window.dispatchEvent(updateEvent);
     
     console.log('✅ UnifiedMessageHandler: Dispatched session variables update');
+  }
+
+  /**
+   * Handle agent log message
+   */
+  private handleAgentLog(sessionId: string, data: any): void {
+    const { payload, session_id } = data;
+    
+    // Use session_id from message if available, otherwise use passed sessionId
+    const targetSessionId = session_id || sessionId;
+    
+    if (!payload || !payload.message) {
+      console.log('⚠️ UnifiedMessageHandler: Received agent log without message:', data);
+      return;
+    }
+    
+    const logMessage = payload.message;
+    console.log('📊 UnifiedMessageHandler: Received agent log for session:', targetSessionId, 'message:', logMessage);
+    
+    // Store the current agent log for this session
+    this.agentLogs.set(targetSessionId, logMessage);
+    
+    // Notify listeners
+    this.notifyAgentLogUpdate(targetSessionId, logMessage);
+    
+    // Dispatch event for components that listen to custom events
+    const logEvent = new CustomEvent('agent-log-updated', {
+      detail: {
+        sessionId: targetSessionId,
+        logMessage: logMessage,
+        level: payload.level || 'INFO',
+        timestamp: payload.log_timestamp || Date.now()
+      }
+    });
+    window.dispatchEvent(logEvent);
+    
+    console.log('✅ UnifiedMessageHandler: Updated agent log for session:', targetSessionId);
+  }
+
+  /**
+   * Get current agent log for a session
+   */
+  getCurrentAgentLog(sessionId: string): string | null {
+    return this.agentLogs.get(sessionId) || null;
+  }
+
+  /**
+   * Clear agent log for a session (when AI response arrives)
+   */
+  clearAgentLog(sessionId: string): void {
+    this.agentLogs.delete(sessionId);
+    this.notifyAgentLogUpdate(sessionId, null);
+  }
+
+  /**
+   * Notify agent log listeners
+   */
+  private notifyAgentLogUpdate(sessionId: string, logMessage: string | null): void {
+    this.agentLogListeners.forEach(listener => {
+      try {
+        listener(sessionId, logMessage);
+      } catch (error) {
+        console.error('❌ UnifiedMessageHandler: Error in agent log listener:', error);
+      }
+    });
+  }
+
+  /**
+   * Subscribe to agent log updates
+   */
+  onAgentLogUpdate(listener: (sessionId: string, logMessage: string | null) => void): () => void {
+    this.agentLogListeners.add(listener);
+    return () => {
+      this.agentLogListeners.delete(listener);
+    };
   }
 
 

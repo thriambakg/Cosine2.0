@@ -260,6 +260,7 @@ const GlobalChatSidebar: React.FC = () => {
   
   const { selectedModel, setSelectedModel } = usePersistentModel();
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
+  const [currentAgentLog, setCurrentAgentLog] = useState<string | null>(null);
   // Removed inline collapses; using side panels instead
   const [isFilesPanelOpen, setIsFilesPanelOpen] = useState(false);
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
@@ -518,6 +519,29 @@ const GlobalChatSidebar: React.FC = () => {
     console.log(`📨 Sidebar: Filtered messages - activeSessionId: ${activeSessionId}, unifiedMessages: ${unifiedMessages.length}, filtered: ${filtered.length}`);
     return filtered;
   }, [unifiedMessages, activeSessionId]);
+
+  // Subscribe to agent log updates
+  useEffect(() => {
+    if (!activeSessionId) {
+      setCurrentAgentLog(null);
+      return;
+    }
+
+    // Get initial agent log if available
+    const initialLog = unifiedMessageHandler.getCurrentAgentLog(activeSessionId);
+    setCurrentAgentLog(initialLog);
+
+    // Subscribe to updates
+    const unsubscribe = unifiedMessageHandler.onAgentLogUpdate((sessionId, logMessage) => {
+      if (sessionId === activeSessionId) {
+        setCurrentAgentLog(logMessage);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [activeSessionId]);
 
 
   // Only auto-scroll when user is near bottom AND new message appended (length or last id changed)
@@ -1687,7 +1711,7 @@ const GlobalChatSidebar: React.FC = () => {
           >
             <CircularProgress size={16} sx={{ color: '#60a5fa' }} />
             <Typography variant="body2" sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
-              AI is thinking...
+              {currentAgentLog || 'AI is thinking...'}
             </Typography>
           </Box>
         )}

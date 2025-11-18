@@ -300,6 +300,7 @@ export default function ChatPage() {
   // Session-specific state tracking
   const [sessionLoadingStates, setSessionLoadingStates] = useState<Record<string, boolean>>({});
   const [pendingMessages, setPendingMessages] = useState<Record<string, Message[]>>({});
+  const [agentLogs, setAgentLogs] = useState<Record<string, string>>({}); // sessionId -> current agent log message
   // Removed unused state variables
   
   // Helper function to get current session loading state
@@ -432,6 +433,19 @@ export default function ChatPage() {
 
   // Subscribe to loading state updates from unified messaging system
   useEffect(() => {
+    // Subscribe to agent log updates
+    const unsubscribeAgentLog = unifiedMessageHandler.onAgentLogUpdate((sessionId, logMessage) => {
+      setAgentLogs(prev => {
+        if (logMessage) {
+          return { ...prev, [sessionId]: logMessage };
+        } else {
+          const updated = { ...prev };
+          delete updated[sessionId];
+          return updated;
+        }
+      });
+    });
+
     const unsubscribe = unifiedMessageHandler.subscribeToLoadingState((sessionId, isLoading, source) => {
       // Only update if it's for chatpage source or cross-interface loading
       if (source === 'chatpage' || (source === 'sidebar' && isLoading)) {
@@ -445,6 +459,7 @@ export default function ChatPage() {
 
     return () => {
       unsubscribe();
+      unsubscribeAgentLog();
     };
   }, []);
 
