@@ -30,7 +30,7 @@ except ImportError:
     SQS_AVAILABLE = False
 
 
-class AgentLogger:
+class AgentLogger(logging.Handler):
     """
     Unified logging handler for agent that processes logs for both CloudWatch and WebSocket.
     
@@ -46,20 +46,34 @@ class AgentLogger:
     
     def __init__(self, session_id: Optional[str] = None, user_id: Optional[str] = None, message_id: Optional[str] = None):
         """
-        Initialize AgentLogger.
+        Initialize AgentLogger as a logging Handler.
         
         Args:
             session_id: Session ID for WebSocket streaming (optional)
             user_id: User ID for WebSocket streaming (optional)
             message_id: Message ID to link logs to specific user message (optional)
         """
-        # Standard Python logger for CloudWatch
+        # Initialize as logging.Handler
+        super().__init__()
+        self.setLevel(logging.INFO)
+        
+        # Standard Python logger for CloudWatch (also add StreamHandler for CloudWatch)
         self.logger = logging.getLogger('agent')
         if not self.logger.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
+        
+        # Add this handler to intercept logs from 'agent' logger
+        # Also attach to root logger to catch logs from Strands framework (which may use different logger names)
+        root_logger = logging.getLogger()
+        if self not in root_logger.handlers:
+            root_logger.addHandler(self)
+        
+        # Also attach to 'agent' logger specifically
+        if self not in self.logger.handlers:
+            self.logger.addHandler(self)
         
         # WebSocket streaming configuration
         self.session_id = session_id
@@ -159,11 +173,11 @@ class AgentLogger:
         
         is_tool_related = any(re.search(pattern, message, re.IGNORECASE) for pattern in tool_patterns)
         
-        # Skip everything except tool-related logs
+        # Only send tool-related logs to WebSocket
         if not is_tool_related:
-            return True
+            return True  # Skip non-tool logs
         
-        # Skip DEBUG level logs (even for tools)
+        # Skip DEBUG level logs (even for tools) - we want INFO level tool calls
         if level == 'DEBUG':
             return True
         
@@ -253,9 +267,47 @@ class AgentLogger:
             # Errors here are non-critical - logs still go to CloudWatch
             self.logger.warning(f"Failed to send log to WebSocket: {str(e)}")
     
+    def emit(self, record: logging.LogRecord):
+        """
+        Override logging.Handler.emit to intercept all logs.
+        This is called automatically by Python's logging system for every log message.
+        
+        Args:
+            record: LogRecord from Python's logging system
+        """
+        try:
+            # Get log message and level
+            message = record.getMessage()
+            level = record.levelname
+            
+            # Only process logs that contain tool calls (filter early to avoid processing everything)
+            # This handler is attached to root logger, so it will see ALL logs
+            # We need to filter to only process tool-related logs
+            
+            # Send to WebSocket if enabled and it's a tool-related log
+            if self.websocket_enabled:
+                # Check if should skip (only tool-related logs are sent)
+                if not self._should_skip_for_websocket(message, level):
+                    # Create structured log entry
+                    current_time = time.time()
+                    log_entry = {
+                        'log_id': f"log_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:8]}",
+                        'level': level,
+                        'message': message,
+                        'timestamp': current_time,
+                        'relative_time': current_time - self.start_time
+                    }
+                    
+                    # Send immediately (no batching)
+                    self._send_log_to_websocket(log_entry)
+        except Exception as e:
+            # Don't break logging if WebSocket send fails
+            self.handleError(record)
+    
     def _send_to_websocket(self, level: str, message: str, **kwargs):
         """
         Send log immediately to WebSocket processor via SQS (no batching).
+        This is used when calling agent_logger.info() directly.
         
         Args:
             level: Log level
