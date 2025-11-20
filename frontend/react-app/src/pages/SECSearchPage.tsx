@@ -77,6 +77,9 @@ const SECSearchPage: React.FC = () => {
   const [selectedColumns, setSelectedColumns] = useState<string[]>(DEFAULT_COLUMNS);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [allResults, setAllResults] = useState<SECSearchResult[]>([]);
+  const [totalFound, setTotalFound] = useState<number>(0);
+  const RESULTS_PER_PAGE = 10;
 
   const { execute: executeSearch, data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
   const { execute: executeAutocomplete, loading: autocompleteLoading } = useSECAutocomplete();
@@ -122,14 +125,21 @@ const SECSearchPage: React.FC = () => {
       searchParams.reportingFor, searchParams.located, searchParams.incorporated, 
       searchParams.fileNumber, searchParams.filmNumber, searchParams.cik, searchParams.entityName]);
 
-  const handleSearch = async (page: number = 1) => {
+  // Store all results when search completes
+  useEffect(() => {
+    if (searchResults?.results) {
+      setAllResults(searchResults.results);
+      setTotalFound(searchResults.total_found || searchResults.results.length);
+    }
+  }, [searchResults]);
+
+  const handleSearch = async () => {
     const params: SECSearchParams = {
       ...searchParams,
-      page,
       columns: selectedColumns.length === DEFAULT_COLUMNS.length ? [] : selectedColumns,
     };
 
-    // Remove empty strings
+    // Remove empty strings and page parameter (we fetch all results)
     Object.keys(params).forEach(key => {
       const value = params[key as keyof SECSearchParams];
       if (value === '' || (Array.isArray(value) && value.length === 0)) {
@@ -137,13 +147,23 @@ const SECSearchPage: React.FC = () => {
       }
     });
 
+    // Reset to page 1 when starting new search
+    setCurrentPage(1);
     await executeSearch(params);
   };
 
-  const handlePageChange = async (newPage: number) => {
+  const handlePageChange = (newPage: number) => {
     if (newPage < 1) return;
+    const maxPage = Math.ceil(allResults.length / RESULTS_PER_PAGE);
+    if (newPage > maxPage) return;
     setCurrentPage(newPage);
-    await handleSearch(newPage);
+  };
+
+  // Get paginated results for current page
+  const getPaginatedResults = (): SECSearchResult[] => {
+    const startIndex = (currentPage - 1) * RESULTS_PER_PAGE;
+    const endIndex = startIndex + RESULTS_PER_PAGE;
+    return allResults.slice(startIndex, endIndex);
   };
 
   const handleColumnToggle = (column: string) => {
@@ -510,7 +530,7 @@ const SECSearchPage: React.FC = () => {
             {/* Search Button */}
             <Button
               variant="contained"
-              onClick={() => handleSearch(1)}
+              onClick={() => handleSearch()}
               disabled={searchLoading}
               startIcon={searchLoading ? <CircularProgress size={20} /> : <SearchIcon />}
               sx={{
@@ -548,7 +568,7 @@ const SECSearchPage: React.FC = () => {
         )}
 
         {/* Results */}
-        {searchResults && (
+        {allResults.length > 0 && (
           <GlassCard sx={{ p: 4 }}>
             <Typography
               variant="h6"
@@ -561,20 +581,18 @@ const SECSearchPage: React.FC = () => {
               }}
             >
               Search Results
-              {searchResults.total_found !== undefined && (
-                <Chip
-                  label={`Showing ${((currentPage - 1) * 10) + 1}-${Math.min(currentPage * 10, searchResults.total_found)} of ${searchResults.total_found} results`}
-                  sx={{
-                    ml: 2,
-                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                    color: '#93c5fd',
-                    border: '1px solid #3b82f6',
-                  }}
-                />
-              )}
+              <Chip
+                label={`Showing ${((currentPage - 1) * RESULTS_PER_PAGE) + 1}-${Math.min(currentPage * RESULTS_PER_PAGE, allResults.length)} of ${allResults.length} results`}
+                sx={{
+                  ml: 2,
+                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                  color: '#93c5fd',
+                  border: '1px solid #3b82f6',
+                }}
+              />
             </Typography>
 
-            {searchResults.results && searchResults.results.length > 0 ? (
+            {getPaginatedResults().length > 0 ? (
               <TableContainer 
                 component={Paper} 
                 sx={{ 
@@ -629,7 +647,7 @@ const SECSearchPage: React.FC = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {searchResults.results.map((result, index) => (
+                    {getPaginatedResults().map((result, index) => (
                       <TableRow key={index} sx={{ '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' } }}>
                         {shouldShowColumn('Form & File') && (
                           <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Form & File')}</TableCell>
@@ -709,17 +727,17 @@ const SECSearchPage: React.FC = () => {
             )}
 
             {/* Pagination Controls */}
-            {searchResults && searchResults.results && searchResults.results.length > 0 && searchResults.total_found !== undefined && searchResults.total_found > 10 && (
+            {allResults.length > RESULTS_PER_PAGE && (
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3, pt: 3, borderTop: '1px solid #374151' }}>
                 <Typography variant="body2" sx={{ color: '#9ca3af' }}>
-                  Page {currentPage} of {Math.ceil(searchResults.total_found / 10)}
-                  {' '}(Showing {((currentPage - 1) * 10) + 1}-{Math.min(currentPage * 10, searchResults.total_found)} of {searchResults.total_found} results)
+                  Page {currentPage} of {Math.ceil(allResults.length / RESULTS_PER_PAGE)}
+                  {' '}(Showing {((currentPage - 1) * RESULTS_PER_PAGE) + 1}-{Math.min(currentPage * RESULTS_PER_PAGE, allResults.length)} of {allResults.length} results)
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1 }}>
                   <Button
                     variant="outlined"
                     onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1 || searchLoading}
+                    disabled={currentPage === 1}
                     startIcon={<ChevronLeftIcon />}
                     sx={{
                       color: '#9ca3af',
@@ -740,7 +758,7 @@ const SECSearchPage: React.FC = () => {
                   <Button
                     variant="outlined"
                     onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage >= Math.ceil(searchResults.total_found / 10) || searchLoading}
+                    disabled={currentPage >= Math.ceil(allResults.length / RESULTS_PER_PAGE)}
                     endIcon={<ChevronRightIcon />}
                     sx={{
                       color: '#9ca3af',
