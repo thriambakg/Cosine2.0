@@ -158,6 +158,12 @@ module "api_gateway" {
     file_download = {
       path_part = "file-download"
     }
+    sec_search = {
+      path_part = "sec-search"
+    }
+    sec_search_autocomplete = {
+      path_part = "sec-search-autocomplete"
+    }
   }
 
   # Methods configuration
@@ -370,6 +376,25 @@ module "api_gateway" {
       lambda_arn              = module.file_return_lambda.function_arn
       request_parameters      = {}
     }
+    # POST method for SEC search
+    sec_search_post = {
+      resource_key            = "sec_search"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.sec_search_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
+    # GET method for SEC search autocomplete
+    sec_search_autocomplete_get = {
+      resource_key            = "sec_search_autocomplete"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.sec_search_lambda.function_arn
+      request_parameters      = {}
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -496,12 +521,22 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "file-download"
     }
+    sec_search_post = {
+      function_arn  = module.sec_search_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "sec-search"
+    }
+    sec_search_autocomplete_get = {
+      function_arn  = module.sec_search_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "sec-search-autocomplete"
+    }
   }
 
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "39" # Updated to apply CORS configuration for stock-screener endpoint
+  deployment_trigger = "40" # Updated to add SEC search endpoints
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -1894,6 +1929,40 @@ module "agent_files_processor_lambda" {
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
+  ]
+
+  tags = var.common_tags
+}
+
+# SEC Search Lambda Function
+module "sec_search_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-sec-search-${var.environment}"
+  description   = "Lambda function for SEC EDGAR search and autocomplete functionality"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/sec_search/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    MAX_RESULTS = "10"
+  }
+
+  # Attach core layer
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies (no special permissions needed - just HTTP requests to SEC)
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn
   ]
 
   tags = var.common_tags
