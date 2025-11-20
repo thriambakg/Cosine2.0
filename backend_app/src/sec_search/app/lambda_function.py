@@ -335,11 +335,33 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
             page = 1
         
         # SEC API pagination: use 'page' parameter and 'from' for offset
-        # Based on SEC website behavior: page 2 uses from=100 (seems like 100 results per page on their site)
-        # But we want 10 per page, so: from = (page - 1) * 10
+        # The SEC website uses from=100 for page 2, suggesting the API might require increments of 100
+        # However, we want 10 results per page. Let's try both approaches:
+        # 1. First try: from = (page - 1) * 10 (our desired page size)
+        # 2. If that doesn't work, we might need to use from=100, 200, etc. and fetch larger batches
+        
+        # SEC API pagination strategy:
+        # The API might only support 'from' in increments of 100 (like their website)
+        # So we'll fetch 100-result batches and slice to get our 10 per page
+        # Page 1: from=0 (implicit), get batch 0-99, slice to 0-9
+        # Page 2: from=0, get batch 0-99, slice to 10-19  
+        # Page 11: from=100, get batch 100-199, slice to 100-109
+        
+        # Calculate which 100-result batch contains our desired page
+        desired_start = (page - 1) * MAX_RESULTS  # e.g., page 2 = result 10
+        batch_start = (desired_start // 100) * 100  # e.g., result 10 is in batch starting at 0
+        
+        if batch_start > 0:
+            params['from'] = batch_start
+            params['size'] = 100  # Request full batch
+        elif page > 1:
+            # For pages 2-10, we still need from=0 but request size=100
+            params['size'] = 100
+        
         if page > 1:
             params['page'] = page
-            params['from'] = (page - 1) * MAX_RESULTS
+        
+        logger.info(f"Making SEC API request with params: {params}, page={page}")
         
         url = "https://efts.sec.gov/LATEST/search-index"
         
@@ -372,16 +394,30 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
         total_count = total_hits.get('value', 0) if isinstance(total_hits, dict) else total_hits
         
         # Get all hits returned by the API
-        # With proper pagination parameters, the API should return the correct page
         hits_list = hits_data.get('hits', [])
         
         logger.info(f"SEC API returned {len(hits_list)} results for page {page} (total_found: {total_count})")
+        if len(hits_list) > 0:
+            first_id = hits_list[0].get('_id', 'N/A')
+            last_id = hits_list[-1].get('_id', 'N/A')
+            logger.info(f"First result ID: {first_id[:50] if len(first_id) > 50 else first_id}")
+            logger.info(f"Last result ID: {last_id[:50] if len(last_id) > 50 else last_id}")
         
-        # The API should have returned the correct page based on 'page' and 'from' parameters
-        # Limit to MAX_RESULTS as a safety measure
-        limited_hits = hits_list[:MAX_RESULTS]
+        # Calculate which slice of the 100-result batch we need
+        # Page 1: want results 0-9 from batch starting at 0
+        # Page 2: want results 10-19 from batch starting at 0
+        # Page 11: want results 100-109 from batch starting at 100
+        batch_start = ((page - 1) * MAX_RESULTS) // 100 * 100
+        offset_in_batch = ((page - 1) * MAX_RESULTS) % 100
+        start_idx = offset_in_batch
+        end_idx = start_idx + MAX_RESULTS
         
-        logger.info(f"Using {len(limited_hits)} results from API response")
+        logger.info(f"Batch start: {batch_start}, offset in batch: {offset_in_batch}, slicing [{start_idx}:{end_idx}]")
+        
+        # Slice the batch to get our 10 results
+        limited_hits = hits_list[start_idx:end_idx]
+        
+        logger.info(f"Using {len(limited_hits)} results from API response (sliced from batch)")
         
         # Extract results with all column data
         results = []
