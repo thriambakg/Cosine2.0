@@ -289,6 +289,10 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
     """
     Search using SEC search-index API (Elasticsearch endpoint)
     
+    Note: The SEC API doesn't support server-side pagination (from/size parameters).
+    We fetch all results in one call (API typically returns up to 20-100 results),
+    then paginate client-side.
+    
     Args:
         search_params: Dictionary with search parameters
     
@@ -321,19 +325,9 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
         if search_params.get('dateTo'):
             params['enddt'] = search_params['dateTo']
         
-        # Handle pagination - use Elasticsearch from/size parameters
-        page = search_params.get('page', 1)
-        try:
-            page = int(page)
-            if page < 1:
-                page = 1
-        except (ValueError, TypeError):
-            page = 1
-        
-        # Elasticsearch uses 'from' (offset) and 'size' (page size)
-        # SEC API likely supports these parameters
-        params['from'] = (page - 1) * MAX_RESULTS
-        params['size'] = MAX_RESULTS
+        # Try to request a larger size (SEC API may have a limit, but we'll try)
+        # The API typically returns 10-20 results by default, but might support larger sizes
+        params['size'] = 1000  # Try to get more results
         
         url = "https://efts.sec.gov/LATEST/search-index"
         
@@ -365,12 +359,37 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
         total_hits = hits_data.get('total', {})
         total_count = total_hits.get('value', 0) if isinstance(total_hits, dict) else total_hits
         
+        # Get all hits returned by the API (may be limited by API, typically 10-100)
         hits_list = hits_data.get('hits', [])
         
-        # The API should return the correct page based on 'from' and 'size' parameters
-        # If the API doesn't support pagination, we'll slice the results as fallback
-        # But ideally, the API handles pagination and returns exactly MAX_RESULTS items
-        limited_hits = hits_list[:MAX_RESULTS]  # Safety limit in case API returns more
+        logger.info(f"SEC API returned {len(hits_list)} results (total_found: {total_count})")
+        
+        # Handle client-side pagination since SEC API doesn't support server-side pagination
+        page = search_params.get('page', 1)
+        try:
+            page = int(page)
+            if page < 1:
+                page = 1
+        except (ValueError, TypeError):
+            page = 1
+        
+        logger.info(f"Pagination: page={page}, MAX_RESULTS={MAX_RESULTS}, total_hits={len(hits_list)}")
+        
+        # Paginate through the results we got
+        start_idx = (page - 1) * MAX_RESULTS
+        end_idx = start_idx + MAX_RESULTS
+        limited_hits = hits_list[start_idx:end_idx]
+        
+        logger.info(f"Slicing hits_list[{start_idx}:{end_idx}] = {len(limited_hits)} results")
+        
+        # Note: If total_count > len(hits_list), the API is limiting results
+        # In that case, we can only paginate through what we got
+        if len(limited_hits) == 0 and page > 1:
+            # Requested page is beyond what we have
+            logger.warning(f"Page {page} requested but only {len(hits_list)} results available from API (total_found: {total_count}). Returning empty results.")
+        elif len(hits_list) < total_count:
+            # API returned fewer results than total - this is expected if API has limits
+            logger.info(f"API returned {len(hits_list)} results but total_found is {total_count}. API may have result limits.")
         
         # Extract results with all column data
         results = []
