@@ -285,18 +285,19 @@ def get_company_search_preview(search_term: str) -> List[Dict[str, Any]]:
         return []
 
 
-def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
+def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> Dict[str, Any]:
     """
     Search using SEC search-index API (Elasticsearch endpoint)
     
-    Fetches ALL results by making multiple API calls with pagination,
-    then returns the complete dataset for client-side pagination.
+    Fetches ONE API page at a time (~100 results), then slices to return 10 results.
+    This matches the test script behavior - fetch on demand, not all at once.
     
     Args:
         search_params: Dictionary with search parameters
+        page: Display page number (1-indexed, 10 results per page)
     
     Returns:
-        Dict with success flag and complete results list (all pages)
+        Dict with success flag, total_found, and results list (10 results)
     """
     session = create_session()
     
@@ -354,85 +355,83 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
             'user-agent': SEC_USER_AGENT
         }
         
-        all_hits = []
-        total_count = 0
-        page = 1
-        max_pages = 1000  # Safety limit to prevent infinite loops
+        # Calculate which API page we need for this display page
+        # API returns ~100 results per call, we display 10 per page
+        # Display pages 1-10 come from API page 1 (results 0-99)
+        # Display pages 11-20 come from API page 2 (results 100-199)
+        # etc.
+        api_page = ((page - 1) // 10) + 1
         
-        logger.info(f"Fetching ALL results for query (will paginate through all pages)")
+        # Build params for this API page - mirror SEC website behavior exactly
+        params = base_params.copy()
+        
+        # SEC website pagination pattern:
+        # API Page 1: no page/from params
+        # API Page 2: page=2&from=100
+        # API Page 3: page=3&from=200 (increments of 100)
+        if api_page > 1:
+            params['page'] = api_page
+            params['from'] = (api_page - 1) * 100  # SEC uses increments of 100
+        
+        logger.info(f"Fetching display page {page} (API page {api_page}, params: page={params.get('page', 'N/A')}, from={params.get('from', 'N/A')})...")
         logger.info(f"Base parameters: {base_params}")
         
-        while True:
-            # Build params for this page
-            params = base_params.copy()
-            
-            if page > 1:
-                params['page'] = page
-                # Try using 'from' parameter for pagination
-                # SEC website uses from=100 for page 2, but we'll try increments of 100
-                params['from'] = (page - 1) * 100
-                params['size'] = 100  # Request larger batch to get more results
-            
-            logger.info(f"Fetching page {page}...")
-            
-            time.sleep(0.1)  # Rate limiting
-            response = session.get(url, params=params, headers=headers, timeout=30)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            # Parse Elasticsearch response structure
-            if not isinstance(data, dict) or 'hits' not in data:
-                if page == 1:
-                    return {
-                        'success': False,
-                        'error': 'Unexpected response format from search-index API'
-                    }
-                else:
-                    # If we get an error on a later page, break and return what we have
-                    logger.warning(f"Unexpected response format on page {page}, stopping pagination")
-                    break
-            
-            hits_data = data.get('hits', {})
-            total_hits = hits_data.get('total', {})
-            page_total_count = total_hits.get('value', 0) if isinstance(total_hits, dict) else total_hits
-            
-            # Set total_count on first page
-            if page == 1:
-                total_count = page_total_count
-                logger.info(f"Total results found: {total_count}")
-            
-            hits_list = hits_data.get('hits', [])
-            
-            if not hits_list:
-                # No more results
-                logger.info(f"No more results on page {page}, stopping pagination")
-                break
-            
-            logger.info(f"Got {len(hits_list)} results on page {page}")
-            all_hits.extend(hits_list)
-            
-            # Check if we've reached the total
-            if len(all_hits) >= total_count:
-                logger.info(f"Fetched all {total_count} results")
-                break
-            
-            # Check if we got fewer results than expected (might be last page)
-            if len(hits_list) < 10:
-                logger.info(f"Got fewer results than expected, likely last page")
-                break
-            
-            # Safety check
-            if page >= max_pages:
-                logger.warning(f"Reached max pages limit ({max_pages}), stopping")
-                break
-            
-            page += 1
+        # Retry logic for handling timeouts
+        max_retries = 3
+        retry_count = 0
+        response = None
         
-        logger.info(f"Total results fetched: {len(all_hits)} out of {total_count}")
+        while retry_count < max_retries:
+            try:
+                time.sleep(0.1)  # Rate limiting
+                response = session.get(url, params=params, headers=headers, timeout=60)
+                response.raise_for_status()
+                break  # Success, exit retry loop
+            except (requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Failed to fetch API page {api_page} after {max_retries} retries: {e}")
+                    raise
+                logger.warning(f"Timeout/error on API page {api_page}, retry {retry_count}/{max_retries}: {e}")
+                time.sleep(1)  # Wait before retry
         
-        # Use all hits (complete dataset for client-side pagination)
-        limited_hits = all_hits
+        data = response.json()
+        
+        # Parse Elasticsearch response structure
+        if not isinstance(data, dict) or 'hits' not in data:
+            return {
+                'success': False,
+                'error': 'Unexpected response format from search-index API'
+            }
+        
+        hits_data = data.get('hits', {})
+        total_hits = hits_data.get('total', {})
+        total_count = total_hits.get('value', 0) if isinstance(total_hits, dict) else total_hits
+        
+        hits_list = hits_data.get('hits', [])
+        
+        if not hits_list:
+            logger.info(f"No results returned from API page {api_page}")
+            return {
+                'success': True,
+                'total_found': total_count,
+                'results': []
+            }
+        
+        logger.info(f"Got {len(hits_list)} results from API page {api_page} (total found: {total_count})")
+        
+        # Calculate which slice we need from this API batch
+        # Display page 1: want results 0-9 from API batch (results 0-99)
+        # Display page 2: want results 10-19 from API batch (results 0-99)
+        # Display page 11: want results 100-109 from API batch (results 100-199)
+        offset_in_batch = ((page - 1) % 10) * MAX_RESULTS
+        start_idx = offset_in_batch
+        end_idx = start_idx + MAX_RESULTS
+        
+        # Slice to get exactly 10 results for this display page
+        limited_hits = hits_list[start_idx:end_idx]
+        
+        logger.info(f"Sliced to {len(limited_hits)} results for display page {page} (from index {start_idx} to {end_idx})")
         
         # Extract results with all column data
         results = []
@@ -587,10 +586,19 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
             'columns': body.get('columns', [])
         }
         
+        # Extract page number (default to 1)
+        page = body.get('page', 1)
+        try:
+            page = int(page)
+            if page < 1:
+                page = 1
+        except (ValueError, TypeError):
+            page = 1
+        
         # Remove None values
         search_params = {k: v for k, v in search_params.items() if v is not None}
         
-        result = search_by_search_index_api(search_params)
+        result = search_by_search_index_api(search_params, page=page)
         
         return {
             'statusCode': 200 if result.get('success') else 500,
