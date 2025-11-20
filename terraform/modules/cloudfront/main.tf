@@ -464,6 +464,11 @@ resource "aws_s3_bucket_policy" "cloudfront_oac_policy" {
     ]
   })
 
-  # Remove the depends_on to avoid circular dependency
-  # The policy will be applied after the distribution is created via terraform apply
+  # Ensure the distribution is created first, but don't block on deployment status
+  depends_on = [aws_cloudfront_distribution.distribution]
+
+  # Lifecycle to handle updates when distribution ARN changes
+  lifecycle {
+    create_before_destroy = false
+  }
 }
