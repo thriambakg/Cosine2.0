@@ -434,6 +434,7 @@ resource "aws_cloudfront_origin_request_policy" "default" {
 
 
 # S3 Bucket Policy for CloudFront OAC
+# Note: This policy allows CloudFront to access S3 via Origin Access Control (OAC)
 resource "aws_s3_bucket_policy" "cloudfront_oac_policy" {
   bucket = var.s3_bucket_id
 
@@ -446,7 +447,10 @@ resource "aws_s3_bucket_policy" "cloudfront_oac_policy" {
         Principal = {
           Service = "cloudfront.amazonaws.com"
         }
-        Action = ["s3:GetObject", "s3:ListBucket"]
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
         Resource = [
           "${var.s3_bucket_arn}",
           "${var.s3_bucket_arn}/*"
@@ -460,5 +464,6 @@ resource "aws_s3_bucket_policy" "cloudfront_oac_policy" {
     ]
   })
 
-  depends_on = [aws_cloudfront_distribution.distribution]
+  # Remove the depends_on to avoid circular dependency
+  # The policy will be applied after the distribution is created via terraform apply
 }
