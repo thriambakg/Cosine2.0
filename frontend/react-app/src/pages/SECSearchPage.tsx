@@ -78,7 +78,6 @@ const SECSearchPage: React.FC = () => {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [allResults, setAllResults] = useState<SECSearchResult[]>([]);
-  const [totalFound, setTotalFound] = useState<number>(0);
   const RESULTS_PER_PAGE = 10;
 
   const { execute: executeSearch, data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
@@ -129,7 +128,6 @@ const SECSearchPage: React.FC = () => {
   useEffect(() => {
     if (searchResults?.results) {
       setAllResults(searchResults.results);
-      setTotalFound(searchResults.total_found || searchResults.results.length);
     }
   }, [searchResults]);
 
