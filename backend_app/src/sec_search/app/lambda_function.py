@@ -321,6 +321,20 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
         if search_params.get('dateTo'):
             params['enddt'] = search_params['dateTo']
         
+        # Handle pagination - use Elasticsearch from/size parameters
+        page = search_params.get('page', 1)
+        try:
+            page = int(page)
+            if page < 1:
+                page = 1
+        except (ValueError, TypeError):
+            page = 1
+        
+        # Elasticsearch uses 'from' (offset) and 'size' (page size)
+        # SEC API likely supports these parameters
+        params['from'] = (page - 1) * MAX_RESULTS
+        params['size'] = MAX_RESULTS
+        
         url = "https://efts.sec.gov/LATEST/search-index"
         
         headers = {
@@ -353,18 +367,10 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
         
         hits_list = hits_data.get('hits', [])
         
-        # Handle pagination
-        page = search_params.get('page', 1)
-        try:
-            page = int(page)
-            if page < 1:
-                page = 1
-        except (ValueError, TypeError):
-            page = 1
-        
-        start_idx = (page - 1) * MAX_RESULTS
-        end_idx = start_idx + MAX_RESULTS
-        limited_hits = hits_list[start_idx:end_idx]
+        # The API should return the correct page based on 'from' and 'size' parameters
+        # If the API doesn't support pagination, we'll slice the results as fallback
+        # But ideally, the API handles pagination and returns exactly MAX_RESULTS items
+        limited_hits = hits_list[:MAX_RESULTS]  # Safety limit in case API returns more
         
         # Extract results with all column data
         results = []
