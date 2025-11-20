@@ -787,11 +787,29 @@ export interface SECFormFilter {
   count: number;
 }
 
+export interface SECEntityFilter {
+  entity: string;
+  count: number;
+}
+
+export interface SECLocationFilter {
+  location: string;
+  count: number;
+}
+
+export interface SECIncorporationFilter {
+  state: string;
+  count: number;
+}
+
 export interface SECSearchResponse {
   success: boolean;
   total_found?: number;
   results?: SECSearchResult[];
   form_filters?: SECFormFilter[];  // Available form types in current search results
+  entity_filters?: SECEntityFilter[];  // Available entities in current search results
+  location_filters?: SECLocationFilter[];  // Available locations in current search results
+  incorporation_filters?: SECIncorporationFilter[];  // Available incorporation states in current search results
   error?: string;
 }
 

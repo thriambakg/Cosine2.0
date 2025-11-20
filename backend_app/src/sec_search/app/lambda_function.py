@@ -408,9 +408,11 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         total_hits = hits_data.get('total', {})
         total_count = total_hits.get('value', 0) if isinstance(total_hits, dict) else total_hits
         
+        # Extract aggregations from API response
+        aggregations = data.get('aggregations', {})
+        
         # Extract form filter aggregation (available form types in results)
         form_filters = []
-        aggregations = data.get('aggregations', {})
         form_filter_agg = aggregations.get('form_filter', {})
         if form_filter_agg and 'buckets' in form_filter_agg:
             form_filters = [
@@ -422,7 +424,115 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             ]
             logger.info(f"Found {len(form_filters)} form types in results: {[f['form'] for f in form_filters]}")
         
+        # Extract entity filter aggregation
+        entity_filters = []
+        entity_filter_agg = aggregations.get('entity_filter', {})
+        if entity_filter_agg and 'buckets' in entity_filter_agg:
+            entity_filters = [
+                {
+                    'entity': bucket.get('key', ''),
+                    'count': bucket.get('doc_count', 0)
+                }
+                for bucket in entity_filter_agg.get('buckets', [])
+            ]
+            logger.info(f"Found {len(entity_filters)} entities in results")
+        
+        # Extract location filter aggregation (biz_states)
+        location_filters = []
+        location_filter_agg = aggregations.get('biz_states_filter', aggregations.get('location_filter', {}))
+        if location_filter_agg and 'buckets' in location_filter_agg:
+            location_filters = [
+                {
+                    'location': bucket.get('key', ''),
+                    'count': bucket.get('doc_count', 0)
+                }
+                for bucket in location_filter_agg.get('buckets', [])
+            ]
+            logger.info(f"Found {len(location_filters)} locations in results")
+        
+        # Extract incorporation state filter aggregation
+        incorporation_filters = []
+        incorporation_filter_agg = aggregations.get('inc_states_filter', aggregations.get('incorporation_filter', {}))
+        if incorporation_filter_agg and 'buckets' in incorporation_filter_agg:
+            incorporation_filters = [
+                {
+                    'state': bucket.get('key', ''),
+                    'count': bucket.get('doc_count', 0)
+                }
+                for bucket in incorporation_filter_agg.get('buckets', [])
+            ]
+            logger.info(f"Found {len(incorporation_filters)} incorporation states in results")
+        
         hits_list = hits_data.get('hits', [])
+        
+        # Always compute filters from current batch results
+        # API aggregations may not be available for entity/location/incorporation, so we compute from results
+        logger.info(f"Computing filters from current batch results ({len(hits_list)} hits)")
+        entity_counts = {}
+        location_counts = {}
+        incorporation_counts = {}
+        
+        # Compute from ALL hits in the current batch (not just the 10 we're displaying)
+        for hit in hits_list:
+            source = hit.get('_source', {})
+            
+            # Count entities (display_names)
+            display_names = source.get('display_names', [])
+            if display_names:
+                for name in display_names:
+                    if name and isinstance(name, str) and name.strip() and name.strip() != 'N/A':
+                        entity_counts[name] = entity_counts.get(name, 0) + 1
+            
+            # Count locations (biz_locations or biz_states)
+            biz_locations = source.get('biz_locations', [])
+            biz_states = source.get('biz_states', [])
+            all_locations = []
+            if biz_locations:
+                all_locations.extend(biz_locations)
+            if biz_states:
+                all_locations.extend(biz_states)
+            
+            for loc in all_locations:
+                if loc and isinstance(loc, str) and loc.strip() and loc.strip() != 'N/A' and loc.strip() != '':
+                    location_counts[loc] = location_counts.get(loc, 0) + 1
+            
+            # Count incorporation states (inc_states)
+            inc_states = source.get('inc_states', [])
+            if inc_states:
+                for state in inc_states:
+                    if state and isinstance(state, str) and state.strip() and state.strip() != 'N/A' and state.strip() != '':
+                        incorporation_counts[state] = incorporation_counts.get(state, 0) + 1
+        
+        # Merge API aggregations with computed filters (API takes precedence if available)
+        # But always include computed filters as fallback
+        computed_entity_filters = [
+            {'entity': entity, 'count': count}
+            for entity, count in sorted(entity_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+        computed_location_filters = [
+            {'location': loc, 'count': count}
+            for loc, count in sorted(location_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+        computed_incorporation_filters = [
+            {'state': state, 'count': count}
+            for state, count in sorted(incorporation_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+        
+        # Use API aggregations if available, otherwise use computed
+        if not entity_filters:
+            entity_filters = computed_entity_filters
+        if not location_filters:
+            location_filters = computed_location_filters
+        if not incorporation_filters:
+            incorporation_filters = computed_incorporation_filters
+        
+        logger.info(f"Computed filters: {len(entity_filters)} entities, {len(location_filters)} locations, {len(incorporation_filters)} incorporation states")
+        if entity_filters:
+            logger.info(f"Sample entities: {entity_filters[:3]}")
+        if location_filters:
+            logger.info(f"Sample locations: {location_filters[:3]}")
+        if incorporation_filters:
+            logger.info(f"Sample incorporation states: {incorporation_filters[:3]}")
         
         if not hits_list:
             logger.info(f"No results returned from API page {api_page}")
@@ -430,7 +540,10 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 'success': True,
                 'total_found': total_count,
                 'results': [],
-                'form_filters': form_filters  # Still return form filters even if no results
+                'form_filters': form_filters,  # Still return form filters even if no results
+                'entity_filters': entity_filters,
+                'location_filters': location_filters,
+                'incorporation_filters': incorporation_filters
             }
         
         logger.info(f"Got {len(hits_list)} results from API page {api_page} (total found: {total_count})")
@@ -515,7 +628,10 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             'success': True,
             'total_found': total_count,
             'results': results,
-            'form_filters': form_filters  # Available form types in current search results
+            'form_filters': form_filters,  # Available form types in current search results
+            'entity_filters': entity_filters,  # Available entities in current search results
+            'location_filters': location_filters,  # Available locations in current search results
+            'incorporation_filters': incorporation_filters  # Available incorporation states in current search results
         }
         
     except Exception as e:
