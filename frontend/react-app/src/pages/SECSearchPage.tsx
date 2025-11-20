@@ -34,23 +34,28 @@ import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../services/api';
 
 // Custom styled components
-const GlassCard = ({ children, sx = {}, ...props }: any) => (
-  <Card
-    sx={{
-      background: 'rgba(15, 23, 42, 0.95)',
-      border: '2px solid #374151',
-      borderRadius: '0px',
-      backdropFilter: 'blur(10px)',
-      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-      ...sx
-    }}
-    {...props}
-  >
-    <CardContent sx={{ p: 0 }}>
-      {children}
-    </CardContent>
-  </Card>
-);
+const GlassCard = ({ children, sx = {}, ...props }: any) => {
+  // Ensure sx is always an object
+  const safeSx = sx && typeof sx === 'object' ? sx : {};
+  
+  return (
+    <Card
+      sx={{
+        background: 'rgba(15, 23, 42, 0.95)',
+        border: '2px solid #374151',
+        borderRadius: '0px',
+        backdropFilter: 'blur(10px)',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+        ...safeSx
+      }}
+      {...props}
+    >
+      <CardContent sx={{ p: 0 }}>
+        {children}
+      </CardContent>
+    </Card>
+  );
+};
 
 const FORM_TYPES = ['3', '4', '5', '8-K', '10-K', '10-Q', '13F', '13D', '13G', 'SC 13D', 'SC 13G'];
 
@@ -130,6 +135,10 @@ const SECSearchPage: React.FC = () => {
     if (searchResults?.results) {
       setCurrentResults(searchResults.results);
       setTotalFound(searchResults.total_found || 0);
+    } else if (searchResults && !searchResults.results) {
+      // Clear results if search completed but no results
+      setCurrentResults([]);
+      setTotalFound(0);
     }
   }, [searchResults]);
 
@@ -157,8 +166,9 @@ const SECSearchPage: React.FC = () => {
 
   const handlePageChange = async (newPage: number) => {
     if (newPage < 1) return;
+    if (!totalFound || totalFound === 0) return; // Don't paginate if no results
     const maxPage = Math.ceil(totalFound / RESULTS_PER_PAGE);
-    if (newPage > maxPage) return;
+    if (maxPage === 0 || newPage > maxPage) return;
     setCurrentPage(newPage);
     // Fetch new page from server
     await handleSearch(newPage);
@@ -579,15 +589,17 @@ const SECSearchPage: React.FC = () => {
               }}
             >
               Search Results
-              <Chip
-                label={`Showing ${((currentPage - 1) * RESULTS_PER_PAGE) + 1}-${Math.min(currentPage * RESULTS_PER_PAGE, totalFound)} of ${totalFound} results`}
-                sx={{
-                  ml: 2,
-                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                  color: '#93c5fd',
-                  border: '1px solid #3b82f6',
-                }}
-              />
+              {totalFound > 0 && (
+                <Chip
+                  label={`Showing ${((currentPage - 1) * RESULTS_PER_PAGE) + 1}-${Math.min(currentPage * RESULTS_PER_PAGE, totalFound)} of ${totalFound} results`}
+                  sx={{
+                    ml: 2,
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    color: '#93c5fd',
+                    border: '1px solid #3b82f6',
+                  }}
+                />
+              )}
             </Typography>
 
             {currentResults.length > 0 ? (
@@ -675,12 +687,12 @@ const SECSearchPage: React.FC = () => {
                           <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Film number')}</TableCell>
                         )}
                         <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>
-                          {result.documentUrls && result.documentUrls.length > 0 ? (
+                          {result.documentUrls && Array.isArray(result.documentUrls) && result.documentUrls.length > 0 ? (
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                               {result.documentUrls.slice(0, 3).map((url, urlIndex) => (
                                 <Link
                                   key={urlIndex}
-                                  href={url}
+                                  href={url || '#'}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   sx={{
@@ -694,7 +706,7 @@ const SECSearchPage: React.FC = () => {
                                   }}
                                 >
                                   <DocumentIcon sx={{ fontSize: 16 }} />
-                                  {url.split('/').pop()?.substring(0, 30)}...
+                                  {url ? (url.split('/').pop()?.substring(0, 30) || 'Document') + '...' : 'Document'}
                                   <OpenInNewIcon sx={{ fontSize: 14 }} />
                                 </Link>
                               ))}
@@ -725,7 +737,7 @@ const SECSearchPage: React.FC = () => {
             )}
 
             {/* Pagination Controls */}
-            {totalFound > RESULTS_PER_PAGE && (
+            {totalFound > RESULTS_PER_PAGE && totalFound > 0 && (
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3, pt: 3, borderTop: '1px solid #374151' }}>
                 <Typography variant="body2" sx={{ color: '#9ca3af' }}>
                   Page {currentPage} of {Math.ceil(totalFound / RESULTS_PER_PAGE)}
@@ -756,7 +768,7 @@ const SECSearchPage: React.FC = () => {
                   <Button
                     variant="outlined"
                     onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage >= Math.ceil(totalFound / RESULTS_PER_PAGE) || searchLoading}
+                    disabled={!totalFound || currentPage >= Math.ceil(totalFound / RESULTS_PER_PAGE) || searchLoading}
                     endIcon={<ChevronRightIcon />}
                     sx={{
                       color: '#9ca3af',
