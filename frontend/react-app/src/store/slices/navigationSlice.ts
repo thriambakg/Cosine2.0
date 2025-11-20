@@ -74,6 +74,13 @@ const defaultNavigationItems: NavigationItem[] = [
     path: '/heatmap',
     icon: 'GridOnIcon',
     category: 'analysis'
+  },
+  {
+    id: 'sec-search',
+    label: 'SEC Search',
+    path: '/sec-search',
+    icon: 'DescriptionIcon',
+    category: 'analysis'
   }
 ];
 

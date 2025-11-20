@@ -15,6 +15,7 @@ import StockVolatilityPage from './pages/StockVolatilityPage';
 import StockAlertsPage from './pages/StockAlertsPage';
 import OptionPricingPage from './pages/OptionPricingPage';
 import HeatmapPage from './pages/HeatmapPage';
+import SECSearchPage from './pages/SECSearchPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 
 // Protected Route Component
@@ -85,6 +86,11 @@ function AppContent() {
               <Route path="/heatmap" element={
                 <ProtectedRoute>
                   <HeatmapPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/sec-search" element={
+                <ProtectedRoute>
+                  <SECSearchPage />
                 </ProtectedRoute>
               } />
               <Route path="*" element={<Navigate to="/" replace />} />

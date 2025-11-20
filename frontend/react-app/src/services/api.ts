@@ -743,6 +743,73 @@ export const dashboardAPI = {
   },
 };
 
+// SEC Search API
+export interface SECSearchParams {
+  cik?: string;
+  entityName?: string;
+  keywords?: string;
+  formTypes?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  reportingFor?: string;
+  located?: string;
+  incorporated?: string;
+  fileNumber?: string;
+  filmNumber?: string;
+  columns?: string[];
+  page?: number;
+}
+
+export interface SECAutocompleteSuggestion {
+  name: string;
+  cik: string;
+  ticker: string;
+}
+
+export interface SECSearchResult {
+  form: string;
+  filingDate: string;
+  reportingFor: string;
+  filingEntity: string;
+  cik: string;
+  located: string;
+  incorporated: string;
+  fileNumber: string;
+  filmNumber: string;
+  accession: string;
+  filingPageUrl: string | null;
+  documentUrls: string[];
+  adsh: string;
+}
+
+export interface SECSearchResponse {
+  success: boolean;
+  total_found?: number;
+  results?: SECSearchResult[];
+  error?: string;
+}
+
+export interface SECAutocompleteResponse {
+  suggestions: SECAutocompleteSuggestion[];
+}
+
+export const secSearchAPI = {
+  // Get autocomplete suggestions
+  getAutocomplete: async (query: string): Promise<SECAutocompleteResponse> => {
+    return apiRequest<SECAutocompleteResponse>(
+      `/sec-search-autocomplete?query=${encodeURIComponent(query)}`
+    );
+  },
+
+  // Perform full search
+  search: async (params: SECSearchParams): Promise<SECSearchResponse> => {
+    return apiRequest<SECSearchResponse>('/sec-search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
 // Session Management API
 export const sessionManagementAPI = {
   // Get all sessions for a user
@@ -815,6 +882,7 @@ export const api = {
   health: apiHealthAPI,
   dashboard: dashboardAPI,
   sessions: sessionManagementAPI,
+  secSearch: secSearchAPI,
 };
 
 export default api;

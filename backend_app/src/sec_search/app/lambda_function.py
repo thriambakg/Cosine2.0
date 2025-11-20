@@ -352,7 +352,19 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
         total_count = total_hits.get('value', 0) if isinstance(total_hits, dict) else total_hits
         
         hits_list = hits_data.get('hits', [])
-        limited_hits = hits_list[:MAX_RESULTS]
+        
+        # Handle pagination
+        page = search_params.get('page', 1)
+        try:
+            page = int(page)
+            if page < 1:
+                page = 1
+        except (ValueError, TypeError):
+            page = 1
+        
+        start_idx = (page - 1) * MAX_RESULTS
+        end_idx = start_idx + MAX_RESULTS
+        limited_hits = hits_list[start_idx:end_idx]
         
         # Extract results with all column data
         results = []

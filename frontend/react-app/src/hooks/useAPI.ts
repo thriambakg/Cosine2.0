@@ -254,6 +254,15 @@ export function useAPIHealth() {
   return useAPI(api.health.checkHealth, 30 * 1000); // 30 second cache
 }
 
+// SEC Search Hooks
+export function useSECSearch() {
+  return useAPI(api.secSearch.search, 0); // No cache for search results
+}
+
+export function useSECAutocomplete() {
+  return useAPI(api.secSearch.getAutocomplete, 5 * 60 * 1000); // 5 minute cache for autocomplete
+}
+
 // ============================================================================
 // UTILITY HOOKS
 // ============================================================================

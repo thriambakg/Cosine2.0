@@ -21,6 +21,7 @@ import {
   Calculate as CalculateIcon,
   GridOn as GridOnIcon,
   SmartToy as BotIcon,
+  Description as DescriptionIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
@@ -40,6 +41,7 @@ const iconMap = {
   CalculateIcon,
   GridOnIcon,
   BotIcon,
+  DescriptionIcon,
 };
 
 export default function AppSidebar() {
