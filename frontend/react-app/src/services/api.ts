@@ -782,10 +782,16 @@ export interface SECSearchResult {
   adsh: string;
 }
 
+export interface SECFormFilter {
+  form: string;
+  count: number;
+}
+
 export interface SECSearchResponse {
   success: boolean;
   total_found?: number;
   results?: SECSearchResult[];
+  form_filters?: SECFormFilter[];  // Available form types in current search results
   error?: string;
 }
 

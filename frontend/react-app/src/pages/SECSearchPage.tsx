@@ -57,7 +57,7 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => {
   );
 };
 
-const FORM_TYPES = ['3', '4', '5', '8-K', '10-K', '10-Q', '13F', '13D', '13G', 'SC 13D', 'SC 13G'];
+const DEFAULT_FORM_TYPES = ['3', '4', '5', '8-K', '10-K', '10-Q', '13F', '13D', '13G', 'SC 13D', 'SC 13G'];
 
 const DEFAULT_COLUMNS = [
   'Form & File',
@@ -84,6 +84,7 @@ const SECSearchPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [currentResults, setCurrentResults] = useState<SECSearchResult[]>([]);
   const [totalFound, setTotalFound] = useState<number>(0);
+  const [availableFormTypes, setAvailableFormTypes] = useState<string[]>(DEFAULT_FORM_TYPES);
   const RESULTS_PER_PAGE = 10;
 
   const { execute: executeSearch, data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
@@ -135,10 +136,21 @@ const SECSearchPage: React.FC = () => {
     if (searchResults?.results) {
       setCurrentResults(searchResults.results);
       setTotalFound(searchResults.total_found || 0);
+      
+      // Update available form types from search results aggregation
+      if (searchResults.form_filters && searchResults.form_filters.length > 0) {
+        const formTypes = searchResults.form_filters.map(filter => filter.form);
+        setAvailableFormTypes(formTypes);
+      } else {
+        // If no form filters returned, reset to default
+        setAvailableFormTypes(DEFAULT_FORM_TYPES);
+      }
     } else if (searchResults && !searchResults.results) {
       // Clear results if search completed but no results
       setCurrentResults([]);
       setTotalFound(0);
+      // Reset to default form types when no results
+      setAvailableFormTypes(DEFAULT_FORM_TYPES);
     }
   }, [searchResults]);
 
@@ -336,7 +348,7 @@ const SECSearchPage: React.FC = () => {
             {/* Form Types */}
             <Autocomplete
               multiple
-              options={FORM_TYPES}
+              options={availableFormTypes}
               value={searchParams.formTypes || []}
               onChange={(_, newValue) => setSearchParams(prev => ({ ...prev, formTypes: newValue.length > 0 ? newValue : undefined }))}
               renderInput={(params) => (

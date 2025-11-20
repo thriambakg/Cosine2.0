@@ -408,6 +408,20 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         total_hits = hits_data.get('total', {})
         total_count = total_hits.get('value', 0) if isinstance(total_hits, dict) else total_hits
         
+        # Extract form filter aggregation (available form types in results)
+        form_filters = []
+        aggregations = data.get('aggregations', {})
+        form_filter_agg = aggregations.get('form_filter', {})
+        if form_filter_agg and 'buckets' in form_filter_agg:
+            form_filters = [
+                {
+                    'form': bucket.get('key', ''),
+                    'count': bucket.get('doc_count', 0)
+                }
+                for bucket in form_filter_agg.get('buckets', [])
+            ]
+            logger.info(f"Found {len(form_filters)} form types in results: {[f['form'] for f in form_filters]}")
+        
         hits_list = hits_data.get('hits', [])
         
         if not hits_list:
@@ -415,7 +429,8 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             return {
                 'success': True,
                 'total_found': total_count,
-                'results': []
+                'results': [],
+                'form_filters': form_filters  # Still return form filters even if no results
             }
         
         logger.info(f"Got {len(hits_list)} results from API page {api_page} (total found: {total_count})")
@@ -499,7 +514,8 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         return {
             'success': True,
             'total_found': total_count,
-            'results': results
+            'results': results,
+            'form_filters': form_filters  # Available form types in current search results
         }
         
     except Exception as e:
