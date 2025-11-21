@@ -873,9 +873,7 @@ const SECSearchPage: React.FC = () => {
     
     const params: SECSearchParams = {
       ...searchParams,
-      page: 1, // Always start from page 1 for new searches
       columns: selectedColumns.length === DEFAULT_COLUMNS.length ? [] : selectedColumns,
-      fetchAll: true, // Fetch all results for client-side filtering
     };
 
     // Remove empty strings
