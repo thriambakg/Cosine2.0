@@ -10,7 +10,9 @@ import logging
 import requests
 import time
 import re
+import boto3
 from typing import Dict, List, Any, Optional
+from datetime import datetime, timezone
 
 # Configure logging
 logger = logging.getLogger()
@@ -23,6 +25,11 @@ SEC_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 
 # Limit results
 MAX_RESULTS = int(os.environ.get('MAX_RESULTS', '10'))
+
+# DynamoDB configuration
+DYNAMODB_TABLE_NAME = os.environ.get('SEC_FILINGS_CACHE_TABLE')
+dynamodb = boto3.resource('dynamodb') if DYNAMODB_TABLE_NAME else None
+cache_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if dynamodb and DYNAMODB_TABLE_NAME else None
 
 
 def create_session():
@@ -37,6 +44,140 @@ def create_session():
         'Referer': 'https://www.sec.gov/',
     })
     return session
+
+
+def construct_filing_id(form: str, cik: str, file_number: str, film_number: str) -> str:
+    """
+    Construct a unique filing ID for caching: {form}-{CIK}-{fileNumber}-{filmNumber}
+    
+    Args:
+        form: Form type (e.g., "4", "10-K")
+        cik: Central Index Key (10-digit padded)
+        file_number: File number
+        film_number: Film number
+    
+    Returns:
+        Filing ID string
+    """
+    # Normalize values - use "N/A" for missing values
+    form = str(form) if form and form != 'N/A' else 'N/A'
+    cik = str(cik).zfill(10) if cik and cik != 'N/A' else 'N/A'
+    file_number = str(file_number) if file_number and file_number != 'N/A' else 'N/A'
+    film_number = str(film_number) if film_number and film_number != 'N/A' else 'N/A'
+    
+    return f"{form}-{cik}-{file_number}-{film_number}"
+
+
+def get_cached_filings(filing_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Check DynamoDB cache for existing filings using BatchGetItem
+    
+    Args:
+        filing_ids: List of filing IDs to check
+    
+    Returns:
+        Dictionary mapping filing_id to cached item data
+    """
+    if not cache_table or not filing_ids:
+        return {}
+    
+    try:
+        # DynamoDB BatchGetItem can handle up to 100 items
+        cached_items = {}
+        
+        # Process in batches of 100
+        for i in range(0, len(filing_ids), 100):
+            batch = filing_ids[i:i+100]
+            keys = [{'filingId': filing_id} for filing_id in batch]
+            
+            response = cache_table.meta.client.batch_get_item(
+                RequestItems={
+                    DYNAMODB_TABLE_NAME: {
+                        'Keys': keys
+                    }
+                }
+            )
+            
+            items = response.get('Responses', {}).get(DYNAMODB_TABLE_NAME, [])
+            for item in items:
+                filing_id = item.get('filingId')
+                if filing_id:
+                    cached_items[filing_id] = item
+            
+            # Update lastAccessed timestamp for cached items
+            current_time = int(datetime.now(timezone.utc).timestamp())
+            for filing_id in cached_items.keys():
+                try:
+                    cache_table.update_item(
+                        Key={'filingId': filing_id},
+                        UpdateExpression='SET lastAccessed = :ts',
+                        ExpressionAttributeValues={':ts': current_time}
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to update lastAccessed for {filing_id}: {e}")
+        
+        logger.info(f"Found {len(cached_items)}/{len(filing_ids)} filings in cache")
+        return cached_items
+        
+    except Exception as e:
+        logger.error(f"Error checking cache: {e}")
+        return {}
+
+
+def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
+    """
+    Store a filing in DynamoDB cache
+    
+    Args:
+        filing_data: Dictionary containing filing data to store
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    if not cache_table:
+        return False
+    
+    try:
+        current_time = int(datetime.now(timezone.utc).timestamp())
+        
+        # Prepare item for DynamoDB
+        item = {
+            'filingId': filing_data.get('filingId'),
+            'form': filing_data.get('form', 'N/A'),
+            'cik': filing_data.get('cik', 'N/A'),
+            'fileNumber': filing_data.get('fileNumber', 'N/A'),
+            'filmNumber': filing_data.get('filmNumber', 'N/A'),
+            'accession': filing_data.get('accession', ''),
+            'adsh': filing_data.get('adsh', ''),
+            'filingDate': filing_data.get('filingDate', 'N/A'),
+            'reportingFor': filing_data.get('reportingFor', 'N/A'),
+            'filingEntity': filing_data.get('filingEntity', 'N/A'),
+            'located': filing_data.get('located', 'N/A'),
+            'incorporated': filing_data.get('incorporated', 'N/A'),
+            'periodEnding': filing_data.get('periodEnding', ''),
+            'filingPageUrl': filing_data.get('filingPageUrl', ''),
+            'primaryDocumentUrl': filing_data.get('primaryDocumentUrl', ''),
+            'cachedAt': current_time,
+            'lastAccessed': current_time,
+        }
+        
+        # Add documentUrls as String Set (SS) if present
+        if filing_data.get('documentUrls'):
+            document_urls = filing_data['documentUrls']
+            if isinstance(document_urls, list):
+                item['documentUrls'] = document_urls  # DynamoDB will store as SS
+        
+        # Add TTL (optional - 90 days from now)
+        ttl_days = 90
+        item['ttl'] = current_time + (ttl_days * 24 * 60 * 60)
+        
+        cache_table.put_item(Item=item)
+        logger.info(f"Stored filing {item['filingId']} in cache")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error storing filing in cache: {e}")
+        return False
 
 
 def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
@@ -604,8 +745,10 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         
         logger.info(f"Sliced to {len(limited_hits)} results for display page {page} (from index {start_idx} to {end_idx})")
         
-        # Extract results with all column data
-        results = []
+        # Extract results with all column data and construct filing IDs
+        filing_ids = []
+        filing_data_list = []
+        
         for hit in limited_hits:
             source = hit.get('_source', {})
             _id = hit.get('_id', '')
@@ -636,22 +779,12 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             # Extract accession number from _id
             accession = _id.split(':')[0] if ':' in _id else ''
             
-            # Build filing page URL from accession
-            filing_page_url = None
-            if accession and cik != 'N/A':
-                cik_padded = str(cik).zfill(10)
-                accession_clean = accession.replace('-', '')
-                if len(accession_clean) >= 12:
-                    accession_dashed = f"{accession_clean[:10]}-{accession_clean[10:12]}-{accession_clean[12:]}"
-                    base_url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_padded}/{accession_dashed}"
-                    filing_page_url = f"{base_url}/{accession_dashed}-index.htm"
+            # Construct filing ID for caching
+            filing_id = construct_filing_id(form, cik, file_number, film_number)
+            filing_ids.append(filing_id)
             
-            # Scrape document URLs from filing page
-            document_urls = []
-            if filing_page_url:
-                document_urls = scrape_filing_page_for_documents(filing_page_url)
-            
-            results.append({
+            filing_data_list.append({
+                'filingId': filing_id,
                 'form': form,
                 'filingDate': file_date,
                 'reportingFor': reporting_for,
@@ -662,10 +795,104 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 'fileNumber': file_number,
                 'filmNumber': film_number,
                 'accession': accession,
-                'filingPageUrl': filing_page_url,
-                'documentUrls': document_urls,
-                'adsh': source.get('adsh', '')
+                'adsh': source.get('adsh', ''),
+                'periodEnding': source.get('period_ending', '')
             })
+        
+        # Check cache for existing filings
+        cached_filings = get_cached_filings(filing_ids)
+        
+        # Process results: use cache if available, otherwise scrape
+        results = []
+        filings_to_cache = []
+        
+        for filing_data in filing_data_list:
+            filing_id = filing_data['filingId']
+            
+            # Check if filing is in cache
+            if filing_id in cached_filings:
+                cached_item = cached_filings[filing_id]
+                logger.info(f"Using cached data for filing {filing_id}")
+                
+                # Handle documentUrls - convert set to list if needed
+                document_urls = cached_item.get('documentUrls', [])
+                if isinstance(document_urls, set):
+                    document_urls = list(document_urls)
+                elif not isinstance(document_urls, list):
+                    document_urls = []
+                
+                # Return cached data
+                result = {
+                    'form': cached_item.get('form', filing_data['form']),
+                    'filingDate': cached_item.get('filingDate', filing_data['filingDate']),
+                    'reportingFor': cached_item.get('reportingFor', filing_data['reportingFor']),
+                    'filingEntity': cached_item.get('filingEntity', filing_data['filingEntity']),
+                    'cik': cached_item.get('cik', filing_data['cik']),
+                    'located': cached_item.get('located', filing_data['located']),
+                    'incorporated': cached_item.get('incorporated', filing_data['incorporated']),
+                    'fileNumber': cached_item.get('fileNumber', filing_data['fileNumber']),
+                    'filmNumber': cached_item.get('filmNumber', filing_data['filmNumber']),
+                    'accession': cached_item.get('accession', filing_data['accession']),
+                    'filingPageUrl': cached_item.get('filingPageUrl', ''),
+                    'documentUrls': document_urls,
+                    'adsh': cached_item.get('adsh', filing_data['adsh'])
+                }
+                results.append(result)
+            else:
+                # Cache miss - need to scrape
+                logger.info(f"Cache miss for filing {filing_id}, scraping...")
+                
+                # Build filing page URL from accession
+                filing_page_url = None
+                if filing_data['accession'] and filing_data['cik'] != 'N/A':
+                    cik_padded = str(filing_data['cik']).zfill(10)
+                    accession_clean = filing_data['accession'].replace('-', '')
+                    if len(accession_clean) >= 12:
+                        accession_dashed = f"{accession_clean[:10]}-{accession_clean[10:12]}-{accession_clean[12:]}"
+                        base_url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_padded}/{accession_dashed}"
+                        filing_page_url = f"{base_url}/{accession_dashed}-index.htm"
+                
+                # Scrape document URLs from filing page
+                document_urls = []
+                primary_document_url = ''
+                if filing_page_url:
+                    document_urls = scrape_filing_page_for_documents(filing_page_url)
+                    if document_urls:
+                        primary_document_url = document_urls[0]
+                
+                # Prepare result
+                result = {
+                    'form': filing_data['form'],
+                    'filingDate': filing_data['filingDate'],
+                    'reportingFor': filing_data['reportingFor'],
+                    'filingEntity': filing_data['filingEntity'],
+                    'cik': filing_data['cik'],
+                    'located': filing_data['located'],
+                    'incorporated': filing_data['incorporated'],
+                    'fileNumber': filing_data['fileNumber'],
+                    'filmNumber': filing_data['filmNumber'],
+                    'accession': filing_data['accession'],
+                    'filingPageUrl': filing_page_url,
+                    'documentUrls': document_urls,
+                    'adsh': filing_data['adsh']
+                }
+                results.append(result)
+                
+                # Prepare data for caching
+                filing_data['filingPageUrl'] = filing_page_url
+                filing_data['documentUrls'] = document_urls
+                filing_data['primaryDocumentUrl'] = primary_document_url
+                filings_to_cache.append(filing_data)
+        
+        # Store new filings in cache (async - don't block response)
+        if filings_to_cache:
+            logger.info(f"Storing {len(filings_to_cache)} new filings in cache")
+            for filing_data in filings_to_cache:
+                try:
+                    store_filing_in_cache(filing_data)
+                except Exception as e:
+                    logger.error(f"Failed to cache filing {filing_data.get('filingId')}: {e}")
+                    # Continue - don't fail the request if caching fails
         
         return {
             'success': True,

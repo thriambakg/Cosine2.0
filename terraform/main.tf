@@ -1950,9 +1950,10 @@ module "sec_search_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
-    MAX_RESULTS = "10"
+    ENVIRONMENT             = var.environment
+    LOG_LEVEL               = var.environment == "development" ? "DEBUG" : "INFO"
+    MAX_RESULTS             = "10"
+    SEC_FILINGS_CACHE_TABLE = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
   }
 
   # Attach core layer
@@ -1960,9 +1961,10 @@ module "sec_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies (no special permissions needed - just HTTP requests to SEC)
+  # Additional IAM policies - DynamoDB access for caching
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn
+    aws_iam_policy.lambda_secrets_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn
   ]
 
   tags = var.common_tags

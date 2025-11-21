@@ -83,6 +83,7 @@ const DEFAULT_COLUMNS = [
   'Incorporated',
   'File number',
   'Film number',
+  'Filing Page',
 ];
 
 // SEC Form Categories (from SEC website)
@@ -892,6 +893,8 @@ const SECSearchPage: React.FC = () => {
         return result.fileNumber || 'N/A';
       case 'Film number':
         return result.filmNumber || 'N/A';
+      case 'Filing Page':
+        return result.filingPageUrl || 'N/A';
       default:
         return 'N/A';
     }
@@ -2226,6 +2229,9 @@ const SECSearchPage: React.FC = () => {
                       {shouldShowColumn('Film number') && (
                         <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Film number</TableCell>
                       )}
+                      {shouldShowColumn('Filing Page') && (
+                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Filing Page</TableCell>
+                      )}
                       <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Documents</TableCell>
                     </TableRow>
                   </TableHead>
@@ -2258,6 +2264,31 @@ const SECSearchPage: React.FC = () => {
                         )}
                         {shouldShowColumn('Film number') && (
                           <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Film number')}</TableCell>
+                        )}
+                        {shouldShowColumn('Filing Page') && (
+                          <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>
+                            {result.filingPageUrl ? (
+                              <Link
+                                href={result.filingPageUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  color: '#3b82f6',
+                                  textDecoration: 'none',
+                                  fontSize: '0.875rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 0.5,
+                                  '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                                }}
+                              >
+                                <OpenInNewIcon sx={{ fontSize: 14 }} />
+                                View Filing
+                              </Link>
+                            ) : (
+                              <Typography variant="body2" sx={{ color: '#9ca3af' }}>N/A</Typography>
+                            )}
+                          </TableCell>
                         )}
                         <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>
                           {result.documentUrls && Array.isArray(result.documentUrls) && result.documentUrls.length > 0 ? (
