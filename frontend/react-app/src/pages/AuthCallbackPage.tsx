@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Box, Typography, CircularProgress, Container } from '@mui/material';
 
+
 const AuthCallbackPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, isLoading, authError } = useAuth();

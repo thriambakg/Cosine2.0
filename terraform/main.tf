@@ -1956,6 +1956,7 @@ module "sec_search_lambda" {
     SEC_FILINGS_CACHE_TABLE = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
   }
 
+
   # Attach core layer
   layers = [
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
