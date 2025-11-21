@@ -745,15 +745,15 @@ export const dashboardAPI = {
 
 // SEC Search API
 export interface SECSearchParams {
-  cik?: string;
-  entityName?: string;
+  cik?: string | string[];  // Support both single CIK and multiple CIKs
+  entityName?: string | string[];  // Support both single and multiple entity names
   keywords?: string;
   formTypes?: string[];
   dateFrom?: string;
   dateTo?: string;
   reportingFor?: string;
-  located?: string;
-  incorporated?: string;
+  located?: string | string[];  // Support both single and multiple locations
+  incorporated?: string | string[];  // Support both single and multiple incorporation states
   fileNumber?: string;
   filmNumber?: string;
   columns?: string[];

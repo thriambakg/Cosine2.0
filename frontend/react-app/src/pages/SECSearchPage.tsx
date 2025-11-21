@@ -73,8 +73,6 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => {
   );
 };
 
-const DEFAULT_FORM_TYPES = ['3', '4', '5', '8-K', '10-K', '10-Q', '13F', '13D', '13G', 'SC 13D', 'SC 13G'];
-
 const DEFAULT_COLUMNS = [
   'Form & File',
   'Filed',
@@ -695,7 +693,6 @@ const SECSearchPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [currentResults, setCurrentResults] = useState<SECSearchResult[]>([]);
   const [totalFound, setTotalFound] = useState<number>(0);
-  const [availableFormTypes, setAvailableFormTypes] = useState<string[]>(DEFAULT_FORM_TYPES);
   const [formTypesModalOpen, setFormTypesModalOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   
@@ -706,6 +703,20 @@ const SECSearchPage: React.FC = () => {
     location: false,
     incorporation: false,
   });
+  
+  // Selected filters (not yet applied to search)
+  const [selectedFilters, setSelectedFilters] = useState<{
+    entities: Array<{ entity: string; cik?: string }>;
+    forms: string[];
+    locations: string[];
+    incorporationStates: string[];
+  }>({
+    entities: [],
+    forms: [],
+    locations: [],
+    incorporationStates: [],
+  });
+  
   const RESULTS_PER_PAGE = 10;
 
   const { execute: executeSearch, data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
@@ -758,29 +769,68 @@ const SECSearchPage: React.FC = () => {
       setCurrentResults(searchResults.results);
       setTotalFound(searchResults.total_found || 0);
       
-      // Update available form types from search results aggregation
-      if (searchResults.form_filters && searchResults.form_filters.length > 0) {
-        const formTypes = searchResults.form_filters.map(filter => filter.form);
-        setAvailableFormTypes(formTypes);
-      } else {
-        // If no form filters returned, reset to default
-        setAvailableFormTypes(DEFAULT_FORM_TYPES);
-      }
+      // Form types are dynamically updated from searchResults.form_filters in the sidebar
     } else if (searchResults && !searchResults.results) {
       // Clear results if search completed but no results
       setCurrentResults([]);
       setTotalFound(0);
-      // Reset to default form types when no results
-      setAvailableFormTypes(DEFAULT_FORM_TYPES);
     }
   }, [searchResults]);
 
-  const handleSearch = async (page: number = 1) => {
+  const handleSearch = async (page: number = 1, applyFilters: boolean = false) => {
     const params: SECSearchParams = {
       ...searchParams,
       page,
       columns: selectedColumns.length === DEFAULT_COLUMNS.length ? [] : selectedColumns,
     };
+
+    // Apply selected filters if requested
+    // Logic: OR within each filter type, AND between filter types
+    // Example: (Form 4 OR Form 5) AND (California OR Texas) AND (Entity A OR Entity B)
+    if (applyFilters) {
+      // Apply form filters (OR logic - any selected form)
+      if (selectedFilters.forms.length > 0) {
+        params.formTypes = selectedFilters.forms;
+      }
+      
+      // Apply entity filters (OR logic - any selected entity)
+      // Support multiple entities by passing arrays
+      if (selectedFilters.entities.length > 0) {
+        if (selectedFilters.entities.length === 1) {
+          // Single entity - use simple format
+          const entity = selectedFilters.entities[0];
+          params.entityName = entity.entity;
+          if (entity.cik) {
+            params.cik = entity.cik;
+          }
+        } else {
+          // Multiple entities - pass as arrays
+          params.entityName = selectedFilters.entities.map(e => e.entity);
+          const ciks = selectedFilters.entities
+            .map(e => e.cik)
+            .filter((cik): cik is string => !!cik);
+          if (ciks.length > 0) {
+            params.cik = ciks.length === 1 ? ciks[0] : ciks;
+          }
+        }
+      }
+      
+      // Apply location filters (OR logic - any selected location)
+      // Support multiple locations
+      if (selectedFilters.locations.length > 0) {
+        params.located = selectedFilters.locations.length === 1 
+          ? selectedFilters.locations[0] 
+          : selectedFilters.locations;
+      }
+      
+      // Apply incorporation state filters (OR logic - any selected state)
+      // Support multiple incorporation states
+      if (selectedFilters.incorporationStates.length > 0) {
+        params.incorporated = selectedFilters.incorporationStates.length === 1
+          ? selectedFilters.incorporationStates[0]
+          : selectedFilters.incorporationStates;
+      }
+    }
 
     // Remove empty strings
     Object.keys(params).forEach(key => {
@@ -795,6 +845,10 @@ const SECSearchPage: React.FC = () => {
       setCurrentPage(1);
     }
     await executeSearch(params);
+  };
+
+  const handleApplyFilters = () => {
+    handleSearch(1, true);
   };
 
   const handlePageChange = async (newPage: number) => {
@@ -1494,6 +1548,143 @@ const SECSearchPage: React.FC = () => {
                 }} />
               </Typography>
 
+              {/* Selected Filters Box */}
+              {(selectedFilters.entities.length > 0 || 
+                selectedFilters.forms.length > 0 || 
+                selectedFilters.locations.length > 0 || 
+                selectedFilters.incorporationStates.length > 0) && (
+                <Box sx={{ 
+                  mb: 2, 
+                  p: 2, 
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  border: '1px solid #3b82f6',
+                  borderRadius: '4px',
+                }}>
+                  <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600 }}>
+                    Selected Filters:
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+                    {/* Entity chips */}
+                    {selectedFilters.entities.map((entity, idx) => (
+                      <Chip
+                        key={`entity-${idx}`}
+                        label={entity.entity}
+                        onDelete={() => {
+                          setSelectedFilters(prev => ({
+                            ...prev,
+                            entities: prev.entities.filter((_, i) => i !== idx),
+                          }));
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {/* Form chips */}
+                    {selectedFilters.forms.map((form, idx) => (
+                      <Chip
+                        key={`form-${idx}`}
+                        label={form}
+                        onDelete={() => {
+                          setSelectedFilters(prev => ({
+                            ...prev,
+                            forms: prev.forms.filter((_, i) => i !== idx),
+                          }));
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {/* Location chips */}
+                    {selectedFilters.locations.map((location, idx) => (
+                      <Chip
+                        key={`location-${idx}`}
+                        label={location}
+                        onDelete={() => {
+                          setSelectedFilters(prev => ({
+                            ...prev,
+                            locations: prev.locations.filter((_, i) => i !== idx),
+                          }));
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {/* Incorporation state chips */}
+                    {selectedFilters.incorporationStates.map((state, idx) => (
+                      <Chip
+                        key={`inc-${idx}`}
+                        label={state}
+                        onDelete={() => {
+                          setSelectedFilters(prev => ({
+                            ...prev,
+                            incorporationStates: prev.incorporationStates.filter((_, i) => i !== idx),
+                          }));
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                  </Box>
+                  <Button
+                    variant="contained"
+                    onClick={handleApplyFilters}
+                    disabled={searchLoading}
+                    startIcon={searchLoading ? <CircularProgress size={16} /> : <SearchIcon />}
+                    sx={{
+                      background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                      color: '#ffffff',
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      py: 0.75,
+                      px: 2,
+                      fontSize: '0.75rem',
+                      width: '100%',
+                      '&:hover': {
+                        background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
+                      },
+                      '&:disabled': {
+                        background: 'rgba(59, 130, 246, 0.3)',
+                      },
+                    }}
+                  >
+                    {searchLoading ? 'Applying...' : 'Apply Filters'}
+                  </Button>
+                </Box>
+              )}
+
               {/* Entity Filter */}
               {searchResults?.entity_filters && searchResults.entity_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
@@ -1518,7 +1709,24 @@ const SECSearchPage: React.FC = () => {
                     {expandedFilters.entity ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
                   </Box>
                   <Collapse in={expandedFilters.entity}>
-                    <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto' }}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
                       {searchResults.entity_filters.map((filter, idx) => (
                         <Box
                           key={idx}
@@ -1527,12 +1735,28 @@ const SECSearchPage: React.FC = () => {
                             const match = filter.entity.match(/^(.+?)\s*\(CIK\s+(\d+)\)$/);
                             if (match) {
                               const [, name, cik] = match;
-                              setSearchParams(prev => ({
-                                ...prev,
-                                entityName: name.trim(),
-                                cik: cik,
-                              }));
-                              handleSearch(1);
+                              const entityObj = { entity: name.trim(), cik: cik };
+                              
+                              setSelectedFilters(prev => {
+                                const exists = prev.entities.some(
+                                  e => e.entity === entityObj.entity && e.cik === entityObj.cik
+                                );
+                                if (exists) {
+                                  // Remove if already selected
+                                  return {
+                                    ...prev,
+                                    entities: prev.entities.filter(
+                                      e => !(e.entity === entityObj.entity && e.cik === entityObj.cik)
+                                    ),
+                                  };
+                                } else {
+                                  // Add if not selected
+                                  return {
+                                    ...prev,
+                                    entities: [...prev.entities, entityObj],
+                                  };
+                                }
+                              });
                             }
                           }}
                           sx={{
@@ -1592,36 +1816,47 @@ const SECSearchPage: React.FC = () => {
                     {expandedFilters.form ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
                   </Box>
                   <Collapse in={expandedFilters.form}>
-                    <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto' }}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
                       {searchResults.form_filters.map((filter, idx) => {
-                        const currentFormTypes = searchParams.formTypes || [];
-                        const isSelected = currentFormTypes.includes(filter.form);
+                        const isSelected = selectedFilters.forms.includes(filter.form);
                         
                         return (
                           <Box
                             key={idx}
                             onClick={() => {
-                              setSearchParams(prev => {
-                                const current = prev.formTypes || [];
-                                let newFormTypes: string[];
-                                
-                                if (isSelected) {
+                              setSelectedFilters(prev => {
+                                const exists = prev.forms.includes(filter.form);
+                                if (exists) {
                                   // Remove if already selected
-                                  newFormTypes = current.filter(f => f !== filter.form);
-                                  if (newFormTypes.length === 0) {
-                                    newFormTypes = undefined as any; // Clear if empty
-                                  }
+                                  return {
+                                    ...prev,
+                                    forms: prev.forms.filter(f => f !== filter.form),
+                                  };
                                 } else {
                                   // Add if not selected
-                                  newFormTypes = [...current, filter.form];
+                                  return {
+                                    ...prev,
+                                    forms: [...prev.forms, filter.form],
+                                  };
                                 }
-                                
-                                return {
-                                  ...prev,
-                                  formTypes: newFormTypes,
-                                };
                               });
-                              handleSearch(1);
                             }}
                             sx={{
                               display: 'flex',
@@ -1694,7 +1929,24 @@ const SECSearchPage: React.FC = () => {
                     {expandedFilters.location ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
                   </Box>
                   <Collapse in={expandedFilters.location}>
-                    <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto' }}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
                       {searchResults.location_filters.map((filter, idx) => {
                         // Extract state code from location string (e.g., "Austin, TX" -> "TX", "California" -> "CA")
                         const getStateCode = (location: string): string => {
@@ -1731,11 +1983,22 @@ const SECSearchPage: React.FC = () => {
                             key={idx}
                             onClick={() => {
                               const stateCode = getStateCode(filter.location);
-                              setSearchParams(prev => ({
-                                ...prev,
-                                located: stateCode,
-                              }));
-                              handleSearch(1);
+                              setSelectedFilters(prev => {
+                                const exists = prev.locations.includes(stateCode);
+                                if (exists) {
+                                  // Remove if already selected
+                                  return {
+                                    ...prev,
+                                    locations: prev.locations.filter(l => l !== stateCode),
+                                  };
+                                } else {
+                                  // Add if not selected
+                                  return {
+                                    ...prev,
+                                    locations: [...prev.locations, stateCode],
+                                  };
+                                }
+                              });
                             }}
                           sx={{
                             display: 'flex',
@@ -1795,45 +2058,90 @@ const SECSearchPage: React.FC = () => {
                     {expandedFilters.incorporation ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
                   </Box>
                   <Collapse in={expandedFilters.incorporation}>
-                    <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto' }}>
-                      {searchResults.incorporation_filters.map((filter, idx) => (
-                        <Box
-                          key={idx}
-                          onClick={() => {
-                            setSearchParams(prev => ({
-                              ...prev,
-                              incorporated: filter.state,
-                            }));
-                            handleSearch(1);
-                          }}
-                          sx={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            p: 1,
-                            cursor: 'pointer',
-                            borderRadius: '4px',
-                            '&:hover': {
-                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            },
-                          }}
-                        >
-                          <Typography variant="body2" sx={{ color: '#ffffff', fontSize: '0.875rem', flex: 1 }}>
-                            {filter.state}
-                          </Typography>
-                          <Chip
-                            label={filter.count}
-                            size="small"
-                            sx={{
-                              height: 20,
-                              fontSize: '0.7rem',
-                              backgroundColor: 'rgba(107, 114, 128, 0.3)',
-                              color: '#9ca3af',
-                              border: '1px solid #6b7280',
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {searchResults.incorporation_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.incorporationStates.includes(filter.state);
+                        
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.incorporationStates.includes(filter.state);
+                                if (exists) {
+                                  // Remove if already selected
+                                  return {
+                                    ...prev,
+                                    incorporationStates: prev.incorporationStates.filter(s => s !== filter.state),
+                                  };
+                                } else {
+                                  // Add if not selected
+                                  return {
+                                    ...prev,
+                                    incorporationStates: [...prev.incorporationStates, filter.state],
+                                  };
+                                }
+                              });
                             }}
-                          />
-                        </Box>
-                      ))}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.state}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
                     </Box>
                   </Collapse>
                 </Box>

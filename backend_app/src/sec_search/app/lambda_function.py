@@ -307,18 +307,43 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             'dateRange': 'all'
         }
         
-        # Add CIK if provided
+        # Add CIK(s) if provided - support both single CIK and multiple CIKs
         if search_params.get('cik'):
-            base_params['ciks'] = str(search_params['cik']).zfill(10)
-        
-        # Add entity name if provided
-        if search_params.get('entityName'):
-            entity_name = search_params['entityName']
-            if search_params.get('cik'):
-                cik_str = str(search_params['cik']).zfill(10)
-                base_params['entityName'] = f"{entity_name} (CIK {cik_str})"
+            cik_value = search_params['cik']
+            if isinstance(cik_value, list):
+                # Multiple CIKs - join with comma
+                ciks_list = [str(cik).zfill(10) for cik in cik_value if cik]
+                if ciks_list:
+                    base_params['ciks'] = ','.join(ciks_list)
             else:
-                base_params['entityName'] = entity_name
+                # Single CIK
+                base_params['ciks'] = str(cik_value).zfill(10)
+        
+        # Add entity name(s) if provided - support both single and multiple
+        if search_params.get('entityName'):
+            entity_name_value = search_params['entityName']
+            if isinstance(entity_name_value, list):
+                # Multiple entity names - join with comma
+                entity_names = [str(name) for name in entity_name_value if name]
+                if entity_names:
+                    base_params['entityName'] = ','.join(entity_names)
+            else:
+                # Single entity name
+                entity_name = str(entity_name_value)
+                if search_params.get('cik'):
+                    # If CIK is provided, format as "Name (CIK 0000000000)"
+                    cik_value = search_params['cik']
+                    if isinstance(cik_value, list) and len(cik_value) > 0:
+                        # Use first CIK for formatting if multiple provided
+                        cik_str = str(cik_value[0]).zfill(10)
+                        base_params['entityName'] = f"{entity_name} (CIK {cik_str})"
+                    elif not isinstance(cik_value, list):
+                        cik_str = str(cik_value).zfill(10)
+                        base_params['entityName'] = f"{entity_name} (CIK {cik_str})"
+                    else:
+                        base_params['entityName'] = entity_name
+                else:
+                    base_params['entityName'] = entity_name
         
         # Add date range
         if search_params.get('dateFrom'):
@@ -329,10 +354,28 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         # Add other filters
         if search_params.get('reportingFor'):
             base_params['reportingFor'] = search_params['reportingFor']
+        
+        # Add location(s) - support both single and multiple
         if search_params.get('located'):
-            base_params['located'] = search_params['located']
+            located_value = search_params['located']
+            if isinstance(located_value, list):
+                # Multiple locations - join with comma
+                locations = [str(loc) for loc in located_value if loc]
+                if locations:
+                    base_params['located'] = ','.join(locations)
+            else:
+                base_params['located'] = str(located_value)
+        
+        # Add incorporation state(s) - support both single and multiple
         if search_params.get('incorporated'):
-            base_params['incorporated'] = search_params['incorporated']
+            incorporated_value = search_params['incorporated']
+            if isinstance(incorporated_value, list):
+                # Multiple states - join with comma
+                states = [str(state) for state in incorporated_value if state]
+                if states:
+                    base_params['incorporated'] = ','.join(states)
+            else:
+                base_params['incorporated'] = str(incorporated_value)
         if search_params.get('fileNumber'):
             base_params['fileNumber'] = search_params['fileNumber']
         if search_params.get('filmNumber'):
