@@ -697,6 +697,10 @@ const SECSearchPage: React.FC = () => {
   const [formTypesModalOpen, setFormTypesModalOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   
+  // Store all results from current search for client-side filtering
+  const [allSearchResults, setAllSearchResults] = useState<SECSearchResult[]>([]);
+  const [isFiltered, setIsFiltered] = useState<boolean>(false);
+  
   // Filter sidebar state
   const [expandedFilters, setExpandedFilters] = useState({
     entity: false,
@@ -764,74 +768,115 @@ const SECSearchPage: React.FC = () => {
       searchParams.reportingFor, searchParams.located, searchParams.incorporated, 
       searchParams.fileNumber, searchParams.filmNumber, searchParams.cik, searchParams.entityName]);
 
-  // Store current page results when search completes
+  
+  // Store results when search completes
   useEffect(() => {
     if (searchResults?.results) {
-      setCurrentResults(searchResults.results);
-      setTotalFound(searchResults.total_found || 0);
+      // Store all results for client-side filtering
+      setAllSearchResults(searchResults.results);
+      setTotalFound(searchResults.total_found || searchResults.results.length);
+      
+      // If not filtered, show first page
+      if (!isFiltered) {
+        setCurrentResults(searchResults.results.slice(0, RESULTS_PER_PAGE));
+        setCurrentPage(1);
+      }
       
       // Form types are dynamically updated from searchResults.form_filters in the sidebar
     } else if (searchResults && !searchResults.results) {
       // Clear results if search completed but no results
       setCurrentResults([]);
+      setAllSearchResults([]);
       setTotalFound(0);
     }
-  }, [searchResults]);
+  }, [searchResults, isFiltered]);
+  
+  // Client-side filtering function
+  const filterResults = (results: SECSearchResult[]): SECSearchResult[] => {
+    let filtered = [...results];
+    
+    // Filter by entities (OR logic - any selected entity matches)
+    if (selectedFilters.entities.length > 0) {
+      filtered = filtered.filter(result => {
+        const reportingFor = result.reportingFor || '';
+        const filingEntity = result.filingEntity || '';
+        return selectedFilters.entities.some(entity => {
+          const entityName = entity.entity.toLowerCase();
+          return reportingFor.toLowerCase().includes(entityName) ||
+                 filingEntity.toLowerCase().includes(entityName) ||
+                 (entity.cik && result.cik === entity.cik);
+        });
+      });
+    }
+    
+    // Filter by forms (OR logic - any selected form matches)
+    if (selectedFilters.forms.length > 0) {
+      filtered = filtered.filter(result => 
+        selectedFilters.forms.includes(result.form || '')
+      );
+    }
+    
+    // Filter by locations (OR logic - any selected location matches)
+    if (selectedFilters.locations.length > 0) {
+      filtered = filtered.filter(result => {
+        const located = result.located || '';
+        return selectedFilters.locations.some(loc => 
+          located.toLowerCase().includes(loc.toLowerCase())
+        );
+      });
+    }
+    
+    // Filter by incorporation states (OR logic - any selected state matches)
+    if (selectedFilters.incorporationStates.length > 0) {
+      filtered = filtered.filter(result => {
+        const incorporated = result.incorporated || '';
+        return selectedFilters.incorporationStates.some(state =>
+          incorporated.toLowerCase().includes(state.toLowerCase())
+        );
+      });
+    }
+    
+    return filtered;
+  };
+  
+  // Apply filters to stored results (client-side) and paginate
+  useEffect(() => {
+    if (allSearchResults.length > 0) {
+      let filtered = allSearchResults;
+      
+      // Apply filters if any are selected
+      if (selectedFilters.entities.length > 0 ||
+          selectedFilters.forms.length > 0 ||
+          selectedFilters.locations.length > 0 ||
+          selectedFilters.incorporationStates.length > 0) {
+        filtered = filterResults(allSearchResults);
+        setIsFiltered(true);
+      } else {
+        setIsFiltered(false);
+      }
+      
+      // Update total and paginate
+      setTotalFound(filtered.length);
+      const startIdx = (currentPage - 1) * RESULTS_PER_PAGE;
+      const endIdx = startIdx + RESULTS_PER_PAGE;
+      setCurrentResults(filtered.slice(startIdx, endIdx));
+    }
+  }, [selectedFilters, allSearchResults, currentPage]);
 
   const handleSearch = async (page: number = 1, applyFilters: boolean = false) => {
+    // If applying filters and we have stored results, just update pagination
+    if (applyFilters && allSearchResults.length > 0) {
+      setCurrentPage(page);
+      // Filtering and pagination is handled by useEffect
+      return;
+    }
+    
     const params: SECSearchParams = {
       ...searchParams,
-      page,
+      page: 1, // Always start from page 1 for new searches
       columns: selectedColumns.length === DEFAULT_COLUMNS.length ? [] : selectedColumns,
+      fetchAll: true, // Fetch all results for client-side filtering
     };
-
-    // Apply selected filters if requested
-    // Logic: OR within each filter type, AND between filter types
-    // Example: (Form 4 OR Form 5) AND (California OR Texas) AND (Entity A OR Entity B)
-    if (applyFilters) {
-      // Apply form filters (OR logic - any selected form)
-      if (selectedFilters.forms.length > 0) {
-        params.formTypes = selectedFilters.forms;
-      }
-      
-      // Apply entity filters (OR logic - any selected entity)
-      // Support multiple entities by passing arrays
-      if (selectedFilters.entities.length > 0) {
-        if (selectedFilters.entities.length === 1) {
-          // Single entity - use simple format
-          const entity = selectedFilters.entities[0];
-          params.entityName = entity.entity;
-          if (entity.cik) {
-            params.cik = entity.cik;
-          }
-        } else {
-          // Multiple entities - pass as arrays
-          params.entityName = selectedFilters.entities.map(e => e.entity);
-          const ciks = selectedFilters.entities
-            .map(e => e.cik)
-            .filter((cik): cik is string => !!cik);
-          if (ciks.length > 0) {
-            params.cik = ciks.length === 1 ? ciks[0] : ciks;
-          }
-        }
-      }
-      
-      // Apply location filters (OR logic - any selected location)
-      // Support multiple locations
-      if (selectedFilters.locations.length > 0) {
-        params.located = selectedFilters.locations.length === 1 
-          ? selectedFilters.locations[0] 
-          : selectedFilters.locations;
-      }
-      
-      // Apply incorporation state filters (OR logic - any selected state)
-      // Support multiple incorporation states
-      if (selectedFilters.incorporationStates.length > 0) {
-        params.incorporated = selectedFilters.incorporationStates.length === 1
-          ? selectedFilters.incorporationStates[0]
-          : selectedFilters.incorporationStates;
-      }
-    }
 
     // Remove empty strings
     Object.keys(params).forEach(key => {
@@ -841,15 +886,23 @@ const SECSearchPage: React.FC = () => {
       }
     });
 
-    // Reset to page 1 when starting new search (not navigating)
-    if (page === 1) {
-      setCurrentPage(1);
-    }
+    // Reset filters
+    setSelectedFilters({
+      entities: [],
+      forms: [],
+      locations: [],
+      incorporationStates: [],
+    });
+    setCurrentPage(1);
+    setIsFiltered(false);
+    
+    // Fetch all results in one API call
     await executeSearch(params);
   };
 
   const handleApplyFilters = () => {
-    handleSearch(1, true);
+    // Filtering is handled by useEffect - just reset to page 1
+    setCurrentPage(1);
   };
 
   const handlePageChange = async (newPage: number) => {
@@ -857,9 +910,9 @@ const SECSearchPage: React.FC = () => {
     if (!totalFound || totalFound === 0) return; // Don't paginate if no results
     const maxPage = Math.ceil(totalFound / RESULTS_PER_PAGE);
     if (maxPage === 0 || newPage > maxPage) return;
+    
+    // Client-side pagination - just update page, useEffect will handle slicing
     setCurrentPage(newPage);
-    // Fetch new page from server
-    await handleSearch(newPage);
   };
 
   const handleColumnToggle = (column: string) => {
