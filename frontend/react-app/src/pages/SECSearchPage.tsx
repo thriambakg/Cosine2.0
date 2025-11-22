@@ -701,6 +701,20 @@ const SECSearchPage: React.FC = () => {
   const [allSearchResults, setAllSearchResults] = useState<SECSearchResult[]>([]);
   const [isFiltered, setIsFiltered] = useState<boolean>(false);
   
+  // Store filter metadata for sidebar
+  const [availableFilters, setAvailableFilters] = useState<{
+    form_filters?: Array<{ form: string; count: number }>;
+    entity_filters?: Array<{ entity: string; count: number }>;
+    location_filters?: Array<{ location: string; count: number }>;
+    incorporation_filters?: Array<{ state: string; count: number }>;
+  }>({});
+  
+  // Store last search request details for status indicator
+  const [lastSearchRequest, setLastSearchRequest] = useState<{
+    params: SECSearchParams;
+    timestamp: Date;
+  } | null>(null);
+  
   // Filter sidebar state
   const [expandedFilters, setExpandedFilters] = useState({
     entity: false,
@@ -726,6 +740,8 @@ const SECSearchPage: React.FC = () => {
 
   const { execute: executeSearch, data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
   const { execute: executeAutocomplete, loading: autocompleteLoading } = useSECAutocomplete();
+  const [isFetchingAll, setIsFetchingAll] = useState<boolean>(false);
+  const [fetchProgress, setFetchProgress] = useState<{ currentPage: number; totalPages: number | null } | null>(null);
 
   // Debounced autocomplete
   useEffect(() => {
@@ -772,43 +788,162 @@ const SECSearchPage: React.FC = () => {
   // Limit to first 1000 results to avoid performance issues
   const MAX_RESULTS_TO_FETCH = 1000;
   
+  // Compute filters from results
+  const computeFiltersFromResults = (results: SECSearchResult[]) => {
+    const formCounts = new Map<string, number>();
+    const entityCounts = new Map<string, number>();
+    const locationCounts = new Map<string, number>();
+    const incorporationCounts = new Map<string, number>();
+    
+    results.forEach(result => {
+      // Count forms
+      if (result.form) {
+        formCounts.set(result.form, (formCounts.get(result.form) || 0) + 1);
+      }
+      
+      // Count entities (from reportingFor and filingEntity)
+      // Format as "Name (CIK 0000000000)" if CIK is available
+      const entities = [
+        { name: result.reportingFor, cik: result.cik },
+        { name: result.filingEntity, cik: result.cik }
+      ].filter(e => e.name);
+      
+      entities.forEach(({ name, cik }) => {
+        if (name) {
+          // Format entity as "Name (CIK 0000000000)" if CIK available, otherwise just "Name"
+          const entityKey = cik ? `${name} (CIK ${cik.padStart(10, '0')})` : name;
+          entityCounts.set(entityKey, (entityCounts.get(entityKey) || 0) + 1);
+        }
+      });
+      
+      // Count locations
+      if (result.located) {
+        locationCounts.set(result.located, (locationCounts.get(result.located) || 0) + 1);
+      }
+      
+      // Count incorporation states
+      if (result.incorporated) {
+        incorporationCounts.set(result.incorporated, (incorporationCounts.get(result.incorporated) || 0) + 1);
+      }
+    });
+    
+    return {
+      form_filters: Array.from(formCounts.entries())
+        .map(([form, count]) => ({ form, count }))
+        .sort((a, b) => b.count - a.count),
+      entity_filters: Array.from(entityCounts.entries())
+        .map(([entity, count]) => ({ entity, count }))
+        .sort((a, b) => b.count - a.count),
+      location_filters: Array.from(locationCounts.entries())
+        .map(([location, count]) => ({ location, count }))
+        .sort((a, b) => b.count - a.count),
+      incorporation_filters: Array.from(incorporationCounts.entries())
+        .map(([state, count]) => ({ state, count }))
+        .sort((a, b) => b.count - a.count),
+    };
+  };
+  
   const fetchAllResults = async (params: SECSearchParams) => {
+    setIsFetchingAll(true);
+    setFetchProgress({ currentPage: 1, totalPages: null });
+    
+    // Store request details for status indicator
+    setLastSearchRequest({
+      params: { ...params },
+      timestamp: new Date(),
+    });
+    
+    console.log('🔍 Starting search:', { params, timestamp: new Date().toISOString() });
+    
     try {
       const allResults: SECSearchResult[] = [];
       let page = 1;
       let hasMore = true;
       let totalFound = 0;
+      let firstResponse: any = null;
+      let estimatedTotalPages: number | null = null;
       
       while (hasMore && allResults.length < MAX_RESULTS_TO_FETCH) {
         const pageParams = { ...params, page };
+        console.log(`📄 Fetching page ${page}...`);
+        setFetchProgress({ currentPage: page, totalPages: estimatedTotalPages });
+        
         const result = await secSearchAPI.search(pageParams);
+        
+        // Store filter metadata from first response
+        if (page === 1 && result) {
+          firstResponse = result;
+          totalFound = result.total_found || 0;
+          // Estimate total pages (each API call returns ~100 results, we fetch 10 per page)
+          if (totalFound > 0) {
+            estimatedTotalPages = Math.ceil(Math.min(totalFound, MAX_RESULTS_TO_FETCH) / RESULTS_PER_PAGE);
+            setFetchProgress({ currentPage: page, totalPages: estimatedTotalPages });
+          }
+          console.log(`📊 First page response: ${result.results?.length || 0} results, total: ${totalFound}`);
+        }
         
         if (result?.success && result.results && result.results.length > 0) {
           allResults.push(...result.results);
           totalFound = result.total_found || allResults.length;
+          console.log(`✅ Page ${page} fetched: ${result.results.length} results (total so far: ${allResults.length}/${totalFound})`);
           
           // Check if we've fetched all results or reached limit
           if (allResults.length >= totalFound || 
               result.results.length < RESULTS_PER_PAGE ||
               allResults.length >= MAX_RESULTS_TO_FETCH) {
             hasMore = false;
+            console.log(`🏁 Finished fetching: ${allResults.length} total results`);
           } else {
             page++;
           }
         } else {
+          console.log(`⚠️ Page ${page} returned no results or failed`);
           hasMore = false;
         }
       }
       
-      setAllSearchResults(allResults);
-      setTotalFound(Math.min(totalFound, allResults.length)); // Use actual fetched count if limited
-      setCurrentResults(allResults.slice(0, RESULTS_PER_PAGE));
-      setCurrentPage(1);
+      // Set filter metadata from API response or compute from results
+      if (firstResponse?.form_filters || firstResponse?.entity_filters || 
+          firstResponse?.location_filters || firstResponse?.incorporation_filters) {
+        // Use API-provided filters
+        setAvailableFilters({
+          form_filters: firstResponse.form_filters,
+          entity_filters: firstResponse.entity_filters,
+          location_filters: firstResponse.location_filters,
+          incorporation_filters: firstResponse.incorporation_filters,
+        });
+      } else {
+        // Compute filters from results
+        const computedFilters = computeFiltersFromResults(allResults);
+        setAvailableFilters(computedFilters);
+      }
+      
+      // Set all results - this will trigger the useEffect to paginate and display
+      // Reset state first
       setIsFiltered(false);
+      setCurrentPage(1);
+      // Then set results - this triggers the useEffect
+      setAllSearchResults(allResults);
+      
+      console.log(`💾 Stored ${allResults.length} results in allSearchResults`);
+      
+      // If no results, still show the status (don't clear everything)
+      if (allResults.length === 0) {
+        console.log('⚠️ No results found for search, but keeping search state');
+        setCurrentResults([]);
+        setTotalFound(0);
+      }
     } catch (error) {
-      console.error('Error fetching all results:', error);
-      // Fallback to single page
+      console.error('❌ Error fetching all results:', error);
+      setAllSearchResults([]);
+      setCurrentResults([]);
+      setTotalFound(0);
+      setAvailableFilters({});
+      // Fallback to single page using hook
       await executeSearch(params);
+    } finally {
+      setIsFetchingAll(false);
+      setFetchProgress(null);
     }
   };
   
@@ -823,56 +958,100 @@ const SECSearchPage: React.FC = () => {
       // Otherwise, results are being accumulated by fetchAllResults
       
       // Form types are dynamically updated from searchResults.form_filters in the sidebar
-    } else if (searchResults && !searchResults.results) {
-      // Clear results if search completed but no results
-      setCurrentResults([]);
-      setAllSearchResults([]);
-      setTotalFound(0);
+    } else if (searchResults && !searchResults.results && searchResults.total_found === 0) {
+      // Only clear if this is a new search with no results (not a filter application)
+      // Don't clear if we already have stored results
+      if (allSearchResults.length === 0) {
+        setCurrentResults([]);
+        setAllSearchResults([]);
+        setTotalFound(0);
+      }
     }
-  }, [searchResults, isFiltered]);
+  }, [searchResults, isFiltered, allSearchResults.length]);
   
   // Client-side filtering function
+  // Logic: OR within each filter type, AND between filter types
+  // Example: (Entity A OR Entity B) AND (Form 4 OR Form 5) AND (Location X OR Location Y)
   const filterResults = (results: SECSearchResult[]): SECSearchResult[] => {
     let filtered = [...results];
     
     // Filter by entities (OR logic - any selected entity matches)
+    // A result matches if it matches ANY of the selected entities
     if (selectedFilters.entities.length > 0) {
       filtered = filtered.filter(result => {
-        const reportingFor = result.reportingFor || '';
-        const filingEntity = result.filingEntity || '';
+        const reportingFor = (result.reportingFor || '').toLowerCase().trim();
+        const filingEntity = (result.filingEntity || '').toLowerCase().trim();
+        const resultCik = (result.cik || '').trim();
+        
         return selectedFilters.entities.some(entity => {
-          const entityName = entity.entity.toLowerCase();
-          return reportingFor.toLowerCase().includes(entityName) ||
-                 filingEntity.toLowerCase().includes(entityName) ||
-                 (entity.cik && result.cik === entity.cik);
+          // Extract entity name from filter (might be "Name (CIK 0000000000)" or just "Name")
+          const entityFilterName = entity.entity.toLowerCase().trim();
+          const entityCik = (entity.cik || '').trim();
+          
+          // Extract just the name part if it's in "Name (CIK 0000000000)" format
+          const nameMatch = entityFilterName.match(/^(.+?)\s*\(CIK\s+\d+\)$/);
+          const entityNameOnly = nameMatch ? nameMatch[1].trim() : entityFilterName;
+          
+          // Match by CIK if available (most accurate)
+          if (entityCik && resultCik) {
+            // Normalize CIKs (remove leading zeros for comparison, or pad to 10 digits)
+            const normalizedEntityCik = entityCik.padStart(10, '0');
+            const normalizedResultCik = resultCik.padStart(10, '0');
+            if (normalizedEntityCik === normalizedResultCik) {
+              return true;
+            }
+          }
+          
+          // Match by entity name (exact match first, then contains)
+          // Check if reportingFor or filingEntity exactly matches the entity name
+          if (reportingFor === entityNameOnly || filingEntity === entityNameOnly) {
+            return true;
+          }
+          
+          // Also check if the entity name is contained in reportingFor or filingEntity
+          // (for cases where entity name might be part of a longer string)
+          if (reportingFor.includes(entityNameOnly) || filingEntity.includes(entityNameOnly)) {
+            return true;
+          }
+          
+          // Also check if the full filter string (with CIK) matches
+          if (reportingFor.includes(entityFilterName) || filingEntity.includes(entityFilterName)) {
+            return true;
+          }
+          
+          return false;
         });
       });
     }
     
     // Filter by forms (OR logic - any selected form matches)
+    // A result matches if its form is ANY of the selected forms
     if (selectedFilters.forms.length > 0) {
-      filtered = filtered.filter(result => 
-        selectedFilters.forms.includes(result.form || '')
-      );
+      filtered = filtered.filter(result => {
+        const resultForm = result.form || '';
+        return selectedFilters.forms.some(form => form === resultForm);
+      });
     }
     
     // Filter by locations (OR logic - any selected location matches)
     if (selectedFilters.locations.length > 0) {
       filtered = filtered.filter(result => {
-        const located = result.located || '';
-        return selectedFilters.locations.some(loc => 
-          located.toLowerCase().includes(loc.toLowerCase())
-        );
+        const located = (result.located || '').toLowerCase();
+        return selectedFilters.locations.some(loc => {
+          const locLower = loc.toLowerCase();
+          return located === locLower || located.includes(locLower);
+        });
       });
     }
     
     // Filter by incorporation states (OR logic - any selected state matches)
     if (selectedFilters.incorporationStates.length > 0) {
       filtered = filtered.filter(result => {
-        const incorporated = result.incorporated || '';
-        return selectedFilters.incorporationStates.some(state =>
-          incorporated.toLowerCase().includes(state.toLowerCase())
-        );
+        const incorporated = (result.incorporated || '').toLowerCase();
+        return selectedFilters.incorporationStates.some(state => {
+          const stateLower = state.toLowerCase();
+          return incorporated === stateLower || incorporated.includes(stateLower);
+        });
       });
     }
     
@@ -881,25 +1060,68 @@ const SECSearchPage: React.FC = () => {
   
   // Apply filters to stored results (client-side) and paginate
   useEffect(() => {
+    console.log('🔄 Filter useEffect triggered:', {
+      allSearchResultsLength: allSearchResults.length,
+      selectedFilters: {
+        entities: selectedFilters.entities.length,
+        forms: selectedFilters.forms.length,
+        locations: selectedFilters.locations.length,
+        incorporationStates: selectedFilters.incorporationStates.length,
+      },
+      currentPage,
+    });
+    
+    // Only process if we have stored results
     if (allSearchResults.length > 0) {
       let filtered = allSearchResults;
       
+      // Check if any filters are selected
+      const hasFilters = selectedFilters.entities.length > 0 ||
+                         selectedFilters.forms.length > 0 ||
+                         selectedFilters.locations.length > 0 ||
+                         selectedFilters.incorporationStates.length > 0;
+      
       // Apply filters if any are selected
-      if (selectedFilters.entities.length > 0 ||
-          selectedFilters.forms.length > 0 ||
-          selectedFilters.locations.length > 0 ||
-          selectedFilters.incorporationStates.length > 0) {
+      if (hasFilters) {
+        console.log('🔍 Applying filters to results...');
         filtered = filterResults(allSearchResults);
+        console.log(`📊 Filtered results: ${filtered.length} of ${allSearchResults.length} match filters`);
         setIsFiltered(true);
+        
+        // Log if filters return nothing - but keep allSearchResults intact
+        if (filtered.length === 0) {
+          console.warn('⚠️ Filters returned 0 results, but keeping original search results intact:', {
+            originalCount: allSearchResults.length,
+            filters: selectedFilters,
+            message: 'User can remove filters to see results again',
+          });
+          // Set display to empty but keep allSearchResults
+          setTotalFound(0);
+          setCurrentResults([]);
+          // Don't clear allSearchResults - it stays intact for when filters are removed
+          return; // Exit early - don't paginate empty results
+        }
       } else {
+        // No filters - show all results
+        console.log('✅ No filters applied, showing all results');
         setIsFiltered(false);
       }
       
-      // Update total and paginate
-      setTotalFound(filtered.length);
+      // Update total and paginate (only if we have filtered results)
+      const filteredTotal = filtered.length;
+      setTotalFound(filteredTotal);
       const startIdx = (currentPage - 1) * RESULTS_PER_PAGE;
       const endIdx = startIdx + RESULTS_PER_PAGE;
-      setCurrentResults(filtered.slice(startIdx, endIdx));
+      const paginatedResults = filtered.slice(startIdx, endIdx);
+      setCurrentResults(paginatedResults);
+      
+      console.log(`📄 Paginated: showing ${paginatedResults.length} results (page ${currentPage}, total: ${filteredTotal})`);
+    } else if (allSearchResults.length === 0) {
+      // Only clear if allSearchResults is actually empty (not just filtered out)
+      // This should only happen on initial load or after a new search clears results
+      console.log('⚠️ allSearchResults is empty, clearing current results');
+      setCurrentResults([]);
+      setTotalFound(0);
     }
   }, [selectedFilters, allSearchResults, currentPage]);
 
@@ -932,6 +1154,7 @@ const SECSearchPage: React.FC = () => {
       locations: [],
       incorporationStates: [],
     });
+    setAvailableFilters({}); // Clear filters until new ones are loaded
     setCurrentPage(1);
     setIsFiltered(false);
     
@@ -1360,8 +1583,8 @@ const SECSearchPage: React.FC = () => {
             <Button
               variant="contained"
               onClick={() => handleSearch()}
-              disabled={searchLoading}
-              startIcon={searchLoading ? <CircularProgress size={20} /> : <SearchIcon />}
+              disabled={searchLoading || isFetchingAll}
+              startIcon={(searchLoading || isFetchingAll) ? <CircularProgress size={20} /> : <SearchIcon />}
               sx={{
                 background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
                 color: '#ffffff',
@@ -1379,7 +1602,11 @@ const SECSearchPage: React.FC = () => {
                 },
               }}
             >
-              {searchLoading ? 'Searching...' : 'Search SEC Filings'}
+              {isFetchingAll && fetchProgress
+                ? `Fetching page ${fetchProgress.currentPage}${fetchProgress.totalPages ? ` of ${fetchProgress.totalPages}` : ''}...`
+                : (searchLoading || isFetchingAll)
+                  ? 'Searching...'
+                  : 'Search SEC Filings'}
             </Button>
           </Box>
 
@@ -1597,7 +1824,7 @@ const SECSearchPage: React.FC = () => {
         )}
 
         {/* Results with Sidebar */}
-        {currentResults.length > 0 && (
+        {allSearchResults.length > 0 && (
           <Box sx={{ display: 'flex', gap: 3 }}>
             {/* Sidebar Filters */}
             <GlassCard sx={{ 
@@ -1781,7 +2008,7 @@ const SECSearchPage: React.FC = () => {
               )}
 
               {/* Entity Filter */}
-              {searchResults?.entity_filters && searchResults.entity_filters.length > 0 && (
+              {availableFilters.entity_filters && availableFilters.entity_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
                     onClick={() => setExpandedFilters(prev => ({ ...prev, entity: !prev.entity }))}
@@ -1822,26 +2049,38 @@ const SECSearchPage: React.FC = () => {
                         backgroundColor: 'rgba(59, 130, 246, 0.7)',
                       },
                     }}>
-                      {searchResults.entity_filters.map((filter, idx) => (
-                        <Box
-                          key={idx}
-                          onClick={() => {
-                            // Extract entity name and CIK from filter.entity (format: "Name (CIK 0000000000)")
-                            const match = filter.entity.match(/^(.+?)\s*\(CIK\s+(\d+)\)$/);
-                            if (match) {
-                              const [, name, cik] = match;
-                              const entityObj = { entity: name.trim(), cik: cik };
-                              
+                      {availableFilters.entity_filters.map((filter, idx) => {
+                        // Check if this entity is selected
+                        const match = filter.entity.match(/^(.+?)\s*\(CIK\s+(\d+)\)$/);
+                        let entityObj;
+                        if (match) {
+                          const [, name, cik] = match;
+                          entityObj = { entity: name.trim(), cik: cik };
+                        } else {
+                          entityObj = { entity: filter.entity.trim() };
+                        }
+                        
+                        const isSelected = selectedFilters.entities.some(
+                          e => e.entity === entityObj.entity && 
+                               (entityObj.cik ? e.cik === entityObj.cik : !e.cik)
+                        );
+                        
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
                               setSelectedFilters(prev => {
                                 const exists = prev.entities.some(
-                                  e => e.entity === entityObj.entity && e.cik === entityObj.cik
+                                  e => e.entity === entityObj.entity && 
+                                       (entityObj.cik ? e.cik === entityObj.cik : !e.cik)
                                 );
                                 if (exists) {
                                   // Remove if already selected
                                   return {
                                     ...prev,
                                     entities: prev.entities.filter(
-                                      e => !(e.entity === entityObj.entity && e.cik === entityObj.cik)
+                                      e => !(e.entity === entityObj.entity && 
+                                            (entityObj.cik ? e.cik === entityObj.cik : !e.cik))
                                     ),
                                   };
                                 } else {
@@ -1852,43 +2091,56 @@ const SECSearchPage: React.FC = () => {
                                   };
                                 }
                               });
-                            }
-                          }}
-                          sx={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            p: 1,
-                            cursor: 'pointer',
-                            borderRadius: '4px',
-                            '&:hover': {
-                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            },
-                          }}
-                        >
-                          <Typography variant="body2" sx={{ color: '#ffffff', fontSize: '0.875rem', flex: 1 }}>
-                            {filter.entity}
-                          </Typography>
-                          <Chip
-                            label={filter.count}
-                            size="small"
-                            sx={{
-                              height: 20,
-                              fontSize: '0.7rem',
-                              backgroundColor: 'rgba(107, 114, 128, 0.3)',
-                              color: '#9ca3af',
-                              border: '1px solid #6b7280',
                             }}
-                          />
-                        </Box>
-                      ))}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.entity}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
                     </Box>
                   </Collapse>
                 </Box>
               )}
 
               {/* Form Filter */}
-              {searchResults?.form_filters && searchResults.form_filters.length > 0 && (
+              {availableFilters.form_filters && availableFilters.form_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
                     onClick={() => setExpandedFilters(prev => ({ ...prev, form: !prev.form }))}
@@ -1929,7 +2181,7 @@ const SECSearchPage: React.FC = () => {
                         backgroundColor: 'rgba(59, 130, 246, 0.7)',
                       },
                     }}>
-                      {searchResults.form_filters.map((filter, idx) => {
+                      {availableFilters.form_filters.map((filter, idx) => {
                         const isSelected = selectedFilters.forms.includes(filter.form);
                         
                         return (
@@ -2001,7 +2253,7 @@ const SECSearchPage: React.FC = () => {
               )}
 
               {/* Location Filter */}
-              {searchResults?.location_filters && searchResults.location_filters.length > 0 && (
+              {availableFilters.location_filters && availableFilters.location_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
                     onClick={() => setExpandedFilters(prev => ({ ...prev, location: !prev.location }))}
@@ -2042,7 +2294,7 @@ const SECSearchPage: React.FC = () => {
                         backgroundColor: 'rgba(59, 130, 246, 0.7)',
                       },
                     }}>
-                      {searchResults.location_filters.map((filter, idx) => {
+                      {availableFilters.location_filters.map((filter, idx) => {
                         // Extract state code from location string (e.g., "Austin, TX" -> "TX", "California" -> "CA")
                         const getStateCode = (location: string): string => {
                           // If it's already a 2-letter code, return it
@@ -2073,11 +2325,13 @@ const SECSearchPage: React.FC = () => {
                           return stateNameToCode[location] || location; // Return original if no match
                         };
                         
+                        const stateCode = getStateCode(filter.location);
+                        const isSelected = selectedFilters.locations.includes(stateCode);
+                        
                         return (
                           <Box
                             key={idx}
                             onClick={() => {
-                              const stateCode = getStateCode(filter.location);
                               setSelectedFilters(prev => {
                                 const exists = prev.locations.includes(stateCode);
                                 if (exists) {
@@ -2095,33 +2349,46 @@ const SECSearchPage: React.FC = () => {
                                 }
                               });
                             }}
-                          sx={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            p: 1,
-                            cursor: 'pointer',
-                            borderRadius: '4px',
-                            '&:hover': {
-                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            },
-                          }}
-                        >
-                          <Typography variant="body2" sx={{ color: '#ffffff', fontSize: '0.875rem', flex: 1 }}>
-                            {filter.location}
-                          </Typography>
-                          <Chip
-                            label={filter.count}
-                            size="small"
                             sx={{
-                              height: 20,
-                              fontSize: '0.7rem',
-                              backgroundColor: 'rgba(107, 114, 128, 0.3)',
-                              color: '#9ca3af',
-                              border: '1px solid #6b7280',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
                             }}
-                          />
-                        </Box>
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.location}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
                         );
                       })}
                     </Box>
@@ -2130,7 +2397,7 @@ const SECSearchPage: React.FC = () => {
               )}
 
               {/* Incorporation Filter */}
-              {searchResults?.incorporation_filters && searchResults.incorporation_filters.length > 0 && (
+              {availableFilters.incorporation_filters && availableFilters.incorporation_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
                     onClick={() => setExpandedFilters(prev => ({ ...prev, incorporation: !prev.incorporation }))}
@@ -2171,7 +2438,7 @@ const SECSearchPage: React.FC = () => {
                         backgroundColor: 'rgba(59, 130, 246, 0.7)',
                       },
                     }}>
-                      {searchResults.incorporation_filters.map((filter, idx) => {
+                      {availableFilters.incorporation_filters.map((filter, idx) => {
                         const isSelected = selectedFilters.incorporationStates.includes(filter.state);
                         
                         return (
@@ -2246,29 +2513,100 @@ const SECSearchPage: React.FC = () => {
             {/* Results Table */}
             <Box sx={{ flex: 1 }}>
               <GlassCard sx={{ p: 4 }}>
-                <Typography
-                  variant="h6"
-                  sx={{
-                    color: '#ffffff',
-                    fontWeight: 600,
-                    mb: 3,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  Search Results
-                  {totalFound > 0 && (
-                    <Chip
-                      label={`Showing ${((currentPage - 1) * RESULTS_PER_PAGE) + 1}-${Math.min(currentPage * RESULTS_PER_PAGE, totalFound)} of ${totalFound} results`}
-                      sx={{
-                        ml: 2,
-                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                        color: '#93c5fd',
-                        border: '1px solid #3b82f6',
-                      }}
-                    />
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                  <Typography
+                    variant="h6"
+                    sx={{
+                      color: '#ffffff',
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                    }}
+                  >
+                    Search Results
+                  </Typography>
+                  
+                  {/* Status Indicator */}
+                  {lastSearchRequest && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      {totalFound > 0 ? (
+                        <Chip
+                          label={`${totalFound} filing${totalFound !== 1 ? 's' : ''} found`}
+                          sx={{
+                            backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                            color: '#86efac',
+                            border: '1px solid #22c55e',
+                            fontWeight: 600,
+                          }}
+                        />
+                      ) : isFiltered && allSearchResults.length > 0 ? (
+                        <Chip
+                          label={`0 of ${allSearchResults.length} forms match filters`}
+                          sx={{
+                            backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                            color: '#fca5a5',
+                            border: '1px solid #ef4444',
+                            fontWeight: 600,
+                          }}
+                        />
+                      ) : allSearchResults.length === 0 && !isFetchingAll ? (
+                        <Chip
+                          label="No forms found"
+                          sx={{
+                            backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                            color: '#fca5a5',
+                            border: '1px solid #ef4444',
+                            fontWeight: 600,
+                          }}
+                        />
+                      ) : null}
+                      
+                      {/* Request Details Link */}
+                      <Chip
+                        label="View Request"
+                        onClick={() => {
+                          console.log('📡 Request config:', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(lastSearchRequest.params),
+                          });
+                          console.log('📡 Request timestamp:', lastSearchRequest.timestamp.toISOString());
+                        }}
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          cursor: 'pointer',
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                          },
+                        }}
+                      />
+                    </Box>
                   )}
-                </Typography>
+                </Box>
+                
+                {totalFound > 0 ? (
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: '#9ca3af',
+                      mb: 2,
+                    }}
+                  >
+                    Showing {((currentPage - 1) * RESULTS_PER_PAGE) + 1}-{Math.min(currentPage * RESULTS_PER_PAGE, totalFound)} of {totalFound} results
+                  </Typography>
+                ) : isFiltered && allSearchResults.length > 0 ? (
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: '#9ca3af',
+                      mb: 2,
+                    }}
+                  >
+                    No results match the selected filters. Your original search found {allSearchResults.length} form{allSearchResults.length !== 1 ? 's' : ''}.
+                  </Typography>
+                ) : null}
 
                 {currentResults.length > 0 ? (
                   <TableContainer 
@@ -2421,16 +2759,52 @@ const SECSearchPage: React.FC = () => {
                   </TableBody>
                 </Table>
               </TableContainer>
-            ) : (
+            ) : allSearchResults.length === 0 && !isFetchingAll ? (
               <Alert severity="info" sx={{
                 backgroundColor: 'rgba(59, 130, 246, 0.1)',
                 border: '1px solid #3b82f6',
                 color: '#93c5fd',
                 '& .MuiAlert-icon': { color: '#93c5fd' },
               }}>
-                No results found. Try adjusting your search parameters.
+                No forms found. Try adjusting your search parameters.
               </Alert>
-            )}
+            ) : currentResults.length === 0 && allSearchResults.length > 0 && isFiltered ? (
+              <Alert 
+                severity="info" 
+                sx={{
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  border: '1px solid #3b82f6',
+                  color: '#93c5fd',
+                  '& .MuiAlert-icon': { color: '#93c5fd' },
+                }}
+                action={
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      console.log('🔄 Clearing all filters to restore results');
+                      setSelectedFilters({
+                        entities: [],
+                        forms: [],
+                        locations: [],
+                        incorporationStates: [],
+                      });
+                      setCurrentPage(1);
+                    }}
+                    sx={{
+                      color: '#93c5fd',
+                      '&:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                      },
+                    }}
+                  >
+                    Clear Filters
+                  </Button>
+                }
+              >
+                No forms match the selected filters. Your original search found {allSearchResults.length} form{allSearchResults.length !== 1 ? 's' : ''}. 
+                Remove filters to see them again.
+              </Alert>
+            ) : null}
 
             {/* Pagination Controls */}
             {totalFound > RESULTS_PER_PAGE && totalFound > 0 && (
