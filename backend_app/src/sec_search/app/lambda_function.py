@@ -180,13 +180,14 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
         return False
 
 
-def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
+def scrape_filing_page_for_documents(filing_page_url: str, retry_count: int = 0) -> List[str]:
     """
     Scrape a SEC filing page (index.htm) to extract all document URLs
     Only extracts from the "Document Format Files" table, not "Data Files" table
     
     Args:
         filing_page_url: URL to the SEC filing index page
+        retry_count: Number of retries attempted (for exponential backoff)
     
     Returns:
         List of document URLs found in the Document Format Files table
@@ -195,8 +196,25 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
     document_urls = []
     
     try:
-        time.sleep(0.1)  # Rate limiting
+        # Rate limiting: SEC recommends max 10 requests/second
+        # Use 0.2 seconds (5 requests/second) to be safe, with exponential backoff on retries
+        delay = 0.2 * (2 ** retry_count)  # 0.2s, 0.4s, 0.8s, etc.
+        time.sleep(delay)
+        
         response = session.get(filing_page_url, timeout=30)
+        
+        # Handle 429 Too Many Requests with retry
+        if response.status_code == 429:
+            max_retries = 3
+            if retry_count < max_retries:
+                wait_time = (2 ** retry_count) * 2  # 2s, 4s, 8s
+                logger.warning(f"429 Too Many Requests for {filing_page_url}, retrying in {wait_time}s (attempt {retry_count + 1}/{max_retries})")
+                time.sleep(wait_time)
+                return scrape_filing_page_for_documents(filing_page_url, retry_count + 1)
+            else:
+                logger.error(f"429 Too Many Requests for {filing_page_url} after {max_retries} retries, giving up")
+                return []
+        
         response.raise_for_status()
         
         html_text = response.text
@@ -816,8 +834,9 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
         # Process results: use cache if available, otherwise scrape
         results = []
         filings_to_cache = []
+        cache_misses = 0  # Track cache misses for rate limiting
         
-        for filing_data in filing_data_list:
+        for idx, filing_data in enumerate(filing_data_list):
             filing_id = filing_data['filingId']
             
             # Check if filing is in cache
@@ -851,7 +870,17 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
                 results.append(result)
             else:
                 # Cache miss - need to scrape
-                logger.info(f"Cache miss for filing {filing_id}, scraping...")
+                cache_misses += 1
+                logger.info(f"Cache miss for filing {filing_id} ({cache_misses} total misses), scraping...")
+                
+                # Add delay between scraping requests to avoid rate limiting
+                # SEC recommends max 10 requests/second, so use 0.2s delay (5 req/sec) to be safe
+                # Add extra delay if we've had many cache misses to be more conservative
+                if cache_misses > 1:
+                    base_delay = 0.2
+                    extra_delay = min(0.1 * (cache_misses - 1), 1.0)  # Max 1s extra
+                    delay = base_delay + extra_delay
+                    time.sleep(delay)
                 
                 # Build filing page URL from accession
                 filing_page_url = None
@@ -867,9 +896,14 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
                 document_urls = []
                 primary_document_url = ''
                 if filing_page_url:
-                    document_urls = scrape_filing_page_for_documents(filing_page_url)
-                    if document_urls:
-                        primary_document_url = document_urls[0]
+                    try:
+                        document_urls = scrape_filing_page_for_documents(filing_page_url)
+                        if document_urls:
+                            primary_document_url = document_urls[0]
+                    except Exception as e:
+                        logger.error(f"Error scraping filing page {filing_page_url}: {e}")
+                        # Continue without document URLs - don't fail the entire request
+                        document_urls = []
                 
                 # Prepare result
                 result = {
