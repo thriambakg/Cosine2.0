@@ -758,7 +758,6 @@ export interface SECSearchParams {
   filmNumber?: string;
   columns?: string[];
   page?: number;
-  fetchAll?: boolean;  // If true, fetch all results (up to 1000) for client-side filtering
 }
 
 export interface SECAutocompleteSuggestion {

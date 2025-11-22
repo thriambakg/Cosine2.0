@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   TextField,
   Autocomplete,
@@ -693,13 +693,13 @@ const SECSearchPage: React.FC = () => {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [currentResults, setCurrentResults] = useState<SECSearchResult[]>([]);
-  const [totalFound, setTotalFound] = useState<number>(0);
+  const [totalFound, setTotalFound] = useState<number>(0); // Total unfiltered results
+  const [filteredCount, setFilteredCount] = useState<number>(0); // Count of filtered results on current page
   const [formTypesModalOpen, setFormTypesModalOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   
-  // Store all results from current search for client-side filtering
-  const [allSearchResults, setAllSearchResults] = useState<SECSearchResult[]>([]);
-  const [isFiltered, setIsFiltered] = useState<boolean>(false);
+  // Track if filters are active (for UI state)
+  const [filtersActive, setFiltersActive] = useState<boolean>(false);
   
   // Filter sidebar state
   const [expandedFilters, setExpandedFilters] = useState({
@@ -769,30 +769,8 @@ const SECSearchPage: React.FC = () => {
       searchParams.fileNumber, searchParams.filmNumber, searchParams.cik, searchParams.entityName]);
 
   
-  // Store results when search completes
-  useEffect(() => {
-    if (searchResults?.results) {
-      // Store all results for client-side filtering
-      setAllSearchResults(searchResults.results);
-      setTotalFound(searchResults.total_found || searchResults.results.length);
-      
-      // If not filtered, show first page
-      if (!isFiltered) {
-        setCurrentResults(searchResults.results.slice(0, RESULTS_PER_PAGE));
-        setCurrentPage(1);
-      }
-      
-      // Form types are dynamically updated from searchResults.form_filters in the sidebar
-    } else if (searchResults && !searchResults.results) {
-      // Clear results if search completed but no results
-      setCurrentResults([]);
-      setAllSearchResults([]);
-      setTotalFound(0);
-    }
-  }, [searchResults, isFiltered]);
-  
   // Client-side filtering function
-  const filterResults = (results: SECSearchResult[]): SECSearchResult[] => {
+  const filterResults = useCallback((results: SECSearchResult[]): SECSearchResult[] => {
     let filtered = [...results];
     
     // Filter by entities (OR logic - any selected entity matches)
@@ -837,45 +815,51 @@ const SECSearchPage: React.FC = () => {
     }
     
     return filtered;
-  };
+  }, [selectedFilters]);
   
-  // Apply filters to stored results (client-side) and paginate
+  // Store results when search completes and apply filters
   useEffect(() => {
-    if (allSearchResults.length > 0) {
-      let filtered = allSearchResults;
+    if (searchResults?.results) {
+      // Store total unfiltered count
+      setTotalFound(searchResults.total_found || searchResults.results.length);
       
-      // Apply filters if any are selected
-      if (selectedFilters.entities.length > 0 ||
-          selectedFilters.forms.length > 0 ||
-          selectedFilters.locations.length > 0 ||
-          selectedFilters.incorporationStates.length > 0) {
-        filtered = filterResults(allSearchResults);
-        setIsFiltered(true);
-      } else {
-        setIsFiltered(false);
-      }
+      // Apply client-side filters to the current batch of results
+      const filtered = filterResults(searchResults.results);
+      setFilteredCount(filtered.length);
+      setCurrentResults(filtered);
       
-      // Update total and paginate
-      setTotalFound(filtered.length);
-      const startIdx = (currentPage - 1) * RESULTS_PER_PAGE;
-      const endIdx = startIdx + RESULTS_PER_PAGE;
-      setCurrentResults(filtered.slice(startIdx, endIdx));
+      // Form types are dynamically updated from searchResults.form_filters in the sidebar
+    } else if (searchResults && !searchResults.results) {
+      // Clear results if search completed but no results
+      setCurrentResults([]);
+      setTotalFound(0);
+      setFilteredCount(0);
     }
-  }, [selectedFilters, allSearchResults, currentPage]);
+  }, [searchResults, filterResults]); // Re-filter when filters change
+  
+  
+  // Update filters active state
+  useEffect(() => {
+    const hasFilters = selectedFilters.entities.length > 0 ||
+                      selectedFilters.forms.length > 0 ||
+                      selectedFilters.locations.length > 0 ||
+                      selectedFilters.incorporationStates.length > 0;
+    setFiltersActive(hasFilters);
+  }, [selectedFilters]);
 
   const handleSearch = async (page: number = 1, applyFilters: boolean = false) => {
-    // If applying filters and we have stored results, just update pagination
-    if (applyFilters && allSearchResults.length > 0) {
-      setCurrentPage(page);
-      // Filtering and pagination is handled by useEffect
+    // If applying filters, just re-fetch current page with filters applied client-side
+    if (applyFilters) {
+      // Re-fetch current page to apply filters
+      await handlePageChange(currentPage);
       return;
     }
     
     const params: SECSearchParams = {
       ...searchParams,
-      page: 1, // Always start from page 1 for new searches
+      page, // Use the requested page
       columns: selectedColumns.length === DEFAULT_COLUMNS.length ? [] : selectedColumns,
-      fetchAll: true, // Fetch all results for client-side filtering
+      // Remove fetchAll - use normal pagination
     };
 
     // Remove empty strings
@@ -886,33 +870,47 @@ const SECSearchPage: React.FC = () => {
       }
     });
 
-    // Reset filters
+    // Reset filters on new search
     setSelectedFilters({
       entities: [],
       forms: [],
       locations: [],
       incorporationStates: [],
     });
-    setCurrentPage(1);
-    setIsFiltered(false);
+    setCurrentPage(page);
     
-    // Fetch all results in one API call
+    // Make API call for the requested page
     await executeSearch(params);
   };
 
   const handleApplyFilters = () => {
-    // Filtering is handled by useEffect - just reset to page 1
-    setCurrentPage(1);
+    // Re-fetch current page to apply filters
+    handlePageChange(currentPage);
   };
 
   const handlePageChange = async (newPage: number) => {
     if (newPage < 1) return;
     if (!totalFound || totalFound === 0) return; // Don't paginate if no results
-    const maxPage = Math.ceil(totalFound / RESULTS_PER_PAGE);
-    if (maxPage === 0 || newPage > maxPage) return;
     
-    // Client-side pagination - just update page, useEffect will handle slicing
     setCurrentPage(newPage);
+    
+    // Make API call for the new page
+    const params: SECSearchParams = {
+      ...searchParams,
+      page: newPage,
+      columns: selectedColumns.length === DEFAULT_COLUMNS.length ? [] : selectedColumns,
+    };
+
+    // Remove empty strings
+    Object.keys(params).forEach(key => {
+      const value = params[key as keyof SECSearchParams];
+      if (value === '' || (Array.isArray(value) && value.length === 0)) {
+        delete params[key as keyof SECSearchParams];
+      }
+    });
+
+    // Fetch new page - filters will be applied client-side in useEffect
+    await executeSearch(params);
   };
 
   const handleColumnToggle = (column: string) => {
@@ -2220,7 +2218,9 @@ const SECSearchPage: React.FC = () => {
                   Search Results
                   {totalFound > 0 && (
                     <Chip
-                      label={`Showing ${((currentPage - 1) * RESULTS_PER_PAGE) + 1}-${Math.min(currentPage * RESULTS_PER_PAGE, totalFound)} of ${totalFound} results`}
+                      label={filtersActive 
+                        ? `Showing ${filteredCount} of ${RESULTS_PER_PAGE} results on this page (${totalFound} total unfiltered)`
+                        : `Showing ${((currentPage - 1) * RESULTS_PER_PAGE) + 1}-${Math.min(currentPage * RESULTS_PER_PAGE, totalFound)} of ${totalFound} results`}
                       sx={{
                         ml: 2,
                         backgroundColor: 'rgba(59, 130, 246, 0.2)',
@@ -2398,7 +2398,9 @@ const SECSearchPage: React.FC = () => {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3, pt: 3, borderTop: '1px solid #374151' }}>
                 <Typography variant="body2" sx={{ color: '#9ca3af' }}>
                   Page {currentPage} of {Math.ceil(totalFound / RESULTS_PER_PAGE)}
-                  {' '}(Showing {((currentPage - 1) * RESULTS_PER_PAGE) + 1}-{Math.min(currentPage * RESULTS_PER_PAGE, totalFound)} of {totalFound} results)
+                  {filtersActive 
+                    ? ` (${filteredCount} of ${RESULTS_PER_PAGE} results on this page match filters)`
+                    : ` (Showing ${((currentPage - 1) * RESULTS_PER_PAGE) + 1}-${Math.min(currentPage * RESULTS_PER_PAGE, totalFound)} of ${totalFound} results)`}
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1 }}>
                   <Button
