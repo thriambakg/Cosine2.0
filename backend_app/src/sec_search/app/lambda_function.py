@@ -426,18 +426,17 @@ def get_company_search_preview(search_term: str) -> List[Dict[str, Any]]:
         return []
 
 
-def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1, client_filters: Dict[str, Any] = None) -> Dict[str, Any]:
+def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1, fetch_all: bool = False) -> Dict[str, Any]:
     """
     Search using SEC search-index API (Elasticsearch endpoint)
     
     Args:
         search_params: Dictionary with search parameters
-        page: Display page number (1-indexed, 10 results per page)
-        client_filters: Optional filters to apply to results before returning (for client-side filtering)
-                       Format: {'entities': [...], 'forms': [...], 'locations': [...], 'incorporationStates': [...]}
+        page: Display page number (1-indexed, 10 results per page) - only used if fetch_all=False
+        fetch_all: If True, fetch all results (up to 1000) for client-side filtering. If False, fetch only requested page.
     
     Returns:
-        Dict with success flag, total_found, and results list (filtered if client_filters provided)
+        Dict with success flag, total_found, and results list
     """
     session = create_session()
     
@@ -647,7 +646,40 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1, cli
             logger.info(f"Found {len(incorporation_filters)} incorporation states in results")
         
         hits_list = hits_data.get('hits', [])
-        hits_list_for_filters = hits_list
+        
+        # If fetch_all is True, fetch all pages up to 1000 results first
+        all_hits = hits_list.copy()
+        if fetch_all:
+            max_results = 1000
+            current_page = api_page
+            while len(all_hits) < max_results and len(all_hits) < total_count:
+                current_page += 1
+                params_next = base_params.copy()
+                if current_page > 1:
+                    params_next['page'] = current_page
+                    params_next['from'] = (current_page - 1) * 100
+                
+                try:
+                    time.sleep(0.1)  # Rate limiting
+                    response_next = session.get(url, params=params_next, headers=headers, timeout=60)
+                    response_next.raise_for_status()
+                    data_next = response_next.json()
+                    hits_data_next = data_next.get('hits', {})
+                    hits_list_next = hits_data_next.get('hits', [])
+                    if hits_list_next:
+                        all_hits.extend(hits_list_next)
+                        logger.info(f"Fetched page {current_page}: {len(hits_list_next)} results (total so far: {len(all_hits)})")
+                    else:
+                        break
+                except Exception as e:
+                    logger.warning(f"Error fetching page {current_page}: {e}")
+                    break
+            
+            logger.info(f"Fetched {len(all_hits)} total results for client-side filtering")
+            # Use all hits for filter computation
+            hits_list_for_filters = all_hits[:max_results]
+        else:
+            hits_list_for_filters = hits_list
         
         # Always compute filters from current batch results (or all results if fetch_all)
         # API aggregations may not be available for entity/location/incorporation, so we compute from results
@@ -732,18 +764,24 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1, cli
         
         logger.info(f"Got {len(hits_list)} results from API page {api_page} (total found: {total_count})")
         
-        # Calculate which slice we need from this API batch
-        # Display page 1: want results 0-9 from API batch (results 0-99)
-        # Display page 2: want results 10-19 from API batch (results 0-99)
-        # Display page 11: want results 100-109 from API batch (results 100-199)
-        offset_in_batch = ((page - 1) % 10) * MAX_RESULTS
-        start_idx = offset_in_batch
-        end_idx = start_idx + MAX_RESULTS
-        
-        # Slice to get exactly 10 results for this display page
-        limited_hits = hits_list[start_idx:end_idx]
-        
-        logger.info(f"Sliced to {len(limited_hits)} results for display page {page} (from index {start_idx} to {end_idx})")
+        # Determine which hits to use for processing results
+        if fetch_all:
+            # Return all fetched results (up to 1000) for client-side filtering
+            limited_hits = all_hits[:max_results]
+            logger.info(f"Returning {len(limited_hits)} total results for client-side filtering")
+        else:
+            # Calculate which slice we need from this API batch
+            # Display page 1: want results 0-9 from API batch (results 0-99)
+            # Display page 2: want results 10-19 from API batch (results 0-99)
+            # Display page 11: want results 100-109 from API batch (results 100-199)
+            offset_in_batch = ((page - 1) % 10) * MAX_RESULTS
+            start_idx = offset_in_batch
+            end_idx = start_idx + MAX_RESULTS
+            
+            # Slice to get exactly 10 results for this display page
+            limited_hits = hits_list[start_idx:end_idx]
+            
+            logger.info(f"Sliced to {len(limited_hits)} results for display page {page} (from index {start_idx} to {end_idx})")
         
         # Extract results with all column data and construct filing IDs
         filing_ids = []
@@ -894,61 +932,6 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1, cli
                     logger.error(f"Failed to cache filing {filing_data.get('filingId')}: {e}")
                     # Continue - don't fail the request if caching fails
         
-        # Apply client-side filters if provided (filter the 10 results before returning)
-        if client_filters:
-            original_count = len(results)
-            filtered_results = []
-            for result in results:
-                # Filter by entities (OR logic - any selected entity matches)
-                if client_filters.get('entities'):
-                    entities = client_filters['entities']
-                    if isinstance(entities, list) and len(entities) > 0:
-                        entity_matches = False
-                        for entity in entities:
-                            entity_name = entity.get('entity', '').lower() if isinstance(entity, dict) else str(entity).lower()
-                            entity_cik = entity.get('cik', '') if isinstance(entity, dict) else None
-                            reporting_for = (result.get('reportingFor') or '').lower()
-                            filing_entity = (result.get('filingEntity') or '').lower()
-                            result_cik = result.get('cik', '')
-                            
-                            if (entity_name in reporting_for or 
-                                entity_name in filing_entity or
-                                (entity_cik and result_cik == entity_cik)):
-                                entity_matches = True
-                                break
-                        if not entity_matches:
-                            continue
-                
-                # Filter by forms (OR logic - any selected form matches)
-                if client_filters.get('forms'):
-                    forms = client_filters['forms']
-                    if isinstance(forms, list) and len(forms) > 0:
-                        if result.get('form') not in forms:
-                            continue
-                
-                # Filter by locations (OR logic - any selected location matches)
-                if client_filters.get('locations'):
-                    locations = client_filters['locations']
-                    if isinstance(locations, list) and len(locations) > 0:
-                        result_located = (result.get('located') or '').lower()
-                        location_matches = any(loc.lower() in result_located for loc in locations)
-                        if not location_matches:
-                            continue
-                
-                # Filter by incorporation states (OR logic - any selected state matches)
-                if client_filters.get('incorporationStates'):
-                    states = client_filters['incorporationStates']
-                    if isinstance(states, list) and len(states) > 0:
-                        result_incorporated = (result.get('incorporated') or '').lower()
-                        state_matches = any(state.lower() in result_incorporated for state in states)
-                        if not state_matches:
-                            continue
-                
-                filtered_results.append(result)
-            
-            results = filtered_results
-            logger.info(f"Applied client filters: {len(results)} results after filtering (from {original_count} original)")
-        
         return {
             'success': True,
             'total_found': total_count,
@@ -1052,13 +1035,10 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         except (ValueError, TypeError):
             page = 1
         
-        # Extract client-side filters (for filtering results before returning)
-        client_filters = body.get('clientFilters')
-        
         # Remove None values
         search_params = {k: v for k, v in search_params.items() if v is not None}
         
-        result = search_by_search_index_api(search_params, page=page, client_filters=client_filters)
+        result = search_by_search_index_api(search_params, page=page)
         
         return {
             'statusCode': 200 if result.get('success') else 500,

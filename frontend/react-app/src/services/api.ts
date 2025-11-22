@@ -758,12 +758,7 @@ export interface SECSearchParams {
   filmNumber?: string;
   columns?: string[];
   page?: number;
-  clientFilters?: {  // Filters to apply to results before returning (for client-side filtering)
-    entities?: Array<{ entity: string; cik?: string }>;
-    forms?: string[];
-    locations?: string[];
-    incorporationStates?: string[];
-  };
+  fetchAll?: boolean;  // If true, fetch all results (up to 1000) for client-side filtering
 }
 
 export interface SECAutocompleteSuggestion {
