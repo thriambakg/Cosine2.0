@@ -430,6 +430,9 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
     """
     Search using SEC search-index API (Elasticsearch endpoint)
     
+    Fetches ONE API page at a time (~100 results), then slices to return 10 results.
+    This matches the test script behavior - fetch on demand, not all at once.
+    
     Args:
         search_params: Dictionary with search parameters
         page: Display page number (1-indexed, 10 results per page)
@@ -645,17 +648,16 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             logger.info(f"Found {len(incorporation_filters)} incorporation states in results")
         
         hits_list = hits_data.get('hits', [])
-        hits_list_for_filters = hits_list
         
         # Always compute filters from current batch results
         # API aggregations may not be available for entity/location/incorporation, so we compute from results
-        logger.info(f"Computing filters from results ({len(hits_list_for_filters)} hits)")
+        logger.info(f"Computing filters from current batch results ({len(hits_list)} hits)")
         entity_counts = {}
         location_counts = {}
         incorporation_counts = {}
         
-        # Compute from ALL hits (either current batch or all fetched results)
-        for hit in hits_list_for_filters:
+        # Compute from ALL hits in the current batch (not just the 10 we're displaying)
+        for hit in hits_list:
             source = hit.get('_source', {})
             
             # Count entities (display_names)
