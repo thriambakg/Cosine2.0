@@ -444,18 +444,19 @@ def get_company_search_preview(search_term: str) -> List[Dict[str, Any]]:
         return []
 
 
-def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
+def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> Dict[str, Any]:
     """
     Search using SEC search-index API (Elasticsearch endpoint)
     
-    Always fetches all results (up to 1000) for client-side filtering.
-    The frontend handles pagination and filtering on the complete dataset.
+    Fetches ONE page at a time (10 results per page).
+    The frontend applies filters client-side after receiving results.
     
     Args:
         search_params: Dictionary with search parameters
+        page: Display page number (1-indexed, 10 results per page)
     
     Returns:
-        Dict with success flag, total_found, and results list (all results, up to 1000)
+        Dict with success flag, total_found, and results list (10 results)
     """
     session = create_session()
     
@@ -556,14 +557,26 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
             'user-agent': SEC_USER_AGENT
         }
         
-        # Always start with first page - we'll fetch all pages up to 1000 results
-        api_page = 1
+        # Calculate which API page to request
+        # API returns ~100 results per page
+        # Display page 1 (results 0-9) needs API page 1 (results 0-99)
+        # Display page 2 (results 10-19) needs API page 1 (results 0-99)
+        # Display page 11 (results 100-109) needs API page 2 (results 100-199)
+        api_page = ((page - 1) // 10) + 1
+        from_param = (api_page - 1) * 100
         
-        # Build params for first API page
+        # Build params for this API page - mirror SEC website behavior exactly
         params = base_params.copy()
-        # First page doesn't need page/from params
         
-        logger.info(f"Fetching all results (up to 1000) for client-side filtering...")
+        # SEC website pagination pattern:
+        # API Page 1: no page/from params
+        # API Page 2: page=2&from=100
+        # API Page 3: page=3&from=200 (increments of 100)
+        if api_page > 1:
+            params['page'] = api_page
+            params['from'] = from_param
+        
+        logger.info(f"Fetching display page {page} (API page {api_page}, params: page={params.get('page', 'N/A')}, from={params.get('from', 'N/A')})...")
         logger.info(f"Base parameters: {base_params}")
         
         # Retry logic for handling timeouts
@@ -655,37 +668,8 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
         
         hits_list = hits_data.get('hits', [])
         
-        # Always fetch all pages up to 1000 results for client-side filtering
-        max_results = 1000
-        all_hits = hits_list.copy()
-        current_page = api_page
-        
-        while len(all_hits) < max_results and len(all_hits) < total_count:
-            current_page += 1
-            params_next = base_params.copy()
-            if current_page > 1:
-                params_next['page'] = current_page
-                params_next['from'] = (current_page - 1) * 100
-            
-            try:
-                time.sleep(0.1)  # Rate limiting
-                response_next = session.get(url, params=params_next, headers=headers, timeout=60)
-                response_next.raise_for_status()
-                data_next = response_next.json()
-                hits_data_next = data_next.get('hits', {})
-                hits_list_next = hits_data_next.get('hits', [])
-                if hits_list_next:
-                    all_hits.extend(hits_list_next)
-                    logger.info(f"Fetched page {current_page}: {len(hits_list_next)} results (total so far: {len(all_hits)})")
-                else:
-                    break
-            except Exception as e:
-                logger.warning(f"Error fetching page {current_page}: {e}")
-                break
-        
-        logger.info(f"Fetched {len(all_hits)} total results for client-side filtering")
-        # Use all hits for filter computation and results
-        hits_list_for_filters = all_hits[:max_results]
+        # Use current batch for filter computation (API aggregations may not be available)
+        hits_list_for_filters = hits_list
         
         # Always compute filters from current batch results (or all results if fetch_all)
         # API aggregations may not be available for entity/location/incorporation, so we compute from results
@@ -756,8 +740,8 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
         if incorporation_filters:
             logger.info(f"Sample incorporation states: {incorporation_filters[:3]}")
         
-        if not all_hits:
-            logger.info(f"No results returned from API")
+        if not hits_list:
+            logger.info(f"No results returned from API page {api_page}")
             return {
                 'success': True,
                 'total_found': total_count,
@@ -768,11 +752,21 @@ def search_by_search_index_api(search_params: Dict[str, Any]) -> Dict[str, Any]:
                 'incorporation_filters': incorporation_filters
             }
         
-        logger.info(f"Got {len(all_hits)} total results (total found: {total_count})")
+        logger.info(f"Got {len(hits_list)} results from API page {api_page} (total found: {total_count})")
         
-        # Return all fetched results (up to 1000) for client-side filtering
-        limited_hits = all_hits[:max_results]
-        logger.info(f"Returning {len(limited_hits)} total results for client-side filtering")
+        # Calculate which slice we need from this API batch
+        # Display page 1: want results 0-9 from API batch (results 0-99)
+        # Display page 2: want results 10-19 from API batch (results 0-99)
+        # Display page 11: want results 100-109 from API batch (results 100-199)
+        MAX_RESULTS = 10
+        offset_in_batch = ((page - 1) % 10) * MAX_RESULTS
+        start_idx = offset_in_batch
+        end_idx = start_idx + MAX_RESULTS
+        
+        # Slice to get exactly 10 results for this display page
+        limited_hits = hits_list[start_idx:end_idx]
+        
+        logger.info(f"Sliced to {len(limited_hits)} results for display page {page} (from index {start_idx} to {end_idx})")
         
         # Extract results with all column data and construct filing IDs
         filing_ids = []

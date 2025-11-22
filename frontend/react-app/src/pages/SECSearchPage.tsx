@@ -697,9 +697,8 @@ const SECSearchPage: React.FC = () => {
   const [formTypesModalOpen, setFormTypesModalOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   
-  // Store all results from current search for client-side filtering
-  const [allSearchResults, setAllSearchResults] = useState<SECSearchResult[]>([]);
-  const [isFiltered, setIsFiltered] = useState<boolean>(false);
+  // Store current page results (10 results) for client-side filtering
+  const [currentPageResults, setCurrentPageResults] = useState<SECSearchResult[]>([]);
   
   // Filter sidebar state
   const [expandedFilters, setExpandedFilters] = useState({
@@ -769,28 +768,6 @@ const SECSearchPage: React.FC = () => {
       searchParams.fileNumber, searchParams.filmNumber, searchParams.cik, searchParams.entityName]);
 
   
-  // Store results when search completes
-  useEffect(() => {
-    if (searchResults?.results) {
-      // Store all results for client-side filtering
-      setAllSearchResults(searchResults.results);
-      setTotalFound(searchResults.total_found || searchResults.results.length);
-      
-      // If not filtered, show first page
-      if (!isFiltered) {
-        setCurrentResults(searchResults.results.slice(0, RESULTS_PER_PAGE));
-        setCurrentPage(1);
-      }
-      
-      // Form types are dynamically updated from searchResults.form_filters in the sidebar
-    } else if (searchResults && !searchResults.results) {
-      // Clear results if search completed but no results
-      setCurrentResults([]);
-      setAllSearchResults([]);
-      setTotalFound(0);
-    }
-  }, [searchResults, isFiltered]);
-  
   // Client-side filtering function
   const filterResults = (results: SECSearchResult[]): SECSearchResult[] => {
     let filtered = [...results];
@@ -839,40 +816,39 @@ const SECSearchPage: React.FC = () => {
     return filtered;
   };
   
-  // Apply filters to stored results (client-side) and paginate
+  // Store results when search completes and apply filters
   useEffect(() => {
-    if (allSearchResults.length > 0) {
-      let filtered = allSearchResults;
+    if (searchResults?.results) {
+      // Store the current page results (10 results from API)
+      setCurrentPageResults(searchResults.results);
+      setTotalFound(searchResults.total_found || 0);
       
-      // Apply filters if any are selected
-      if (selectedFilters.entities.length > 0 ||
-          selectedFilters.forms.length > 0 ||
-          selectedFilters.locations.length > 0 ||
-          selectedFilters.incorporationStates.length > 0) {
-        filtered = filterResults(allSearchResults);
-        setIsFiltered(true);
-      } else {
-        setIsFiltered(false);
-      }
+      // Apply filters to the current 10 results before displaying
+      const filtered = filterResults(searchResults.results);
+      setCurrentResults(filtered);
       
-      // Update total and paginate
-      setTotalFound(filtered.length);
-      const startIdx = (currentPage - 1) * RESULTS_PER_PAGE;
-      const endIdx = startIdx + RESULTS_PER_PAGE;
-      setCurrentResults(filtered.slice(startIdx, endIdx));
+      // Form types are dynamically updated from searchResults.form_filters in the sidebar
+    } else if (searchResults && !searchResults.results) {
+      // Clear results if search completed but no results
+      setCurrentResults([]);
+      setCurrentPageResults([]);
+      setTotalFound(0);
     }
-  }, [selectedFilters, allSearchResults, currentPage]);
+  }, [searchResults]);
+  
+  // Re-apply filters when filters change (on current page results)
+  useEffect(() => {
+    if (currentPageResults.length > 0) {
+      const filtered = filterResults(currentPageResults);
+      setCurrentResults(filtered);
+    }
+  }, [selectedFilters, currentPageResults]);
 
   const handleSearch = async (page: number = 1, applyFilters: boolean = false) => {
-    // If applying filters and we have stored results, just update pagination
-    if (applyFilters && allSearchResults.length > 0) {
-      setCurrentPage(page);
-      // Filtering and pagination is handled by useEffect
-      return;
-    }
-    
+    // Don't send filters to API - we'll filter client-side after receiving results
     const params: SECSearchParams = {
       ...searchParams,
+      page: page,  // Send page number to API
       columns: selectedColumns.length === DEFAULT_COLUMNS.length ? [] : selectedColumns,
     };
 
@@ -884,23 +860,28 @@ const SECSearchPage: React.FC = () => {
       }
     });
 
-    // Reset filters
-    setSelectedFilters({
-      entities: [],
-      forms: [],
-      locations: [],
-      incorporationStates: [],
-    });
-    setCurrentPage(1);
-    setIsFiltered(false);
+    // Reset filters only on new search (not when applying filters or paginating)
+    if (page === 1 && !applyFilters) {
+      setSelectedFilters({
+        entities: [],
+        forms: [],
+        locations: [],
+        incorporationStates: [],
+      });
+    }
     
-    // Fetch all results in one API call
+    setCurrentPage(page);
+    
+    // Fetch one page (10 results) from API
     await executeSearch(params);
   };
 
   const handleApplyFilters = () => {
-    // Filtering is handled by useEffect - just reset to page 1
+    // Filters are applied client-side via useEffect
+    // Just reset to page 1 to show filtered results from current page
     setCurrentPage(1);
+    // Re-fetch current page to apply filters
+    handleSearch(1, true);
   };
 
   const handlePageChange = async (newPage: number) => {
@@ -909,8 +890,9 @@ const SECSearchPage: React.FC = () => {
     const maxPage = Math.ceil(totalFound / RESULTS_PER_PAGE);
     if (maxPage === 0 || newPage > maxPage) return;
     
-    // Client-side pagination - just update page, useEffect will handle slicing
-    setCurrentPage(newPage);
+    // Fetch next page from API (no filters applied to API call)
+    // Filters will be applied client-side after receiving results
+    await handleSearch(newPage, false);
   };
 
   const handleColumnToggle = (column: string) => {

@@ -757,6 +757,7 @@ export interface SECSearchParams {
   fileNumber?: string;
   filmNumber?: string;
   columns?: string[];
+  page?: number;
 }
 
 export interface SECAutocompleteSuggestion {
