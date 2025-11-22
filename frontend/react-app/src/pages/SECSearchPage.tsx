@@ -697,8 +697,6 @@ const SECSearchPage: React.FC = () => {
   const [formTypesModalOpen, setFormTypesModalOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   
-  // Store current page results (10 results) for client-side filtering
-  const [currentPageResults, setCurrentPageResults] = useState<SECSearchResult[]>([]);
   
   // Filter sidebar state
   const [expandedFilters, setExpandedFilters] = useState({
@@ -768,89 +766,42 @@ const SECSearchPage: React.FC = () => {
       searchParams.fileNumber, searchParams.filmNumber, searchParams.cik, searchParams.entityName]);
 
   
-  // Client-side filtering function
-  const filterResults = (results: SECSearchResult[]): SECSearchResult[] => {
-    let filtered = [...results];
-    
-    // Filter by entities (OR logic - any selected entity matches)
-    if (selectedFilters.entities.length > 0) {
-      filtered = filtered.filter(result => {
-        const reportingFor = result.reportingFor || '';
-        const filingEntity = result.filingEntity || '';
-        return selectedFilters.entities.some(entity => {
-          const entityName = entity.entity.toLowerCase();
-          return reportingFor.toLowerCase().includes(entityName) ||
-                 filingEntity.toLowerCase().includes(entityName) ||
-                 (entity.cik && result.cik === entity.cik);
-        });
-      });
-    }
-    
-    // Filter by forms (OR logic - any selected form matches)
-    if (selectedFilters.forms.length > 0) {
-      filtered = filtered.filter(result => 
-        selectedFilters.forms.includes(result.form || '')
-      );
-    }
-    
-    // Filter by locations (OR logic - any selected location matches)
-    if (selectedFilters.locations.length > 0) {
-      filtered = filtered.filter(result => {
-        const located = result.located || '';
-        return selectedFilters.locations.some(loc => 
-          located.toLowerCase().includes(loc.toLowerCase())
-        );
-      });
-    }
-    
-    // Filter by incorporation states (OR logic - any selected state matches)
-    if (selectedFilters.incorporationStates.length > 0) {
-      filtered = filtered.filter(result => {
-        const incorporated = result.incorporated || '';
-        return selectedFilters.incorporationStates.some(state =>
-          incorporated.toLowerCase().includes(state.toLowerCase())
-        );
-      });
-    }
-    
-    return filtered;
-  };
-  
-  // Store results when search completes and apply filters
+  // Store results when search completes
   useEffect(() => {
     if (searchResults?.results) {
-      // Store the current page results (10 results from API)
-      setCurrentPageResults(searchResults.results);
+      // Results are already filtered by Lambda if clientFilters were provided
+      setCurrentResults(searchResults.results);
       setTotalFound(searchResults.total_found || 0);
-      
-      // Apply filters to the current 10 results before displaying
-      const filtered = filterResults(searchResults.results);
-      setCurrentResults(filtered);
       
       // Form types are dynamically updated from searchResults.form_filters in the sidebar
     } else if (searchResults && !searchResults.results) {
       // Clear results if search completed but no results
       setCurrentResults([]);
-      setCurrentPageResults([]);
       setTotalFound(0);
     }
   }, [searchResults]);
-  
-  // Re-apply filters when filters change (on current page results)
-  useEffect(() => {
-    if (currentPageResults.length > 0) {
-      const filtered = filterResults(currentPageResults);
-      setCurrentResults(filtered);
-    }
-  }, [selectedFilters, currentPageResults]);
 
   const handleSearch = async (page: number = 1, applyFilters: boolean = false) => {
-    // Don't send filters to API - we'll filter client-side after receiving results
     const params: SECSearchParams = {
       ...searchParams,
-      page: page,  // Send page number to API
+      page,
       columns: selectedColumns.length === DEFAULT_COLUMNS.length ? [] : selectedColumns,
     };
+
+    // Add client-side filters if applying filters
+    if (applyFilters && (
+      selectedFilters.entities.length > 0 ||
+      selectedFilters.forms.length > 0 ||
+      selectedFilters.locations.length > 0 ||
+      selectedFilters.incorporationStates.length > 0
+    )) {
+      params.clientFilters = {
+        entities: selectedFilters.entities,
+        forms: selectedFilters.forms,
+        locations: selectedFilters.locations,
+        incorporationStates: selectedFilters.incorporationStates,
+      };
+    }
 
     // Remove empty strings
     Object.keys(params).forEach(key => {
@@ -860,7 +811,7 @@ const SECSearchPage: React.FC = () => {
       }
     });
 
-    // Reset filters only on new search (not when applying filters or paginating)
+    // Reset filters if starting new search
     if (page === 1 && !applyFilters) {
       setSelectedFilters({
         entities: [],
@@ -871,28 +822,26 @@ const SECSearchPage: React.FC = () => {
     }
     
     setCurrentPage(page);
-    
-    // Fetch one page (10 results) from API
     await executeSearch(params);
   };
 
   const handleApplyFilters = () => {
-    // Filters are applied client-side via useEffect
-    // Just reset to page 1 to show filtered results from current page
+    // Apply filters and reset to page 1
     setCurrentPage(1);
-    // Re-fetch current page to apply filters
     handleSearch(1, true);
   };
 
   const handlePageChange = async (newPage: number) => {
     if (newPage < 1) return;
     if (!totalFound || totalFound === 0) return; // Don't paginate if no results
-    const maxPage = Math.ceil(totalFound / RESULTS_PER_PAGE);
-    if (maxPage === 0 || newPage > maxPage) return;
     
-    // Fetch next page from API (no filters applied to API call)
-    // Filters will be applied client-side after receiving results
-    await handleSearch(newPage, false);
+    // Fetch next page with filters applied (if any)
+    const hasFilters = selectedFilters.entities.length > 0 ||
+                       selectedFilters.forms.length > 0 ||
+                       selectedFilters.locations.length > 0 ||
+                       selectedFilters.incorporationStates.length > 0;
+    
+    await handleSearch(newPage, hasFilters);
   };
 
   const handleColumnToggle = (column: string) => {

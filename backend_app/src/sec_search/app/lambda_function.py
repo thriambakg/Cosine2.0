@@ -180,14 +180,13 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
         return False
 
 
-def scrape_filing_page_for_documents(filing_page_url: str, retry_count: int = 0) -> List[str]:
+def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
     """
     Scrape a SEC filing page (index.htm) to extract all document URLs
     Only extracts from the "Document Format Files" table, not "Data Files" table
     
     Args:
         filing_page_url: URL to the SEC filing index page
-        retry_count: Number of retries attempted (for exponential backoff)
     
     Returns:
         List of document URLs found in the Document Format Files table
@@ -196,25 +195,8 @@ def scrape_filing_page_for_documents(filing_page_url: str, retry_count: int = 0)
     document_urls = []
     
     try:
-        # Rate limiting: SEC recommends max 10 requests/second
-        # Use 0.2 seconds (5 requests/second) to be safe, with exponential backoff on retries
-        delay = 0.2 * (2 ** retry_count)  # 0.2s, 0.4s, 0.8s, etc.
-        time.sleep(delay)
-        
+        time.sleep(0.1)  # Rate limiting
         response = session.get(filing_page_url, timeout=30)
-        
-        # Handle 429 Too Many Requests with retry
-        if response.status_code == 429:
-            max_retries = 3
-            if retry_count < max_retries:
-                wait_time = (2 ** retry_count) * 2  # 2s, 4s, 8s
-                logger.warning(f"429 Too Many Requests for {filing_page_url}, retrying in {wait_time}s (attempt {retry_count + 1}/{max_retries})")
-                time.sleep(wait_time)
-                return scrape_filing_page_for_documents(filing_page_url, retry_count + 1)
-            else:
-                logger.error(f"429 Too Many Requests for {filing_page_url} after {max_retries} retries, giving up")
-                return []
-        
         response.raise_for_status()
         
         html_text = response.text
@@ -444,19 +426,18 @@ def get_company_search_preview(search_term: str) -> List[Dict[str, Any]]:
         return []
 
 
-def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> Dict[str, Any]:
+def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1, client_filters: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Search using SEC search-index API (Elasticsearch endpoint)
-    
-    Fetches ONE page at a time (10 results per page).
-    The frontend applies filters client-side after receiving results.
     
     Args:
         search_params: Dictionary with search parameters
         page: Display page number (1-indexed, 10 results per page)
+        client_filters: Optional filters to apply to results before returning (for client-side filtering)
+                       Format: {'entities': [...], 'forms': [...], 'locations': [...], 'incorporationStates': [...]}
     
     Returns:
-        Dict with success flag, total_found, and results list (10 results)
+        Dict with success flag, total_found, and results list (filtered if client_filters provided)
     """
     session = create_session()
     
@@ -557,13 +538,12 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             'user-agent': SEC_USER_AGENT
         }
         
-        # Calculate which API page to request
-        # API returns ~100 results per page
-        # Display page 1 (results 0-9) needs API page 1 (results 0-99)
-        # Display page 2 (results 10-19) needs API page 1 (results 0-99)
-        # Display page 11 (results 100-109) needs API page 2 (results 100-199)
+        # Calculate which API page we need for this display page
+        # API returns ~100 results per call, we display 10 per page
+        # Display pages 1-10 come from API page 1 (results 0-99)
+        # Display pages 11-20 come from API page 2 (results 100-199)
+        # etc.
         api_page = ((page - 1) // 10) + 1
-        from_param = (api_page - 1) * 100
         
         # Build params for this API page - mirror SEC website behavior exactly
         params = base_params.copy()
@@ -574,7 +554,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         # API Page 3: page=3&from=200 (increments of 100)
         if api_page > 1:
             params['page'] = api_page
-            params['from'] = from_param
+            params['from'] = (api_page - 1) * 100  # SEC uses increments of 100
         
         logger.info(f"Fetching display page {page} (API page {api_page}, params: page={params.get('page', 'N/A')}, from={params.get('from', 'N/A')})...")
         logger.info(f"Base parameters: {base_params}")
@@ -667,8 +647,6 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             logger.info(f"Found {len(incorporation_filters)} incorporation states in results")
         
         hits_list = hits_data.get('hits', [])
-        
-        # Use current batch for filter computation (API aggregations may not be available)
         hits_list_for_filters = hits_list
         
         # Always compute filters from current batch results (or all results if fetch_all)
@@ -758,7 +736,6 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         # Display page 1: want results 0-9 from API batch (results 0-99)
         # Display page 2: want results 10-19 from API batch (results 0-99)
         # Display page 11: want results 100-109 from API batch (results 100-199)
-        MAX_RESULTS = 10
         offset_in_batch = ((page - 1) % 10) * MAX_RESULTS
         start_idx = offset_in_batch
         end_idx = start_idx + MAX_RESULTS
@@ -828,9 +805,8 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         # Process results: use cache if available, otherwise scrape
         results = []
         filings_to_cache = []
-        cache_misses = 0  # Track cache misses for rate limiting
         
-        for idx, filing_data in enumerate(filing_data_list):
+        for filing_data in filing_data_list:
             filing_id = filing_data['filingId']
             
             # Check if filing is in cache
@@ -864,17 +840,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 results.append(result)
             else:
                 # Cache miss - need to scrape
-                cache_misses += 1
-                logger.info(f"Cache miss for filing {filing_id} ({cache_misses} total misses), scraping...")
-                
-                # Add delay between scraping requests to avoid rate limiting
-                # SEC recommends max 10 requests/second, so use 0.2s delay (5 req/sec) to be safe
-                # Add extra delay if we've had many cache misses to be more conservative
-                if cache_misses > 1:
-                    base_delay = 0.2
-                    extra_delay = min(0.1 * (cache_misses - 1), 1.0)  # Max 1s extra
-                    delay = base_delay + extra_delay
-                    time.sleep(delay)
+                logger.info(f"Cache miss for filing {filing_id}, scraping...")
                 
                 # Build filing page URL from accession
                 filing_page_url = None
@@ -890,14 +856,9 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 document_urls = []
                 primary_document_url = ''
                 if filing_page_url:
-                    try:
-                        document_urls = scrape_filing_page_for_documents(filing_page_url)
-                        if document_urls:
-                            primary_document_url = document_urls[0]
-                    except Exception as e:
-                        logger.error(f"Error scraping filing page {filing_page_url}: {e}")
-                        # Continue without document URLs - don't fail the entire request
-                        document_urls = []
+                    document_urls = scrape_filing_page_for_documents(filing_page_url)
+                    if document_urls:
+                        primary_document_url = document_urls[0]
                 
                 # Prepare result
                 result = {
@@ -932,6 +893,61 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 except Exception as e:
                     logger.error(f"Failed to cache filing {filing_data.get('filingId')}: {e}")
                     # Continue - don't fail the request if caching fails
+        
+        # Apply client-side filters if provided (filter the 10 results before returning)
+        if client_filters:
+            original_count = len(results)
+            filtered_results = []
+            for result in results:
+                # Filter by entities (OR logic - any selected entity matches)
+                if client_filters.get('entities'):
+                    entities = client_filters['entities']
+                    if isinstance(entities, list) and len(entities) > 0:
+                        entity_matches = False
+                        for entity in entities:
+                            entity_name = entity.get('entity', '').lower() if isinstance(entity, dict) else str(entity).lower()
+                            entity_cik = entity.get('cik', '') if isinstance(entity, dict) else None
+                            reporting_for = (result.get('reportingFor') or '').lower()
+                            filing_entity = (result.get('filingEntity') or '').lower()
+                            result_cik = result.get('cik', '')
+                            
+                            if (entity_name in reporting_for or 
+                                entity_name in filing_entity or
+                                (entity_cik and result_cik == entity_cik)):
+                                entity_matches = True
+                                break
+                        if not entity_matches:
+                            continue
+                
+                # Filter by forms (OR logic - any selected form matches)
+                if client_filters.get('forms'):
+                    forms = client_filters['forms']
+                    if isinstance(forms, list) and len(forms) > 0:
+                        if result.get('form') not in forms:
+                            continue
+                
+                # Filter by locations (OR logic - any selected location matches)
+                if client_filters.get('locations'):
+                    locations = client_filters['locations']
+                    if isinstance(locations, list) and len(locations) > 0:
+                        result_located = (result.get('located') or '').lower()
+                        location_matches = any(loc.lower() in result_located for loc in locations)
+                        if not location_matches:
+                            continue
+                
+                # Filter by incorporation states (OR logic - any selected state matches)
+                if client_filters.get('incorporationStates'):
+                    states = client_filters['incorporationStates']
+                    if isinstance(states, list) and len(states) > 0:
+                        result_incorporated = (result.get('incorporated') or '').lower()
+                        state_matches = any(state.lower() in result_incorporated for state in states)
+                        if not state_matches:
+                            continue
+                
+                filtered_results.append(result)
+            
+            results = filtered_results
+            logger.info(f"Applied client filters: {len(results)} results after filtering (from {original_count} original)")
         
         return {
             'success': True,
@@ -1027,11 +1043,22 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
             'columns': body.get('columns', [])
         }
         
+        # Extract page number (default to 1)
+        page = body.get('page', 1)
+        try:
+            page = int(page)
+            if page < 1:
+                page = 1
+        except (ValueError, TypeError):
+            page = 1
+        
+        # Extract client-side filters (for filtering results before returning)
+        client_filters = body.get('clientFilters')
+        
         # Remove None values
         search_params = {k: v for k, v in search_params.items() if v is not None}
         
-        # Always fetch all results (up to 1000) for client-side filtering
-        result = search_by_search_index_api(search_params)
+        result = search_by_search_index_api(search_params, page=page, client_filters=client_filters)
         
         return {
             'statusCode': 200 if result.get('success') else 500,
