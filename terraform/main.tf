@@ -603,6 +603,32 @@ resource "aws_iam_policy" "lambda_invoke_policy" {
   tags = var.common_tags
 }
 
+# IAM Policy for SEC Search Lambda to access S3 filings bucket
+resource "aws_iam_policy" "sec_search_s3_policy" {
+  name        = "${var.project_name}-sec-search-s3-policy-${var.environment}"
+  description = "Policy for SEC Search Lambda to access S3 filings bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::cosine-sec-filings-${var.environment}",
+          "arn:aws:s3:::cosine-sec-filings-${var.environment}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
 # IAM Policy for Lambda functions to access DynamoDB
 resource "aws_iam_policy" "lambda_dynamodb_policy" {
   name        = "${var.project_name}-lambda-dynamodb-policy-${var.environment}"
@@ -1954,6 +1980,7 @@ module "sec_search_lambda" {
     LOG_LEVEL               = var.environment == "development" ? "DEBUG" : "INFO"
     MAX_RESULTS             = "10"
     SEC_FILINGS_CACHE_TABLE = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
+    SEC_FILINGS_S3_BUCKET   = "cosine-sec-filings-${var.environment}"
   }
 
 
@@ -1962,10 +1989,11 @@ module "sec_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for caching
+  # Additional IAM policies - DynamoDB access for caching and S3 access for filing storage
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn
+    data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
+    aws_iam_policy.sec_search_s3_policy.arn
   ]
 
   tags = var.common_tags

@@ -31,6 +31,10 @@ DYNAMODB_TABLE_NAME = os.environ.get('SEC_FILINGS_CACHE_TABLE')
 dynamodb = boto3.resource('dynamodb') if DYNAMODB_TABLE_NAME else None
 cache_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if dynamodb and DYNAMODB_TABLE_NAME else None
 
+# S3 configuration for storing downloaded filings
+S3_BUCKET_NAME = os.environ.get('SEC_FILINGS_S3_BUCKET', 'cosine-sec-filings-production')
+s3_client = boto3.client('s3') if S3_BUCKET_NAME else None
+
 
 def create_session():
     """Create a requests session with proper headers"""
@@ -327,6 +331,134 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
     except Exception as e:
         logger.error(f"Error scraping filing page: {e}")
         return []
+
+
+def download_document_to_s3(document_url: str, filing_id: str, filename: str) -> Optional[str]:
+    """
+    Download a document from SEC and store it in S3
+    
+    Args:
+        document_url: URL of the document to download
+        filing_id: Filing ID (used as S3 prefix)
+        filename: Filename to use in S3 (extracted from URL or generated)
+    
+    Returns:
+        S3 key if successful, None otherwise
+    """
+    if not s3_client or not S3_BUCKET_NAME:
+        logger.warning("S3 client not configured, skipping download")
+        return None
+    
+    session = create_session()
+    
+    try:
+        # Add delay to avoid rate limiting
+        time.sleep(0.1)
+        
+        # Download the document
+        response = session.get(document_url, timeout=30)
+        response.raise_for_status()
+        
+        if len(response.content) == 0:
+            logger.warning(f"Empty content for {document_url}")
+            return None
+        
+        # Determine content type from extension or response headers
+        content_type = response.headers.get('Content-Type', 'application/octet-stream')
+        if filename.endswith('.xml'):
+            content_type = 'application/xml'
+        elif filename.endswith(('.html', '.htm')):
+            content_type = 'text/html'
+        elif filename.endswith('.txt'):
+            content_type = 'text/plain'
+        elif filename.endswith('.pdf'):
+            content_type = 'application/pdf'
+        
+        # Generate S3 key: filings/{filing_id}/{filename}
+        s3_key = f"filings/{filing_id}/{filename}"
+        
+        # Upload to S3
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=s3_key,
+            Body=response.content,
+            ContentType=content_type
+        )
+        
+        logger.info(f"Downloaded and stored {document_url} to s3://{S3_BUCKET_NAME}/{s3_key}")
+        return s3_key
+        
+    except Exception as e:
+        logger.error(f"Error downloading document {document_url}: {e}")
+        return None
+
+
+def download_filing_documents(filing_id: str, filing_page_url: str, document_urls: List[str]) -> Dict[str, Any]:
+    """
+    Download all documents for a filing to S3
+    
+    Args:
+        filing_id: Filing ID (used as S3 prefix)
+        filing_page_url: URL to the filing page (index.htm)
+        document_urls: List of document URLs to download
+    
+    Returns:
+        Dict with:
+        - filingPageS3Key: S3 key for the filing page (index.htm)
+        - documentS3Keys: Dict mapping document URL to S3 key
+        - success: Boolean indicating if at least one document was downloaded
+    """
+    result = {
+        'filingPageS3Key': None,
+        'documentS3Keys': {},
+        'success': False
+    }
+    
+    if not s3_client or not S3_BUCKET_NAME:
+        logger.warning("S3 client not configured, skipping downloads")
+        return result
+    
+    # Download filing page (index.htm)
+    if filing_page_url:
+        try:
+            # Extract filename from URL
+            filename = filing_page_url.split('/')[-1]
+            if not filename or filename == '':
+                filename = 'index.htm'
+            
+            filing_page_s3_key = download_document_to_s3(filing_page_url, filing_id, filename)
+            if filing_page_s3_key:
+                result['filingPageS3Key'] = filing_page_s3_key
+                result['success'] = True
+        except Exception as e:
+            logger.error(f"Error downloading filing page {filing_page_url}: {e}")
+    
+    # Download each document
+    for doc_url in document_urls:
+        try:
+            # Extract filename from URL
+            filename = doc_url.split('/')[-1]
+            if not filename or filename == '':
+                # Generate filename from URL path
+                path_parts = doc_url.split('/')
+                if len(path_parts) > 1:
+                    filename = path_parts[-1]
+                else:
+                    filename = f"document_{hash(doc_url) % 10000}.xml"
+            
+            # Clean filename (remove query params if any)
+            if '?' in filename:
+                filename = filename.split('?')[0]
+            
+            s3_key = download_document_to_s3(doc_url, filing_id, filename)
+            if s3_key:
+                result['documentS3Keys'][doc_url] = s3_key
+                result['success'] = True
+        except Exception as e:
+            logger.error(f"Error downloading document {doc_url}: {e}")
+            continue
+    
+    return result
 
 
 def get_company_search_preview(search_term: str) -> List[Dict[str, Any]]:
@@ -821,6 +953,10 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 elif not isinstance(document_urls, list):
                     document_urls = []
                 
+                # Check if documents are already in S3, if not download them
+                filing_page_url = cached_item.get('filingPageUrl', '')
+                download_result = download_filing_documents(filing_id, filing_page_url, document_urls)
+                
                 # Return cached data
                 result = {
                     'form': cached_item.get('form', filing_data['form']),
@@ -833,9 +969,11 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'fileNumber': cached_item.get('fileNumber', filing_data['fileNumber']),
                     'filmNumber': cached_item.get('filmNumber', filing_data['filmNumber']),
                     'accession': cached_item.get('accession', filing_data['accession']),
-                    'filingPageUrl': cached_item.get('filingPageUrl', ''),
+                    'filingPageUrl': filing_page_url,
                     'documentUrls': document_urls,
-                    'adsh': cached_item.get('adsh', filing_data['adsh'])
+                    'adsh': cached_item.get('adsh', filing_data['adsh']),
+                    'filingPageS3Key': download_result.get('filingPageS3Key'),
+                    'documentS3Keys': download_result.get('documentS3Keys', {})
                 }
                 results.append(result)
             else:
@@ -860,6 +998,9 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     if document_urls:
                         primary_document_url = document_urls[0]
                 
+                # Download filing documents to S3
+                download_result = download_filing_documents(filing_id, filing_page_url, document_urls)
+                
                 # Prepare result
                 result = {
                     'form': filing_data['form'],
@@ -874,7 +1015,9 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'accession': filing_data['accession'],
                     'filingPageUrl': filing_page_url,
                     'documentUrls': document_urls,
-                    'adsh': filing_data['adsh']
+                    'adsh': filing_data['adsh'],
+                    'filingPageS3Key': download_result.get('filingPageS3Key'),
+                    'documentS3Keys': download_result.get('documentS3Keys', {})
                 }
                 results.append(result)
                 

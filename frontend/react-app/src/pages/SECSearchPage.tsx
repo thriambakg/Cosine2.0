@@ -83,7 +83,6 @@ const DEFAULT_COLUMNS = [
   'Incorporated',
   'File number',
   'Film number',
-  'Filing Page',
 ];
 
 // SEC Form Categories (from SEC website)
@@ -709,11 +708,6 @@ const SECSearchPage: React.FC = () => {
     incorporation_filters?: Array<{ state: string; count: number }>;
   }>({});
   
-  // Store last search request details for status indicator
-  const [lastSearchRequest, setLastSearchRequest] = useState<{
-    params: SECSearchParams;
-    timestamp: Date;
-  } | null>(null);
   
   // Filter sidebar state
   const [expandedFilters, setExpandedFilters] = useState({
@@ -742,6 +736,7 @@ const SECSearchPage: React.FC = () => {
   const { execute: executeAutocomplete, loading: autocompleteLoading } = useSECAutocomplete();
   const [isFetchingAll, setIsFetchingAll] = useState<boolean>(false);
   const [fetchProgress, setFetchProgress] = useState<{ currentPage: number; totalPages: number | null } | null>(null);
+  const [selectedFiling, setSelectedFiling] = useState<SECSearchResult | null>(null);
 
   // Debounced autocomplete
   useEffect(() => {
@@ -846,12 +841,6 @@ const SECSearchPage: React.FC = () => {
   const fetchAllResults = async (params: SECSearchParams) => {
     setIsFetchingAll(true);
     setFetchProgress({ currentPage: 1, totalPages: null });
-    
-    // Store request details for status indicator
-    setLastSearchRequest({
-      params: { ...params },
-      timestamp: new Date(),
-    });
     
     console.log('🔍 Starting search:', { params, timestamp: new Date().toISOString() });
     
@@ -1208,8 +1197,6 @@ const SECSearchPage: React.FC = () => {
         return result.fileNumber || 'N/A';
       case 'Film number':
         return result.filmNumber || 'N/A';
-      case 'Filing Page':
-        return result.filingPageUrl || 'N/A';
       default:
         return 'N/A';
     }
@@ -2527,7 +2514,7 @@ const SECSearchPage: React.FC = () => {
                   </Typography>
                   
                   {/* Status Indicator */}
-                  {lastSearchRequest && (
+                  {allSearchResults.length > 0 || isFetchingAll ? (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       {totalFound > 0 ? (
                         <Chip
@@ -2560,30 +2547,8 @@ const SECSearchPage: React.FC = () => {
                           }}
                         />
                       ) : null}
-                      
-                      {/* Request Details Link */}
-                      <Chip
-                        label="View Request"
-                        onClick={() => {
-                          console.log('📡 Request config:', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(lastSearchRequest.params),
-                          });
-                          console.log('📡 Request timestamp:', lastSearchRequest.timestamp.toISOString());
-                        }}
-                        sx={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#93c5fd',
-                          border: '1px solid #3b82f6',
-                          cursor: 'pointer',
-                          '&:hover': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                          },
-                        }}
-                      />
                     </Box>
-                  )}
+                  ) : null}
                 </Box>
                 
                 {totalFound > 0 ? (
@@ -2659,10 +2624,7 @@ const SECSearchPage: React.FC = () => {
                       {shouldShowColumn('Film number') && (
                         <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Film number</TableCell>
                       )}
-                      {shouldShowColumn('Filing Page') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Filing Page</TableCell>
-                      )}
-                      <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Documents</TableCell>
+                      <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -2695,64 +2657,22 @@ const SECSearchPage: React.FC = () => {
                         {shouldShowColumn('Film number') && (
                           <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Film number')}</TableCell>
                         )}
-                        {shouldShowColumn('Filing Page') && (
-                          <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>
-                            {result.filingPageUrl ? (
-                              <Link
-                                href={result.filingPageUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                sx={{
-                                  color: '#3b82f6',
-                                  textDecoration: 'none',
-                                  fontSize: '0.875rem',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 0.5,
-                                  '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
-                                }}
-                              >
-                                <OpenInNewIcon sx={{ fontSize: 14 }} />
-                                View Filing
-                              </Link>
-                            ) : (
-                              <Typography variant="body2" sx={{ color: '#9ca3af' }}>N/A</Typography>
-                            )}
-                          </TableCell>
-                        )}
                         <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>
-                          {result.documentUrls && Array.isArray(result.documentUrls) && result.documentUrls.length > 0 ? (
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                              {result.documentUrls.slice(0, 3).map((url, urlIndex) => (
-                                <Link
-                                  key={urlIndex}
-                                  href={url || '#'}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  sx={{
-                                    color: '#3b82f6',
-                                    textDecoration: 'none',
-                                    fontSize: '0.875rem',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 0.5,
-                                    '&:hover': { color: '#60a5fa' },
-                                  }}
-                                >
-                                  <DocumentIcon sx={{ fontSize: 16 }} />
-                                  {url ? (url.split('/').pop()?.substring(0, 30) || 'Document') + '...' : 'Document'}
-                                  <OpenInNewIcon sx={{ fontSize: 14 }} />
-                                </Link>
-                              ))}
-                              {result.documentUrls.length > 3 && (
-                                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                                  +{result.documentUrls.length - 3} more
-                                </Typography>
-                              )}
-                            </Box>
-                          ) : (
-                            <Typography variant="body2" sx={{ color: '#9ca3af' }}>No documents</Typography>
-                          )}
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => setSelectedFiling(result)}
+                            sx={{
+                              color: '#3b82f6',
+                              borderColor: '#3b82f6',
+                              '&:hover': {
+                                borderColor: '#60a5fa',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            View Filing
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -2864,6 +2784,162 @@ const SECSearchPage: React.FC = () => {
           </Box>
         )}
       </Container>
+
+      {/* Filing Details Dialog */}
+      <Dialog
+        open={selectedFiling !== null}
+        onClose={() => setSelectedFiling(null)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '2px solid #374151',
+            borderRadius: '8px',
+            color: '#ffffff',
+          },
+        }}
+      >
+        {selectedFiling && (
+          <>
+            <DialogTitle sx={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              borderBottom: '1px solid #374151',
+              pb: 2,
+            }}>
+              <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                Filing Details
+              </Typography>
+              <IconButton
+                onClick={() => setSelectedFiling(null)}
+                sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}
+              >
+                <CloseIcon />
+              </IconButton>
+            </DialogTitle>
+            <DialogContent sx={{ mt: 2 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
+                    Filing Information
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#6b7280' }}>Form</Typography>
+                      <Typography variant="body2" sx={{ color: '#ffffff' }}>{selectedFiling.form}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#6b7280' }}>Filing Date</Typography>
+                      <Typography variant="body2" sx={{ color: '#ffffff' }}>{selectedFiling.filingDate}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#6b7280' }}>Reporting For</Typography>
+                      <Typography variant="body2" sx={{ color: '#ffffff' }}>{selectedFiling.reportingFor}</Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
+                    Filing Page
+                  </Typography>
+                  {selectedFiling.filingPageUrl ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <Link
+                        href={selectedFiling.filingPageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        sx={{
+                          color: '#3b82f6',
+                          textDecoration: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.5,
+                          '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                        }}
+                      >
+                        <OpenInNewIcon sx={{ fontSize: 16 }} />
+                        View on SEC.gov
+                      </Link>
+                      {selectedFiling.filingPageS3Key && (
+                        <Typography variant="caption" sx={{ color: '#6b7280' }}>
+                          S3: {selectedFiling.filingPageS3Key}
+                        </Typography>
+                      )}
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>Not available</Typography>
+                  )}
+                </Grid>
+
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
+                    Documents ({selectedFiling.documentUrls?.length || 0})
+                  </Typography>
+                  {selectedFiling.documentUrls && selectedFiling.documentUrls.length > 0 ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
+                      {selectedFiling.documentUrls.map((url, index) => {
+                        const filename = url.split('/').pop() || `Document ${index + 1}`;
+                        const s3Key = selectedFiling.documentS3Keys?.[url];
+                        return (
+                          <Box
+                            key={index}
+                            sx={{
+                              p: 1.5,
+                              border: '1px solid #374151',
+                              borderRadius: '4px',
+                              backgroundColor: 'rgba(31, 41, 55, 0.5)',
+                            }}
+                          >
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                              <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
+                              <Link
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  color: '#3b82f6',
+                                  textDecoration: 'none',
+                                  fontSize: '0.875rem',
+                                  flex: 1,
+                                  '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                                }}
+                              >
+                                {filename}
+                                <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
+                              </Link>
+                            </Box>
+                            {s3Key && (
+                              <Typography variant="caption" sx={{ color: '#6b7280', display: 'block', mt: 0.5 }}>
+                                S3: {s3Key}
+                              </Typography>
+                            )}
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No documents available</Typography>
+                  )}
+                </Grid>
+              </Grid>
+            </DialogContent>
+            <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+              <Button
+                onClick={() => setSelectedFiling(null)}
+                sx={{
+                  color: '#9ca3af',
+                  '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' },
+                }}
+              >
+                Close
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
     </Box>
   );
 };

@@ -780,6 +780,8 @@ export interface SECSearchResult {
   filingPageUrl: string | null;
   documentUrls: string[];
   adsh: string;
+  filingPageS3Key?: string | null;
+  documentS3Keys?: Record<string, string>;
 }
 
 export interface SECFormFilter {
