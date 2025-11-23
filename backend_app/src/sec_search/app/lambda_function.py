@@ -1070,16 +1070,13 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'filingPageUrl': filing_page_url,
                     'documentUrls': document_urls,
                     'adsh': cached_item.get('adsh', filing_data['adsh']),
-                    'filingId': filing_id,  # Store filing_id for download step
+                    'filingId': filing_id,
                 }
                 results.append(result)
                 
-                # Add to download list (even cached filings may need S3 download if not already there)
-                filings_to_download.append({
-                    'filingId': filing_id,
-                    'filingPageUrl': filing_page_url,
-                    'documentUrls': document_urls,
-                })
+                # Skip S3 download for cached filings - they should already be in S3
+                # Since indexing and downloading are tied together, if it's in DynamoDB, files should already be in S3
+                logger.info(f"Skipping S3 download for cached filing {filing_id} - files should already be in S3")
             else:
                 # Cache miss - need to scrape
                 logger.info(f"Cache miss for filing {filing_id}, scraping...")
@@ -1145,10 +1142,11 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     logger.error(f"Failed to cache filing {filing_data.get('filingId')}: {e}")
                     # Continue - don't fail the request if caching fails
         
-        # Step 2: Download documents to S3 for all filings (cached and new)
+        # Step 2: Download documents to S3 for NEW filings only (not cached ones)
+        # Cached filings should already have their files in S3 since indexing and downloading are tied together
         # This happens after DynamoDB storage to ensure the index exists
         if filings_to_download:
-            logger.info(f"Downloading documents to S3 for {len(filings_to_download)} filings")
+            logger.info(f"Downloading documents to S3 for {len(filings_to_download)} NEW filings (cached filings skipped)")
             for filing_download_info in filings_to_download:
                 try:
                     filing_id = filing_download_info.get('filingId')

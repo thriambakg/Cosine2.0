@@ -2808,10 +2808,10 @@ const SECSearchPage: React.FC = () => {
               alignItems: 'center',
               borderBottom: '1px solid #374151',
               pb: 2,
+              color: '#ffffff',
+              fontWeight: 600,
             }}>
-              <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                Filing Details
-              </Typography>
+              Filing Details: {selectedFiling.form} - {selectedFiling.filingEntity}
               <IconButton
                 onClick={() => setSelectedFiling(null)}
                 sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}
@@ -2863,11 +2863,6 @@ const SECSearchPage: React.FC = () => {
                         <OpenInNewIcon sx={{ fontSize: 16 }} />
                         View on SEC.gov
                       </Link>
-                      {selectedFiling.filingPageS3Key && (
-                        <Typography variant="caption" sx={{ color: '#6b7280' }}>
-                          S3: {selectedFiling.filingPageS3Key}
-                        </Typography>
-                      )}
                     </Box>
                   ) : (
                     <Typography variant="body2" sx={{ color: '#9ca3af' }}>Not available</Typography>
@@ -2882,7 +2877,6 @@ const SECSearchPage: React.FC = () => {
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
                       {selectedFiling.documentUrls.map((url, index) => {
                         const filename = url.split('/').pop() || `Document ${index + 1}`;
-                        const s3Key = selectedFiling.documentS3Keys?.[url];
                         return (
                           <Box
                             key={index}
@@ -2893,7 +2887,7 @@ const SECSearchPage: React.FC = () => {
                               backgroundColor: 'rgba(31, 41, 55, 0.5)',
                             }}
                           >
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                               <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
                               <Link
                                 href={url}
@@ -2911,11 +2905,6 @@ const SECSearchPage: React.FC = () => {
                                 <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
                               </Link>
                             </Box>
-                            {s3Key && (
-                              <Typography variant="caption" sx={{ color: '#6b7280', display: 'block', mt: 0.5 }}>
-                                S3: {s3Key}
-                              </Typography>
-                            )}
                           </Box>
                         );
                       })}
