@@ -256,27 +256,7 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> Dict[str, List[str
         
         document_urls = []
         
-        # Strategy 1: Find all .xml file links (prioritize these)
-        xml_pattern = r'href="([^"]*\.xml[^"]*)"'
-        xml_matches = re.findall(xml_pattern, table_section, re.IGNORECASE)
-        document_urls.extend(xml_matches)
-        
-        # Strategy 2: Look for primary document patterns (highest priority)
-        primary_patterns = [
-            r'href="([^"]*primary[_-]?document[^"]*\.xml[^"]*)"',
-            r'href="([^"]*primarydoc[^"]*\.xml[^"]*)"',
-            r'href="([^"]*document[^"]*\.xml[^"]*)"',
-            r'href="([^"]*doc\d+\.xml[^"]*)"',
-        ]
-        primary_links = []
-        for pattern in primary_patterns:
-            matches = re.findall(pattern, table_section, re.IGNORECASE)
-            primary_links.extend(matches)
-        
-        # Prepend primary links to prioritize them
-        document_urls = primary_links + [link for link in document_urls if link not in primary_links]
-        
-        # Strategy 3: Look for .html/.htm files in the table
+        # Strategy 1: Look for .html/.htm files in the table (prioritize HTML over XML)
         html_pattern = r'href="([^"]*\.(?:html?|htm)[^"]*)"'
         html_matches = re.findall(html_pattern, table_section, re.IGNORECASE)
         html_matches = [link for link in html_matches 
@@ -284,6 +264,28 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> Dict[str, List[str
                        and 'xbrl' not in link.lower()
                        and 'taxonomy' not in link.lower()]
         document_urls.extend(html_matches)
+        
+        # Strategy 2: Find all .xml file links (if no HTML found)
+        xml_pattern = r'href="([^"]*\.xml[^"]*)"'
+        xml_matches = re.findall(xml_pattern, table_section, re.IGNORECASE)
+        document_urls.extend(xml_matches)
+        
+        # Strategy 3: Look for primary document patterns (highest priority)
+        primary_patterns = [
+            r'href="([^"]*primary[_-]?document[^"]*\.(?:xml|html?)[^"]*)"',
+            r'href="([^"]*primarydoc[^"]*\.(?:xml|html?)[^"]*)"',
+            r'href="([^"]*document[^"]*\.(?:xml|html?)[^"]*)"',
+            r'href="([^"]*doc\d+\.(?:xml|html?)[^"]*)"',
+        ]
+        primary_links = []
+        for pattern in primary_patterns:
+            matches = re.findall(pattern, table_section, re.IGNORECASE)
+            primary_links.extend(matches)
+        
+        # Prepend primary links to prioritize them (HTML first if available)
+        primary_html = [link for link in primary_links if link.endswith(('.html', '.htm'))]
+        primary_xml = [link for link in primary_links if link.endswith('.xml')]
+        document_urls = primary_html + primary_xml + [link for link in document_urls if link not in primary_links]
         
         # Strategy 4: Look for .txt files in the table
         txt_pattern = r'href="([^"]*\.txt[^"]*)"'
@@ -316,13 +318,13 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> Dict[str, List[str
                 'schema' not in absolute_url.lower()):
                 absolute_urls.append(absolute_url)
         
-        # Sort: XML files first, then HTML, then TXT
+        # Sort: HTML files first (preferred), then XML, then TXT
         def link_priority(link):
-            if link.endswith('.xml'):
-                return 0
-            elif 'primary' in link.lower() or 'document' in link.lower():
+            if link.endswith(('.html', '.htm')):
+                return 0  # HTML first
+            elif link.endswith('.xml'):
                 return 1
-            elif link.endswith(('.html', '.htm')):
+            elif 'primary' in link.lower() or 'document' in link.lower():
                 return 2
             elif 'doc' in link.lower():
                 return 3
@@ -481,13 +483,11 @@ def download_filing_documents_to_s3(filing_id: str, document_format_files: List[
     
     Returns:
         Dict with:
-        - filingPageS3Key: S3 key for the filing page (index.htm) if downloaded
         - documentFormatFilesS3Keys: Dict mapping document URL to S3 key for Document Format Files
         - dataFilesS3Keys: Dict mapping document URL to S3 key for Data Files
         - success: Boolean indicating if at least one document was downloaded
     """
     result = {
-        'filingPageS3Key': None,
         'documentFormatFilesS3Keys': {},
         'dataFilesS3Keys': {},
         'success': False
@@ -523,95 +523,145 @@ def download_filing_documents_to_s3(filing_id: str, document_format_files: List[
     
     logger.info(f"Downloading documents for filing_id: {filing_id} (Document Format Files: {len(document_format_files)}, Data Files: {len(data_files)})")
     
-    # Download filing page (index.htm) if provided - store at root of filing folder
-    if filing_page_url:
-        try:
-            # Extract filename from URL
-            filename = filing_page_url.split('/')[-1]
-            if not filename or filename == '' or '?' in filename:
-                filename = 'index.htm'
-            
-            # Remove query parameters if any
-            if '?' in filename:
-                filename = filename.split('?')[0]
-            
-            # Sanitize filename
-            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
-            
-            # Store filing page at root level (not in a subfolder)
-            s3_key = f"filings/{filing_id}/{filename}"
-            session = create_session()
-            time.sleep(0.1)
-            response = session.get(filing_page_url, timeout=30)
-            response.raise_for_status()
-            s3_client.put_object(
-                Bucket=S3_BUCKET_NAME,
-                Key=s3_key,
-                Body=response.content,
-                ContentType='text/html'
-            )
-            result['filingPageS3Key'] = s3_key
-            result['success'] = True
-            logger.info(f"Downloaded filing page to {s3_key}")
-        except Exception as e:
-            logger.error(f"Error downloading filing page {filing_page_url}: {e}")
-    
     # Download Document Format Files
+    # Prioritize HTML files over XML - download HTML version if available
     for doc_url in document_format_files:
         try:
-            # Extract filename from URL
-            filename = doc_url.split('/')[-1]
+            # Check if this is an XML file - try to find HTML version
+            html_url = None
+            if doc_url.endswith('.xml'):
+                # Try to find HTML version in common SEC patterns
+                # Pattern 1: xslF345X05/ownership.html (common for Form 4)
+                # Pattern 2: Replace .xml with .html in same directory
+                base_url = '/'.join(doc_url.split('/')[:-1])
+                xml_filename = doc_url.split('/')[-1]
+                html_filename = xml_filename.replace('.xml', '.html')
+                
+                # Try pattern: xslF345X05/{filename}.html
+                possible_html_paths = [
+                    f"{base_url}/xslF345X05/{html_filename}",
+                    f"{base_url}/xslF345X03/{html_filename}",
+                    f"{base_url}/xslF345X05/{html_filename}",
+                    f"{base_url}/{html_filename}",  # Same directory
+                ]
+                
+                # Check if HTML version exists
+                session = create_session()
+                for html_path in possible_html_paths:
+                    try:
+                        time.sleep(0.05)  # Small delay
+                        test_response = session.head(html_path, timeout=10, allow_redirects=True)
+                        if test_response.status_code == 200:
+                            html_url = html_path
+                            logger.info(f"Found HTML version for {doc_url}: {html_url}")
+                            break
+                    except:
+                        continue
+            
+            # Use HTML URL if found, otherwise use original URL
+            download_url = html_url if html_url else doc_url
+            
+            # Extract filename from URL (prefer HTML filename if available)
+            if html_url:
+                filename = html_url.split('/')[-1]
+            else:
+                filename = doc_url.split('/')[-1]
+            
             if not filename or filename == '' or '?' in filename:
                 # Generate filename from URL path
-                path_parts = doc_url.split('/')
+                path_parts = download_url.split('/')
                 if len(path_parts) > 1:
                     filename = path_parts[-1]
                 else:
                     # Fallback: use hash of URL
-                    filename = f"document_{abs(hash(doc_url)) % 100000}.xml"
+                    filename = f"document_{abs(hash(download_url)) % 100000}.html" if html_url else f"document_{abs(hash(download_url)) % 100000}.xml"
             
             # Clean filename (remove query params if any)
             if '?' in filename:
                 filename = filename.split('?')[0]
             
+            # Ensure HTML files have .html extension, XML files have .xml
+            if html_url and not filename.endswith('.html') and not filename.endswith('.htm'):
+                filename = filename.replace('.xml', '.html')
+            
             # Sanitize filename for S3 (remove invalid characters)
             filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
             
-            s3_key = download_document_to_s3(doc_url, filing_id, filename, folder='documentformatfiles')
+            s3_key = download_document_to_s3(download_url, filing_id, filename, folder='documentformatfiles')
             if s3_key:
-                result['documentFormatFilesS3Keys'][doc_url] = s3_key
+                result['documentFormatFilesS3Keys'][doc_url] = s3_key  # Use original URL as key
                 result['success'] = True
-                logger.info(f"Downloaded Document Format File to {s3_key}")
+                logger.info(f"Downloaded Document Format File to {s3_key} (from {download_url})")
         except Exception as e:
             logger.error(f"Error downloading Document Format File {doc_url}: {e}")
             continue
     
     # Download Data Files
+    # Prioritize HTML files over XML - download HTML version if available
     for doc_url in data_files:
         try:
-            # Extract filename from URL
-            filename = doc_url.split('/')[-1]
+            # Check if this is an XML file - try to find HTML version
+            html_url = None
+            if doc_url.endswith('.xml'):
+                # Try to find HTML version
+                base_url = '/'.join(doc_url.split('/')[:-1])
+                xml_filename = doc_url.split('/')[-1]
+                html_filename = xml_filename.replace('.xml', '.html')
+                
+                # Try common patterns
+                possible_html_paths = [
+                    f"{base_url}/xslF345X05/{html_filename}",
+                    f"{base_url}/xslF345X03/{html_filename}",
+                    f"{base_url}/{html_filename}",  # Same directory
+                ]
+                
+                # Check if HTML version exists
+                session = create_session()
+                for html_path in possible_html_paths:
+                    try:
+                        time.sleep(0.05)  # Small delay
+                        test_response = session.head(html_path, timeout=10, allow_redirects=True)
+                        if test_response.status_code == 200:
+                            html_url = html_path
+                            logger.info(f"Found HTML version for data file {doc_url}: {html_url}")
+                            break
+                    except:
+                        continue
+            
+            # Use HTML URL if found, otherwise use original URL
+            download_url = html_url if html_url else doc_url
+            
+            # Extract filename from URL (prefer HTML filename if available)
+            if html_url:
+                filename = html_url.split('/')[-1]
+            else:
+                filename = doc_url.split('/')[-1]
+            
             if not filename or filename == '' or '?' in filename:
                 # Generate filename from URL path
-                path_parts = doc_url.split('/')
+                path_parts = download_url.split('/')
                 if len(path_parts) > 1:
                     filename = path_parts[-1]
                 else:
                     # Fallback: use hash of URL
-                    filename = f"datafile_{abs(hash(doc_url)) % 100000}.xml"
+                    filename = f"datafile_{abs(hash(download_url)) % 100000}.html" if html_url else f"datafile_{abs(hash(download_url)) % 100000}.xml"
             
             # Clean filename (remove query params if any)
             if '?' in filename:
                 filename = filename.split('?')[0]
             
+            # Ensure HTML files have .html extension
+            if html_url and not filename.endswith('.html') and not filename.endswith('.htm'):
+                filename = filename.replace('.xml', '.html')
+            
             # Sanitize filename for S3 (remove invalid characters)
             filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
             
-            s3_key = download_document_to_s3(doc_url, filing_id, filename, folder='datafiles')
+            s3_key = download_document_to_s3(download_url, filing_id, filename, folder='datafiles')
             if s3_key:
-                result['dataFilesS3Keys'][doc_url] = s3_key
+                result['dataFilesS3Keys'][doc_url] = s3_key  # Use original URL as key
                 result['success'] = True
-                logger.info(f"Downloaded Data File to {s3_key}")
+                logger.info(f"Downloaded Data File to {s3_key} (from {download_url})")
         except Exception as e:
             logger.error(f"Error downloading Data File {doc_url}: {e}")
             continue
@@ -1310,7 +1360,6 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     # Update results with S3 keys if this filing is in the current page results
                     for result in results:
                         if result.get('filingId') == filing_id:
-                            result['filingPageS3Key'] = download_result.get('filingPageS3Key')
                             result['documentFormatFilesS3Keys'] = download_result.get('documentFormatFilesS3Keys', {})
                             result['dataFilesS3Keys'] = download_result.get('dataFilesS3Keys', {})
                             break
