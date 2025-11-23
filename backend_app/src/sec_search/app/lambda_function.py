@@ -53,6 +53,7 @@ def create_session():
 def construct_filing_id(form: str, cik: str, file_number: str, film_number: str) -> str:
     """
     Construct a unique filing ID for caching: {form}-{CIK}-{fileNumber}-{filmNumber}
+    This must match the DynamoDB primary key format exactly.
     
     Args:
         form: Form type (e.g., "4", "10-K")
@@ -61,15 +62,32 @@ def construct_filing_id(form: str, cik: str, file_number: str, film_number: str)
         film_number: Film number
     
     Returns:
-        Filing ID string
+        Filing ID string in format: {form}-{CIK}-{fileNumber}-{filmNumber}
     """
-    # Normalize values - use "N/A" for missing values
-    form = str(form) if form and form != 'N/A' else 'N/A'
-    cik = str(cik).zfill(10) if cik and cik != 'N/A' else 'N/A'
-    file_number = str(file_number) if file_number and file_number != 'N/A' else 'N/A'
-    film_number = str(film_number) if film_number and film_number != 'N/A' else 'N/A'
+    # Normalize and validate values - all fields are required for a valid filing ID
+    form = str(form).strip() if form and str(form).strip() and str(form).strip() != 'N/A' else 'N/A'
+    cik = str(cik).strip() if cik and str(cik).strip() and str(cik).strip() != 'N/A' else 'N/A'
+    file_number = str(file_number).strip() if file_number and str(file_number).strip() and str(file_number).strip() != 'N/A' else 'N/A'
+    film_number = str(film_number).strip() if film_number and str(film_number).strip() and str(film_number).strip() != 'N/A' else 'N/A'
     
-    return f"{form}-{cik}-{file_number}-{film_number}"
+    # Pad CIK to 10 digits if it's a valid number
+    if cik != 'N/A' and cik.isdigit():
+        cik = cik.zfill(10)
+    
+    # Construct filing ID - all components must be present
+    # Format: {form}-{CIK}-{fileNumber}-{filmNumber}
+    filing_id = f"{form}-{cik}-{file_number}-{film_number}"
+    
+    # Validate that we have at least form and CIK (file_number and film_number can be N/A for some forms)
+    if form == 'N/A' or cik == 'N/A':
+        logger.error(f"CRITICAL: Invalid filing ID components - missing required fields: form={form}, cik={cik}, file_number={file_number}, film_number={film_number}")
+        # Still return the ID but log as error - this should not happen in production
+    
+    # Ensure the filing_id has exactly 3 dashes (4 components)
+    if filing_id.count('-') != 3:
+        logger.error(f"CRITICAL: Invalid filing_id format - expected 3 dashes, got {filing_id.count('-')}: '{filing_id}'")
+    
+    return filing_id
 
 
 def get_cached_filings(filing_ids: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -393,18 +411,20 @@ def download_document_to_s3(document_url: str, filing_id: str, filename: str) ->
         return None
 
 
-def download_filing_documents(filing_id: str, filing_page_url: str, document_urls: List[str]) -> Dict[str, Any]:
+def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], filing_page_url: Optional[str] = None) -> Dict[str, Any]:
     """
-    Download all documents for a filing to S3
+    Download all documents for a filing to S3.
+    This method is called after the DynamoDB index is created.
+    Creates folder structure: filings/{filing_id}/
     
     Args:
-        filing_id: Filing ID (used as S3 prefix)
-        filing_page_url: URL to the filing page (index.htm)
-        document_urls: List of document URLs to download
+        filing_id: DynamoDB primary key (filingId) in format: {form}-{CIK}-{fileNumber}-{filmNumber}
+        document_urls: List of document URLs to download from SEC
+        filing_page_url: Optional URL to the filing page (index.htm)
     
     Returns:
         Dict with:
-        - filingPageS3Key: S3 key for the filing page (index.htm)
+        - filingPageS3Key: S3 key for the filing page (index.htm) if downloaded
         - documentS3Keys: Dict mapping document URL to S3 key
         - success: Boolean indicating if at least one document was downloaded
     """
@@ -418,18 +438,41 @@ def download_filing_documents(filing_id: str, filing_page_url: str, document_url
         logger.warning("S3 client not configured, skipping downloads")
         return result
     
-    # Download filing page (index.htm)
+    # Validate filing_id format - must have 4 components separated by dashes
+    # Expected format: {form}-{CIK}-{fileNumber}-{filmNumber} (matches DynamoDB primary key)
+    if not filing_id or filing_id.count('-') < 3:
+        logger.error(f"Invalid filing_id format for S3 download: '{filing_id}'. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. Skipping download.")
+        return result
+    
+    # Sanitize filing_id for S3 (remove any invalid characters)
+    import re
+    sanitized_filing_id = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filing_id)
+    if sanitized_filing_id != filing_id:
+        logger.warning(f"Sanitized filing_id for S3: {filing_id} -> {sanitized_filing_id}")
+        filing_id = sanitized_filing_id
+    
+    logger.info(f"Downloading documents for filing_id: {filing_id} (folder: filings/{filing_id}/)")
+    
+    # Download filing page (index.htm) if provided
     if filing_page_url:
         try:
             # Extract filename from URL
             filename = filing_page_url.split('/')[-1]
-            if not filename or filename == '':
+            if not filename or filename == '' or '?' in filename:
                 filename = 'index.htm'
+            
+            # Remove query parameters if any
+            if '?' in filename:
+                filename = filename.split('?')[0]
+            
+            # Sanitize filename
+            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
             
             filing_page_s3_key = download_document_to_s3(filing_page_url, filing_id, filename)
             if filing_page_s3_key:
                 result['filingPageS3Key'] = filing_page_s3_key
                 result['success'] = True
+                logger.info(f"Downloaded filing page to {filing_page_s3_key}")
         except Exception as e:
             logger.error(f"Error downloading filing page {filing_page_url}: {e}")
     
@@ -438,25 +481,35 @@ def download_filing_documents(filing_id: str, filing_page_url: str, document_url
         try:
             # Extract filename from URL
             filename = doc_url.split('/')[-1]
-            if not filename or filename == '':
+            if not filename or filename == '' or '?' in filename:
                 # Generate filename from URL path
                 path_parts = doc_url.split('/')
                 if len(path_parts) > 1:
                     filename = path_parts[-1]
                 else:
-                    filename = f"document_{hash(doc_url) % 10000}.xml"
+                    # Fallback: use hash of URL
+                    filename = f"document_{abs(hash(doc_url)) % 100000}.xml"
             
             # Clean filename (remove query params if any)
             if '?' in filename:
                 filename = filename.split('?')[0]
             
+            # Sanitize filename for S3 (remove invalid characters)
+            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
+            
             s3_key = download_document_to_s3(doc_url, filing_id, filename)
             if s3_key:
                 result['documentS3Keys'][doc_url] = s3_key
                 result['success'] = True
+                logger.info(f"Downloaded document to {s3_key}")
         except Exception as e:
             logger.error(f"Error downloading document {doc_url}: {e}")
             continue
+    
+    if result['success']:
+        logger.info(f"Successfully downloaded {len(result['documentS3Keys'])} document(s) for filing_id: {filing_id}")
+    else:
+        logger.warning(f"No documents were successfully downloaded for filing_id: {filing_id}")
     
     return result
 
@@ -911,8 +964,27 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             # Extract accession number from _id
             accession = _id.split(':')[0] if ':' in _id else ''
             
-            # Construct filing ID for caching
-            filing_id = construct_filing_id(form, cik, file_number, film_number)
+            # Construct filing ID for caching - must match DynamoDB primary key format
+            # Ensure all values are strings and not None
+            form_str = str(form) if form is not None else 'N/A'
+            cik_str = str(cik) if cik is not None and cik != 'N/A' else 'N/A'
+            file_number_str = str(file_number) if file_number is not None and file_number != 'N/A' else 'N/A'
+            film_number_str = str(film_number) if film_number is not None and film_number != 'N/A' else 'N/A'
+            
+            filing_id = construct_filing_id(form_str, cik_str, file_number_str, film_number_str)
+            
+            # Validate filing_id format - must have exactly 3 dashes (4 components)
+            if filing_id.count('-') != 3:
+                logger.error(f"CRITICAL: Invalid filing_id format for DynamoDB/S3: '{filing_id}'. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. "
+                           f"Components: form='{form_str}', cik='{cik_str}', file_number='{file_number_str}', film_number='{film_number_str}'. "
+                           f"Skipping this filing.")
+                continue  # Skip this filing - don't add to list
+            
+            # Additional validation - ensure form and CIK are not N/A
+            if filing_id.startswith('N/A-') or filing_id.split('-')[1] == 'N/A':
+                logger.error(f"CRITICAL: Invalid filing_id - form or CIK is N/A: '{filing_id}'. Skipping this filing.")
+                continue  # Skip this filing
+            
             filing_ids.append(filing_id)
             
             filing_data_list.append({
@@ -936,10 +1008,16 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         
         # Process results: use cache if available, otherwise scrape
         results = []
-        filings_to_cache = []
+        filings_to_store_in_dynamodb = []  # New filings to store in DynamoDB
+        filings_to_download = []  # All filings (cached and new) that need S3 downloads
         
         for filing_data in filing_data_list:
-            filing_id = filing_data['filingId']
+            filing_id = filing_data.get('filingId', '')
+            
+            # Validate filing_id before proceeding
+            if not filing_id or filing_id.count('-') < 3:
+                logger.error(f"Invalid filing_id in filing_data: '{filing_id}'. Skipping this filing.")
+                continue
             
             # Check if filing is in cache
             if filing_id in cached_filings:
@@ -953,11 +1031,8 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 elif not isinstance(document_urls, list):
                     document_urls = []
                 
-                # Check if documents are already in S3, if not download them
-                filing_page_url = cached_item.get('filingPageUrl', '')
-                download_result = download_filing_documents(filing_id, filing_page_url, document_urls)
-                
                 # Return cached data
+                filing_page_url = cached_item.get('filingPageUrl', '')
                 result = {
                     'form': cached_item.get('form', filing_data['form']),
                     'filingDate': cached_item.get('filingDate', filing_data['filingDate']),
@@ -972,10 +1047,16 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'filingPageUrl': filing_page_url,
                     'documentUrls': document_urls,
                     'adsh': cached_item.get('adsh', filing_data['adsh']),
-                    'filingPageS3Key': download_result.get('filingPageS3Key'),
-                    'documentS3Keys': download_result.get('documentS3Keys', {})
+                    'filingId': filing_id,  # Store filing_id for download step
                 }
                 results.append(result)
+                
+                # Add to download list (even cached filings may need S3 download if not already there)
+                filings_to_download.append({
+                    'filingId': filing_id,
+                    'filingPageUrl': filing_page_url,
+                    'documentUrls': document_urls,
+                })
             else:
                 # Cache miss - need to scrape
                 logger.info(f"Cache miss for filing {filing_id}, scraping...")
@@ -998,9 +1079,6 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     if document_urls:
                         primary_document_url = document_urls[0]
                 
-                # Download filing documents to S3
-                download_result = download_filing_documents(filing_id, filing_page_url, document_urls)
-                
                 # Prepare result
                 result = {
                     'form': filing_data['form'],
@@ -1016,26 +1094,74 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'filingPageUrl': filing_page_url,
                     'documentUrls': document_urls,
                     'adsh': filing_data['adsh'],
-                    'filingPageS3Key': download_result.get('filingPageS3Key'),
-                    'documentS3Keys': download_result.get('documentS3Keys', {})
+                    'filingId': filing_id,  # Store filing_id for download step
                 }
                 results.append(result)
                 
-                # Prepare data for caching
+                # Prepare data for DynamoDB storage and download
                 filing_data['filingPageUrl'] = filing_page_url
                 filing_data['documentUrls'] = document_urls
                 filing_data['primaryDocumentUrl'] = primary_document_url
-                filings_to_cache.append(filing_data)
+                filings_to_store_in_dynamodb.append(filing_data)
+                
+                # Add to download list
+                filings_to_download.append({
+                    'filingId': filing_id,
+                    'filingPageUrl': filing_page_url,
+                    'documentUrls': document_urls,
+                })
         
-        # Store new filings in cache (async - don't block response)
-        if filings_to_cache:
-            logger.info(f"Storing {len(filings_to_cache)} new filings in cache")
-            for filing_data in filings_to_cache:
+        # Step 1: Store new filings in DynamoDB cache
+        if filings_to_store_in_dynamodb:
+            logger.info(f"Storing {len(filings_to_store_in_dynamodb)} new filings in DynamoDB cache")
+            for filing_data in filings_to_store_in_dynamodb:
                 try:
                     store_filing_in_cache(filing_data)
+                    logger.info(f"Stored filing {filing_data.get('filingId')} in DynamoDB cache")
                 except Exception as e:
                     logger.error(f"Failed to cache filing {filing_data.get('filingId')}: {e}")
                     # Continue - don't fail the request if caching fails
+        
+        # Step 2: Download documents to S3 for all filings (cached and new)
+        # This happens after DynamoDB storage to ensure the index exists
+        if filings_to_download:
+            logger.info(f"Downloading documents to S3 for {len(filings_to_download)} filings")
+            for filing_download_info in filings_to_download:
+                try:
+                    filing_id = filing_download_info.get('filingId')
+                    document_urls = filing_download_info.get('documentUrls', [])
+                    filing_page_url = filing_download_info.get('filingPageUrl', '')
+                    
+                    if not filing_id:
+                        logger.warning(f"Skipping S3 download: missing filing_id")
+                        continue
+                    
+                    if not document_urls or len(document_urls) == 0:
+                        logger.info(f"Skipping S3 download for filing_id {filing_id}: no document URLs to download")
+                        continue
+                    
+                    # Validate filing_id format one more time before downloading
+                    if filing_id.count('-') < 3:
+                        logger.error(f"Invalid filing_id format '{filing_id}' - skipping S3 download. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}")
+                        continue
+                    
+                    logger.info(f"Downloading {len(document_urls)} document(s) to S3 for filing_id: {filing_id}")
+                    download_result = download_filing_documents_to_s3(
+                        filing_id=filing_id,
+                        document_urls=document_urls,
+                        filing_page_url=filing_page_url if filing_page_url else None
+                    )
+                    
+                    # Update results with S3 keys if this filing is in the current page results
+                    for result in results:
+                        if result.get('filingId') == filing_id:
+                            result['filingPageS3Key'] = download_result.get('filingPageS3Key')
+                            result['documentS3Keys'] = download_result.get('documentS3Keys', {})
+                            break
+                        
+                except Exception as e:
+                    logger.error(f"Failed to download documents for filing {filing_download_info.get('filingId')}: {e}")
+                    # Continue - don't fail the request if downloading fails
         
         return {
             'success': True,
