@@ -76,6 +76,9 @@ def construct_filing_id(form: str, cik: str, file_number: str, film_number: str)
     
     # Construct filing ID - all components must be present
     # Format: {form}-{CIK}-{fileNumber}-{filmNumber}
+    # Note: file_number may contain dashes (e.g., "001-34756"), so the total dash count may be > 3
+    # When split by '-', we get: [form, CIK, ...file_number_parts..., film_number]
+    # So we need at least 4 parts: form, CIK, file_number (may be multiple parts), film_number
     filing_id = f"{form}-{cik}-{file_number}-{film_number}"
     
     # Validate that we have at least form and CIK (file_number and film_number can be N/A for some forms)
@@ -83,9 +86,11 @@ def construct_filing_id(form: str, cik: str, file_number: str, film_number: str)
         logger.error(f"CRITICAL: Invalid filing ID components - missing required fields: form={form}, cik={cik}, file_number={file_number}, film_number={film_number}")
         # Still return the ID but log as error - this should not happen in production
     
-    # Ensure the filing_id has exactly 3 dashes (4 components)
-    if filing_id.count('-') != 3:
-        logger.error(f"CRITICAL: Invalid filing_id format - expected 3 dashes, got {filing_id.count('-')}: '{filing_id}'")
+    # Validate structure: split by '-' and ensure we have at least 4 parts
+    # Parts: [form, CIK, ...file_number_parts..., film_number]
+    parts = filing_id.split('-')
+    if len(parts) < 4:
+        logger.error(f"CRITICAL: Invalid filing_id format - expected at least 4 parts when split by '-', got {len(parts)}: '{filing_id}' (parts: {parts})")
     
     return filing_id
 
@@ -438,10 +443,17 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
         logger.warning("S3 client not configured, skipping downloads")
         return result
     
-    # Validate filing_id format - must have 4 components separated by dashes
+    # Validate filing_id format - must have at least 4 components when split by dashes
     # Expected format: {form}-{CIK}-{fileNumber}-{filmNumber} (matches DynamoDB primary key)
-    if not filing_id or filing_id.count('-') < 3:
-        logger.error(f"Invalid filing_id format for S3 download: '{filing_id}'. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. Skipping download.")
+    # Note: file_number may contain dashes (e.g., "001-34756"), so we split and check parts
+    if not filing_id:
+        logger.error(f"Invalid filing_id format for S3 download: missing filing_id. Skipping download.")
+        return result
+    
+    parts = filing_id.split('-')
+    if len(parts) < 4:
+        logger.error(f"Invalid filing_id format for S3 download: '{filing_id}'. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. "
+                    f"Split into {len(parts)} parts: {parts}. Skipping download.")
         return result
     
     # Sanitize filing_id for S3 (remove any invalid characters)
@@ -973,15 +985,19 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             
             filing_id = construct_filing_id(form_str, cik_str, file_number_str, film_number_str)
             
-            # Validate filing_id format - must have exactly 3 dashes (4 components)
-            if filing_id.count('-') != 3:
+            # Validate filing_id format - must have at least 3 dashes (4 components minimum)
+            # Note: file_number may contain dashes (e.g., "001-34756"), so total dashes may be > 3
+            # Format: {form}-{CIK}-{fileNumber}-{filmNumber}
+            # We split by '-' and check we have at least 4 parts (form, CIK, fileNumber, filmNumber)
+            parts = filing_id.split('-')
+            if len(parts) < 4:
                 logger.error(f"CRITICAL: Invalid filing_id format for DynamoDB/S3: '{filing_id}'. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. "
                            f"Components: form='{form_str}', cik='{cik_str}', file_number='{file_number_str}', film_number='{film_number_str}'. "
-                           f"Skipping this filing.")
+                           f"Split into {len(parts)} parts: {parts}. Skipping this filing.")
                 continue  # Skip this filing - don't add to list
             
             # Additional validation - ensure form and CIK are not N/A
-            if filing_id.startswith('N/A-') or filing_id.split('-')[1] == 'N/A':
+            if filing_id.startswith('N/A-') or parts[1] == 'N/A':
                 logger.error(f"CRITICAL: Invalid filing_id - form or CIK is N/A: '{filing_id}'. Skipping this filing.")
                 continue  # Skip this filing
             
@@ -1015,8 +1031,15 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             filing_id = filing_data.get('filingId', '')
             
             # Validate filing_id before proceeding
-            if not filing_id or filing_id.count('-') < 3:
-                logger.error(f"Invalid filing_id in filing_data: '{filing_id}'. Skipping this filing.")
+            # file_number may contain dashes, so we check by splitting instead of counting dashes
+            if not filing_id:
+                logger.error(f"Invalid filing_id in filing_data: missing filing_id. Skipping this filing.")
+                continue
+            
+            # Split by '-' and ensure we have at least 4 parts (form, CIK, fileNumber, filmNumber)
+            parts = filing_id.split('-')
+            if len(parts) < 4:
+                logger.error(f"Invalid filing_id in filing_data: '{filing_id}'. Expected at least 4 parts when split by '-', got {len(parts)}. Skipping this filing.")
                 continue
             
             # Check if filing is in cache
@@ -1141,8 +1164,11 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                         continue
                     
                     # Validate filing_id format one more time before downloading
-                    if filing_id.count('-') < 3:
-                        logger.error(f"Invalid filing_id format '{filing_id}' - skipping S3 download. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}")
+                    # file_number may contain dashes, so we split and check parts
+                    parts = filing_id.split('-')
+                    if len(parts) < 4:
+                        logger.error(f"Invalid filing_id format '{filing_id}' - skipping S3 download. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. "
+                                   f"Split into {len(parts)} parts: {parts}")
                         continue
                     
                     logger.info(f"Downloading {len(document_urls)} document(s) to S3 for filing_id: {filing_id}")
