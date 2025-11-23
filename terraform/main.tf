@@ -1989,11 +1989,12 @@ module "sec_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for caching and S3 access for filing storage
+  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, and KMS for S3 encryption
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
     data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
-    aws_iam_policy.sec_search_s3_policy.arn
+    aws_iam_policy.sec_search_s3_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
   ]
 
   tags = var.common_tags
