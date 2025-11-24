@@ -11,6 +11,7 @@ import requests
 import time
 import re
 import boto3
+import uuid
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
@@ -392,40 +393,21 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
         else:
             table_section = html_text
         
-        # Extract links only from this table section
-        # Strategy 1: Find all .xml file links (prioritize these)
-        xml_pattern = r'href="([^"]*\.xml[^"]*)"'
-        xml_matches = re.findall(xml_pattern, table_section, re.IGNORECASE)
-        document_urls.extend(xml_matches)
+        # Extract ALL href links from the table section (more reliable than pattern matching)
+        # This captures all files regardless of extension
+        href_pattern = r'<a[^>]+href="([^"]+)"[^>]*>'
+        all_hrefs = re.findall(href_pattern, table_section, re.IGNORECASE)
         
-        # Strategy 2: Look for primary document patterns (highest priority)
-        primary_patterns = [
-            r'href="([^"]*primary[_-]?document[^"]*\.xml[^"]*)"',
-            r'href="([^"]*primarydoc[^"]*\.xml[^"]*)"',
-            r'href="([^"]*document[^"]*\.xml[^"]*)"',
-            r'href="([^"]*doc\d+\.xml[^"]*)"',
-        ]
-        primary_links = []
-        for pattern in primary_patterns:
-            matches = re.findall(pattern, table_section, re.IGNORECASE)
-            primary_links.extend(matches)
-        
-        # Prepend primary links to prioritize them
-        document_urls = primary_links + [link for link in document_urls if link not in primary_links]
-        
-        # Strategy 3: Look for .html/.htm files in the table
-        html_pattern = r'href="([^"]*\.(?:html?|htm)[^"]*)"'
-        html_matches = re.findall(html_pattern, table_section, re.IGNORECASE)
-        html_matches = [link for link in html_matches 
-                       if 'index' not in link.lower() 
-                       and 'xbrl' not in link.lower()
-                       and 'taxonomy' not in link.lower()]
-        document_urls.extend(html_matches)
-        
-        # Strategy 4: Look for .txt files in the table
-        txt_pattern = r'href="([^"]*\.txt[^"]*)"'
-        txt_matches = re.findall(txt_pattern, table_section, re.IGNORECASE)
-        document_urls.extend(txt_matches)
+        # Filter out index pages and XBRL/taxonomy files
+        document_urls = []
+        for href in all_hrefs:
+            href_lower = href.lower()
+            # Skip index pages, XBRL, and taxonomy files
+            if ('index' not in href_lower and 
+                'xbrl' not in href_lower and
+                'taxonomy' not in href_lower and
+                'schema' not in href_lower):
+                document_urls.append(href)
         
         # Remove duplicates while preserving order
         seen = set()
@@ -700,9 +682,14 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if '.' in filename:
                 base_name, ext = filename.rsplit('.', 1)
                 base_name = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', base_name)
-                filename = f"{base_name}.{ext}"
+                # Add UUID to base name to ensure uniqueness and prevent overwrites
+                unique_id = str(uuid.uuid4())[:8]  # Use first 8 chars of UUID
+                filename = f"{base_name}_{unique_id}.{ext}"
             else:
                 filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
+                # Add UUID if no extension
+                unique_id = str(uuid.uuid4())[:8]
+                filename = f"{filename}_{unique_id}"
             
             # Upload to S3 in documentformatfiles/ subfolder
             s3_key = f"filings/{filing_id}/documentformatfiles/{filename}"
@@ -824,9 +811,14 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if '.' in filename:
                 base_name, ext = filename.rsplit('.', 1)
                 base_name = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', base_name)
-                filename = f"{base_name}.{ext}"
+                # Add UUID to base name to ensure uniqueness and prevent overwrites
+                unique_id = str(uuid.uuid4())[:8]  # Use first 8 chars of UUID
+                filename = f"{base_name}_{unique_id}.{ext}"
             else:
                 filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
+                # Add UUID if no extension
+                unique_id = str(uuid.uuid4())[:8]
+                filename = f"{filename}_{unique_id}"
             
             # Upload to S3 in datafiles/ subfolder
             s3_key = f"filings/{filing_id}/datafiles/{filename}"
