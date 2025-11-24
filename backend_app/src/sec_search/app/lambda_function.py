@@ -14,12 +14,33 @@ import boto3
 import uuid
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
+from decimal import Decimal
 
 # Import async job handler
 from async_job_handler import (
     create_job, update_job_progress, complete_job, fail_job,
     get_job_status, invoke_async_search, cancel_job, is_job_cancelled
 )
+
+
+def json_dumps_with_decimal(obj: Any) -> str:
+    """
+    JSON dumps with Decimal support for DynamoDB
+    Converts Decimal objects to int or float for JSON serialization
+    """
+    def decimal_default(obj):
+        if isinstance(obj, Decimal):
+            # Convert to int if it's a whole number, otherwise float
+            if obj % 1 == 0:
+                return int(obj)
+            return float(obj)
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+    
+    return json.dumps(obj, default=decimal_default)
+
+# Configure logging first
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 # WebSocket configuration for streaming progress
 # Reuse existing WebSocket API for chat (frontend already has connection)
@@ -34,7 +55,8 @@ if WEBSOCKET_ENDPOINT:
     )
 else:
     websocket_api_gateway = None
-    logger.warning("WEBSOCKET_ENDPOINT not configured - progress streaming disabled")
+    if logger:
+        logger.warning("WEBSOCKET_ENDPOINT not configured - progress streaming disabled")
 
 # DynamoDB for WebSocket connections
 CHAT_CONNECTIONS_TABLE_NAME = os.environ.get('CHAT_CONNECTIONS_TABLE_NAME')
@@ -2104,7 +2126,7 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            'body': json.dumps(job_status)
+            'body': json_dumps_with_decimal(job_status)
         }
     except Exception as e:
         logger.error(f"Error in handle_job_status: {e}")
@@ -2306,13 +2328,32 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Also handles async job processing
     """
     try:
+        # Log the event structure for debugging
+        logger.info(f"📥 Lambda handler received event type: {type(event)}, keys: {list(event.keys())[:10]}")
+        
         # Check if this is an async job invocation
-        if event.get('async_job'):
-            job_id = event.get('job_id')
-            search_params = event.get('search_params', {})
+        # Lambda async invocations send the payload directly as the event
+        # But if it's a string, we need to parse it
+        if isinstance(event, str):
+            try:
+                event = json.loads(event)
+            except json.JSONDecodeError:
+                logger.warning(f"⚠️ Event is string but not valid JSON: {event[:100]}")
+        
+        async_job = event.get('async_job') or event.get('asyncJob')
+        if async_job:
+            logger.info(f"🔄 Received async job invocation")
+            job_id = event.get('job_id') or event.get('jobId')
+            search_params = event.get('search_params') or event.get('searchParams') or {}
             if job_id and search_params:
+                logger.info(f"🚀 Processing async job {job_id} with {len(search_params)} params")
+                # Call process_async_search - it handles all the work
                 process_async_search(job_id, search_params)
-            return {'statusCode': 200, 'body': 'Async job started'}
+                logger.info(f"✅ Async job {job_id} processing completed")
+                return {'statusCode': 200, 'body': 'Async job started'}
+            else:
+                logger.error(f"❌ Invalid async job invocation - missing job_id or search_params: job_id={job_id}, has_params={bool(search_params)}")
+                return {'statusCode': 400, 'body': 'Invalid async job invocation'}
         
         # Regular HTTP request
         path = event.get('path', '')

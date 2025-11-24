@@ -299,8 +299,14 @@ def invoke_async_search(job_id: str, search_params: Dict[str, Any]):
         job_id: Job identifier
         search_params: Search parameters
     """
-    if not LAMBDA_FUNCTION_NAME:
-        logger.error("Lambda function name not configured")
+    # AWS_LAMBDA_FUNCTION_NAME is automatically set by Lambda runtime
+    function_name = LAMBDA_FUNCTION_NAME or os.environ.get('AWS_LAMBDA_FUNCTION_NAME')
+    
+    if not function_name:
+        error_msg = "Lambda function name not configured - cannot invoke async search"
+        logger.error(f"❌ {error_msg}")
+        logger.error(f"Environment variables: AWS_LAMBDA_FUNCTION_NAME={os.environ.get('AWS_LAMBDA_FUNCTION_NAME')}")
+        fail_job(job_id, error_msg)
         return
     
     try:
@@ -310,13 +316,24 @@ def invoke_async_search(job_id: str, search_params: Dict[str, Any]):
             'search_params': search_params
         }
         
-        lambda_client.invoke(
-            FunctionName=LAMBDA_FUNCTION_NAME,
+        logger.info(f"🔄 Invoking async search for job {job_id} with function {function_name}")
+        logger.debug(f"Payload: {json.dumps(payload)[:200]}...")
+        
+        response = lambda_client.invoke(
+            FunctionName=function_name,
             InvocationType='Event',  # Async invocation
             Payload=json.dumps(payload)
         )
-        logger.info(f"Invoked async search for job {job_id}")
+        
+        status_code = response.get('StatusCode')
+        logger.info(f"✅ Invoked async search for job {job_id} - StatusCode: {status_code}")
+        
+        if status_code != 202:
+            logger.warning(f"⚠️ Unexpected status code {status_code} for async invocation")
+            
     except Exception as e:
-        logger.error(f"Error invoking async search: {e}")
-        fail_job(job_id, f"Failed to invoke async search: {str(e)}")
+        error_msg = f"Failed to invoke async search: {str(e)}"
+        logger.error(f"❌ Error invoking async search for job {job_id}: {e}")
+        logger.exception(e)  # Log full traceback
+        fail_job(job_id, error_msg)
 
