@@ -46,10 +46,9 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Download as DownloadIcon,
-  Stop as StopIcon,
 } from '@mui/icons-material';
-import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
-import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
+import { useSECAutocomplete } from '../hooks/useAPI';
+import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, SECSearchResponse } from '../services/api';
 import { getSecSearchWebSocket, SECSearchWebSocketMessage } from '../services/secSearchWebSocket';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -775,7 +774,11 @@ const SECSearchPage: React.FC = () => {
   
   const RESULTS_PER_PAGE = 10;
 
-  const { execute: executeSearch, data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
+  // Note: useSECSearch is no longer used - we use WebSocket now
+  // searchResults is now managed via WebSocket messages, not REST API
+  const searchResults: SECSearchResponse | null = null; // Placeholder for type compatibility
+  const searchLoading = false; // Always false since we use WebSocket now (use searchState.isSearching instead)
+  const [searchError, setSearchError] = useState<string | null>(null); // Errors from WebSocket messages
   const { execute: executeAutocomplete, loading: autocompleteLoading } = useSECAutocomplete();
   
   // Search state type: boolean (is searching), current page, total pages, job_id for async searches
@@ -992,8 +995,7 @@ const SECSearchPage: React.FC = () => {
       searchParams.fileNumber, searchParams.filmNumber, searchParams.cik, searchParams.entityName]);
 
   // Fetch all results when a new search is performed (for client-side filtering)
-  // Limit to first 1000 results to avoid performance issues
-  const MAX_RESULTS_TO_FETCH = 1000;
+  // Note: Results are now streamed via WebSocket, no need for MAX_RESULTS_TO_FETCH
   
   // Compute filters from results
   const computeFiltersFromResults = (results: SECSearchResult[]) => {
@@ -1051,6 +1053,8 @@ const SECSearchPage: React.FC = () => {
   };
   
   const fetchAllResults = async (params: SECSearchParams) => {
+    // Clear any previous errors when starting a new search
+    setSearchError(null);
     const startTimestamp = Date.now();
     setSearchState({ isSearching: true, currentPage: 1, totalPages: null, jobId: null });
     setSearchStartTime(startTimestamp);
@@ -1121,6 +1125,7 @@ const SECSearchPage: React.FC = () => {
       
       const unsubscribeError = wsService.onMessage('error', (message: SECSearchWebSocketMessage) => {
         console.error('❌ Search error:', message.error);
+        setSearchError(message.error || 'An error occurred during search');
         setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
         setSearchStartTime(null);
         setAllSearchResults([]);
@@ -1139,6 +1144,7 @@ const SECSearchPage: React.FC = () => {
       
     } catch (error) {
       console.error('❌ Error starting WebSocket search:', error);
+      setSearchError(error instanceof Error ? error.message : 'Failed to start search');
       setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
       setSearchStartTime(null);
     }
@@ -1805,8 +1811,8 @@ const SECSearchPage: React.FC = () => {
             <Button
               variant="contained"
               onClick={() => handleSearch()}
-              disabled={searchLoading || searchState.isSearching}
-              startIcon={(searchLoading || searchState.isSearching) ? <CircularProgress size={20} /> : <SearchIcon />}
+              disabled={searchState.isSearching}
+              startIcon={searchState.isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
               sx={{
                 background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
                 color: '#ffffff',
@@ -1828,7 +1834,7 @@ const SECSearchPage: React.FC = () => {
                 ? searchState.totalPages 
                   ? `Fetching page ${searchState.currentPage} of ${searchState.totalPages}...`
                   : `Fetching page ${searchState.currentPage}...`
-                : (searchLoading || searchState.isSearching)
+                : searchState.isSearching
                   ? 'Searching...'
                   : 'Search SEC Filings'}
             </Button>
@@ -2240,8 +2246,8 @@ const SECSearchPage: React.FC = () => {
                   <Button
                     variant="contained"
                     onClick={handleApplyFilters}
-                    disabled={searchLoading}
-                    startIcon={searchLoading ? <CircularProgress size={16} /> : <SearchIcon />}
+                    disabled={searchState.isSearching}
+                    startIcon={searchState.isSearching ? <CircularProgress size={16} /> : <SearchIcon />}
                     sx={{
                       background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
                       color: '#ffffff',
@@ -2260,7 +2266,7 @@ const SECSearchPage: React.FC = () => {
                       },
                     }}
                   >
-                    {searchLoading ? 'Applying...' : 'Apply Filters'}
+                    {searchState.isSearching ? 'Applying...' : 'Apply Filters'}
                   </Button>
                 </Box>
               )}
@@ -2269,7 +2275,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.entity_filters && availableFilters.entity_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, entity: !prev.entity }))}
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, entity: !prev.entity }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2401,7 +2407,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.form_filters && availableFilters.form_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, form: !prev.form }))}
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, form: !prev.form }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2514,7 +2520,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.location_filters && availableFilters.location_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, location: !prev.location }))}
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, location: !prev.location }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2658,7 +2664,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.incorporation_filters && availableFilters.incorporation_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, incorporation: !prev.incorporation }))}
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, incorporation: !prev.incorporation }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -3008,7 +3014,7 @@ const SECSearchPage: React.FC = () => {
                   <Button
                     variant="outlined"
                     onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1 || searchLoading}
+                    disabled={currentPage === 1 || searchState.isSearching}
                     startIcon={<ChevronLeftIcon />}
                     sx={{
                       color: '#9ca3af',
@@ -3029,7 +3035,7 @@ const SECSearchPage: React.FC = () => {
                   <Button
                     variant="outlined"
                     onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={!totalFound || currentPage >= Math.ceil(totalFound / RESULTS_PER_PAGE) || searchLoading}
+                    disabled={!totalFound || currentPage >= Math.ceil(totalFound / RESULTS_PER_PAGE) || searchState.isSearching}
                     endIcon={<ChevronRightIcon />}
                     sx={{
                       color: '#9ca3af',
