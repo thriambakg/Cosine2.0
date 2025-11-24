@@ -618,23 +618,13 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 except (IndexError, AttributeError):
                     pass
             
-            # For detection only, decode a small sample (first 1000 bytes) to check content
-            # But preserve the original bytes for saving
-            try:
-                # Try to decode for detection, using response encoding or UTF-8 as fallback
-                encoding = response.encoding or response_charset or 'utf-8'
-                content_sample = doc_content[:1000] if len(doc_content) >= 1000 else doc_content
-                content_start = content_sample.decode(encoding, errors='ignore').lower()
-            except (UnicodeDecodeError, AttributeError, LookupError):
-                # If bytes can't be decoded, just use raw bytes for detection (ASCII only)
-                content_start = doc_content[:1000] if len(doc_content) >= 1000 else doc_content
-                try:
-                    content_start = content_start.decode('latin-1', errors='ignore').lower()
-                except:
-                    pass
+            # For detection only, use raw bytes to check content
+            # We check bytes against bytes to avoid encoding issues
+            content_start = doc_content[:1000] if len(doc_content) >= 1000 else doc_content
+            content_start_lower = content_start.lower()
             
-            # Check for HTML indicators (matching glue script logic)
-            is_html = any(indicator in content_start for indicator in [
+            # Check for HTML indicators (matching glue script logic) - use bytes
+            is_html = any(indicator in content_start_lower for indicator in [
                 b'<!doctype html',
                 b'<html',
                 b'<head>',
@@ -665,11 +655,11 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             )
             
             # Skip SEC navigation/search pages (browse-edgar, search pages, etc.)
-            is_sec_nav_page = (b'browse-edgar' in content_start or
-                             b'sec.gov/cgi-bin' in content_start or
-                             b'edgar search' in content_start or
-                             b'company search' in content_start or
-                             b'filings search' in content_start)
+            is_sec_nav_page = (b'browse-edgar' in content_start_lower or
+                             b'sec.gov/cgi-bin' in content_start_lower or
+                             b'edgar search' in content_start_lower or
+                             b'company search' in content_start_lower or
+                             b'filings search' in content_start_lower)
             
             if is_index_page:
                 logger.warning(f"Skipping {doc_url} - appears to be filing index page, not actual document")
