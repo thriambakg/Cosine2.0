@@ -465,28 +465,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
     
     logger.info(f"Downloading documents for filing_id: {filing_id} (folder: filings/{filing_id}/)")
     
-    # Download filing page (index.htm) if provided
-    if filing_page_url:
-        try:
-            # Extract filename from URL
-            filename = filing_page_url.split('/')[-1]
-            if not filename or filename == '' or '?' in filename:
-                filename = 'index.htm'
-            
-            # Remove query parameters if any
-            if '?' in filename:
-                filename = filename.split('?')[0]
-            
-            # Sanitize filename
-            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
-            
-            filing_page_s3_key = download_document_to_s3(filing_page_url, filing_id, filename)
-            if filing_page_s3_key:
-                result['filingPageS3Key'] = filing_page_s3_key
-                result['success'] = True
-                logger.info(f"Downloaded filing page to {filing_page_s3_key}")
-        except Exception as e:
-            logger.error(f"Error downloading filing page {filing_page_url}: {e}")
+    # Skip downloading the index page - we only need the actual document files
     
     # Download each document
     # Match glue script behavior: download and verify content type (not just URL extension)
