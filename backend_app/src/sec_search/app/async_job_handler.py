@@ -23,13 +23,12 @@ lambda_client = boto3.client('lambda')
 LAMBDA_FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME')
 
 
-def create_job(search_params: Dict[str, Any], user_id: Optional[str] = None) -> str:
+def create_job(search_params: Dict[str, Any]) -> str:
     """
     Create a new async search job and return job_id
     
     Args:
         search_params: Search parameters
-        user_id: User ID for WebSocket streaming (optional)
         
     Returns:
         job_id: Unique job identifier
@@ -58,12 +57,8 @@ def create_job(search_params: Dict[str, Any], user_id: Optional[str] = None) -> 
             'ttl': int((datetime.now(timezone.utc).timestamp() + 3600))  # Expire after 1 hour
         }
         
-        # Store user_id if provided (for WebSocket streaming)
-        if user_id:
-            job_item['user_id'] = user_id
-        
         cache_table.put_item(Item=job_item)
-        logger.info(f"Created job {job_id} for user {user_id or 'unknown'}")
+        logger.info(f"Created job {job_id}")
         
         return job_id
     except Exception as e:
@@ -102,7 +97,7 @@ def update_job_progress(job_id: str, current_page: int, total_pages: Optional[in
                 ':updated': datetime.now(timezone.utc).isoformat()
             }
         )
-        logger.info(f"📄 Job {job_id}: Page {current_page}{f'/{total_pages}' if total_pages else ''} - {results_count} results")
+        logger.info(f"Updated job {job_id} progress: page {current_page}/{total_pages}, {results_count} results")
     except Exception as e:
         logger.error(f"Error updating job progress: {e}")
 
@@ -196,24 +191,21 @@ def cancel_job(job_id: str) -> bool:
         True if job was cancelled, False otherwise
     """
     if not cache_table:
-        logger.error(f"🛑 CANCEL: DynamoDB table not configured, cannot cancel job {job_id}")
         return False
     
     try:
         # Check if job exists and is cancellable
         response = cache_table.get_item(Key={'filingId': job_id})
         if 'Item' not in response:
-            logger.warning(f"🛑 CANCEL: Job {job_id} not found for cancellation")
+            logger.warning(f"Job {job_id} not found for cancellation")
             return False
         
         item = response['Item']
         current_status = item.get('job_status', 'UNKNOWN')
-        current_page = item.get('job_progress', {}).get('current_page', 0)
-        total_pages = item.get('job_progress', {}).get('total_pages')
         
         # Only cancel if job is pending or in progress
         if current_status not in ['PENDING', 'IN_PROGRESS']:
-            logger.info(f"🛑 CANCEL: Job {job_id} cannot be cancelled (status: {current_status})")
+            logger.info(f"Job {job_id} cannot be cancelled (status: {current_status})")
             return False
         
         # Set cancellation flag
@@ -226,10 +218,10 @@ def cancel_job(job_id: str) -> bool:
                 ':updated': datetime.now(timezone.utc).isoformat()
             }
         )
-        logger.info(f"🛑 CANCEL: Job {job_id} cancelled successfully (was on page {current_page}{f'/{total_pages}' if total_pages else ''})")
+        logger.info(f"Cancelled job {job_id}")
         return True
     except Exception as e:
-        logger.error(f"🛑 CANCEL ERROR: Failed to cancel job {job_id}: {e}")
+        logger.error(f"Error cancelling job: {e}")
         return False
 
 
@@ -299,14 +291,8 @@ def invoke_async_search(job_id: str, search_params: Dict[str, Any]):
         job_id: Job identifier
         search_params: Search parameters
     """
-    # AWS_LAMBDA_FUNCTION_NAME is automatically set by Lambda runtime
-    function_name = LAMBDA_FUNCTION_NAME or os.environ.get('AWS_LAMBDA_FUNCTION_NAME')
-    
-    if not function_name:
-        error_msg = "Lambda function name not configured - cannot invoke async search"
-        logger.error(f"❌ {error_msg}")
-        logger.error(f"Environment variables: AWS_LAMBDA_FUNCTION_NAME={os.environ.get('AWS_LAMBDA_FUNCTION_NAME')}")
-        fail_job(job_id, error_msg)
+    if not LAMBDA_FUNCTION_NAME:
+        logger.error("Lambda function name not configured")
         return
     
     try:
@@ -316,24 +302,13 @@ def invoke_async_search(job_id: str, search_params: Dict[str, Any]):
             'search_params': search_params
         }
         
-        logger.info(f"🔄 Invoking async search for job {job_id} with function {function_name}")
-        logger.debug(f"Payload: {json.dumps(payload)[:200]}...")
-        
-        response = lambda_client.invoke(
-            FunctionName=function_name,
+        lambda_client.invoke(
+            FunctionName=LAMBDA_FUNCTION_NAME,
             InvocationType='Event',  # Async invocation
             Payload=json.dumps(payload)
         )
-        
-        status_code = response.get('StatusCode')
-        logger.info(f"✅ Invoked async search for job {job_id} - StatusCode: {status_code}")
-        
-        if status_code != 202:
-            logger.warning(f"⚠️ Unexpected status code {status_code} for async invocation")
-            
+        logger.info(f"Invoked async search for job {job_id}")
     except Exception as e:
-        error_msg = f"Failed to invoke async search: {str(e)}"
-        logger.error(f"❌ Error invoking async search for job {job_id}: {e}")
-        logger.exception(e)  # Log full traceback
-        fail_job(job_id, error_msg)
+        logger.error(f"Error invoking async search: {e}")
+        fail_job(job_id, f"Failed to invoke async search: {str(e)}")
 

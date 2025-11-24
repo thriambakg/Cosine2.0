@@ -164,12 +164,6 @@ module "api_gateway" {
     sec_search_autocomplete = {
       path_part = "sec-search-autocomplete"
     }
-    sec_search_status = {
-      path_part = "sec-search-status"
-    }
-    sec_search_cancel = {
-      path_part = "sec-search-cancel"
-    }
   }
 
   # Methods configuration
@@ -401,24 +395,6 @@ module "api_gateway" {
       lambda_arn              = module.sec_search_lambda.function_arn
       request_parameters      = {}
     }
-    # GET method for SEC search job status
-    sec_search_status_get = {
-      resource_key            = "sec_search_status"
-      http_method             = "GET"
-      integration_type        = "AWS_PROXY"
-      integration_http_method = "POST"
-      lambda_arn              = module.sec_search_lambda.function_arn
-      request_parameters      = {}
-    }
-    # POST method for SEC search job cancel
-    sec_search_cancel_post = {
-      resource_key            = "sec_search_cancel"
-      http_method             = "POST"
-      integration_type        = "AWS_PROXY"
-      integration_http_method = "POST"
-      lambda_arn              = module.sec_search_lambda.function_arn
-      request_parameters      = {}
-    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -555,22 +531,12 @@ module "api_gateway" {
       http_method   = "GET"
       resource_path = "sec-search-autocomplete"
     }
-    sec_search_status_get = {
-      function_arn  = module.sec_search_lambda.function_arn
-      http_method   = "GET"
-      resource_path = "sec-search-status"
-    }
-    sec_search_cancel_post = {
-      function_arn  = module.sec_search_lambda.function_arn
-      http_method   = "POST"
-      resource_path = "sec-search-cancel"
-    }
   }
 
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "41" # Updated to add SEC search status and cancel endpoints
+  deployment_trigger = "40" # Updated to add SEC search endpoints
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -741,7 +707,8 @@ resource "aws_iam_policy" "lambda_websocket_policy" {
           "execute-api:ManageConnections"
         ]
         Resource = [
-          "${module.websocket_api.api_execution_arn}/*"
+          "${module.websocket_api.api_execution_arn}/*",
+          "${module.sec_search_websocket_api.api_execution_arn}/*"
         ]
       }
     ]
@@ -1310,7 +1277,7 @@ module "websocket_message_lambda" {
   tags = var.common_tags
 }
 
-# WebSocket API Gateway
+# WebSocket API Gateway for Chat
 module "websocket_api" {
   source = "./modules/websocket-api"
 
@@ -1322,6 +1289,22 @@ module "websocket_api" {
   connection_lambda_name = module.websocket_connection_lambda.function_name
   message_lambda_arn     = module.websocket_message_lambda.function_arn
   message_lambda_name    = module.websocket_message_lambda.function_name
+
+  tags = var.common_tags
+}
+
+# WebSocket API Gateway for SEC Search
+module "sec_search_websocket_api" {
+  source = "./modules/websocket-api"
+
+  api_name        = "${var.project_name}-sec-search-websocket-api-${var.environment}"
+  api_description = "WebSocket API for SEC search with real-time progress streaming"
+  stage_name      = var.environment
+
+  connection_lambda_arn  = module.sec_search_websocket_connection_lambda.function_arn
+  connection_lambda_name = module.sec_search_websocket_connection_lambda.function_name
+  message_lambda_arn     = module.sec_search_websocket_message_lambda.function_arn
+  message_lambda_name    = module.sec_search_websocket_message_lambda.function_name
 
   tags = var.common_tags
 }
@@ -2012,14 +1995,11 @@ module "sec_search_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT                 = var.environment
-    LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
-    MAX_RESULTS                 = "10"
-    SEC_FILINGS_CACHE_TABLE     = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
-    SEC_FILINGS_S3_BUCKET       = "cosine-sec-filings-${var.environment}"
-    WEBSOCKET_ENDPOINT          = module.websocket_api.stage_url
-    WEBSOCKET_API_ID            = module.websocket_api.api_id
-    CHAT_CONNECTIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name
+    ENVIRONMENT             = var.environment
+    LOG_LEVEL               = var.environment == "development" ? "DEBUG" : "INFO"
+    MAX_RESULTS             = "10"
+    SEC_FILINGS_CACHE_TABLE = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
+    SEC_FILINGS_S3_BUCKET   = "cosine-sec-filings-${var.environment}"
   }
 
 
@@ -2028,15 +2008,85 @@ module "sec_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, KMS for S3 encryption, and WebSocket for streaming
+  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, and KMS for S3 encryption
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
     data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
     aws_iam_policy.sec_search_s3_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# SEC Search WebSocket Connection Manager Lambda Function
+module "sec_search_websocket_connection_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-sec-search-websocket-connection-${var.environment}"
+  description   = "Lambda function for SEC search WebSocket connection management"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 256
+
+  # Source directory
+  source_dir = "../backend_app/src/sec_search/websocket_connection/app"
+
+  # Environment variables
+  environment_variables = {
+    WEBSOCKET_ENDPOINT = module.sec_search_websocket_api.stage_url
+    WEBSOCKET_API_ID   = module.sec_search_websocket_api.api_id
+    ENVIRONMENT        = var.environment
+    LOG_LEVEL          = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_websocket_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# SEC Search WebSocket Message Handler Lambda Function
+module "sec_search_websocket_message_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-sec-search-websocket-message-${var.environment}"
+  description   = "Lambda function for SEC search WebSocket message processing and search execution"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 900 # 15 minutes for long-running searches
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/sec_search/websocket_message/app"
+
+  # Environment variables
+  environment_variables = {
+    WEBSOCKET_ENDPOINT       = module.sec_search_websocket_api.stage_url
+    WEBSOCKET_API_ID         = module.sec_search_websocket_api.api_id
+    SEC_SEARCH_FUNCTION_NAME = module.sec_search_lambda.function_name
+    SEC_FILINGS_CACHE_TABLE  = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
+    SEC_FILINGS_S3_BUCKET    = "cosine-sec-filings-${var.environment}"
+    ENVIRONMENT              = var.environment
+    LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  # Attach core layer
+  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+
+  # Additional IAM policies
+  additional_policy_arns = [
     aws_iam_policy.lambda_websocket_policy.arn,
-    aws_iam_policy.lambda_dynamodb_policy.arn, # For WebSocket connections table access
-    aws_iam_policy.lambda_invoke_policy.arn    # For async Lambda invocation
+    aws_iam_policy.lambda_invoke_policy.arn,
+    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.sec_search_s3_policy.arn
   ]
 
   tags = var.common_tags

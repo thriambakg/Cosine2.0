@@ -61,8 +61,6 @@ class UnifiedMessageHandlerService {
   private recentSendTimestamps: Map<string, number> = new Map(); // queueKey -> last send timestamp (prevents rapid duplicates)
   private agentLogs: Map<string, string> = new Map(); // sessionId -> current agent log message
   private agentLogListeners: Set<(sessionId: string, logMessage: string | null) => void> = new Set(); // Agent log update listeners
-  private secSearchProgress: Map<string, any> = new Map(); // job_id -> current search progress
-  private secSearchProgressListeners: Set<(jobId: string, progress: any | null) => void> = new Set(); // SEC search progress update listeners
 
   private constructor() {
     // Listen for WebSocket responses and update local cache
@@ -763,9 +761,6 @@ class UnifiedMessageHandlerService {
       case 'agent_log':
         this.handleAgentLog(sessionId, data);
         break;
-      case 'sec_search_progress':
-        this.handleSecSearchProgress(data);
-        break;
       default:
         console.log('📨 UnifiedMessageHandler: Unknown message type:', data.type);
     }
@@ -959,77 +954,6 @@ class UnifiedMessageHandlerService {
     this.agentLogListeners.add(listener);
     return () => {
       this.agentLogListeners.delete(listener);
-    };
-  }
-
-  /**
-   * Handle SEC search progress updates
-   */
-  private handleSecSearchProgress(data: any): void {
-    const jobId = data.job_id;
-    const payload = data.payload || {};
-    
-    if (!jobId) {
-      console.warn('📊 UnifiedMessageHandler: SEC search progress missing job_id');
-      return;
-    }
-    
-    console.log('📊 UnifiedMessageHandler: Received SEC search progress for job:', jobId, 'progress:', payload);
-    
-    // Store the current progress for this job
-    this.secSearchProgress.set(jobId, payload);
-    
-    // Notify listeners
-    this.notifySecSearchProgressUpdate(jobId, payload);
-    
-    // Dispatch event for components that listen to custom events
-    const progressEvent = new CustomEvent('sec-search-progress-updated', {
-      detail: {
-        jobId,
-        progress: payload,
-        timestamp: Date.now()
-      }
-    });
-    window.dispatchEvent(progressEvent);
-    
-    console.log('✅ UnifiedMessageHandler: Updated SEC search progress for job:', jobId);
-  }
-
-  /**
-   * Get current SEC search progress for a job
-   */
-  getSecSearchProgress(jobId: string): any | null {
-    return this.secSearchProgress.get(jobId) || null;
-  }
-
-  /**
-   * Clear SEC search progress for a job (when search completes)
-   */
-  clearSecSearchProgress(jobId: string): void {
-    this.secSearchProgress.delete(jobId);
-    this.notifySecSearchProgressUpdate(jobId, null);
-  }
-
-  /**
-   * Notify SEC search progress listeners
-   */
-  private notifySecSearchProgressUpdate(jobId: string, progress: any | null): void {
-    this.secSearchProgressListeners.forEach(listener => {
-      try {
-        listener(jobId, progress);
-      } catch (error) {
-        console.error('❌ UnifiedMessageHandler: Error in SEC search progress listener:', error);
-      }
-    });
-  }
-
-  /**
-   * Subscribe to SEC search progress updates
-   */
-  onSecSearchProgressUpdate(listener: (jobId: string, progress: any | null) => void): () => void {
-    this.secSearchProgressListeners.add(listener);
-    return () => {
-      this.secSearchProgressListeners.delete(listener);
     };
   }
 

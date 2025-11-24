@@ -50,7 +50,7 @@ import {
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
-import { unifiedMessageHandler } from '../services/unifiedMessageHandler';
+import { getSecSearchWebSocket, SECSearchWebSocketMessage } from '../services/secSearchWebSocket';
 import { useAuth } from '../contexts/AuthContext';
 
 // Custom styled components
@@ -685,8 +685,12 @@ const LOCATION_OPTIONS = [
 ];
 
 const SECSearchPage: React.FC = () => {
-  // Get user for WebSocket streaming
+  // Get user for WebSocket connection
   const { user } = useAuth();
+  
+  // WebSocket service instance
+  const wsService = getSecSearchWebSocket();
+  
   // Session persistence key
   const SESSION_STORAGE_KEY = 'sec-search-page-state';
 
@@ -839,6 +843,15 @@ const SECSearchPage: React.FC = () => {
       });
     }
   }, []); // Only log once on mount
+
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (wsService.isConnected()) {
+        wsService.disconnect();
+      }
+    };
+  }, []);
 
   // Immediately save searchState to sessionStorage when it changes
   // This ensures the button state persists even if user navigates away
@@ -1039,114 +1052,91 @@ const SECSearchPage: React.FC = () => {
   
   const fetchAllResults = async (params: SECSearchParams) => {
     const startTimestamp = Date.now();
+    setSearchState({ isSearching: true, currentPage: 1, totalPages: null, jobId: null });
     setSearchStartTime(startTimestamp);
     
-    console.log('🔍 Starting async search:', { params, timestamp: new Date().toISOString() });
+    console.log('🔍 Starting WebSocket search:', { params, timestamp: new Date().toISOString() });
+    
+    if (!user?.username) {
+      console.error('❌ User not authenticated');
+      setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+      return;
+    }
     
     try {
-      // Note: user_id is NOT sent in request body for security
-      // Backend extracts user_id from Cognito JWT token (authenticated request)
-      // This prevents user_id spoofing and ensures proper user isolation
-      
-      // Call search API - now returns 200 immediately with job_id, processes async
-      // API Gateway will pass Cognito JWT to Lambda, which extracts user_id securely
-      const result = await secSearchAPI.search(params);
-      
-      if (!result.success || !result.job_id) {
-        console.error('❌ Failed to start search:', result.error || 'No job_id returned');
-        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-        return;
+      // Connect to WebSocket if not already connected
+      if (!wsService.isConnected()) {
+        await wsService.connect(user.username);
       }
       
-      const jobId = result.job_id;
-      console.log('✅ Search started, job_id:', jobId);
-      
-      // Store job_id and set initial state - progress will stream via WebSocket
-      setSearchState({ 
-        isSearching: true, 
-        currentPage: 0, 
-        totalPages: null, 
-        jobId: jobId 
+      // Set up message handlers
+      const unsubscribeProgress = wsService.onMessage('progress', (message: SECSearchWebSocketMessage) => {
+        console.log('📊 Progress update:', message);
+        setSearchState({
+          isSearching: true,
+          currentPage: message.current_page || 0,
+          totalPages: message.total_pages || null,
+          jobId: null
+        });
       });
       
-      // Poll for job completion (WebSocket handles progress updates)
-      const pollInterval = setInterval(async () => {
-        try {
-          const jobStatus = await secSearchAPI.getJobStatus(jobId);
-          
-          if (!jobStatus) {
-            console.warn('⚠️ Job status not found, stopping poll');
-            clearInterval(pollInterval);
-            setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-            return;
+      const unsubscribeResults = wsService.onMessage('results', (message: SECSearchWebSocketMessage) => {
+        console.log('✅ Results received:', message);
+        
+        if (message.success && message.results) {
+          // Set filter metadata
+          if (message.form_filters || message.entity_filters || 
+              message.location_filters || message.incorporation_filters) {
+            setAvailableFilters({
+              form_filters: message.form_filters || [],
+              entity_filters: message.entity_filters || [],
+              location_filters: message.location_filters || [],
+              incorporation_filters: message.incorporation_filters || [],
+            });
+          } else {
+            // Compute filters from results
+            const computedFilters = computeFiltersFromResults(message.results);
+            setAvailableFilters(computedFilters);
           }
           
-          const status = jobStatus.status;
-          console.log(`📊 Job ${jobId} status: ${status}`);
+          // Set all results
+          setIsFiltered(false);
+          setCurrentPage(1);
+          setAllSearchResults(message.results);
+          setTotalFound(message.total_found || message.results.length);
           
-          if (status === 'COMPLETED') {
-            clearInterval(pollInterval);
-            console.log('✅ Search completed, fetching results');
-            
-            // Fetch final results from job
-            const finalResults = jobStatus.results || jobStatus.job_results;
-            
-            if (finalResults && finalResults.success && !finalResults.cancelled) {
-              const allResults = finalResults.results || [];
-              
-              // Set filter metadata
-              if (finalResults.form_filters || finalResults.entity_filters) {
-                setAvailableFilters({
-                  form_filters: finalResults.form_filters || [],
-                  entity_filters: finalResults.entity_filters || [],
-                  location_filters: finalResults.location_filters || [],
-                  incorporation_filters: finalResults.incorporation_filters || [],
-                });
-              }
-              
-              // Set all results
-              setAllSearchResults(allResults);
-              setTotalFound(finalResults.total_found || allResults.length);
-              
-              // Clear search state
-              setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-              setSearchStartTime(null);
-              
-              console.log(`✅ Search completed: ${allResults.length} results`);
-            } else if (finalResults?.cancelled) {
-              console.log('🛑 Search was cancelled');
-              setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-              setSearchStartTime(null);
-            } else {
-              console.warn('⚠️ Search completed but no results available');
-              setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-              setSearchStartTime(null);
-            }
-          } else if (status === 'FAILED' || status === 'CANCELLED') {
-            clearInterval(pollInterval);
-            console.log(`❌ Search ${status.toLowerCase()}:`, jobStatus.error || 'Unknown error');
-            setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-            setSearchStartTime(null);
-          }
-          // IN_PROGRESS or PENDING - continue polling, progress updates come via WebSocket
-        } catch (error) {
-          console.error('❌ Error polling job status:', error);
+          console.log(`💾 Stored ${message.results.length} results in allSearchResults`);
         }
-      }, 2000); // Poll every 2 seconds
+        
+        // Clear search state
+        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+        setSearchStartTime(null);
+        
+        // Clean up handlers
+        unsubscribeProgress();
+        unsubscribeResults();
+      });
       
-      // Cleanup interval after 10 minutes (safety timeout)
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        if (searchState.jobId === jobId) {
-          console.warn('⏱️ Poll timeout reached, stopping');
-          setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-        }
-      }, 10 * 60 * 1000);
+      const unsubscribeError = wsService.onMessage('error', (message: SECSearchWebSocketMessage) => {
+        console.error('❌ Search error:', message.error);
+        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+        setSearchStartTime(null);
+        setAllSearchResults([]);
+        setCurrentResults([]);
+        setTotalFound(0);
+        setAvailableFilters({});
+        
+        // Clean up handlers
+        unsubscribeProgress();
+        unsubscribeResults();
+        unsubscribeError();
+      });
       
-      // Store interval reference for cleanup if component unmounts
-      return () => clearInterval(pollInterval);
+      // Send search request
+      wsService.sendSearch(params);
+      
     } catch (error) {
-      console.error('❌ Error starting search:', error);
+      console.error('❌ Error starting WebSocket search:', error);
       setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
       setSearchStartTime(null);
     }
@@ -1332,30 +1322,26 @@ const SECSearchPage: React.FC = () => {
 
   const handleCancelSearch = async () => {
     try {
-      // If we have a job_id, cancel the async job
-      if (searchState.jobId) {
-        console.log(`🛑 Cancelling async search job ${searchState.jobId}`);
-        const result = await secSearchAPI.cancelJob(searchState.jobId);
-        
-        if (result.success) {
-          console.log('✅ Async search cancelled successfully');
-        } else {
-          console.error('❌ Failed to cancel async search:', result.error);
-        }
-      } else {
-        console.log('🛑 Cancelling sync search');
+      console.log('🛑 Cancelling WebSocket search');
+      
+      // Send cancel request via WebSocket (this will close the connection)
+      if (wsService.isConnected()) {
+        wsService.sendCancel();
       }
       
-      // Always clear search state (works for both sync and async searches)
+      // Disconnect WebSocket
+      wsService.disconnect();
+      
+      // Clear search state
       setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
       setSearchStartTime(null);
       setAllSearchResults([]);
       setCurrentResults([]);
       setTotalFound(0);
-      console.log('✅ Search state cleared');
+      console.log('✅ Search cancelled - WebSocket connection closed (search continues in background)');
     } catch (error) {
       console.error('❌ Error cancelling search:', error);
-      // Still clear state even if API call fails
+      // Still clear state even if WebSocket call fails
       setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
       setSearchStartTime(null);
     }
@@ -1394,52 +1380,9 @@ const SECSearchPage: React.FC = () => {
     setCurrentPage(1);
     setIsFiltered(false);
     
-    // Start search - now returns 200 immediately with job_id, progress streams via WebSocket
+    // Fetch all results for client-side filtering
     await fetchAllResults(params);
   };
-
-  // Subscribe to WebSocket progress updates for SEC search
-  useEffect(() => {
-    if (!searchState.jobId) {
-      return;
-    }
-
-    console.log('📡 SECSearchPage: Subscribing to WebSocket progress updates for job:', searchState.jobId);
-    
-    const unsubscribe = unifiedMessageHandler.onSecSearchProgressUpdate((jobId, progress) => {
-      if (jobId === searchState.jobId && progress) {
-        console.log('📊 SECSearchPage: Received progress update:', progress);
-        // Update search state with progress from WebSocket
-        setSearchState(prev => ({
-          ...prev,
-          currentPage: progress.current_page || prev.currentPage,
-          totalPages: progress.total_pages || prev.totalPages,
-          isSearching: progress.status === 'IN_PROGRESS' || progress.status === 'PENDING',
-        }));
-      }
-    });
-
-    // Also listen for custom events (fallback)
-    const handleProgressEvent = (event: CustomEvent) => {
-      if (event.detail.jobId === searchState.jobId) {
-        const progress = event.detail.progress;
-        console.log('📊 SECSearchPage: Received progress event:', progress);
-        setSearchState(prev => ({
-          ...prev,
-          currentPage: progress.current_page || prev.currentPage,
-          totalPages: progress.total_pages || prev.totalPages,
-          isSearching: progress.status === 'IN_PROGRESS' || progress.status === 'PENDING',
-        }));
-      }
-    };
-
-    window.addEventListener('sec-search-progress-updated', handleProgressEvent as EventListener);
-
-    return () => {
-      unsubscribe();
-      window.removeEventListener('sec-search-progress-updated', handleProgressEvent as EventListener);
-    };
-  }, [searchState.jobId]);
 
   const handleApplyFilters = () => {
     // Filtering is handled by useEffect - just reset to page 1
