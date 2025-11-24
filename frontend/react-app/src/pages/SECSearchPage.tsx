@@ -46,7 +46,7 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Download as DownloadIcon,
-  Cancel as CancelIcon,
+  Stop as StopIcon,
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
@@ -821,7 +821,7 @@ const SECSearchPage: React.FC = () => {
     ? { currentPage: searchState.currentPage, totalPages: searchState.totalPages }
     : null;
   const [selectedFiling, setSelectedFiling] = useState<SECSearchResult | null>(null);
-  const [isRestoringState, setIsRestoringState] = useState<boolean>(false); // Set to false since we initialize from storage
+  const [isRestoringState] = useState<boolean>(false); // Set to false since we initialize from storage
 
   // Log state restoration (state is already initialized from sessionStorage above)
   useEffect(() => {
@@ -1315,25 +1315,33 @@ const SECSearchPage: React.FC = () => {
   }, [selectedFilters, allSearchResults, currentPage]);
 
   const handleCancelSearch = async () => {
-    if (!searchState.jobId) {
-      console.warn('No job_id to cancel');
-      return;
-    }
-
     try {
-      console.log(`🛑 Cancelling search job ${searchState.jobId}`);
-      const result = await secSearchAPI.cancelJob(searchState.jobId);
-      
-      if (result.success) {
-        // Clear search state
-        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-        setSearchStartTime(null);
-        console.log('✅ Search cancelled successfully');
+      // If we have a job_id, cancel the async job
+      if (searchState.jobId) {
+        console.log(`🛑 Cancelling async search job ${searchState.jobId}`);
+        const result = await secSearchAPI.cancelJob(searchState.jobId);
+        
+        if (result.success) {
+          console.log('✅ Async search cancelled successfully');
+        } else {
+          console.error('❌ Failed to cancel async search:', result.error);
+        }
       } else {
-        console.error('❌ Failed to cancel search:', result.error);
+        console.log('🛑 Cancelling sync search');
       }
+      
+      // Always clear search state (works for both sync and async searches)
+      setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+      setSearchStartTime(null);
+      setAllSearchResults([]);
+      setCurrentResults([]);
+      setTotalFound(0);
+      console.log('✅ Search state cleared');
     } catch (error) {
       console.error('❌ Error cancelling search:', error);
+      // Still clear state even if API call fails
+      setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+      setSearchStartTime(null);
     }
   };
 
@@ -1788,7 +1796,7 @@ const SECSearchPage: React.FC = () => {
             </Box>
           </Collapse>
 
-          {/* Search Button and Cancel Button */}
+          {/* Search Button and Stop Button */}
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
             <Button
               variant="contained"
@@ -1821,28 +1829,37 @@ const SECSearchPage: React.FC = () => {
                   : 'Search SEC Filings'}
             </Button>
             
-            {/* Cancel Button - only show when search is in progress and has a job_id */}
-            {searchState.isSearching && searchState.jobId && (
+            {/* Stop Button - red border, clear background, red square icon, only show when search is in progress */}
+            {searchState.isSearching && (
               <Button
                 variant="outlined"
                 onClick={handleCancelSearch}
-                startIcon={<CancelIcon />}
                 sx={{
                   borderColor: '#ef4444',
+                  backgroundColor: 'transparent',
                   color: '#ef4444',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  py: 1.5,
-                  px: 3,
+                  minWidth: 48,
+                  width: 48,
+                  height: 48,
+                  borderRadius: '4px', // Match search button border radius
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   '&:hover': {
                     borderColor: '#dc2626',
-                    color: '#dc2626',
                     backgroundColor: 'rgba(239, 68, 68, 0.1)',
                   },
                 }}
               >
-                Cancel
+                <Box
+                  sx={{
+                    width: 16,
+                    height: 16,
+                    backgroundColor: '#ef4444',
+                    borderRadius: '2px',
+                  }}
+                />
               </Button>
             )}
           </Box>
@@ -2129,7 +2146,7 @@ const SECSearchPage: React.FC = () => {
                         key={`entity-${idx}`}
                         label={entity.entity}
                         onDelete={() => {
-                          setSelectedFilters(prev => ({
+                          setSelectedFilters((prev: typeof selectedFilters) => ({
                             ...prev,
                             entities: prev.entities.filter((_, i) => i !== idx),
                           }));
@@ -2152,7 +2169,7 @@ const SECSearchPage: React.FC = () => {
                         key={`form-${idx}`}
                         label={form}
                         onDelete={() => {
-                          setSelectedFilters(prev => ({
+                          setSelectedFilters((prev: typeof selectedFilters) => ({
                             ...prev,
                             forms: prev.forms.filter((_, i) => i !== idx),
                           }));
@@ -2175,7 +2192,7 @@ const SECSearchPage: React.FC = () => {
                         key={`location-${idx}`}
                         label={location}
                         onDelete={() => {
-                          setSelectedFilters(prev => ({
+                          setSelectedFilters((prev: typeof selectedFilters) => ({
                             ...prev,
                             locations: prev.locations.filter((_, i) => i !== idx),
                           }));
@@ -2198,7 +2215,7 @@ const SECSearchPage: React.FC = () => {
                         key={`inc-${idx}`}
                         label={state}
                         onDelete={() => {
-                          setSelectedFilters(prev => ({
+                          setSelectedFilters((prev: typeof selectedFilters) => ({
                             ...prev,
                             incorporationStates: prev.incorporationStates.filter((_, i) => i !== idx),
                           }));
@@ -2306,7 +2323,7 @@ const SECSearchPage: React.FC = () => {
                           <Box
                             key={idx}
                             onClick={() => {
-                              setSelectedFilters(prev => {
+                              setSelectedFilters((prev: typeof selectedFilters) => {
                                 const exists = prev.entities.some(
                                   e => e.entity === entityObj.entity && 
                                        (entityObj.cik ? e.cik === entityObj.cik : !e.cik)
@@ -2425,7 +2442,7 @@ const SECSearchPage: React.FC = () => {
                           <Box
                             key={idx}
                             onClick={() => {
-                              setSelectedFilters(prev => {
+                              setSelectedFilters((prev: typeof selectedFilters) => {
                                 const exists = prev.forms.includes(filter.form);
                                 if (exists) {
                                   // Remove if already selected
@@ -2569,7 +2586,7 @@ const SECSearchPage: React.FC = () => {
                           <Box
                             key={idx}
                             onClick={() => {
-                              setSelectedFilters(prev => {
+                              setSelectedFilters((prev: typeof selectedFilters) => {
                                 const exists = prev.locations.includes(stateCode);
                                 if (exists) {
                                   // Remove if already selected
@@ -2682,7 +2699,7 @@ const SECSearchPage: React.FC = () => {
                           <Box
                             key={idx}
                             onClick={() => {
-                              setSelectedFilters(prev => {
+                              setSelectedFilters((prev: typeof selectedFilters) => {
                                 const exists = prev.incorporationStates.includes(filter.state);
                                 if (exists) {
                                   // Remove if already selected
