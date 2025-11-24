@@ -200,6 +200,18 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
             if isinstance(data_file_urls, list):
                 item['dataFileUrls'] = data_file_urls  # DynamoDB will store as SS
         
+        # Add documentS3Keys as Map (M) if present
+        if filing_data.get('documentS3Keys'):
+            document_s3_keys = filing_data['documentS3Keys']
+            if isinstance(document_s3_keys, dict):
+                item['documentS3Keys'] = document_s3_keys  # DynamoDB will store as Map
+        
+        # Add dataFileS3Keys as Map (M) if present
+        if filing_data.get('dataFileS3Keys'):
+            data_file_s3_keys = filing_data['dataFileS3Keys']
+            if isinstance(data_file_s3_keys, dict):
+                item['dataFileS3Keys'] = data_file_s3_keys  # DynamoDB will store as Map
+        
         # Add TTL (optional - 90 days from now)
         ttl_days = 90
         item['ttl'] = current_time + (ttl_days * 24 * 60 * 60)
@@ -1335,6 +1347,15 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 elif not isinstance(data_file_urls, list):
                     data_file_urls = []
                 
+                # Handle S3 keys from cache - convert from DynamoDB Map format if needed
+                document_s3_keys = cached_item.get('documentS3Keys', {})
+                if not isinstance(document_s3_keys, dict):
+                    document_s3_keys = {}
+                
+                data_file_s3_keys = cached_item.get('dataFileS3Keys', {})
+                if not isinstance(data_file_s3_keys, dict):
+                    data_file_s3_keys = {}
+                
                 # Return cached data
                 filing_page_url = cached_item.get('filingPageUrl', '')
                 result = {
@@ -1351,6 +1372,8 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'filingPageUrl': filing_page_url,
                     'documentUrls': document_urls,
                     'dataFileUrls': data_file_urls,
+                    'documentS3Keys': document_s3_keys,
+                    'dataFileS3Keys': data_file_s3_keys,
                     'adsh': cached_item.get('adsh', filing_data['adsh']),
                     'filingId': filing_id,
                 }
@@ -1467,12 +1490,36 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                         filing_page_url=filing_page_url if filing_page_url else None
                     )
                     
+                    # Update the filing_data with S3 keys for cache update
+                    document_s3_keys = download_result.get('documentS3Keys', {})
+                    data_file_s3_keys = download_result.get('dataFileS3Keys', {})
+                    
                     # Update results with S3 keys if this filing is in the current page results
                     for result in results:
                         if result.get('filingId') == filing_id:
-                            result['documentS3Keys'] = download_result.get('documentS3Keys', {})
-                            result['dataFileS3Keys'] = download_result.get('dataFileS3Keys', {})
+                            result['documentS3Keys'] = document_s3_keys
+                            result['dataFileS3Keys'] = data_file_s3_keys
                             break
+                    
+                    # Update DynamoDB cache with S3 keys
+                    try:
+                        if cache_table:
+                            # Get the current item
+                            response = cache_table.get_item(Key={'filingId': filing_id})
+                            if 'Item' in response:
+                                # Update the item with S3 keys
+                                cache_table.update_item(
+                                    Key={'filingId': filing_id},
+                                    UpdateExpression='SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys',
+                                    ExpressionAttributeValues={
+                                        ':doc_keys': document_s3_keys,
+                                        ':data_keys': data_file_s3_keys
+                                    }
+                                )
+                                logger.info(f"Updated cache with S3 keys for filing {filing_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to update cache with S3 keys for filing {filing_id}: {e}")
+                        # Continue - don't fail the request if cache update fails
                         
                 except Exception as e:
                     logger.error(f"Failed to download documents for filing {filing_download_info.get('filingId')}: {e}")

@@ -241,18 +241,29 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Direct Lambda invocation - event is the payload
             body = event
         
-        # Validate user identity
-        authenticated_user_id = validate_user_identity(event)
+        # Check if this is a SEC filing download (doesn't require authentication)
+        bucket_name = body.get('bucket')
+        s3_key = body.get('s3_key')
+        is_sec_filing = bucket_name == 'SEC_FILINGS' or (s3_key and s3_key.startswith('filings/'))
         
-        if not authenticated_user_id:
-            return {
-                'statusCode': 401,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Authentication failed: No authenticated user ID found in request'})
-            }
-        
-        # Generate fresh presigned URL for download
-        return handle_file_download(event, body, authenticated_user_id)
+        # For SEC filings, skip authentication
+        if is_sec_filing:
+            logger.info("📄 SEC filing download - skipping authentication")
+            # Use a dummy user_id for SEC filings (not used in validation)
+            return handle_file_download(event, body, 'SEC_FILING_USER')
+        else:
+            # For chat files, require authentication
+            authenticated_user_id = validate_user_identity(event)
+            
+            if not authenticated_user_id:
+                return {
+                    'statusCode': 401,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Authentication failed: No authenticated user ID found in request'})
+                }
+            
+            # Generate fresh presigned URL for download
+            return handle_file_download(event, body, authenticated_user_id)
             
     except Exception as e:
         logger.error(f"❌ Lambda handler error: {str(e)}")
