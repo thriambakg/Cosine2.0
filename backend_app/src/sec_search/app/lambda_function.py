@@ -188,22 +188,22 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
             'lastAccessed': current_time,
         }
         
-        # Add documentFormatFiles and dataFiles separately
+        # Add documentFormatFiles and dataFiles if present
         if filing_data.get('documentFormatFiles'):
-            doc_format_files = filing_data['documentFormatFiles']
-            if isinstance(doc_format_files, list):
-                item['documentFormatFiles'] = doc_format_files
+            document_format_files = filing_data['documentFormatFiles']
+            if isinstance(document_format_files, list):
+                item['documentFormatFiles'] = document_format_files
         
         if filing_data.get('dataFiles'):
             data_files = filing_data['dataFiles']
             if isinstance(data_files, list):
                 item['dataFiles'] = data_files
         
-        # Keep documentUrls for backward compatibility (combined list)
-        if filing_data.get('documentUrls'):
+        # Backward compatibility: also store documentUrls if provided (for old format)
+        if filing_data.get('documentUrls') and not filing_data.get('documentFormatFiles'):
             document_urls = filing_data['documentUrls']
             if isinstance(document_urls, list):
-                item['documentUrls'] = document_urls
+                item['documentUrls'] = document_urls  # Keep for backward compatibility
         
         # Add TTL (optional - 90 days from now)
         ttl_days = 90
@@ -220,119 +220,17 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
 
 def scrape_filing_page_for_documents(filing_page_url: str) -> Dict[str, List[str]]:
     """
-    Scrape a SEC filing page (index.htm) to extract document URLs from both sections
+    Scrape a SEC filing page (index.htm) to extract all document URLs from both sections
     
     Args:
         filing_page_url: URL to the SEC filing index page
     
     Returns:
         Dict with:
-        - 'documentFormatFiles': List of URLs from Document Format Files table (may be empty)
-        - 'dataFiles': List of URLs from Data Files table (may be empty)
+        - documentFormatFiles: List of URLs from "Document Format Files" table
+        - dataFiles: List of URLs from "Data Files" table
     """
     session = create_session()
-    
-    def extract_urls_from_section(html_text: str, section_start: int, section_end: int) -> List[str]:
-        """Extract URLs from a specific section of the HTML"""
-        if section_start < 0 or section_start >= section_end:
-            return []
-        
-        # Extract the section
-        section_html = html_text[section_start:section_end]
-        
-        # Find the table boundaries
-        before_start = html_text[:section_start]
-        table_open_match = before_start.rfind('<table')
-        if table_open_match >= 0:
-            # Find where this table ends
-            table_section_full = html_text[table_open_match:section_end]
-            table_close_match = table_section_full.find('</table>')
-            if table_close_match > 0:
-                table_section = table_section_full[:table_close_match + 8]
-            else:
-                table_section = table_section_full
-        else:
-            table_section = section_html
-        
-        document_urls = []
-        
-        # Strategy 1: Look for .html/.htm files in the table (prioritize HTML over XML)
-        html_pattern = r'href="([^"]*\.(?:html?|htm)[^"]*)"'
-        html_matches = re.findall(html_pattern, table_section, re.IGNORECASE)
-        html_matches = [link for link in html_matches 
-                       if 'index' not in link.lower() 
-                       and 'xbrl' not in link.lower()
-                       and 'taxonomy' not in link.lower()]
-        document_urls.extend(html_matches)
-        
-        # Strategy 2: Find all .xml file links (if no HTML found)
-        xml_pattern = r'href="([^"]*\.xml[^"]*)"'
-        xml_matches = re.findall(xml_pattern, table_section, re.IGNORECASE)
-        document_urls.extend(xml_matches)
-        
-        # Strategy 3: Look for primary document patterns (highest priority)
-        primary_patterns = [
-            r'href="([^"]*primary[_-]?document[^"]*\.(?:xml|html?)[^"]*)"',
-            r'href="([^"]*primarydoc[^"]*\.(?:xml|html?)[^"]*)"',
-            r'href="([^"]*document[^"]*\.(?:xml|html?)[^"]*)"',
-            r'href="([^"]*doc\d+\.(?:xml|html?)[^"]*)"',
-        ]
-        primary_links = []
-        for pattern in primary_patterns:
-            matches = re.findall(pattern, table_section, re.IGNORECASE)
-            primary_links.extend(matches)
-        
-        # Prepend primary links to prioritize them (HTML first if available)
-        primary_html = [link for link in primary_links if link.endswith(('.html', '.htm'))]
-        primary_xml = [link for link in primary_links if link.endswith('.xml')]
-        document_urls = primary_html + primary_xml + [link for link in document_urls if link not in primary_links]
-        
-        # Strategy 4: Look for .txt files in the table
-        txt_pattern = r'href="([^"]*\.txt[^"]*)"'
-        txt_matches = re.findall(txt_pattern, table_section, re.IGNORECASE)
-        document_urls.extend(txt_matches)
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_doc_links = []
-        for link in document_urls:
-            if link not in seen:
-                seen.add(link)
-                unique_doc_links.append(link)
-        
-        # Convert relative URLs to absolute
-        base_url = '/'.join(filing_page_url.split('/')[:-1])
-        absolute_urls = []
-        for link in unique_doc_links:
-            if link.startswith('/'):
-                absolute_url = f"{SEC_BASE_URL}{link}"
-            elif not link.startswith('http'):
-                absolute_url = f"{base_url}/{link}"
-            else:
-                absolute_url = link
-            
-            # Skip index pages and XBRL taxonomy files
-            if ('index' not in absolute_url.lower() and 
-                'xbrl' not in absolute_url.lower() and
-                'taxonomy' not in absolute_url.lower() and
-                'schema' not in absolute_url.lower()):
-                absolute_urls.append(absolute_url)
-        
-        # Sort: HTML files first (preferred), then XML, then TXT
-        def link_priority(link):
-            if link.endswith(('.html', '.htm')):
-                return 0  # HTML first
-            elif link.endswith('.xml'):
-                return 1
-            elif 'primary' in link.lower() or 'document' in link.lower():
-                return 2
-            elif 'doc' in link.lower():
-                return 3
-            else:
-                return 4
-        
-        return sorted(absolute_urls, key=link_priority)
-    
     result = {
         'documentFormatFiles': [],
         'dataFiles': []
@@ -352,7 +250,6 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> Dict[str, List[str
             r'<th[^>]*>.*?Document Format Files',
         ]
         
-        # Find the "Data Files" table section
         data_table_start_patterns = [
             r'Data Files',
             r'<table[^>]*>.*?Data Files',
@@ -375,31 +272,110 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> Dict[str, List[str
                 data_table_start = match.start()
                 break
         
-        # Find the end of Data Files table (next table or end of HTML)
-        data_table_end = len(html_text)
-        if data_table_start < len(html_text):
-            # Look for the next table or end of document
-            next_table_match = re.search(r'<table', html_text[data_table_start + 100:], re.IGNORECASE)
-            if next_table_match:
-                data_table_end = data_table_start + 100 + next_table_match.start()
+        # Helper function to extract links from a table section
+        def extract_links_from_table(table_section: str) -> List[str]:
+            """Extract all file links from a table section"""
+            links = []
+            
+            # Strategy 1: Find all file links (XML, HTML, TXT, PDF, etc.)
+            # Match any href that points to a file (has an extension or looks like a file)
+            file_patterns = [
+                r'href="([^"]*\.(?:xml|html?|htm|txt|pdf|zip|gz|json|csv)[^"]*)"',  # Common file extensions
+                r'href="([^"]*/(?:[^/]+\.(?:xml|html?|htm|txt|pdf|zip|gz|json|csv))[^"]*)"',  # Files with paths
+            ]
+            
+            for pattern in file_patterns:
+                matches = re.findall(pattern, table_section, re.IGNORECASE)
+                links.extend(matches)
+            
+            # Strategy 2: Look for primary document patterns (highest priority)
+            primary_patterns = [
+                r'href="([^"]*primary[_-]?document[^"]*)"',
+                r'href="([^"]*primarydoc[^"]*)"',
+                r'href="([^"]*document[^"]*)"',
+                r'href="([^"]*doc\d+[^"]*)"',
+            ]
+            primary_links = []
+            for pattern in primary_patterns:
+                matches = re.findall(pattern, table_section, re.IGNORECASE)
+                primary_links.extend(matches)
+            
+            # Prepend primary links to prioritize them
+            links = primary_links + [link for link in links if link not in primary_links]
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_links = []
+            for link in links:
+                if link not in seen:
+                    seen.add(link)
+                    unique_links.append(link)
+            
+            # Convert relative URLs to absolute
+            base_url = '/'.join(filing_page_url.split('/')[:-1])
+            absolute_urls = []
+            for link in unique_links:
+                if link.startswith('/'):
+                    absolute_url = f"{SEC_BASE_URL}{link}"
+                elif not link.startswith('http'):
+                    absolute_url = f"{base_url}/{link}"
+                else:
+                    absolute_url = link
+                
+                # Skip index pages and XBRL taxonomy files
+                if ('index' not in absolute_url.lower() and 
+                    'xbrl' not in absolute_url.lower() and
+                    'taxonomy' not in absolute_url.lower() and
+                    'schema' not in absolute_url.lower()):
+                    absolute_urls.append(absolute_url)
+            
+            return absolute_urls
         
         # Extract Document Format Files section
         if doc_table_start >= 0:
-            result['documentFormatFiles'] = extract_urls_from_section(
-                html_text, doc_table_start, data_table_start
-            )
-            logger.info(f"Found {len(result['documentFormatFiles'])} Document Format Files")
-        else:
-            logger.info("No Document Format Files section found")
+            # Find the end of Document Format Files table (either Data Files start or next table)
+            doc_table_end = data_table_start
+            
+            before_start = html_text[:doc_table_start]
+            table_open_match = before_start.rfind('<table')
+            if table_open_match >= 0:
+                table_section_full = html_text[table_open_match:doc_table_end]
+                table_close_match = table_section_full.find('</table>')
+                if table_close_match > 0:
+                    doc_table_section = table_section_full[:table_close_match + 8]
+                else:
+                    doc_table_section = table_section_full
+            else:
+                doc_table_section = html_text[doc_table_start:doc_table_end]
+            
+            result['documentFormatFiles'] = extract_links_from_table(doc_table_section)
+            logger.info(f"Found {len(result['documentFormatFiles'])} files in Document Format Files section")
         
         # Extract Data Files section
         if data_table_start < len(html_text):
-            result['dataFiles'] = extract_urls_from_section(
-                html_text, data_table_start, data_table_end
-            )
-            logger.info(f"Found {len(result['dataFiles'])} Data Files")
-        else:
-            logger.info("No Data Files section found")
+            # Find the end of Data Files table (next table or end of document)
+            # Look for next table or end of HTML
+            after_data_start = html_text[data_table_start:]
+            next_table_match = re.search(r'<table[^>]*>', after_data_start[100:], re.IGNORECASE)  # Skip first 100 chars to avoid matching same table
+            if next_table_match:
+                data_table_end = data_table_start + 100 + next_table_match.start()
+            else:
+                data_table_end = len(html_text)
+            
+            before_data_start = html_text[:data_table_start]
+            table_open_match = before_data_start.rfind('<table')
+            if table_open_match >= 0:
+                table_section_full = html_text[table_open_match:data_table_end]
+                table_close_match = table_section_full.find('</table>')
+                if table_close_match > 0:
+                    data_table_section = table_section_full[:table_close_match + 8]
+                else:
+                    data_table_section = table_section_full
+            else:
+                data_table_section = html_text[data_table_start:data_table_end]
+            
+            result['dataFiles'] = extract_links_from_table(data_table_section)
+            logger.info(f"Found {len(result['dataFiles'])} files in Data Files section")
         
         return result
         
@@ -408,7 +384,7 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> Dict[str, List[str
         return result
 
 
-def download_document_to_s3(document_url: str, filing_id: str, filename: str, folder: str = 'documentformatfiles') -> Optional[str]:
+def download_document_to_s3(document_url: str, filing_id: str, filename: str, subfolder: str = '') -> Optional[str]:
     """
     Download a document from SEC and store it in S3
     
@@ -416,7 +392,7 @@ def download_document_to_s3(document_url: str, filing_id: str, filename: str, fo
         document_url: URL of the document to download
         filing_id: Filing ID (used as S3 prefix)
         filename: Filename to use in S3 (extracted from URL or generated)
-        folder: Subfolder name ('documentformatfiles' or 'datafiles')
+        subfolder: Optional subfolder (e.g., 'documentformatfiles' or 'datafiles')
     
     Returns:
         S3 key if successful, None otherwise
@@ -449,9 +425,20 @@ def download_document_to_s3(document_url: str, filing_id: str, filename: str, fo
             content_type = 'text/plain'
         elif filename.endswith('.pdf'):
             content_type = 'application/pdf'
+        elif filename.endswith('.zip'):
+            content_type = 'application/zip'
+        elif filename.endswith('.gz'):
+            content_type = 'application/gzip'
+        elif filename.endswith('.json'):
+            content_type = 'application/json'
+        elif filename.endswith('.csv'):
+            content_type = 'text/csv'
         
-        # Generate S3 key: filings/{filing_id}/{folder}/{filename}
-        s3_key = f"filings/{filing_id}/{folder}/{filename}"
+        # Generate S3 key: filings/{filing_id}/{subfolder}/{filename}
+        if subfolder:
+            s3_key = f"filings/{filing_id}/{subfolder}/{filename}"
+        else:
+            s3_key = f"filings/{filing_id}/{filename}"
         
         # Upload to S3
         s3_client.put_object(
@@ -477,17 +464,19 @@ def download_filing_documents_to_s3(filing_id: str, document_format_files: List[
     
     Args:
         filing_id: DynamoDB primary key (filingId) in format: {form}-{CIK}-{fileNumber}-{filmNumber}
-        document_format_files: List of document URLs from Document Format Files section
-        data_files: List of document URLs from Data Files section
+        document_format_files: List of document URLs from "Document Format Files" section
+        data_files: List of document URLs from "Data Files" section
         filing_page_url: Optional URL to the filing page (index.htm)
     
     Returns:
         Dict with:
+        - filingPageS3Key: S3 key for the filing page (index.htm) if downloaded
         - documentFormatFilesS3Keys: Dict mapping document URL to S3 key for Document Format Files
         - dataFilesS3Keys: Dict mapping document URL to S3 key for Data Files
         - success: Boolean indicating if at least one document was downloaded
     """
     result = {
+        'filingPageS3Key': None,
         'documentFormatFilesS3Keys': {},
         'dataFilesS3Keys': {},
         'success': False
@@ -517,172 +506,95 @@ def download_filing_documents_to_s3(filing_id: str, document_format_files: List[
         logger.warning(f"Sanitized filing_id for S3: {filing_id} -> {sanitized_filing_id}")
         filing_id = sanitized_filing_id
     
-    # Normalize inputs - ensure lists are not None
-    document_format_files = document_format_files or []
-    data_files = data_files or []
+    logger.info(f"Downloading documents for filing_id: {filing_id}")
+    logger.info(f"  - Document Format Files: {len(document_format_files)} files")
+    logger.info(f"  - Data Files: {len(data_files)} files")
     
-    logger.info(f"Downloading documents for filing_id: {filing_id} (Document Format Files: {len(document_format_files)}, Data Files: {len(data_files)})")
+    # Download filing page (index.htm) if provided - store at root level
+    if filing_page_url:
+        try:
+            # Extract filename from URL
+            filename = filing_page_url.split('/')[-1]
+            if not filename or filename == '' or '?' in filename:
+                filename = 'index.htm'
+            
+            # Remove query parameters if any
+            if '?' in filename:
+                filename = filename.split('?')[0]
+            
+            # Sanitize filename
+            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
+            
+            filing_page_s3_key = download_document_to_s3(filing_page_url, filing_id, filename, subfolder='')
+            if filing_page_s3_key:
+                result['filingPageS3Key'] = filing_page_s3_key
+                result['success'] = True
+                logger.info(f"Downloaded filing page to {filing_page_s3_key}")
+        except Exception as e:
+            logger.error(f"Error downloading filing page {filing_page_url}: {e}")
+    
+    # Helper function to download a list of URLs to a specific subfolder
+    def download_urls_to_folder(urls: List[str], subfolder: str) -> Dict[str, str]:
+        """Download URLs and return dict mapping URL to S3 key"""
+        s3_keys = {}
+        for doc_url in urls:
+            try:
+                # Extract filename from URL
+                filename = doc_url.split('/')[-1]
+                if not filename or filename == '' or '?' in filename:
+                    # Generate filename from URL path
+                    path_parts = doc_url.split('/')
+                    if len(path_parts) > 1:
+                        filename = path_parts[-1]
+                    else:
+                        # Fallback: use hash of URL
+                        filename = f"file_{abs(hash(doc_url)) % 100000}"
+                
+                # Clean filename (remove query params if any)
+                if '?' in filename:
+                    filename = filename.split('?')[0]
+                
+                # If filename has no extension, try to determine from URL or content type
+                if '.' not in filename:
+                    # Try to get extension from URL path
+                    url_lower = doc_url.lower()
+                    if '.xml' in url_lower:
+                        filename += '.xml'
+                    elif '.html' in url_lower or '.htm' in url_lower:
+                        filename += '.html'
+                    elif '.txt' in url_lower:
+                        filename += '.txt'
+                    elif '.pdf' in url_lower:
+                        filename += '.pdf'
+                    else:
+                        filename += '.txt'  # Default extension
+                
+                # Sanitize filename for S3 (remove invalid characters)
+                filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
+                
+                s3_key = download_document_to_s3(doc_url, filing_id, filename, subfolder=subfolder)
+                if s3_key:
+                    s3_keys[doc_url] = s3_key
+                    result['success'] = True
+                    logger.info(f"Downloaded {subfolder} file to {s3_key}")
+            except Exception as e:
+                logger.error(f"Error downloading {subfolder} file {doc_url}: {e}")
+                continue
+        return s3_keys
     
     # Download Document Format Files
-    # Prioritize HTML files over XML - download HTML version if available
-    for doc_url in document_format_files:
-        try:
-            # Check if this is an XML file - try to find HTML version
-            html_url = None
-            if doc_url.endswith('.xml'):
-                # Try to find HTML version in common SEC patterns
-                base_url = '/'.join(doc_url.split('/')[:-1])
-                xml_filename = doc_url.split('/')[-1]
-                html_filename = xml_filename.replace('.xml', '.html')
-                
-                # Check if XML is already in an xslF folder (e.g., xslF345X03/rrd280655.xml)
-                # If so, HTML should be in the same folder
-                if 'xslF' in base_url.lower():
-                    # XML is in xslF folder, HTML should be in same folder
-                    possible_html_paths = [f"{base_url}/{html_filename}"]
-                else:
-                    # XML is in base directory, try xslF folders first, then same directory
-                    possible_html_paths = [
-                        f"{base_url}/xslF345X05/{html_filename}",
-                        f"{base_url}/xslF345X03/{html_filename}",
-                        f"{base_url}/xslF345X04/{html_filename}",
-                        f"{base_url}/{html_filename}",  # Same directory as fallback
-                    ]
-                
-                # Check if HTML version exists
-                session = create_session()
-                for html_path in possible_html_paths:
-                    try:
-                        time.sleep(0.05)  # Small delay
-                        test_response = session.head(html_path, timeout=10, allow_redirects=True)
-                        if test_response.status_code == 200:
-                            html_url = html_path
-                            logger.info(f"Found HTML version for {doc_url}: {html_url}")
-                            break
-                    except Exception as e:
-                        logger.debug(f"HTML check failed for {html_path}: {e}")
-                        continue
-            
-            # Use HTML URL if found, otherwise use original URL
-            download_url = html_url if html_url else doc_url
-            
-            # Extract filename from URL (prefer HTML filename if available)
-            if html_url:
-                filename = html_url.split('/')[-1]
-            else:
-                filename = doc_url.split('/')[-1]
-            
-            if not filename or filename == '' or '?' in filename:
-                # Generate filename from URL path
-                path_parts = download_url.split('/')
-                if len(path_parts) > 1:
-                    filename = path_parts[-1]
-                else:
-                    # Fallback: use hash of URL
-                    filename = f"document_{abs(hash(download_url)) % 100000}.html" if html_url else f"document_{abs(hash(download_url)) % 100000}.xml"
-            
-            # Clean filename (remove query params if any)
-            if '?' in filename:
-                filename = filename.split('?')[0]
-            
-            # Ensure HTML files have .html extension, XML files have .xml
-            if html_url and not filename.endswith('.html') and not filename.endswith('.htm'):
-                filename = filename.replace('.xml', '.html')
-            
-            # Sanitize filename for S3 (remove invalid characters)
-            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
-            
-            s3_key = download_document_to_s3(download_url, filing_id, filename, folder='documentformatfiles')
-            if s3_key:
-                result['documentFormatFilesS3Keys'][doc_url] = s3_key  # Use original URL as key
-                result['success'] = True
-                logger.info(f"Downloaded Document Format File to {s3_key} (from {download_url})")
-        except Exception as e:
-            logger.error(f"Error downloading Document Format File {doc_url}: {e}")
-            continue
+    if document_format_files:
+        result['documentFormatFilesS3Keys'] = download_urls_to_folder(document_format_files, 'documentformatfiles')
+        logger.info(f"Downloaded {len(result['documentFormatFilesS3Keys'])} Document Format Files")
     
     # Download Data Files
-    # Prioritize HTML files over XML - download HTML version if available
-    for doc_url in data_files:
-        try:
-            # Check if this is an XML file - try to find HTML version
-            html_url = None
-            if doc_url.endswith('.xml'):
-                # Try to find HTML version
-                base_url = '/'.join(doc_url.split('/')[:-1])
-                xml_filename = doc_url.split('/')[-1]
-                html_filename = xml_filename.replace('.xml', '.html')
-                
-                # Check if XML is already in an xslF folder
-                if 'xslF' in base_url.lower():
-                    # XML is in xslF folder, HTML should be in same folder
-                    possible_html_paths = [f"{base_url}/{html_filename}"]
-                else:
-                    # XML is in base directory, try xslF folders first, then same directory
-                    possible_html_paths = [
-                        f"{base_url}/xslF345X05/{html_filename}",
-                        f"{base_url}/xslF345X03/{html_filename}",
-                        f"{base_url}/xslF345X04/{html_filename}",
-                        f"{base_url}/{html_filename}",  # Same directory as fallback
-                    ]
-                
-                # Check if HTML version exists
-                session = create_session()
-                for html_path in possible_html_paths:
-                    try:
-                        time.sleep(0.05)  # Small delay
-                        test_response = session.head(html_path, timeout=10, allow_redirects=True)
-                        if test_response.status_code == 200:
-                            html_url = html_path
-                            logger.info(f"Found HTML version for data file {doc_url}: {html_url}")
-                            break
-                    except Exception as e:
-                        logger.debug(f"HTML check failed for {html_path}: {e}")
-                        continue
-            
-            # Use HTML URL if found, otherwise use original URL
-            download_url = html_url if html_url else doc_url
-            
-            # Extract filename from URL (prefer HTML filename if available)
-            if html_url:
-                filename = html_url.split('/')[-1]
-            else:
-                filename = doc_url.split('/')[-1]
-            
-            if not filename or filename == '' or '?' in filename:
-                # Generate filename from URL path
-                path_parts = download_url.split('/')
-                if len(path_parts) > 1:
-                    filename = path_parts[-1]
-                else:
-                    # Fallback: use hash of URL
-                    filename = f"datafile_{abs(hash(download_url)) % 100000}.html" if html_url else f"datafile_{abs(hash(download_url)) % 100000}.xml"
-            
-            # Clean filename (remove query params if any)
-            if '?' in filename:
-                filename = filename.split('?')[0]
-            
-            # Ensure HTML files have .html extension
-            if html_url and not filename.endswith('.html') and not filename.endswith('.htm'):
-                filename = filename.replace('.xml', '.html')
-            
-            # Sanitize filename for S3 (remove invalid characters)
-            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
-            
-            s3_key = download_document_to_s3(download_url, filing_id, filename, folder='datafiles')
-            if s3_key:
-                result['dataFilesS3Keys'][doc_url] = s3_key  # Use original URL as key
-                result['success'] = True
-                logger.info(f"Downloaded Data File to {s3_key} (from {download_url})")
-        except Exception as e:
-            logger.error(f"Error downloading Data File {doc_url}: {e}")
-            continue
+    if data_files:
+        result['dataFilesS3Keys'] = download_urls_to_folder(data_files, 'datafiles')
+        logger.info(f"Downloaded {len(result['dataFilesS3Keys'])} Data Files")
     
     total_downloaded = len(result['documentFormatFilesS3Keys']) + len(result['dataFilesS3Keys'])
     if result['success']:
-        logger.info(f"Successfully downloaded {total_downloaded} document(s) for filing_id: {filing_id} "
-                   f"(Document Format Files: {len(result['documentFormatFilesS3Keys'])}, "
-                   f"Data Files: {len(result['dataFilesS3Keys'])})")
+        logger.info(f"Successfully downloaded {total_downloaded} document(s) for filing_id: {filing_id}")
     else:
         logger.warning(f"No documents were successfully downloaded for filing_id: {filing_id}")
     
@@ -1210,20 +1122,21 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 cached_item = cached_filings[filing_id]
                 logger.info(f"Using cached data for filing {filing_id}")
                 
-                # Handle documentFormatFiles and dataFiles - convert set to list if needed
+                # Handle documentFormatFiles and dataFiles - support both old format (documentUrls) and new format
                 document_format_files = cached_item.get('documentFormatFiles', [])
                 data_files = cached_item.get('dataFiles', [])
                 
-                # Fallback to documentUrls for backward compatibility
+                # Backward compatibility: if documentUrls exists but documentFormatFiles doesn't, use documentUrls
                 if not document_format_files and not data_files:
-                    document_urls = cached_item.get('documentUrls', [])
-                    if isinstance(document_urls, set):
-                        document_urls = list(document_urls)
-                    elif not isinstance(document_urls, list):
-                        document_urls = []
-                    # If we only have the old format, put everything in documentFormatFiles
-                    document_format_files = document_urls
+                    old_document_urls = cached_item.get('documentUrls', [])
+                    if isinstance(old_document_urls, set):
+                        old_document_urls = list(old_document_urls)
+                    elif not isinstance(old_document_urls, list):
+                        old_document_urls = []
+                    # Treat old format as documentFormatFiles for backward compatibility
+                    document_format_files = old_document_urls
                 
+                # Ensure they're lists
                 if isinstance(document_format_files, set):
                     document_format_files = list(document_format_files)
                 elif not isinstance(document_format_files, list):
@@ -1272,16 +1185,17 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                         base_url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_padded}/{accession_dashed}"
                         filing_page_url = f"{base_url}/{accession_dashed}-index.htm"
                 
-                # Scrape document URLs from filing page (both sections)
-                document_format_files = []
-                data_files = []
+                # Scrape document URLs from filing page (returns dict with documentFormatFiles and dataFiles)
+                scraped_docs = {'documentFormatFiles': [], 'dataFiles': []}
                 primary_document_url = ''
                 if filing_page_url:
                     scraped_docs = scrape_filing_page_for_documents(filing_page_url)
-                    document_format_files = scraped_docs.get('documentFormatFiles', [])
-                    data_files = scraped_docs.get('dataFiles', [])
-                    if document_format_files:
-                        primary_document_url = document_format_files[0]
+                    # Get primary document from Document Format Files (first one if available)
+                    if scraped_docs.get('documentFormatFiles'):
+                        primary_document_url = scraped_docs['documentFormatFiles'][0]
+                
+                document_format_files = scraped_docs.get('documentFormatFiles', [])
+                data_files = scraped_docs.get('dataFiles', [])
                 
                 # Prepare result
                 result = {
@@ -1308,8 +1222,6 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 filing_data['documentFormatFiles'] = document_format_files
                 filing_data['dataFiles'] = data_files
                 filing_data['primaryDocumentUrl'] = primary_document_url
-                # Keep documentUrls for backward compatibility (combined)
-                filing_data['documentUrls'] = document_format_files + data_files
                 filings_to_store_in_dynamodb.append(filing_data)
                 
                 # Add to download list
@@ -1343,13 +1255,17 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     data_files = filing_download_info.get('dataFiles', [])
                     filing_page_url = filing_download_info.get('filingPageUrl', '')
                     
+                    # Backward compatibility: if old format documentUrls exists, use it as documentFormatFiles
+                    if not document_format_files and not data_files:
+                        old_document_urls = filing_download_info.get('documentUrls', [])
+                        if old_document_urls:
+                            document_format_files = old_document_urls
+                    
                     if not filing_id:
                         logger.warning(f"Skipping S3 download: missing filing_id")
                         continue
                     
-                    # Check if we have any files to download
-                    total_files = len(document_format_files) + len(data_files)
-                    if total_files == 0:
+                    if (not document_format_files or len(document_format_files) == 0) and (not data_files or len(data_files) == 0):
                         logger.info(f"Skipping S3 download for filing_id {filing_id}: no document URLs to download")
                         continue
                     
@@ -1361,7 +1277,8 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                                    f"Split into {len(parts)} parts: {parts}")
                         continue
                     
-                    logger.info(f"Downloading {len(document_format_files)} Document Format Files and {len(data_files)} Data Files to S3 for filing_id: {filing_id}")
+                    total_files = len(document_format_files) + len(data_files)
+                    logger.info(f"Downloading {total_files} document(s) to S3 for filing_id: {filing_id} ({len(document_format_files)} Document Format Files, {len(data_files)} Data Files)")
                     download_result = download_filing_documents_to_s3(
                         filing_id=filing_id,
                         document_format_files=document_format_files,
@@ -1372,6 +1289,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     # Update results with S3 keys if this filing is in the current page results
                     for result in results:
                         if result.get('filingId') == filing_id:
+                            result['filingPageS3Key'] = download_result.get('filingPageS3Key')
                             result['documentFormatFilesS3Keys'] = download_result.get('documentFormatFilesS3Keys', {})
                             result['dataFilesS3Keys'] = download_result.get('dataFilesS3Keys', {})
                             break

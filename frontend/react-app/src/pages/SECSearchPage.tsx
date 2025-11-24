@@ -2872,11 +2872,12 @@ const SECSearchPage: React.FC = () => {
                 {/* Document Format Files Section */}
                 <Grid item xs={12}>
                   <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
-                    Document Format Files ({selectedFiling.documentFormatFiles?.length || 0})
+                    Document Format Files ({selectedFiling.documentFormatFiles?.length || selectedFiling.documentUrls?.length || 0})
                   </Typography>
-                  {selectedFiling.documentFormatFiles && selectedFiling.documentFormatFiles.length > 0 ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '300px', overflowY: 'auto' }}>
-                      {selectedFiling.documentFormatFiles.map((url, index) => {
+                  {(selectedFiling.documentFormatFiles && selectedFiling.documentFormatFiles.length > 0) || 
+                   (selectedFiling.documentUrls && selectedFiling.documentUrls.length > 0) ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
+                      {(selectedFiling.documentFormatFiles || selectedFiling.documentUrls || []).map((url, index) => {
                         const filename = url.split('/').pop() || `Document ${index + 1}`;
                         return (
                           <Box
@@ -2921,7 +2922,7 @@ const SECSearchPage: React.FC = () => {
                     Data Files ({selectedFiling.dataFiles?.length || 0})
                   </Typography>
                   {selectedFiling.dataFiles && selectedFiling.dataFiles.length > 0 ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '300px', overflowY: 'auto' }}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
                       {selectedFiling.dataFiles.map((url, index) => {
                         const filename = url.split('/').pop() || `Data File ${index + 1}`;
                         return (
