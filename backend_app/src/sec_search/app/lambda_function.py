@@ -200,17 +200,15 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
             if isinstance(data_file_urls, list):
                 item['dataFileUrls'] = data_file_urls  # DynamoDB will store as SS
         
-        # Add documentS3Keys as Map (M) if present
-        if filing_data.get('documentS3Keys'):
-            document_s3_keys = filing_data['documentS3Keys']
-            if isinstance(document_s3_keys, dict):
-                item['documentS3Keys'] = document_s3_keys  # DynamoDB will store as Map
+        # Add documentS3Keys as Map (M) - always store (even if empty dict)
+        document_s3_keys = filing_data.get('documentS3Keys', {})
+        if isinstance(document_s3_keys, dict):
+            item['documentS3Keys'] = document_s3_keys  # DynamoDB will store as Map
         
-        # Add dataFileS3Keys as Map (M) if present
-        if filing_data.get('dataFileS3Keys'):
-            data_file_s3_keys = filing_data['dataFileS3Keys']
-            if isinstance(data_file_s3_keys, dict):
-                item['dataFileS3Keys'] = data_file_s3_keys  # DynamoDB will store as Map
+        # Add dataFileS3Keys as Map (M) - always store (even if empty dict)
+        data_file_s3_keys = filing_data.get('dataFileS3Keys', {})
+        if isinstance(data_file_s3_keys, dict):
+            item['dataFileS3Keys'] = data_file_s3_keys  # DynamoDB will store as Map
         
         # Add TTL (optional - 90 days from now)
         ttl_days = 90
@@ -1433,6 +1431,9 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 filing_data['documentUrls'] = document_urls
                 filing_data['dataFileUrls'] = data_file_urls
                 filing_data['primaryDocumentUrl'] = primary_document_url
+                # Initialize empty S3 keys - will be updated after download
+                filing_data['documentS3Keys'] = {}
+                filing_data['dataFileS3Keys'] = {}
                 filings_to_store_in_dynamodb.append(filing_data)
                 
                 # Add to download list
@@ -1503,22 +1504,27 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     
                     # Update DynamoDB cache with S3 keys
                     try:
-                        if cache_table:
-                            # Get the current item
-                            response = cache_table.get_item(Key={'filingId': filing_id})
-                            if 'Item' in response:
-                                # Update the item with S3 keys
-                                cache_table.update_item(
-                                    Key={'filingId': filing_id},
-                                    UpdateExpression='SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys',
-                                    ExpressionAttributeValues={
-                                        ':doc_keys': document_s3_keys,
-                                        ':data_keys': data_file_s3_keys
-                                    }
-                                )
-                                logger.info(f"Updated cache with S3 keys for filing {filing_id}")
+                        if cache_table and (document_s3_keys or data_file_s3_keys):
+                            logger.info(f"Updating cache with S3 keys for filing {filing_id}: {len(document_s3_keys)} document keys, {len(data_file_s3_keys)} data file keys")
+                            # Update the item with S3 keys (no need to check if item exists - update_item will work)
+                            cache_table.update_item(
+                                Key={'filingId': filing_id},
+                                UpdateExpression='SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys',
+                                ExpressionAttributeValues={
+                                    ':doc_keys': document_s3_keys if document_s3_keys else {},
+                                    ':data_keys': data_file_s3_keys if data_file_s3_keys else {}
+                                }
+                            )
+                            logger.info(f"✅ Successfully updated cache with S3 keys for filing {filing_id}")
+                        else:
+                            if not cache_table:
+                                logger.warning(f"Cache table not available - cannot update S3 keys for filing {filing_id}")
+                            else:
+                                logger.warning(f"No S3 keys to update for filing {filing_id}")
                     except Exception as e:
-                        logger.warning(f"Failed to update cache with S3 keys for filing {filing_id}: {e}")
+                        logger.error(f"❌ Failed to update cache with S3 keys for filing {filing_id}: {e}")
+                        import traceback
+                        logger.error(f"❌ Traceback: {traceback.format_exc()}")
                         # Continue - don't fail the request if cache update fails
                         
                 except Exception as e:
