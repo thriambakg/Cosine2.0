@@ -382,16 +382,24 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
             before_start = html_text[:doc_table_start]
             table_open_match = before_start.rfind('<table')
             if table_open_match >= 0:
+                # Find the closing </table> tag for the Document Format Files table
+                # Look for the next </table> after our table start, but before Data Files table
                 table_section_full = html_text[table_open_match:data_table_start]
+                # Find all </table> tags and take the first one (the Document Format Files table)
                 table_close_match = table_section_full.find('</table>')
                 if table_close_match > 0:
+                    # Include the closing tag
                     table_section = table_section_full[:table_close_match + 8]
                 else:
+                    # If no closing tag found, use everything up to Data Files table
                     table_section = table_section_full
             else:
+                # If no table tag found before "Document Format Files", search from that point
                 table_section = html_text[doc_table_start:data_table_start]
         else:
             table_section = html_text
+        
+        logger.debug(f"Extracted table section length: {len(table_section)} chars, found {len(re.findall(r'<a[^>]+href=', table_section, re.IGNORECASE))} href links")
         
         # Extract ALL href links from the table section (more reliable than pattern matching)
         # This captures all files regardless of extension
@@ -621,10 +629,15 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                      b'<document>' in doc_content or 
                      b'<edgarDocument' in doc_content)
             
-            # Skip if this is the index page (has "Document Format Files" or "Data Files" table)
-            is_index_page = (b'document format files' in content_start or 
-                           b'data files' in content_start or
-                           b'<table' in content_start and b'seq' in content_start and b'description' in content_start)
+            # Skip if this is the actual filing index page
+            # Since we're extracting links strictly from within the "Document Format Files" table,
+            # we only need to check if the URL itself is an index.htm file
+            # The content-based check was too aggressive and was incorrectly skipping real documents
+            is_index_page = (
+                '-index.htm' in doc_url.lower() or 
+                doc_url.endswith('index.htm') or
+                doc_url.endswith('index.html')
+            )
             
             # Skip SEC navigation/search pages (browse-edgar, search pages, etc.)
             is_sec_nav_page = (b'browse-edgar' in content_start or
@@ -634,7 +647,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                              b'filings search' in content_start)
             
             if is_index_page:
-                logger.warning(f"Skipping {doc_url} - appears to be index page, not actual document")
+                logger.warning(f"Skipping {doc_url} - appears to be filing index page, not actual document")
                 continue
             
             if is_sec_nav_page:
@@ -773,10 +786,15 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                      b'<document>' in data_file_content or 
                      b'<edgarDocument' in data_file_content)
             
-            # Skip if this is the index page
-            is_index_page = (b'document format files' in content_start or 
-                           b'data files' in content_start or
-                           b'<table' in content_start and b'seq' in content_start and b'description' in content_start)
+            # Skip if this is the actual filing index page
+            # Since we're extracting links strictly from within the "Data Files" table,
+            # we only need to check if the URL itself is an index.htm file
+            # The content-based check was too aggressive and was incorrectly skipping real documents
+            is_index_page = (
+                '-index.htm' in data_file_url.lower() or 
+                data_file_url.endswith('index.htm') or
+                data_file_url.endswith('index.html')
+            )
             
             # Skip SEC navigation/search pages (browse-edgar, search pages, etc.)
             is_sec_nav_page = (b'browse-edgar' in content_start or
@@ -786,7 +804,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                              b'filings search' in content_start)
             
             if is_index_page:
-                logger.warning(f"Skipping {data_file_url} - appears to be index page, not actual data file")
+                logger.warning(f"Skipping {data_file_url} - appears to be filing index page, not actual data file")
                 continue
             
             if is_sec_nav_page:
