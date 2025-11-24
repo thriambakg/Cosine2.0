@@ -639,18 +639,26 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             content_start_lower = content_start.lower()
             
             # Check for HTML indicators (matching glue script logic) - use bytes
+            # Check for various HTML/XHTML DOCTYPE declarations and HTML tags
             is_html = any(indicator in content_start_lower for indicator in [
-                b'<!doctype html',
-                b'<html',
-                b'<head>',
-                b'<body>',
-                b'<style',
-                b'sec form 4',
+                b'<!doctype html',  # Standard HTML5 DOCTYPE
+                b'<!doctype html public',  # XHTML DOCTYPE with PUBLIC
+                b'<!doctype html system',  # XHTML DOCTYPE with SYSTEM
+                b'<html',  # HTML tag (with or without xmlns)
+                b'<head>',  # HEAD tag
+                b'<head ',  # HEAD tag with attributes
+                b'<body>',  # BODY tag
+                b'<body ',  # BODY tag with attributes
+                b'<style',  # STYLE tag
+                b'sec form 4',  # SEC form indicators
                 b'sec form 3',
                 b'sec form 5',
                 b'form 4',
                 b'form 3',
                 b'form 5',
+                b'schedule 13',  # Schedule 13D/13G forms
+                b'schedule 13d',
+                b'schedule 13g',
             ])
             
             # Check for XML indicators
@@ -882,15 +890,19 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 continue
             
             data_file_content = response.content
-            content_start = data_file_content[:1000].lower() if len(data_file_content) >= 1000 else data_file_content.lower()
+            content_start_lower = data_file_content[:1000].lower() if len(data_file_content) >= 1000 else data_file_content.lower()
             
-            # Check for HTML indicators
-            is_html = any(indicator in content_start for indicator in [
-                b'<!doctype html',
-                b'<html',
-                b'<head>',
-                b'<body>',
-                b'<style',
+            # Check for HTML indicators - use lowercase for consistency
+            is_html = any(indicator in content_start_lower for indicator in [
+                b'<!doctype html',  # Standard HTML5 DOCTYPE
+                b'<!doctype html public',  # XHTML DOCTYPE with PUBLIC
+                b'<!doctype html system',  # XHTML DOCTYPE with SYSTEM
+                b'<html',  # HTML tag (with or without xmlns)
+                b'<head>',  # HEAD tag
+                b'<head ',  # HEAD tag with attributes
+                b'<body>',  # BODY tag
+                b'<body ',  # BODY tag with attributes
+                b'<style',  # STYLE tag
             ])
             
             # Check for XML indicators
@@ -910,11 +922,11 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             )
             
             # Skip SEC navigation/search pages (browse-edgar, search pages, etc.)
-            is_sec_nav_page = (b'browse-edgar' in content_start or
-                             b'sec.gov/cgi-bin' in content_start or
-                             b'edgar search' in content_start or
-                             b'company search' in content_start or
-                             b'filings search' in content_start)
+            is_sec_nav_page = (b'browse-edgar' in content_start_lower or
+                             b'sec.gov/cgi-bin' in content_start_lower or
+                             b'edgar search' in content_start_lower or
+                             b'company search' in content_start_lower or
+                             b'filings search' in content_start_lower)
             
             if is_index_page:
                 logger.warning(f"Skipping {data_file_url} - appears to be filing index page, not actual data file")
