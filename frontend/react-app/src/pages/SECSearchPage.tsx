@@ -45,6 +45,7 @@ import {
   Close as CloseIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
@@ -2877,6 +2878,7 @@ const SECSearchPage: React.FC = () => {
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
                       {selectedFiling.documentUrls.map((url, index) => {
                         const filename = url.split('/').pop() || `Document ${index + 1}`;
+                        const s3Key = selectedFiling.documentS3Keys?.[url];
                         return (
                           <Box
                             key={index}
@@ -2904,6 +2906,53 @@ const SECSearchPage: React.FC = () => {
                                 {filename}
                                 <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
                               </Link>
+                              {s3Key && (
+                                <IconButton
+                                  size="small"
+                                  onClick={async () => {
+                                    try {
+                                      console.log('📥 Downloading SEC filing document:', filename);
+                                      
+                                      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                                      const response = await fetch(`${apiUrl}/file-download`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          bucket: 'SEC_FILINGS',
+                                          s3_key: s3Key,
+                                          filename: filename
+                                        })
+                                      });
+                                      
+                                      if (!response.ok) {
+                                        throw new Error(`Download request failed: ${response.status}`);
+                                      }
+                                      
+                                      const { download_url } = await response.json();
+                                      
+                                      // Create download link and trigger download
+                                      const link = document.createElement('a');
+                                      link.href = download_url;
+                                      link.download = filename;
+                                      link.target = '_blank';
+                                      document.body.appendChild(link);
+                                      link.click();
+                                      document.body.removeChild(link);
+                                      
+                                      console.log('✅ File download started');
+                                    } catch (error) {
+                                      console.error('❌ Download failed:', error);
+                                    }
+                                  }}
+                                  sx={{
+                                    color: '#3b82f6',
+                                    ml: 'auto',
+                                    '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                                  }}
+                                >
+                                  <DownloadIcon fontSize="small" />
+                                </IconButton>
+                              )}
                             </Box>
                           </Box>
                         );
@@ -2922,6 +2971,7 @@ const SECSearchPage: React.FC = () => {
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
                       {selectedFiling.dataFileUrls.map((url, index) => {
                         const filename = url.split('/').pop() || `Data File ${index + 1}`;
+                        const s3Key = selectedFiling.dataFileS3Keys?.[url];
                         return (
                           <Box
                             key={index}
@@ -2949,6 +2999,53 @@ const SECSearchPage: React.FC = () => {
                                 {filename}
                                 <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
                               </Link>
+                              {s3Key && (
+                                <IconButton
+                                  size="small"
+                                  onClick={async () => {
+                                    try {
+                                      console.log('📥 Downloading SEC filing data file:', filename);
+                                      
+                                      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                                      const response = await fetch(`${apiUrl}/file-download`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          bucket: 'SEC_FILINGS',
+                                          s3_key: s3Key,
+                                          filename: filename
+                                        })
+                                      });
+                                      
+                                      if (!response.ok) {
+                                        throw new Error(`Download request failed: ${response.status}`);
+                                      }
+                                      
+                                      const { download_url } = await response.json();
+                                      
+                                      // Create download link and trigger download
+                                      const link = document.createElement('a');
+                                      link.href = download_url;
+                                      link.download = filename;
+                                      link.target = '_blank';
+                                      document.body.appendChild(link);
+                                      link.click();
+                                      document.body.removeChild(link);
+                                      
+                                      console.log('✅ File download started');
+                                    } catch (error) {
+                                      console.error('❌ Download failed:', error);
+                                    }
+                                  }}
+                                  sx={{
+                                    color: '#3b82f6',
+                                    ml: 'auto',
+                                    '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                                  }}
+                                >
+                                  <DownloadIcon fontSize="small" />
+                                </IconButton>
+                              )}
                             </Box>
                           </Box>
                         );

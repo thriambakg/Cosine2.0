@@ -21,6 +21,7 @@ s3_client = boto3.client('s3', config=boto3.session.Config(signature_version='s3
 
 # Environment variables
 S3_BUCKET = os.environ.get('S3_BUCKET')
+SEC_FILINGS_BUCKET = os.environ.get('SEC_FILINGS_BUCKET')
 SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE')
 
 def get_cors_headers():
@@ -121,6 +122,7 @@ def generate_presigned_url(s3_key: str, expiration: int = 3600) -> str:
 def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authenticated_user_id: str) -> Dict[str, Any]:
     """
     Handle file download requests - generate fresh presigned URLs
+    Supports both chat session files and SEC filings
     """
     try:
         # Extract request parameters
@@ -128,38 +130,58 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         user_id = body.get('user_id')
         filename = body.get('filename')
         s3_key = body.get('s3_key')
+        bucket_name = body.get('bucket')  # Optional: specify bucket (for SEC filings)
         
-        if not session_id or not user_id or not filename:
-            return {
-                'statusCode': 400,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
-            }
+        # Determine if this is a SEC filing download (SEC filings don't require session validation)
+        is_sec_filing = bucket_name == 'SEC_FILINGS' or (s3_key and s3_key.startswith('filings/'))
         
-        # Validate that the authenticated user matches the requested user
-        if authenticated_user_id != user_id:
-            logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
-            return {
-                'statusCode': 403,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Forbidden: User mismatch'})
-            }
-        
-        # Validate session access
-        if not validate_session_access(user_id, session_id):
-            return {
-                'statusCode': 403,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Forbidden: Session access denied'})
-            }
-        
-        # Use provided s3_key or construct it
-        if not s3_key:
-            s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
+        if is_sec_filing:
+            # SEC filing download - skip session validation
+            if not s3_key or not filename:
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Missing required parameters: s3_key, filename'})
+                }
+            
+            # Use SEC filings bucket
+            target_bucket = SEC_FILINGS_BUCKET or S3_BUCKET
+            logger.info(f"📄 SEC filing download request: {s3_key} from bucket {target_bucket}")
+        else:
+            # Chat session file download - require session validation
+            if not session_id or not user_id or not filename:
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
+                }
+            
+            # Validate that the authenticated user matches the requested user
+            if authenticated_user_id != user_id:
+                logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
+                return {
+                    'statusCode': 403,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Forbidden: User mismatch'})
+                }
+            
+            # Validate session access
+            if not validate_session_access(user_id, session_id):
+                return {
+                    'statusCode': 403,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Forbidden: Session access denied'})
+                }
+            
+            # Use provided s3_key or construct it
+            if not s3_key:
+                s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
+            
+            target_bucket = S3_BUCKET
         
         # Check if file exists in S3
         try:
-            s3_client.head_object(Bucket=S3_BUCKET, Key=s3_key)
+            s3_client.head_object(Bucket=target_bucket, Key=s3_key)
         except ClientError as e:
             if e.response['Error']['Code'] == '404':
                 return {
@@ -174,14 +196,14 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         presigned_url = s3_client.generate_presigned_url(
             'get_object',
             Params={
-                'Bucket': S3_BUCKET,
+                'Bucket': target_bucket,
                 'Key': s3_key,
                 'ResponseContentDisposition': f'attachment; filename="{filename}"'
             },
             ExpiresIn=3600  # 1 hour expiration
         )
         
-        logger.info(f"🔗 Generated fresh presigned URL for {filename}")
+        logger.info(f"🔗 Generated fresh presigned URL for {filename} from {target_bucket}")
         
         return {
             'statusCode': 200,

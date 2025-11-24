@@ -1836,6 +1836,7 @@ module "file_return_lambda" {
 
   environment_variables = {
     S3_BUCKET          = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    SEC_FILINGS_BUCKET = "cosine-sec-filings-${var.environment}"
     SESSIONS_TABLE     = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
     WEBSOCKET_ENDPOINT = module.websocket_api.stage_url
     ENVIRONMENT        = var.environment
@@ -1846,7 +1847,8 @@ module "file_return_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
     aws_iam_policy.lambda_websocket_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn
+    data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn,
+    aws_iam_policy.sec_search_s3_policy.arn # Add SEC filings bucket access
   ]
 
   tags = var.common_tags
