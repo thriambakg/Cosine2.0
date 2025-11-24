@@ -714,6 +714,13 @@ resource "aws_iam_policy" "lambda_websocket_policy" {
     ]
   })
 
+  # Ensure this policy is created/updated after the WebSocket APIs exist
+  # This is critical because the policy references module outputs that must exist first
+  depends_on = [
+    module.websocket_api,
+    module.sec_search_websocket_api
+  ]
+
   tags = var.common_tags
 }
 
@@ -2008,12 +2015,13 @@ module "sec_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, and KMS for S3 encryption
+  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, KMS for S3 encryption, and WebSocket access
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
     data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
     aws_iam_policy.sec_search_s3_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_websocket_policy.arn # Allow sending messages to WebSocket API
   ]
 
   tags = var.common_tags
