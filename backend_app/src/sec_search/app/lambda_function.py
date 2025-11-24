@@ -489,9 +489,72 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
             logger.error(f"Error downloading filing page {filing_page_url}: {e}")
     
     # Download each document
+    # Match glue script behavior: download and verify content type (not just URL extension)
     for doc_url in document_urls:
         try:
-            # Extract filename from URL
+            # Download the document first to check its actual content type
+            session = create_session()
+            time.sleep(0.1)  # Rate limiting
+            response = session.get(doc_url, timeout=30)
+            response.raise_for_status()
+            
+            if len(response.content) == 0:
+                logger.warning(f"Empty content for {doc_url}, skipping")
+                continue
+            
+            doc_content = response.content
+            content_start = doc_content[:1000].lower() if len(doc_content) >= 1000 else doc_content.lower()
+            
+            # Check for HTML indicators (matching glue script logic)
+            is_html = any(indicator in content_start for indicator in [
+                b'<!doctype html',
+                b'<html',
+                b'<head>',
+                b'<body>',
+                b'<style',
+                b'sec form 4',
+                b'sec form 3',
+                b'sec form 5',
+                b'form 4',
+                b'form 3',
+                b'form 5',
+            ])
+            
+            # Check for XML indicators
+            is_xml = (doc_content.startswith(b'<?xml') or 
+                     b'<ownershipDocument' in doc_content or 
+                     b'<document>' in doc_content or 
+                     b'<edgarDocument' in doc_content)
+            
+            # Skip if this is the index page (has "Document Format Files" or "Data Files" table)
+            is_index_page = (b'document format files' in content_start or 
+                           b'data files' in content_start or
+                           b'<table' in content_start and b'seq' in content_start and b'description' in content_start)
+            
+            if is_index_page:
+                logger.warning(f"Skipping {doc_url} - appears to be index page, not actual document")
+                continue
+            
+            # Determine file extension and content type based on actual content
+            if is_xml and not is_html:
+                file_ext = 'xml'
+                content_type = 'application/xml'
+            elif is_html:
+                file_ext = 'html'
+                content_type = 'text/html'
+            else:
+                # Fallback: use URL extension or default to xml
+                if doc_url.endswith('.html') or doc_url.endswith('.htm'):
+                    file_ext = 'html'
+                    content_type = 'text/html'
+                elif doc_url.endswith('.txt'):
+                    file_ext = 'txt'
+                    content_type = 'text/plain'
+                else:
+                    file_ext = 'xml'
+                    content_type = 'application/xml'
+            
+            # Extract filename from URL, but use determined extension
             filename = doc_url.split('/')[-1]
             if not filename or filename == '' or '?' in filename:
                 # Generate filename from URL path
@@ -499,21 +562,35 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
                 if len(path_parts) > 1:
                     filename = path_parts[-1]
                 else:
-                    # Fallback: use hash of URL
-                    filename = f"document_{abs(hash(doc_url)) % 100000}.xml"
+                    filename = f"document_{abs(hash(doc_url)) % 100000}.{file_ext}"
             
             # Clean filename (remove query params if any)
             if '?' in filename:
                 filename = filename.split('?')[0]
             
+            # Replace extension with determined extension if different
+            if '.' in filename:
+                base_name = filename.rsplit('.', 1)[0]
+                filename = f"{base_name}.{file_ext}"
+            else:
+                filename = f"{filename}.{file_ext}"
+            
             # Sanitize filename for S3 (remove invalid characters)
             filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
             
-            s3_key = download_document_to_s3(doc_url, filing_id, filename)
+            # Upload to S3
+            s3_key = f"filings/{filing_id}/{filename}"
+            s3_client.put_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=s3_key,
+                Body=doc_content,
+                ContentType=content_type
+            )
+            
             if s3_key:
                 result['documentS3Keys'][doc_url] = s3_key
                 result['success'] = True
-                logger.info(f"Downloaded document to {s3_key}")
+                logger.info(f"Downloaded document to {s3_key} (detected as {file_ext}, size: {len(doc_content):,} bytes)")
         except Exception as e:
             logger.error(f"Error downloading document {doc_url}: {e}")
             continue
