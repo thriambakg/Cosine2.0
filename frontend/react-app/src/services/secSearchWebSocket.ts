@@ -37,50 +37,43 @@ export class SECSearchWebSocketService {
    * This should be configured via environment variable or runtime config
    */
   private getWebSocketUrl(): string {
-    // Check for explicit SEC search WebSocket URL in environment variables
-    const explicitUrl = process.env.NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL || process.env.VITE_SEC_SEARCH_WEBSOCKET_URL;
-    if (explicitUrl && !explicitUrl.includes('{{') && !explicitUrl.includes('your-')) {
-      console.log('🔌 Using SEC Search WebSocket URL from environment:', explicitUrl);
-      return explicitUrl;
-    }
-    
-    // Check runtime config (from config.js) - check both window.COSINE_CONFIG and ENV_CONFIG
-    if (typeof window !== 'undefined' && window.COSINE_CONFIG?.secSearchWebSocketUrl) {
-      const runtimeUrl = window.COSINE_CONFIG.secSearchWebSocketUrl;
-      if (runtimeUrl && !runtimeUrl.includes('{{')) {
-        console.log('🔌 Using SEC Search WebSocket URL from runtime config:', runtimeUrl);
-        return runtimeUrl;
-      }
-    }
-    
-    // Also check ENV_CONFIG (from environment.ts)
+    // Priority 1: Check ENV_CONFIG (from environment.ts) - this reads from env vars and runtime config
     if (ENV_CONFIG.secSearchWebSocketUrl) {
       console.log('🔌 Using SEC Search WebSocket URL from ENV_CONFIG:', ENV_CONFIG.secSearchWebSocketUrl);
       return ENV_CONFIG.secSearchWebSocketUrl;
     }
     
-    // Fallback: Try to construct from API Gateway URL pattern
-    // This is a temporary solution - the actual WebSocket API has a different ID
-    const apiUrl = ENV_CONFIG.apiGatewayUrl;
-    // Extract region and stage from REST API URL
-    // Pattern: https://{api-id}.execute-api.{region}.amazonaws.com/{stage}
-    const urlMatch = apiUrl.match(/https:\/\/([^.]+)\.execute-api\.([^.]+)\.amazonaws\.com\/(.+)/);
-    
-    if (urlMatch) {
-      const [, , region, stage] = urlMatch;
-      // The SEC search WebSocket API will have a different API ID
-      // For now, we need the actual API ID from Terraform outputs
-      // This is a placeholder - you need to set NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL
-      // or add secSearchWebSocketUrl to window.COSINE_CONFIG
-      console.error('❌ SEC Search WebSocket URL not configured. Please set NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL environment variable or add secSearchWebSocketUrl to runtime config.');
-      console.error('   Expected format: wss://{api-id}.execute-api.{region}.amazonaws.com/{stage}');
-      console.error(`   Example: wss://<SEC-SEARCH-WS-API-ID>.execute-api.${region}.amazonaws.com/${stage}`);
-      throw new Error('SEC Search WebSocket URL not configured. Please set NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL or add secSearchWebSocketUrl to runtime config.');
+    // Priority 2: Check runtime config (from config.js)
+    if (typeof window !== 'undefined' && window.COSINE_CONFIG?.secSearchWebSocketUrl) {
+      const runtimeUrl = window.COSINE_CONFIG.secSearchWebSocketUrl;
+      if (runtimeUrl && !runtimeUrl.includes('{{') && !runtimeUrl.includes('your-')) {
+        console.log('🔌 Using SEC Search WebSocket URL from runtime config:', runtimeUrl);
+        return runtimeUrl;
+      }
     }
     
-    // Last resort: try to use the REST API URL (will fail, but gives better error)
-    console.error('❌ Could not determine SEC Search WebSocket URL. Please configure NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL');
-    throw new Error('SEC Search WebSocket URL not configured');
+    // Priority 3: Check explicit environment variables (direct access)
+    const explicitUrl = process.env.NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL || process.env.VITE_SEC_SEARCH_WEBSOCKET_URL;
+    if (explicitUrl && !explicitUrl.includes('{{') && !explicitUrl.includes('your-')) {
+      console.log('🔌 Using SEC Search WebSocket URL from environment variable:', explicitUrl);
+      return explicitUrl;
+    }
+    
+    // Error: URL not configured
+    const apiUrl = ENV_CONFIG.apiGatewayUrl;
+    const urlMatch = apiUrl.match(/https:\/\/([^.]+)\.execute-api\.([^.]+)\.amazonaws\.com\/(.+)/);
+    const region = urlMatch ? urlMatch[2] : 'us-east-1';
+    const stage = urlMatch ? urlMatch[3] : 'production';
+    
+    console.error('❌ SEC Search WebSocket URL not configured.');
+    console.error('   Please set one of the following:');
+    console.error('   1. NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL environment variable');
+    console.error('   2. secSearchWebSocketUrl in window.COSINE_CONFIG (runtime config)');
+    console.error('   3. Add to Terraform build_environment_variables output');
+    console.error(`   Expected format: wss://<API-ID>.execute-api.${region}.amazonaws.com/${stage}`);
+    console.error('   Get the API ID from: terraform output sec_search_websocket_api');
+    
+    throw new Error('SEC Search WebSocket URL not configured. Please set NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL or add secSearchWebSocketUrl to runtime config.');
   }
 
   /**

@@ -360,6 +360,10 @@ output "build_environment_variables" {
     # API Gateway URL
     NEXT_PUBLIC_API_GATEWAY_URL = module.api_gateway.stage_url
 
+    # WebSocket URLs
+    NEXT_PUBLIC_WEBSOCKET_URL            = module.websocket_api.stage_url
+    NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL = module.sec_search_websocket_api.stage_url
+
     # DynamoDB table names (for client-side reference if needed)
     NEXT_PUBLIC_USER_PROFILES_TABLE   = try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, "not_configured")
     NEXT_PUBLIC_SECURITY_EVENTS_TABLE = try(data.terraform_remote_state.base_infra.outputs.security_events_table_name, "not_configured")

@@ -31,6 +31,7 @@ const getRuntimeConfig = () => {
     return {
       apiGatewayUrl: window.COSINE_CONFIG.apiGatewayUrl,
       websocketUrl: window.COSINE_CONFIG.websocketUrl,
+      secSearchWebSocketUrl: window.COSINE_CONFIG.secSearchWebSocketUrl,
       awsRegion: window.COSINE_CONFIG.awsRegion,
       environment: window.COSINE_CONFIG.environment,
       cognitoUserPoolId: window.COSINE_CONFIG.cognitoUserPoolId,
@@ -121,11 +122,6 @@ const getWebSocketUrl = (): string | undefined => {
     return runtimeConfig.websocketUrl;
   }
   
-  // Also check for SEC search WebSocket URL in runtime config
-  if (typeof window !== 'undefined' && window.COSINE_CONFIG?.secSearchWebSocketUrl) {
-    // This is handled separately in secSearchWebSocket.ts
-  }
-  
   // Check for explicit WebSocket URL
   const explicitUrl = process.env.NEXT_PUBLIC_WEBSOCKET_URL || process.env.VITE_WEBSOCKET_URL;
   if (explicitUrl && !explicitUrl.includes('your-')) {
@@ -173,6 +169,7 @@ export const getEnvironmentConfig = (): EnvironmentConfig => {
     environment: environment as 'development' | 'staging' | 'production',
     apiGatewayUrl: getApiGatewayUrl(),
     websocketUrl: getWebSocketUrl(),
+    secSearchWebSocketUrl: getSecSearchWebSocketUrl(),
     awsRegion: getAwsRegion(),
     cognitoUserPoolId: cognitoConfig.userPoolId,
     cognitoClientId: cognitoConfig.clientId,
