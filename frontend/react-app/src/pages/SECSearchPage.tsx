@@ -2869,15 +2869,13 @@ const SECSearchPage: React.FC = () => {
                   )}
                 </Grid>
 
-                {/* Document Format Files Section */}
                 <Grid item xs={12}>
                   <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
-                    Document Format Files ({selectedFiling.documentFormatFiles?.length || selectedFiling.documentUrls?.length || 0})
+                    Documents ({selectedFiling.documentUrls?.length || 0})
                   </Typography>
-                  {(selectedFiling.documentFormatFiles && selectedFiling.documentFormatFiles.length > 0) || 
-                   (selectedFiling.documentUrls && selectedFiling.documentUrls.length > 0) ? (
+                  {selectedFiling.documentUrls && selectedFiling.documentUrls.length > 0 ? (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
-                      {(selectedFiling.documentFormatFiles || selectedFiling.documentUrls || []).map((url, index) => {
+                      {selectedFiling.documentUrls.map((url, index) => {
                         const filename = url.split('/').pop() || `Document ${index + 1}`;
                         return (
                           <Box
@@ -2912,53 +2910,7 @@ const SECSearchPage: React.FC = () => {
                       })}
                     </Box>
                   ) : (
-                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No Document Format Files available</Typography>
-                  )}
-                </Grid>
-
-                {/* Data Files Section */}
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
-                    Data Files ({selectedFiling.dataFiles?.length || 0})
-                  </Typography>
-                  {selectedFiling.dataFiles && selectedFiling.dataFiles.length > 0 ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
-                      {selectedFiling.dataFiles.map((url, index) => {
-                        const filename = url.split('/').pop() || `Data File ${index + 1}`;
-                        return (
-                          <Box
-                            key={index}
-                            sx={{
-                              p: 1.5,
-                              border: '1px solid #374151',
-                              borderRadius: '4px',
-                              backgroundColor: 'rgba(31, 41, 55, 0.5)',
-                            }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
-                              <Link
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                sx={{
-                                  color: '#3b82f6',
-                                  textDecoration: 'none',
-                                  fontSize: '0.875rem',
-                                  flex: 1,
-                                  '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
-                                }}
-                              >
-                                {filename}
-                                <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
-                              </Link>
-                            </Box>
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  ) : (
-                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No Data Files available</Typography>
+                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No documents available</Typography>
                   )}
                 </Grid>
               </Grid>

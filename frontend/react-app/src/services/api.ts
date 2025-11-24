@@ -778,14 +778,10 @@ export interface SECSearchResult {
   filmNumber: string;
   accession: string;
   filingPageUrl: string | null;
-  documentUrls?: string[]; // Deprecated - kept for backward compatibility
-  documentFormatFiles?: string[]; // New: URLs from "Document Format Files" section
-  dataFiles?: string[]; // New: URLs from "Data Files" section
+  documentUrls: string[];
   adsh: string;
   filingPageS3Key?: string | null;
-  documentS3Keys?: Record<string, string>; // Deprecated - kept for backward compatibility
-  documentFormatFilesS3Keys?: Record<string, string>; // New: S3 keys for Document Format Files
-  dataFilesS3Keys?: Record<string, string>; // New: S3 keys for Data Files
+  documentS3Keys?: Record<string, string>;
 }
 
 export interface SECFormFilter {
