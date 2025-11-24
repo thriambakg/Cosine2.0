@@ -815,6 +815,27 @@ export interface SECSearchResponse {
   location_filters?: SECLocationFilter[];  // Available locations in current search results
   incorporation_filters?: SECIncorporationFilter[];  // Available incorporation states in current search results
   error?: string;
+  // Async search fields
+  job_id?: string;
+  status?: string;
+  message?: string;
+}
+
+export interface SECJobStatus {
+  job_id: string;
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  progress?: {
+    current_page: number;
+    total_pages: number | null;
+    results_count: number;
+    total_found: number;
+  };
+  results?: SECSearchResponse;
+  results_s3_key?: string;
+  error?: string;
+  cancelled?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface SECAutocompleteResponse {
@@ -829,11 +850,34 @@ export const secSearchAPI = {
     );
   },
 
-  // Perform full search
+  // Perform full search (sync mode)
   search: async (params: SECSearchParams): Promise<SECSearchResponse> => {
     return apiRequest<SECSearchResponse>('/sec-search', {
       method: 'POST',
       body: JSON.stringify(params),
+    });
+  },
+
+  // Start async search (returns job_id)
+  searchAsync: async (params: SECSearchParams): Promise<SECSearchResponse> => {
+    return apiRequest<SECSearchResponse>('/sec-search', {
+      method: 'POST',
+      body: JSON.stringify({ ...params, async: true }),
+    });
+  },
+
+  // Get job status
+  getJobStatus: async (job_id: string): Promise<SECJobStatus> => {
+    return apiRequest<SECJobStatus>(`/sec-search-status?job_id=${encodeURIComponent(job_id)}`, {
+      method: 'GET',
+    });
+  },
+
+  // Cancel a job
+  cancelJob: async (job_id: string): Promise<{ success: boolean; message?: string; error?: string }> => {
+    return apiRequest<{ success: boolean; message?: string; error?: string }>('/sec-search-cancel', {
+      method: 'POST',
+      body: JSON.stringify({ job_id }),
     });
   },
 };

@@ -46,6 +46,7 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Download as DownloadIcon,
+  Cancel as CancelIcon,
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
@@ -682,24 +683,53 @@ const LOCATION_OPTIONS = [
 ];
 
 const SECSearchPage: React.FC = () => {
-  const [searchParams, setSearchParams] = useState<SECSearchParams>({
-    dateFrom: '2001-01-01',
-    dateTo: new Date().toISOString().split('T')[0],
-  });
-  const [companyInput, setCompanyInput] = useState<string>('');
+  // Session persistence key
+  const SESSION_STORAGE_KEY = 'sec-search-page-state';
+
+  // Helper function to load state from sessionStorage
+  const loadStateFromStorage = () => {
+    try {
+      const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (savedState) {
+        return JSON.parse(savedState);
+      }
+    } catch (error) {
+      console.error('❌ Error loading state from sessionStorage:', error);
+    }
+    return null;
+  };
+
+  // Initialize state from sessionStorage immediately (using function initializer)
+  const savedState = loadStateFromStorage();
+  
+  const [searchParams, setSearchParams] = useState<SECSearchParams>(
+    savedState?.searchParams || {
+      dateFrom: '2001-01-01',
+      dateTo: new Date().toISOString().split('T')[0],
+    }
+  );
+  const [companyInput, setCompanyInput] = useState<string>(savedState?.companyInput || '');
   const [companySuggestions, setCompanySuggestions] = useState<SECAutocompleteSuggestion[]>([]);
-  const [selectedCompany, setSelectedCompany] = useState<SECAutocompleteSuggestion | null>(null);
-  const [selectedColumns, setSelectedColumns] = useState<string[]>(DEFAULT_COLUMNS);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [selectedCompany, setSelectedCompany] = useState<SECAutocompleteSuggestion | null>(
+    savedState?.selectedCompany || null
+  );
+  const [selectedColumns, setSelectedColumns] = useState<string[]>(
+    savedState?.selectedColumns || DEFAULT_COLUMNS
+  );
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(savedState?.showAdvanced || false);
+  const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
   const [currentResults, setCurrentResults] = useState<SECSearchResult[]>([]);
-  const [totalFound, setTotalFound] = useState<number>(0);
+  const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
   const [formTypesModalOpen, setFormTypesModalOpen] = useState(false);
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>(
+    savedState?.selectedCategoryFilter || 'all'
+  );
   
   // Store all results from current search for client-side filtering
-  const [allSearchResults, setAllSearchResults] = useState<SECSearchResult[]>([]);
-  const [isFiltered, setIsFiltered] = useState<boolean>(false);
+  const [allSearchResults, setAllSearchResults] = useState<SECSearchResult[]>(
+    savedState?.allSearchResults || []
+  );
+  const [isFiltered, setIsFiltered] = useState<boolean>(savedState?.isFiltered || false);
   
   // Store filter metadata for sidebar
   const [availableFilters, setAvailableFilters] = useState<{
@@ -707,16 +737,18 @@ const SECSearchPage: React.FC = () => {
     entity_filters?: Array<{ entity: string; count: number }>;
     location_filters?: Array<{ location: string; count: number }>;
     incorporation_filters?: Array<{ state: string; count: number }>;
-  }>({});
+  }>(savedState?.availableFilters || {});
   
   
   // Filter sidebar state
-  const [expandedFilters, setExpandedFilters] = useState({
-    entity: false,
-    form: false,
-    location: false,
-    incorporation: false,
-  });
+  const [expandedFilters, setExpandedFilters] = useState(
+    savedState?.expandedFilters || {
+      entity: false,
+      form: false,
+      location: false,
+      incorporation: false,
+    }
+  );
   
   // Selected filters (not yet applied to search)
   const [selectedFilters, setSelectedFilters] = useState<{
@@ -724,20 +756,182 @@ const SECSearchPage: React.FC = () => {
     forms: string[];
     locations: string[];
     incorporationStates: string[];
-  }>({
-    entities: [],
-    forms: [],
-    locations: [],
-    incorporationStates: [],
-  });
+  }>(
+    savedState?.selectedFilters || {
+      entities: [],
+      forms: [],
+      locations: [],
+      incorporationStates: [],
+    }
+  );
   
   const RESULTS_PER_PAGE = 10;
 
   const { execute: executeSearch, data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
   const { execute: executeAutocomplete, loading: autocompleteLoading } = useSECAutocomplete();
-  const [isFetchingAll, setIsFetchingAll] = useState<boolean>(false);
-  const [fetchProgress, setFetchProgress] = useState<{ currentPage: number; totalPages: number | null } | null>(null);
+  
+  // Search state type: boolean (is searching), current page, total pages, job_id for async searches
+  type SearchState = {
+    isSearching: boolean;
+    currentPage: number;
+    totalPages: number | null;
+    jobId: string | null;  // For async searches - used to cancel
+  };
+
+  // Initialize search state from sessionStorage
+  const initializeSearchState = (): SearchState => {
+    if (!savedState) {
+      return { isSearching: false, currentPage: 0, totalPages: null, jobId: null };
+    }
+    
+    // If isFetchingAll was true when saved, check if search likely still running
+    if (savedState.isFetchingAll) {
+      const savedSearchStartTime = savedState.searchStartTime;
+      const now = Date.now();
+      const SEARCH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes timeout
+      
+      // If we have a start time, check if search timed out
+      if (savedSearchStartTime && (now - savedSearchStartTime) >= SEARCH_TIMEOUT_MS) {
+        // Search timed out - clear state
+        return { isSearching: false, currentPage: 0, totalPages: null, jobId: null };
+      }
+      
+      // Otherwise, restore the searching state with saved progress
+      const progress = savedState.fetchProgress || { currentPage: 1, totalPages: null };
+      return {
+        isSearching: true,
+        currentPage: progress.currentPage || 1,
+        totalPages: progress.totalPages || null,
+        jobId: savedState.jobId || null,  // Restore job_id if exists
+      };
+    }
+    
+    return { isSearching: false, currentPage: 0, totalPages: null, jobId: null };
+  };
+  
+  const initialSearchState = initializeSearchState();
+  const [searchState, setSearchState] = useState<SearchState>(initialSearchState);
+  const [searchStartTime, setSearchStartTime] = useState<number | null>(
+    savedState?.searchStartTime || null
+  );
+  
+  // Legacy state for backward compatibility (will be removed after migration)
+  const isFetchingAll = searchState.isSearching;
+  const fetchProgress = searchState.isSearching 
+    ? { currentPage: searchState.currentPage, totalPages: searchState.totalPages }
+    : null;
   const [selectedFiling, setSelectedFiling] = useState<SECSearchResult | null>(null);
+  const [isRestoringState, setIsRestoringState] = useState<boolean>(false); // Set to false since we initialize from storage
+
+  // Log state restoration (state is already initialized from sessionStorage above)
+  useEffect(() => {
+    if (savedState) {
+      console.log('✅ SEC search page state initialized from sessionStorage');
+      console.log('🔄 Loading state:', {
+        isFetchingAll,
+        hasProgress: !!fetchProgress,
+        searchStartTime,
+        hasResults: allSearchResults.length > 0,
+      });
+    }
+  }, []); // Only log once on mount
+
+  // Immediately save searchState to sessionStorage when it changes
+  // This ensures the button state persists even if user navigates away
+  useEffect(() => {
+    if (isRestoringState) {
+      return; // Don't save during initial restoration
+    }
+
+    try {
+      const currentState = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (currentState) {
+        const parsed = JSON.parse(currentState);
+        // Update the loading-related fields atomically
+        parsed.isFetchingAll = searchState.isSearching;
+        parsed.fetchProgress = searchState.isSearching 
+          ? { currentPage: searchState.currentPage, totalPages: searchState.totalPages }
+          : null;
+        parsed.searchStartTime = searchStartTime;
+        parsed.jobId = searchState.jobId;  // Save job_id for cancellation
+        parsed.jobId = searchState.jobId;  // Save job_id for cancellation
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(parsed));
+        if (searchState.isSearching) {
+          console.log('💾 Updated search state in sessionStorage:', {
+            isSearching: searchState.isSearching,
+            currentPage: searchState.currentPage,
+            totalPages: searchState.totalPages,
+          });
+        }
+      } else {
+        // If no state exists yet, create it with just the loading fields
+        const newState = {
+          isFetchingAll: searchState.isSearching,
+          fetchProgress: searchState.isSearching 
+            ? { currentPage: searchState.currentPage, totalPages: searchState.totalPages }
+            : null,
+          searchStartTime,
+        };
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(newState));
+      }
+    } catch (error) {
+      console.error('❌ Error updating search state in sessionStorage:', error);
+    }
+  }, [searchState, searchStartTime, isRestoringState]);
+
+  // Save state to sessionStorage whenever relevant state changes
+  useEffect(() => {
+    // Don't save during initial restoration
+    if (isRestoringState) {
+      return;
+    }
+
+    try {
+      const stateToSave = {
+        searchParams,
+        selectedCompany,
+        companyInput,
+        allSearchResults,
+        totalFound,
+        currentPage,
+        selectedFilters,
+        availableFilters,
+        expandedFilters,
+        selectedCategoryFilter,
+        selectedColumns,
+        showAdvanced,
+        isFiltered,
+        // Save search state in legacy format for compatibility
+        isFetchingAll: searchState.isSearching,
+        fetchProgress: searchState.isSearching 
+          ? { currentPage: searchState.currentPage, totalPages: searchState.totalPages }
+          : null,
+        searchStartTime, // Save when search started to determine if still in progress
+        jobId: searchState.jobId,  // Save job_id for cancellation
+      };
+      
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
+    } catch (error) {
+      console.error('❌ Error saving SEC search page state:', error);
+    }
+  }, [
+    searchParams,
+    selectedCompany,
+    companyInput,
+    allSearchResults,
+    totalFound,
+    currentPage,
+    selectedFilters,
+    availableFilters,
+    expandedFilters,
+    selectedCategoryFilter,
+    selectedColumns,
+    showAdvanced,
+    isFiltered,
+    searchState,
+    searchStartTime,
+    isRestoringState,
+  ]);
 
   // Debounced autocomplete
   useEffect(() => {
@@ -840,8 +1034,9 @@ const SECSearchPage: React.FC = () => {
   };
   
   const fetchAllResults = async (params: SECSearchParams) => {
-    setIsFetchingAll(true);
-    setFetchProgress({ currentPage: 1, totalPages: null });
+    const startTimestamp = Date.now();
+    setSearchState({ isSearching: true, currentPage: 1, totalPages: null, jobId: null });
+    setSearchStartTime(startTimestamp);
     
     console.log('🔍 Starting search:', { params, timestamp: new Date().toISOString() });
     
@@ -856,7 +1051,8 @@ const SECSearchPage: React.FC = () => {
       while (hasMore && allResults.length < MAX_RESULTS_TO_FETCH) {
         const pageParams = { ...params, page };
         console.log(`📄 Fetching page ${page}...`);
-        setFetchProgress({ currentPage: page, totalPages: estimatedTotalPages });
+        // Update search state atomically with current page
+        setSearchState(prev => ({ ...prev, isSearching: true, currentPage: page, totalPages: estimatedTotalPages }));
         
         const result = await secSearchAPI.search(pageParams);
         
@@ -867,7 +1063,8 @@ const SECSearchPage: React.FC = () => {
           // Estimate total pages (each API call returns ~100 results, we fetch 10 per page)
           if (totalFound > 0) {
             estimatedTotalPages = Math.ceil(Math.min(totalFound, MAX_RESULTS_TO_FETCH) / RESULTS_PER_PAGE);
-            setFetchProgress({ currentPage: page, totalPages: estimatedTotalPages });
+            // Update state with total pages now that we know it
+            setSearchState(prev => ({ ...prev, isSearching: true, currentPage: page, totalPages: estimatedTotalPages }));
           }
           console.log(`📊 First page response: ${result.results?.length || 0} results, total: ${totalFound}`);
         }
@@ -932,8 +1129,10 @@ const SECSearchPage: React.FC = () => {
       // Fallback to single page using hook
       await executeSearch(params);
     } finally {
-      setIsFetchingAll(false);
-      setFetchProgress(null);
+      // Always clear searching state when done (success or error)
+      setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+      setSearchStartTime(null);
+      console.log('🏁 Search completed - clearing search state');
     }
   };
   
@@ -1114,6 +1313,29 @@ const SECSearchPage: React.FC = () => {
       setTotalFound(0);
     }
   }, [selectedFilters, allSearchResults, currentPage]);
+
+  const handleCancelSearch = async () => {
+    if (!searchState.jobId) {
+      console.warn('No job_id to cancel');
+      return;
+    }
+
+    try {
+      console.log(`🛑 Cancelling search job ${searchState.jobId}`);
+      const result = await secSearchAPI.cancelJob(searchState.jobId);
+      
+      if (result.success) {
+        // Clear search state
+        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+        setSearchStartTime(null);
+        console.log('✅ Search cancelled successfully');
+      } else {
+        console.error('❌ Failed to cancel search:', result.error);
+      }
+    } catch (error) {
+      console.error('❌ Error cancelling search:', error);
+    }
+  };
 
   const handleSearch = async (page: number = 1, applyFilters: boolean = false) => {
     // If applying filters and we have stored results, just update pagination
@@ -1566,13 +1788,13 @@ const SECSearchPage: React.FC = () => {
             </Box>
           </Collapse>
 
-          {/* Search Button */}
-          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
+          {/* Search Button and Cancel Button */}
+          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
             <Button
               variant="contained"
               onClick={() => handleSearch()}
-              disabled={searchLoading || isFetchingAll}
-              startIcon={(searchLoading || isFetchingAll) ? <CircularProgress size={20} /> : <SearchIcon />}
+              disabled={searchLoading || searchState.isSearching}
+              startIcon={(searchLoading || searchState.isSearching) ? <CircularProgress size={20} /> : <SearchIcon />}
               sx={{
                 background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
                 color: '#ffffff',
@@ -1590,12 +1812,39 @@ const SECSearchPage: React.FC = () => {
                 },
               }}
             >
-              {isFetchingAll && fetchProgress
-                ? `Fetching page ${fetchProgress.currentPage}${fetchProgress.totalPages ? ` of ${fetchProgress.totalPages}` : ''}...`
-                : (searchLoading || isFetchingAll)
+              {searchState.isSearching
+                ? searchState.totalPages 
+                  ? `Fetching page ${searchState.currentPage} of ${searchState.totalPages}...`
+                  : `Fetching page ${searchState.currentPage}...`
+                : (searchLoading || searchState.isSearching)
                   ? 'Searching...'
                   : 'Search SEC Filings'}
             </Button>
+            
+            {/* Cancel Button - only show when search is in progress and has a job_id */}
+            {searchState.isSearching && searchState.jobId && (
+              <Button
+                variant="outlined"
+                onClick={handleCancelSearch}
+                startIcon={<CancelIcon />}
+                sx={{
+                  borderColor: '#ef4444',
+                  color: '#ef4444',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                  py: 1.5,
+                  px: 3,
+                  '&:hover': {
+                    borderColor: '#dc2626',
+                    color: '#dc2626',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  },
+                }}
+              >
+                Cancel
+              </Button>
+            )}
           </Box>
 
           {/* Column Selection - Move to Advanced or keep separate */}
@@ -2515,7 +2764,7 @@ const SECSearchPage: React.FC = () => {
                   </Typography>
                   
                   {/* Status Indicator */}
-                  {allSearchResults.length > 0 || isFetchingAll ? (
+                  {allSearchResults.length > 0 || searchState.isSearching ? (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       {totalFound > 0 ? (
                         <Chip
@@ -2537,7 +2786,7 @@ const SECSearchPage: React.FC = () => {
                             fontWeight: 600,
                           }}
                         />
-                      ) : allSearchResults.length === 0 && !isFetchingAll ? (
+                      ) : allSearchResults.length === 0 && !searchState.isSearching ? (
                         <Chip
                           label="No forms found"
                           sx={{

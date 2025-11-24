@@ -15,6 +15,12 @@ import uuid
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
+# Import async job handler
+from async_job_handler import (
+    create_job, update_job_progress, complete_job, fail_job,
+    get_job_status, invoke_async_search, cancel_job, is_job_cancelled
+)
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -1843,7 +1849,7 @@ def handle_autocomplete(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle full search requests"""
+    """Handle full search requests - supports both sync and async modes"""
     try:
         # Parse request body or query params
         if event.get('body'):
@@ -1853,6 +1859,9 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
                 body = event['body']
         else:
             body = event.get('queryStringParameters') or {}
+        
+        # Check if async mode is requested
+        async_mode = body.get('async', False)
         
         # Extract search parameters
         search_params = {
@@ -1870,7 +1879,31 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
             'columns': body.get('columns', [])
         }
         
-        # Extract page number (default to 1)
+        # Remove None values
+        search_params = {k: v for k, v in search_params.items() if v is not None}
+        
+        # If async mode, create job and return job_id
+        if async_mode:
+            job_id = create_job(search_params)
+            invoke_async_search(job_id, search_params)
+            
+            return {
+                'statusCode': 202,  # Accepted
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
+                },
+                'body': json.dumps({
+                    'success': True,
+                    'job_id': job_id,
+                    'status': 'PENDING',
+                    'message': 'Search started asynchronously'
+                })
+            }
+        
+        # Sync mode - extract page number (default to 1)
         page = body.get('page', 1)
         try:
             page = int(page)
@@ -1878,9 +1911,6 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
                 page = 1
         except (ValueError, TypeError):
             page = 1
-        
-        # Remove None values
-        search_params = {k: v for k, v in search_params.items() if v is not None}
         
         result = search_by_search_index_api(search_params, page=page)
         
@@ -1909,11 +1939,246 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
+def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle job status requests"""
+    try:
+        query_params = event.get('queryStringParameters') or {}
+        job_id = query_params.get('job_id')
+        
+        if not job_id:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'job_id parameter required'
+                })
+            }
+        
+        job_status = get_job_status(job_id)
+        
+        if not job_status:
+            return {
+                'statusCode': 404,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'Job not found'
+                })
+            }
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps(job_status)
+        }
+    except Exception as e:
+        logger.error(f"Error in handle_job_status: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': str(e)
+            })
+        }
+
+
+def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle job cancellation requests"""
+    try:
+        # Support both GET (query params) and POST (body) methods
+        if event.get('httpMethod') == 'POST':
+            if event.get('body'):
+                if isinstance(event['body'], str):
+                    body = json.loads(event['body'])
+                else:
+                    body = event['body']
+            else:
+                body = {}
+            job_id = body.get('job_id')
+        else:
+            query_params = event.get('queryStringParameters') or {}
+            job_id = query_params.get('job_id')
+        
+        if not job_id:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'job_id parameter required'
+                })
+            }
+        
+        success = cancel_job(job_id)
+        
+        if success:
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'success': True,
+                    'message': f'Job {job_id} cancelled successfully'
+                })
+            }
+        else:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'success': False,
+                    'error': 'Job not found or cannot be cancelled'
+                })
+            }
+    except Exception as e:
+        logger.error(f"Error in handle_job_cancel: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': str(e)
+            })
+        }
+
+
+def process_async_search(job_id: str, search_params: Dict[str, Any]):
+    """
+    Process search asynchronously - called by Lambda async invocation
+    This function runs in the background and updates job status
+    Checks for cancellation after each page
+    """
+    try:
+        logger.info(f"Starting async search for job {job_id}")
+        update_job_progress(job_id, 0, None, 0, 0, 'IN_PROGRESS')
+        
+        # Fetch all pages (up to MAX_RESULTS_TO_FETCH)
+        MAX_RESULTS_TO_FETCH = 1000
+        RESULTS_PER_PAGE = 10
+        all_results = []
+        page = 1
+        total_found = 0
+        estimated_total_pages = None
+        
+        while len(all_results) < MAX_RESULTS_TO_FETCH:
+            # Check for cancellation before starting next page
+            if is_job_cancelled(job_id):
+                logger.info(f"Job {job_id} was cancelled, stopping search")
+                # Store partial results if any
+                if all_results:
+                    partial_result = {
+                        'success': True,
+                        'total_found': total_found,
+                        'results': all_results,
+                        'cancelled': True,
+                        'message': 'Search was cancelled by user'
+                    }
+                    complete_job(job_id, partial_result)
+                else:
+                    fail_job(job_id, 'Search was cancelled by user')
+                return
+            
+            # Update progress
+            if estimated_total_pages:
+                update_job_progress(job_id, page, estimated_total_pages, len(all_results), total_found, 'IN_PROGRESS')
+            else:
+                update_job_progress(job_id, page, None, len(all_results), total_found, 'IN_PROGRESS')
+            
+            # Fetch page
+            result = search_by_search_index_api(search_params, page=page)
+            
+            if not result.get('success'):
+                fail_job(job_id, result.get('error', 'Search failed'))
+                return
+            
+            if page == 1:
+                total_found = result.get('total_found', 0)
+                if total_found > 0:
+                    estimated_total_pages = min(MAX_RESULTS_TO_FETCH, total_found) // RESULTS_PER_PAGE
+                    if total_found % RESULTS_PER_PAGE > 0:
+                        estimated_total_pages += 1
+            
+            page_results = result.get('results', [])
+            if not page_results:
+                break
+            
+            all_results.extend(page_results)
+            
+            # Check for cancellation after processing page
+            if is_job_cancelled(job_id):
+                logger.info(f"Job {job_id} was cancelled after page {page}, stopping search")
+                # Store partial results
+                partial_result = {
+                    'success': True,
+                    'total_found': total_found,
+                    'results': all_results,
+                    'cancelled': True,
+                    'message': f'Search was cancelled by user after fetching {len(all_results)} results'
+                }
+                complete_job(job_id, partial_result)
+                return
+            
+            # Check if we've fetched all results
+            if len(all_results) >= total_found or len(all_results) >= MAX_RESULTS_TO_FETCH:
+                break
+            
+            page += 1
+        
+        # Complete job (only if not cancelled)
+        if not is_job_cancelled(job_id):
+            final_result = {
+                'success': True,
+                'total_found': total_found,
+                'results': all_results,
+                'form_filters': result.get('form_filters', []),
+                'entity_filters': result.get('entity_filters', []),
+                'location_filters': result.get('location_filters', []),
+                'incorporation_filters': result.get('incorporation_filters', [])
+            }
+            complete_job(job_id, final_result)
+            logger.info(f"Completed async search for job {job_id}: {len(all_results)} results")
+        
+    except Exception as e:
+        logger.error(f"Error in process_async_search: {e}")
+        if not is_job_cancelled(job_id):
+            fail_job(job_id, str(e))
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main Lambda handler - routes requests based on path
+    Also handles async job processing
     """
     try:
+        # Check if this is an async job invocation
+        if event.get('async_job'):
+            job_id = event.get('job_id')
+            search_params = event.get('search_params', {})
+            if job_id and search_params:
+                process_async_search(job_id, search_params)
+            return {'statusCode': 200, 'body': 'Async job started'}
+        
+        # Regular HTTP request
         path = event.get('path', '')
         http_method = event.get('httpMethod', '')
         
@@ -1923,6 +2188,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Autocomplete endpoint: /sec-search-autocomplete (GET)
         if 'autocomplete' in path and http_method == 'GET':
             return handle_autocomplete(event)
+        # Job cancel endpoint: /sec-search-cancel (POST/GET)
+        elif 'sec-search-cancel' in path:
+            return handle_job_cancel(event)
+        # Job status endpoint: /sec-search-status (GET)
+        elif 'sec-search-status' in path and http_method == 'GET':
+            return handle_job_status(event)
         # Search endpoint: /sec-search (POST)
         elif 'sec-search' in path and 'autocomplete' not in path:
             return handle_search(event)
