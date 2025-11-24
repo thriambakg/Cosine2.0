@@ -23,12 +23,13 @@ lambda_client = boto3.client('lambda')
 LAMBDA_FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME')
 
 
-def create_job(search_params: Dict[str, Any]) -> str:
+def create_job(search_params: Dict[str, Any], user_id: Optional[str] = None) -> str:
     """
     Create a new async search job and return job_id
     
     Args:
         search_params: Search parameters
+        user_id: User ID for WebSocket streaming (optional)
         
     Returns:
         job_id: Unique job identifier
@@ -57,8 +58,12 @@ def create_job(search_params: Dict[str, Any]) -> str:
             'ttl': int((datetime.now(timezone.utc).timestamp() + 3600))  # Expire after 1 hour
         }
         
+        # Store user_id if provided (for WebSocket streaming)
+        if user_id:
+            job_item['user_id'] = user_id
+        
         cache_table.put_item(Item=job_item)
-        logger.info(f"Created job {job_id}")
+        logger.info(f"Created job {job_id} for user {user_id or 'unknown'}")
         
         return job_id
     except Exception as e:
@@ -97,7 +102,7 @@ def update_job_progress(job_id: str, current_page: int, total_pages: Optional[in
                 ':updated': datetime.now(timezone.utc).isoformat()
             }
         )
-        logger.info(f"Updated job {job_id} progress: page {current_page}/{total_pages}, {results_count} results")
+        logger.info(f"📄 Job {job_id}: Page {current_page}{f'/{total_pages}' if total_pages else ''} - {results_count} results")
     except Exception as e:
         logger.error(f"Error updating job progress: {e}")
 
@@ -191,21 +196,24 @@ def cancel_job(job_id: str) -> bool:
         True if job was cancelled, False otherwise
     """
     if not cache_table:
+        logger.error(f"🛑 CANCEL: DynamoDB table not configured, cannot cancel job {job_id}")
         return False
     
     try:
         # Check if job exists and is cancellable
         response = cache_table.get_item(Key={'filingId': job_id})
         if 'Item' not in response:
-            logger.warning(f"Job {job_id} not found for cancellation")
+            logger.warning(f"🛑 CANCEL: Job {job_id} not found for cancellation")
             return False
         
         item = response['Item']
         current_status = item.get('job_status', 'UNKNOWN')
+        current_page = item.get('job_progress', {}).get('current_page', 0)
+        total_pages = item.get('job_progress', {}).get('total_pages')
         
         # Only cancel if job is pending or in progress
         if current_status not in ['PENDING', 'IN_PROGRESS']:
-            logger.info(f"Job {job_id} cannot be cancelled (status: {current_status})")
+            logger.info(f"🛑 CANCEL: Job {job_id} cannot be cancelled (status: {current_status})")
             return False
         
         # Set cancellation flag
@@ -218,10 +226,10 @@ def cancel_job(job_id: str) -> bool:
                 ':updated': datetime.now(timezone.utc).isoformat()
             }
         )
-        logger.info(f"Cancelled job {job_id}")
+        logger.info(f"🛑 CANCEL: Job {job_id} cancelled successfully (was on page {current_page}{f'/{total_pages}' if total_pages else ''})")
         return True
     except Exception as e:
-        logger.error(f"Error cancelling job: {e}")
+        logger.error(f"🛑 CANCEL ERROR: Failed to cancel job {job_id}: {e}")
         return False
 
 

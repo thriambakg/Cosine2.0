@@ -50,6 +50,8 @@ import {
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
+import { unifiedMessageHandler } from '../services/unifiedMessageHandler';
+import { useAuth } from '../contexts/AuthContext';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -683,6 +685,8 @@ const LOCATION_OPTIONS = [
 ];
 
 const SECSearchPage: React.FC = () => {
+  // Get user for WebSocket streaming
+  const { user } = useAuth();
   // Session persistence key
   const SESSION_STORAGE_KEY = 'sec-search-page-state';
 
@@ -1035,104 +1039,116 @@ const SECSearchPage: React.FC = () => {
   
   const fetchAllResults = async (params: SECSearchParams) => {
     const startTimestamp = Date.now();
-    setSearchState({ isSearching: true, currentPage: 1, totalPages: null, jobId: null });
     setSearchStartTime(startTimestamp);
     
-    console.log('🔍 Starting search:', { params, timestamp: new Date().toISOString() });
+    console.log('🔍 Starting async search:', { params, timestamp: new Date().toISOString() });
     
     try {
-      const allResults: SECSearchResult[] = [];
-      let page = 1;
-      let hasMore = true;
-      let totalFound = 0;
-      let firstResponse: any = null;
-      let estimatedTotalPages: number | null = null;
+      // Note: user_id is NOT sent in request body for security
+      // Backend extracts user_id from Cognito JWT token (authenticated request)
+      // This prevents user_id spoofing and ensures proper user isolation
       
-      while (hasMore && allResults.length < MAX_RESULTS_TO_FETCH) {
-        const pageParams = { ...params, page };
-        console.log(`📄 Fetching page ${page}...`);
-        // Update search state atomically with current page
-        setSearchState(prev => ({ ...prev, isSearching: true, currentPage: page, totalPages: estimatedTotalPages }));
-        
-        const result = await secSearchAPI.search(pageParams);
-        
-        // Store filter metadata from first response
-        if (page === 1 && result) {
-          firstResponse = result;
-          totalFound = result.total_found || 0;
-          // Estimate total pages (each API call returns ~100 results, we fetch 10 per page)
-          if (totalFound > 0) {
-            estimatedTotalPages = Math.ceil(Math.min(totalFound, MAX_RESULTS_TO_FETCH) / RESULTS_PER_PAGE);
-            // Update state with total pages now that we know it
-            setSearchState(prev => ({ ...prev, isSearching: true, currentPage: page, totalPages: estimatedTotalPages }));
-          }
-          console.log(`📊 First page response: ${result.results?.length || 0} results, total: ${totalFound}`);
-        }
-        
-        if (result?.success && result.results && result.results.length > 0) {
-          allResults.push(...result.results);
-          totalFound = result.total_found || allResults.length;
-          console.log(`✅ Page ${page} fetched: ${result.results.length} results (total so far: ${allResults.length}/${totalFound})`);
+      // Call search API - now returns 200 immediately with job_id, processes async
+      // API Gateway will pass Cognito JWT to Lambda, which extracts user_id securely
+      const result = await secSearchAPI.search(params);
+      
+      if (!result.success || !result.job_id) {
+        console.error('❌ Failed to start search:', result.error || 'No job_id returned');
+        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+        return;
+      }
+      
+      const jobId = result.job_id;
+      console.log('✅ Search started, job_id:', jobId);
+      
+      // Store job_id and set initial state - progress will stream via WebSocket
+      setSearchState({ 
+        isSearching: true, 
+        currentPage: 0, 
+        totalPages: null, 
+        jobId: jobId 
+      });
+      
+      // Poll for job completion (WebSocket handles progress updates)
+      const pollInterval = setInterval(async () => {
+        try {
+          const jobStatus = await secSearchAPI.getJobStatus(jobId);
           
-          // Check if we've fetched all results or reached limit
-          if (allResults.length >= totalFound || 
-              result.results.length < RESULTS_PER_PAGE ||
-              allResults.length >= MAX_RESULTS_TO_FETCH) {
-            hasMore = false;
-            console.log(`🏁 Finished fetching: ${allResults.length} total results`);
-          } else {
-            page++;
+          if (!jobStatus) {
+            console.warn('⚠️ Job status not found, stopping poll');
+            clearInterval(pollInterval);
+            setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+            return;
           }
-        } else {
-          console.log(`⚠️ Page ${page} returned no results or failed`);
-          hasMore = false;
+          
+          const status = jobStatus.status;
+          console.log(`📊 Job ${jobId} status: ${status}`);
+          
+          if (status === 'COMPLETED') {
+            clearInterval(pollInterval);
+            console.log('✅ Search completed, fetching results');
+            
+            // Fetch final results from job
+            const finalResults = jobStatus.results || jobStatus.job_results;
+            
+            if (finalResults && finalResults.success && !finalResults.cancelled) {
+              const allResults = finalResults.results || [];
+              
+              // Set filter metadata
+              if (finalResults.form_filters || finalResults.entity_filters) {
+                setAvailableFilters({
+                  form_filters: finalResults.form_filters || [],
+                  entity_filters: finalResults.entity_filters || [],
+                  location_filters: finalResults.location_filters || [],
+                  incorporation_filters: finalResults.incorporation_filters || [],
+                });
+              }
+              
+              // Set all results
+              setAllSearchResults(allResults);
+              setTotalFound(finalResults.total_found || allResults.length);
+              
+              // Clear search state
+              setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+              setSearchStartTime(null);
+              
+              console.log(`✅ Search completed: ${allResults.length} results`);
+            } else if (finalResults?.cancelled) {
+              console.log('🛑 Search was cancelled');
+              setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+              setSearchStartTime(null);
+            } else {
+              console.warn('⚠️ Search completed but no results available');
+              setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+              setSearchStartTime(null);
+            }
+          } else if (status === 'FAILED' || status === 'CANCELLED') {
+            clearInterval(pollInterval);
+            console.log(`❌ Search ${status.toLowerCase()}:`, jobStatus.error || 'Unknown error');
+            setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+            setSearchStartTime(null);
+          }
+          // IN_PROGRESS or PENDING - continue polling, progress updates come via WebSocket
+        } catch (error) {
+          console.error('❌ Error polling job status:', error);
         }
-      }
+      }, 2000); // Poll every 2 seconds
       
-      // Set filter metadata from API response or compute from results
-      if (firstResponse?.form_filters || firstResponse?.entity_filters || 
-          firstResponse?.location_filters || firstResponse?.incorporation_filters) {
-        // Use API-provided filters
-        setAvailableFilters({
-          form_filters: firstResponse.form_filters,
-          entity_filters: firstResponse.entity_filters,
-          location_filters: firstResponse.location_filters,
-          incorporation_filters: firstResponse.incorporation_filters,
-        });
-      } else {
-        // Compute filters from results
-        const computedFilters = computeFiltersFromResults(allResults);
-        setAvailableFilters(computedFilters);
-      }
+      // Cleanup interval after 10 minutes (safety timeout)
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        if (searchState.jobId === jobId) {
+          console.warn('⏱️ Poll timeout reached, stopping');
+          setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+        }
+      }, 10 * 60 * 1000);
       
-      // Set all results - this will trigger the useEffect to paginate and display
-      // Reset state first
-      setIsFiltered(false);
-      setCurrentPage(1);
-      // Then set results - this triggers the useEffect
-      setAllSearchResults(allResults);
-      
-      console.log(`💾 Stored ${allResults.length} results in allSearchResults`);
-      
-      // If no results, still show the status (don't clear everything)
-      if (allResults.length === 0) {
-        console.log('⚠️ No results found for search, but keeping search state');
-        setCurrentResults([]);
-        setTotalFound(0);
-      }
+      // Store interval reference for cleanup if component unmounts
+      return () => clearInterval(pollInterval);
     } catch (error) {
-      console.error('❌ Error fetching all results:', error);
-      setAllSearchResults([]);
-      setCurrentResults([]);
-      setTotalFound(0);
-      setAvailableFilters({});
-      // Fallback to single page using hook
-      await executeSearch(params);
-    } finally {
-      // Always clear searching state when done (success or error)
+      console.error('❌ Error starting search:', error);
       setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
       setSearchStartTime(null);
-      console.log('🏁 Search completed - clearing search state');
     }
   };
   
@@ -1378,9 +1394,52 @@ const SECSearchPage: React.FC = () => {
     setCurrentPage(1);
     setIsFiltered(false);
     
-    // Fetch all results for client-side filtering
+    // Start search - now returns 200 immediately with job_id, progress streams via WebSocket
     await fetchAllResults(params);
   };
+
+  // Subscribe to WebSocket progress updates for SEC search
+  useEffect(() => {
+    if (!searchState.jobId) {
+      return;
+    }
+
+    console.log('📡 SECSearchPage: Subscribing to WebSocket progress updates for job:', searchState.jobId);
+    
+    const unsubscribe = unifiedMessageHandler.onSecSearchProgressUpdate((jobId, progress) => {
+      if (jobId === searchState.jobId && progress) {
+        console.log('📊 SECSearchPage: Received progress update:', progress);
+        // Update search state with progress from WebSocket
+        setSearchState(prev => ({
+          ...prev,
+          currentPage: progress.current_page || prev.currentPage,
+          totalPages: progress.total_pages || prev.totalPages,
+          isSearching: progress.status === 'IN_PROGRESS' || progress.status === 'PENDING',
+        }));
+      }
+    });
+
+    // Also listen for custom events (fallback)
+    const handleProgressEvent = (event: CustomEvent) => {
+      if (event.detail.jobId === searchState.jobId) {
+        const progress = event.detail.progress;
+        console.log('📊 SECSearchPage: Received progress event:', progress);
+        setSearchState(prev => ({
+          ...prev,
+          currentPage: progress.current_page || prev.currentPage,
+          totalPages: progress.total_pages || prev.totalPages,
+          isSearching: progress.status === 'IN_PROGRESS' || progress.status === 'PENDING',
+        }));
+      }
+    };
+
+    window.addEventListener('sec-search-progress-updated', handleProgressEvent as EventListener);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('sec-search-progress-updated', handleProgressEvent as EventListener);
+    };
+  }, [searchState.jobId]);
 
   const handleApplyFilters = () => {
     // Filtering is handled by useEffect - just reset to page 1

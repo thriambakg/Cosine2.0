@@ -21,6 +21,128 @@ from async_job_handler import (
     get_job_status, invoke_async_search, cancel_job, is_job_cancelled
 )
 
+# WebSocket configuration for streaming progress
+# Reuse existing WebSocket API for chat (frontend already has connection)
+WEBSOCKET_ENDPOINT = os.environ.get('WEBSOCKET_ENDPOINT')
+if WEBSOCKET_ENDPOINT:
+    # Convert wss:// to https:// for API Gateway Management API
+    if WEBSOCKET_ENDPOINT.startswith('wss://'):
+        WEBSOCKET_ENDPOINT = WEBSOCKET_ENDPOINT.replace('wss://', 'https://')
+    websocket_api_gateway = boto3.client(
+        'apigatewaymanagementapi',
+        endpoint_url=WEBSOCKET_ENDPOINT
+    )
+else:
+    websocket_api_gateway = None
+    logger.warning("WEBSOCKET_ENDPOINT not configured - progress streaming disabled")
+
+# DynamoDB for WebSocket connections
+CHAT_CONNECTIONS_TABLE_NAME = os.environ.get('CHAT_CONNECTIONS_TABLE_NAME')
+dynamodb_ws = boto3.resource('dynamodb') if CHAT_CONNECTIONS_TABLE_NAME else None
+chat_connections_table = dynamodb_ws.Table(CHAT_CONNECTIONS_TABLE_NAME) if dynamodb_ws and CHAT_CONNECTIONS_TABLE_NAME else None
+
+
+def get_active_connections_for_user(user_id: str) -> List[str]:
+    """
+    Get active WebSocket connections for a user
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        List of active connection IDs
+    """
+    if not chat_connections_table:
+        return []
+    
+    try:
+        from boto3.dynamodb.conditions import Key
+        current_time = int(datetime.now(timezone.utc).timestamp())
+        
+        # Query connections table for active connections
+        response = chat_connections_table.query(
+            IndexName='UserConnectionsIndex',
+            KeyConditionExpression=Key('user_id').eq(user_id),
+            FilterExpression='expires_at > :current_time',
+            ExpressionAttributeValues={':current_time': current_time}
+        )
+        
+        connection_ids = [item['connection_id'] for item in response.get('Items', [])]
+        return connection_ids
+    except Exception as e:
+        logger.error(f"Error getting active connections for user {user_id}: {e}")
+        return []
+
+
+def send_sec_search_progress(job_id: str, user_id: Optional[str], current_page: int, 
+                             total_pages: Optional[int], results_count: int, total_found: int):
+    """
+    Send SEC search progress update via WebSocket
+    
+    Args:
+        job_id: Job ID
+        user_id: User ID (REQUIRED for user isolation - must be from Cognito JWT)
+        current_page: Current page being processed
+        total_pages: Total pages (None if unknown)
+        results_count: Number of results collected so far
+        total_found: Total results found
+    
+    SECURITY: user_id must be from authenticated Cognito JWT, never from client request body
+    """
+    if not user_id:
+        logger.debug(f"⚠️ Skipping WebSocket progress for job {job_id} - no user_id (user not authenticated)")
+        return  # Skip if no user_id (user not authenticated or extraction failed)
+    
+    if not websocket_api_gateway:
+        logger.warning("⚠️ WebSocket API Gateway not configured - progress streaming disabled")
+        return
+    
+    try:
+        # Get active connections for this user
+        connection_ids = get_active_connections_for_user(user_id)
+        
+        if not connection_ids:
+            return  # No active connections
+        
+        # Create progress message
+        progress_message = {
+            'type': 'sec_search_progress',
+            'job_id': job_id,
+            'payload': {
+                'current_page': current_page,
+                'total_pages': total_pages,
+                'results_count': results_count,
+                'total_found': total_found,
+                'status': 'IN_PROGRESS'
+            }
+        }
+        
+        # Send to all active connections for this user
+        # SECURITY: Only send to connections belonging to this specific user_id
+        sent_count = 0
+        for connection_id in connection_ids:
+            try:
+                websocket_api_gateway.post_to_connection(
+                    ConnectionId=connection_id,
+                    Data=json.dumps(progress_message)
+                )
+                sent_count += 1
+            except Exception as e:
+                # Check if it's a GoneException (connection closed) - this is expected
+                error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
+                if error_code == 'GoneException':
+                    logger.debug(f"Connection {connection_id} closed (user may have disconnected)")
+                else:
+                    logger.warning(f"Failed to send progress to connection {connection_id}: {e}")
+                # Connection might be closed, continue with others
+        
+        if sent_count > 0:
+            logger.debug(f"✅ Sent progress update for job {job_id} to {sent_count}/{len(connection_ids)} active connection(s) for user {user_id[:8] if user_id else 'unknown'}...")
+        else:
+            logger.debug(f"⚠️ No active connections found for user {user_id[:8] if user_id else 'unknown'}... - progress update not delivered (user may have disconnected)")
+    except Exception as e:
+        logger.error(f"Error sending SEC search progress: {e}")
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -150,7 +272,11 @@ def get_cached_filings(filing_ids: List[str]) -> Dict[str, Dict[str, Any]]:
                 except Exception as e:
                     logger.warning(f"Failed to update lastAccessed for {filing_id}: {e}")
         
-        logger.info(f"Found {len(cached_items)}/{len(filing_ids)} filings in cache")
+        # Log cache hit rate (only if significant)
+        if len(filing_ids) > 0:
+            cache_hit_rate = len(cached_items) / len(filing_ids)
+            if cache_hit_rate > 0:
+                logger.info(f"Cache: {len(cached_items)}/{len(filing_ids)} filings found")
         return cached_items
         
     except Exception as e:
@@ -222,7 +348,7 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
         item['ttl'] = current_time + (ttl_days * 24 * 60 * 60)
         
         cache_table.put_item(Item=item)
-        logger.info(f"Stored filing {item['filingId']} in cache")
+        # Removed verbose logging - filing storage is working
         return True
         
     except Exception as e:
@@ -591,9 +717,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
         logger.warning(f"Sanitized filing_id for S3: {filing_id} -> {sanitized_filing_id}")
         filing_id = sanitized_filing_id
     
-    logger.info(f"Downloading documents for filing_id: {filing_id}")
-    logger.info(f"  - Document Format Files: {len(document_urls)} files")
-    logger.info(f"  - Data Files: {len(data_file_urls)} files")
+    # Removed verbose logging - downloads are working
     
     # Skip downloading the index page - we only need the actual document files
     
@@ -732,12 +856,12 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             # DETECT HTML content and change extension if needed
             # If file has .xml extension but content is actually HTML, change to .html
             if original_ext == 'xml' and is_html:
-                logger.info(f"Detected HTML content in {filename}, changing extension from .xml to .html")
+                # Removed verbose logging - HTML detection is working
                 original_ext = 'html'
                 filename = f"{base_name}.html"
             # If file has no extension but is HTML, add .html
             elif not original_ext and is_html:
-                logger.info(f"Detected HTML content in {filename}, adding .html extension")
+                # Removed verbose logging - HTML detection is working
                 original_ext = 'html'
                 filename = f"{base_name}.html"
             
@@ -877,7 +1001,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if s3_key:
                 result['documentS3Keys'][doc_url] = s3_key
                 result['success'] = True
-                logger.info(f"Downloaded document to {s3_key} (preserved extension: {original_ext or 'none'}, size: {len(doc_content):,} bytes, type: {type(doc_content).__name__})")
+                # Removed verbose logging - downloads are working
         except Exception as e:
             logger.error(f"Error downloading document {doc_url}: {e}")
             continue
@@ -978,12 +1102,12 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             # DETECT HTML content and change extension if needed
             # If file has .xml extension but content is actually HTML, change to .html
             if original_ext == 'xml' and is_html:
-                logger.info(f"Detected HTML content in {filename}, changing extension from .xml to .html")
+                # Removed verbose logging - HTML detection is working
                 original_ext = 'html'
                 filename = f"{base_name}.html"
             # If file has no extension but is HTML, add .html
             elif not original_ext and is_html:
-                logger.info(f"Detected HTML content in {filename}, adding .html extension")
+                # Removed verbose logging - HTML detection is working
                 original_ext = 'html'
                 filename = f"{base_name}.html"
             
@@ -1040,15 +1164,12 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if s3_key:
                 result['dataFileS3Keys'][data_file_url] = s3_key
                 result['success'] = True
-                logger.info(f"Downloaded data file to {s3_key} (preserved extension: {original_ext or 'none'}, size: {len(data_file_content):,} bytes)")
+                # Removed verbose logging - downloads are working
         except Exception as e:
             logger.error(f"Error downloading data file {data_file_url}: {e}")
             continue
     
-    if result['success']:
-        logger.info(f"Successfully downloaded {len(result['documentS3Keys'])} document(s) and {len(result['dataFileS3Keys'])} data file(s) for filing_id: {filing_id}")
-    else:
-        logger.warning(f"No files were successfully downloaded for filing_id: {filing_id}")
+    # Removed verbose logging - downloads are working (only log errors)
     
     return result
 
@@ -1281,8 +1402,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             params['page'] = api_page
             params['from'] = (api_page - 1) * 100  # SEC uses increments of 100
         
-        logger.info(f"Fetching display page {page} (API page {api_page}, params: page={params.get('page', 'N/A')}, from={params.get('from', 'N/A')})...")
-        logger.info(f"Base parameters: {base_params}")
+        logger.info(f"📄 Fetching page {page} (API page {api_page})...")
         
         # Retry logic for handling timeouts
         max_retries = 3
@@ -1330,7 +1450,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 }
                 for bucket in form_filter_agg.get('buckets', [])
             ]
-            logger.info(f"Found {len(form_filters)} form types in results: {[f['form'] for f in form_filters]}")
+            # Removed verbose filter logging
         
         # Extract entity filter aggregation
         entity_filters = []
@@ -1343,7 +1463,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 }
                 for bucket in entity_filter_agg.get('buckets', [])
             ]
-            logger.info(f"Found {len(entity_filters)} entities in results")
+            # Removed verbose filter logging
         
         # Extract location filter aggregation (biz_states)
         location_filters = []
@@ -1356,7 +1476,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 }
                 for bucket in location_filter_agg.get('buckets', [])
             ]
-            logger.info(f"Found {len(location_filters)} locations in results")
+            # Removed verbose filter logging
         
         # Extract incorporation state filter aggregation
         incorporation_filters = []
@@ -1369,13 +1489,13 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 }
                 for bucket in incorporation_filter_agg.get('buckets', [])
             ]
-            logger.info(f"Found {len(incorporation_filters)} incorporation states in results")
+            # Removed verbose filter logging
         
         hits_list = hits_data.get('hits', [])
         
         # Always compute filters from current batch results
         # API aggregations may not be available for entity/location/incorporation, so we compute from results
-        logger.info(f"Computing filters from current batch results ({len(hits_list)} hits)")
+        # Removed verbose filter computation logging
         entity_counts = {}
         location_counts = {}
         incorporation_counts = {}
@@ -1434,13 +1554,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         if not incorporation_filters:
             incorporation_filters = computed_incorporation_filters
         
-        logger.info(f"Computed filters: {len(entity_filters)} entities, {len(location_filters)} locations, {len(incorporation_filters)} incorporation states")
-        if entity_filters:
-            logger.info(f"Sample entities: {entity_filters[:3]}")
-        if location_filters:
-            logger.info(f"Sample locations: {location_filters[:3]}")
-        if incorporation_filters:
-            logger.info(f"Sample incorporation states: {incorporation_filters[:3]}")
+        # Removed verbose filter logging
         
         if not hits_list:
             logger.info(f"No results returned from API page {api_page}")
@@ -1454,7 +1568,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 'incorporation_filters': incorporation_filters
             }
         
-        logger.info(f"Got {len(hits_list)} results from API page {api_page} (total found: {total_count})")
+        logger.info(f"✅ Page {page}: {len(hits_list)} results (total: {total_count})")
         
         # Calculate which slice we need from this API batch
         # Display page 1: want results 0-9 from API batch (results 0-99)
@@ -1467,7 +1581,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         # Slice to get exactly 10 results for this display page
         limited_hits = hits_list[start_idx:end_idx]
         
-        logger.info(f"Sliced to {len(limited_hits)} results for display page {page} (from index {start_idx} to {end_idx})")
+        # Removed verbose slicing logging
         
         # Extract results with all column data and construct filing IDs
         filing_ids = []
@@ -1572,7 +1686,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             # Check if filing is in cache
             if filing_id in cached_filings:
                 cached_item = cached_filings[filing_id]
-                logger.info(f"Using cached data for filing {filing_id}")
+                # Removed verbose logging - cache usage is working
                 
                 # Handle documentUrls - convert set to list if needed
                 document_urls = cached_item.get('documentUrls', [])
@@ -1622,10 +1736,10 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 
                 # Skip S3 download for cached filings - they should already be in S3
                 # Since indexing and downloading are tied together, if it's in DynamoDB, files should already be in S3
-                logger.info(f"Skipping S3 download for cached filing {filing_id} - files should already be in S3")
+                # Removed verbose logging - cache usage is working
             else:
                 # Cache miss - need to scrape
-                logger.info(f"Cache miss for filing {filing_id}, scraping...")
+                # Removed verbose logging - scraping is working
                 
                 # Build filing page URL from accession
                 filing_page_url = None
@@ -1693,7 +1807,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             for filing_data in filings_to_store_in_dynamodb:
                 try:
                     store_filing_in_cache(filing_data)
-                    logger.info(f"Stored filing {filing_data.get('filingId')} in DynamoDB cache")
+                    # Removed verbose logging - caching is working
                 except Exception as e:
                     logger.error(f"Failed to cache filing {filing_data.get('filingId')}: {e}")
                     # Continue - don't fail the request if caching fails
@@ -1702,7 +1816,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         # Cached filings should already have their files in S3 since indexing and downloading are tied together
         # This happens after DynamoDB storage to ensure the index exists
         if filings_to_download:
-            logger.info(f"Downloading documents to S3 for {len(filings_to_download)} NEW filings (cached filings skipped)")
+            # Removed verbose logging - downloads are working
             for filing_download_info in filings_to_download:
                 try:
                     filing_id = filing_download_info.get('filingId')
@@ -1715,7 +1829,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                         continue
                     
                     if not document_urls and not data_file_urls:
-                        logger.info(f"Skipping S3 download for filing_id {filing_id}: no document or data file URLs to download")
+                        # Removed verbose logging - skipping is expected for some filings
                         continue
                     
                     # Validate filing_id format one more time before downloading
@@ -1726,7 +1840,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                                    f"Split into {len(parts)} parts: {parts}")
                         continue
                     
-                    logger.info(f"Downloading {len(document_urls)} document(s) and {len(data_file_urls)} data file(s) to S3 for filing_id: {filing_id}")
+                    # Removed verbose logging - downloads are working
                     download_result = download_filing_documents_to_s3(
                         filing_id=filing_id,
                         document_urls=document_urls,
@@ -1749,27 +1863,17 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     try:
                         if cache_table:
                             # Always update, even if keys are empty (to ensure fields exist in DynamoDB)
-                            logger.info(f"Updating cache with S3 keys for filing {filing_id}: {len(document_s3_keys)} document keys, {len(data_file_s3_keys)} data file keys")
-                            logger.debug(f"Document S3 keys: {document_s3_keys}")
-                            logger.debug(f"Data file S3 keys: {data_file_s3_keys}")
+                            # Removed verbose logging - cache updates are working
                             
                             # Update the item with S3 keys (no need to check if item exists - update_item will work)
-                            response = cache_table.update_item(
+                            cache_table.update_item(
                                 Key={'filingId': filing_id},
                                 UpdateExpression='SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys',
                                 ExpressionAttributeValues={
                                     ':doc_keys': document_s3_keys if document_s3_keys else {},
                                     ':data_keys': data_file_s3_keys if data_file_s3_keys else {}
-                                },
-                                ReturnValues='ALL_NEW'  # Return updated item to verify
+                                }
                             )
-                            
-                            # Verify the update
-                            updated_item = response.get('Attributes', {})
-                            updated_doc_keys = updated_item.get('documentS3Keys', {})
-                            updated_data_keys = updated_item.get('dataFileS3Keys', {})
-                            logger.info(f"✅ Successfully updated cache with S3 keys for filing {filing_id}")
-                            logger.info(f"   Verified: {len(updated_doc_keys)} document keys, {len(updated_data_keys)} data file keys in cache")
                         else:
                             logger.warning(f"Cache table not available - cannot update S3 keys for filing {filing_id}")
                     except Exception as e:
@@ -1882,47 +1986,70 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         # Remove None values
         search_params = {k: v for k, v in search_params.items() if v is not None}
         
-        # If async mode, create job and return job_id
-        if async_mode:
-            job_id = create_job(search_params)
-            invoke_async_search(job_id, search_params)
-            
-            return {
-                'statusCode': 202,  # Accepted
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
-                },
-                'body': json.dumps({
-                    'success': True,
-                    'job_id': job_id,
-                    'status': 'PENDING',
-                    'message': 'Search started asynchronously'
-                })
-            }
+        # Get user_id from request (for WebSocket streaming)
+        # SECURITY: Always get from Cognito JWT, never trust client-provided user_id
+        # In production, API Gateway should have Cognito authorizer configured
+        user_id = None
         
-        # Sync mode - extract page number (default to 1)
-        page = body.get('page', 1)
-        try:
-            page = int(page)
-            if page < 1:
-                page = 1
-        except (ValueError, TypeError):
-            page = 1
+        # Try multiple methods to extract user_id from authenticated request
+        # Method 1: From API Gateway authorizer (Cognito JWT) - PREFERRED
+        if event.get('requestContext') and event['requestContext'].get('authorizer'):
+            authorizer = event['requestContext']['authorizer']
+            # Cognito JWT claims contain 'sub' (subject) which is the user ID
+            if isinstance(authorizer, dict):
+                claims = authorizer.get('claims', {})
+                # 'sub' is the Cognito user ID (UUID format)
+                user_id = claims.get('sub') or claims.get('cognito:username')
+            # Some authorizers put user_id directly
+            if not user_id and isinstance(authorizer, dict):
+                user_id = authorizer.get('user_id')
         
-        result = search_by_search_index_api(search_params, page=page)
+        # Method 2: From request context identity (Cognito Identity)
+        if not user_id and event.get('requestContext') and event['requestContext'].get('identity'):
+            identity = event['requestContext']['identity']
+            user_id = identity.get('cognitoIdentityId') or identity.get('cognitoIdentityPoolId')
+        
+        # Method 3: From Authorization header (if API Gateway doesn't validate, we can extract from header)
+        # NOTE: This requires JWT validation in Lambda - for now, we'll log if header exists
+        if not user_id and event.get('headers'):
+            headers = event.get('headers') or {}
+            # Normalize header keys (API Gateway may lowercase them)
+            normalized_headers = {k.lower(): v for k, v in headers.items()}
+            auth_header = normalized_headers.get('authorization') or normalized_headers.get('authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                # JWT token is present but not validated by API Gateway
+                # In production, API Gateway should have Cognito authorizer to validate and extract claims
+                logger.warning("⚠️ SECURITY: Authorization header present but API Gateway authorizer not configured - user_id extraction may fail")
+        
+        # SECURITY: Never trust user_id from request body - it can be spoofed
+        # If we still don't have user_id, log warning but continue (progress won't stream)
+        if not user_id:
+            logger.warning("⚠️ SECURITY: Could not extract user_id from authenticated request - WebSocket streaming disabled for this search")
+            logger.debug(f"Request context keys: {list(event.get('requestContext', {}).keys())}")
+            logger.debug(f"Headers present: {'headers' in event}")
+        else:
+            # Log partial user_id for debugging (first 8 chars only for security)
+            logger.info(f"✅ Extracted user_id from authenticated request: {user_id[:8]}... (length: {len(user_id)})")
+        
+        # Always process async with WebSocket streaming
+        # Return 200 immediately to avoid API Gateway timeout
+        job_id = create_job(search_params, user_id=user_id)
+        invoke_async_search(job_id, search_params)
         
         return {
-            'statusCode': 200 if result.get('success') else 500,
+            'statusCode': 200,  # Return 200 immediately
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Headers': 'Content-Type',
                 'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
             },
-            'body': json.dumps(result)
+            'body': json.dumps({
+                'success': True,
+                'job_id': job_id,
+                'status': 'PENDING',
+                'message': 'Search started - progress will stream via WebSocket'
+            })
         }
     except Exception as e:
         logger.error(f"Error in handle_search: {e}")
@@ -2011,6 +2138,7 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
             job_id = query_params.get('job_id')
         
         if not job_id:
+            logger.warning("🛑 CANCEL: Cancel request received without job_id")
             return {
                 'statusCode': 400,
                 'headers': {
@@ -2022,9 +2150,11 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
                 })
             }
         
+        logger.info(f"🛑 CANCEL: Received cancel request for job {job_id}")
         success = cancel_job(job_id)
         
         if success:
+            logger.info(f"🛑 CANCEL: Successfully processed cancel request for job {job_id}")
             return {
                 'statusCode': 200,
                 'headers': {
@@ -2037,6 +2167,7 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
                 })
             }
         else:
+            logger.warning(f"🛑 CANCEL: Failed to cancel job {job_id} (not found or cannot be cancelled)")
             return {
                 'statusCode': 400,
                 'headers': {
@@ -2049,7 +2180,7 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
                 })
             }
     except Exception as e:
-        logger.error(f"Error in handle_job_cancel: {e}")
+        logger.error(f"🛑 CANCEL ERROR: Error in handle_job_cancel: {e}")
         return {
             'statusCode': 500,
             'headers': {
@@ -2066,11 +2197,24 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
     """
     Process search asynchronously - called by Lambda async invocation
     This function runs in the background and updates job status
-    Checks for cancellation after each page
+    Progress updates are streamed via WebSocket
+    If cancelled, continues processing but doesn't return results
     """
     try:
-        logger.info(f"Starting async search for job {job_id}")
+        # Get user_id from job for WebSocket streaming
+        user_id = None
+        if cache_table:
+            try:
+                response = cache_table.get_item(Key={'filingId': job_id})
+                if 'Item' in response:
+                    user_id = response['Item'].get('user_id')
+            except Exception as e:
+                logger.warning(f"Failed to get user_id from job: {e}")
+        
+        logger.info(f"🚀 Starting async search for job {job_id} (user: {user_id or 'unknown'})")
         update_job_progress(job_id, 0, None, 0, 0, 'IN_PROGRESS')
+        # Send initial WebSocket update
+        send_sec_search_progress(job_id, user_id, 0, None, 0, 0)
         
         # Fetch all pages (up to MAX_RESULTS_TO_FETCH)
         MAX_RESULTS_TO_FETCH = 1000
@@ -2081,28 +2225,20 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
         estimated_total_pages = None
         
         while len(all_results) < MAX_RESULTS_TO_FETCH:
-            # Check for cancellation before starting next page
-            if is_job_cancelled(job_id):
-                logger.info(f"Job {job_id} was cancelled, stopping search")
-                # Store partial results if any
-                if all_results:
-                    partial_result = {
-                        'success': True,
-                        'total_found': total_found,
-                        'results': all_results,
-                        'cancelled': True,
-                        'message': 'Search was cancelled by user'
-                    }
-                    complete_job(job_id, partial_result)
-                else:
-                    fail_job(job_id, 'Search was cancelled by user')
-                return
+            # Check for cancellation - continue processing anyway (just don't return results)
+            cancelled = is_job_cancelled(job_id)
+            if cancelled:
+                logger.info(f"🛑 CANCEL: Job {job_id} was cancelled - continuing in background but won't return results")
             
             # Update progress
             if estimated_total_pages:
                 update_job_progress(job_id, page, estimated_total_pages, len(all_results), total_found, 'IN_PROGRESS')
+                # Send WebSocket update
+                send_sec_search_progress(job_id, user_id, page, estimated_total_pages, len(all_results), total_found)
             else:
                 update_job_progress(job_id, page, None, len(all_results), total_found, 'IN_PROGRESS')
+                # Send WebSocket update
+                send_sec_search_progress(job_id, user_id, page, None, len(all_results), total_found)
             
             # Fetch page
             result = search_by_search_index_api(search_params, page=page)
@@ -2124,28 +2260,24 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
             
             all_results.extend(page_results)
             
-            # Check for cancellation after processing page
-            if is_job_cancelled(job_id):
-                logger.info(f"Job {job_id} was cancelled after page {page}, stopping search")
-                # Store partial results
-                partial_result = {
-                    'success': True,
-                    'total_found': total_found,
-                    'results': all_results,
-                    'cancelled': True,
-                    'message': f'Search was cancelled by user after fetching {len(all_results)} results'
-                }
-                complete_job(job_id, partial_result)
-                return
-            
             # Check if we've fetched all results
             if len(all_results) >= total_found or len(all_results) >= MAX_RESULTS_TO_FETCH:
                 break
             
             page += 1
         
-        # Complete job (only if not cancelled)
-        if not is_job_cancelled(job_id):
+        # Complete job - check if cancelled (if so, don't store results)
+        cancelled = is_job_cancelled(job_id)
+        if cancelled:
+            logger.info(f"🛑 CANCEL: Job {job_id} was cancelled - completing without storing results")
+            final_result = {
+                'success': True,
+                'total_found': total_found,
+                'results': [],  # Don't return results if cancelled
+                'cancelled': True,
+                'message': 'Search was cancelled by user'
+            }
+        else:
             final_result = {
                 'success': True,
                 'total_found': total_found,
@@ -2155,8 +2287,12 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
                 'location_filters': result.get('location_filters', []),
                 'incorporation_filters': result.get('incorporation_filters', [])
             }
-            complete_job(job_id, final_result)
-            logger.info(f"Completed async search for job {job_id}: {len(all_results)} results")
+        
+        complete_job(job_id, final_result)
+        logger.info(f"✅ Completed async search for job {job_id}: {len(all_results)} results (cancelled: {cancelled})")
+        
+        # Send final WebSocket update
+        send_sec_search_progress(job_id, user_id, page, estimated_total_pages, len(all_results), total_found)
         
     except Exception as e:
         logger.error(f"Error in process_async_search: {e}")
