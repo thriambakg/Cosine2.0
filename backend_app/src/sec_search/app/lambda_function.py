@@ -596,9 +596,13 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
     for doc_url in document_urls:
         try:
             # Download the document first to check its actual content type
+            # Use a session without compression to ensure we get exact bytes
             session = create_session()
+            # Override Accept-Encoding for document downloads to get uncompressed content
+            download_headers = session.headers.copy()
+            download_headers['Accept-Encoding'] = 'identity'  # Request uncompressed content
             time.sleep(0.1)  # Rate limiting
-            response = session.get(doc_url, timeout=30)
+            response = session.get(doc_url, headers=download_headers, timeout=30)
             response.raise_for_status()
             
             if len(response.content) == 0:
@@ -606,7 +610,18 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 continue
             
             # Preserve raw bytes - don't decode, just use as-is to preserve all content exactly
+            # response.content is already the decompressed bytes (requests handles this automatically)
+            # But by requesting 'identity', we avoid any compression/decompression issues
             doc_content = response.content
+            
+            # Log first 200 bytes for debugging (to verify we're getting the right content)
+            if len(doc_content) > 0:
+                preview = doc_content[:200] if len(doc_content) >= 200 else doc_content
+                try:
+                    preview_str = preview.decode('utf-8', errors='replace')[:200]
+                    logger.debug(f"Content preview (first 200 chars): {preview_str[:100]}...")
+                except:
+                    logger.debug(f"Content preview (first 200 bytes, hex): {preview.hex()[:100]}...")
             
             # Get charset from response headers if available
             response_charset = None
@@ -765,19 +780,87 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 unique_id = str(uuid.uuid4())[:8]
                 filename = f"{filename}_{unique_id}"
             
-            # Upload to S3 in documentformatfiles/ subfolder
-            s3_key = f"filings/{filing_id}/documentformatfiles/{filename}"
+            # If this is HTML content, fix SEC URLs to use proper SEC.gov URLs
+            # Do this BEFORE type verification since we need to decode bytes
+            if is_html:
+                try:
+                    # Decode to string for URL processing
+                    encoding = response_charset or response.encoding or 'utf-8'
+                    html_content = doc_content.decode(encoding, errors='replace')
+                    
+                    # Fix SEC URLs in the HTML content
+                    # Pattern 1: /cgi-bin/browse-edgar?action=getcompany&CIK=XXXXX -> https://www.sec.gov/edgar/browse/?CIK=XXXXX
+                    # Handle both &amp; (HTML entity) and & (direct)
+                    html_content = re.sub(
+                        r'/cgi-bin/browse-edgar\?action=getcompany&amp;CIK=(\d+)',
+                        r'https://www.sec.gov/edgar/browse/?CIK=\1',
+                        html_content,
+                        flags=re.IGNORECASE
+                    )
+                    html_content = re.sub(
+                        r'/cgi-bin/browse-edgar\?action=getcompany&CIK=(\d+)',
+                        r'https://www.sec.gov/edgar/browse/?CIK=\1',
+                        html_content,
+                        flags=re.IGNORECASE
+                    )
+                    
+                    # Pattern 2: Any S3 bucket URLs pointing to SEC content -> proper SEC.gov URLs
+                    html_content = re.sub(
+                        r'https?://[^/]+\.s3[^/]*\.amazonaws\.com[^"\']*cgi-bin/browse-edgar\?action=getcompany&amp;CIK=(\d+)',
+                        r'https://www.sec.gov/edgar/browse/?CIK=\1',
+                        html_content,
+                        flags=re.IGNORECASE
+                    )
+                    html_content = re.sub(
+                        r'https?://[^/]+\.s3[^/]*\.amazonaws\.com[^"\']*cgi-bin/browse-edgar\?action=getcompany&CIK=(\d+)',
+                        r'https://www.sec.gov/edgar/browse/?CIK=\1',
+                        html_content,
+                        flags=re.IGNORECASE
+                    )
+                    
+                    # Pattern 3: Fix relative URLs that should be absolute SEC.gov URLs
+                    # /cgi-bin/browse-edgar -> https://www.sec.gov/cgi-bin/browse-edgar
+                    html_content = re.sub(
+                        r'href=["\'](/cgi-bin/browse-edgar[^"\']*)["\']',
+                        lambda m: f'href="https://www.sec.gov{m.group(1)}"',
+                        html_content,
+                        flags=re.IGNORECASE
+                    )
+                    
+                    # Pattern 4: Fix any other relative SEC URLs
+                    html_content = re.sub(
+                        r'href=["\'](/Archives/edgar[^"\']*)["\']',
+                        lambda m: f'href="https://www.sec.gov{m.group(1)}"',
+                        html_content,
+                        flags=re.IGNORECASE
+                    )
+                    
+                    # Re-encode back to bytes with the same encoding
+                    doc_content = html_content.encode(encoding, errors='replace')
+                    logger.debug(f"Fixed SEC URLs in HTML content (encoding: {encoding})")
+                except Exception as e:
+                    logger.warning(f"Error processing URLs in HTML content: {e}. Using original content.")
+                    # If URL processing fails, use original content
+            
+            # Verify we have bytes, not a string (after URL processing)
+            if isinstance(doc_content, str):
+                logger.error(f"ERROR: doc_content is a string, not bytes! Converting to bytes with UTF-8 encoding.")
+                doc_content = doc_content.encode('utf-8')
+            elif not isinstance(doc_content, bytes):
+                logger.error(f"ERROR: doc_content is neither string nor bytes! Type: {type(doc_content)}")
+                doc_content = bytes(doc_content)
+            
             s3_client.put_object(
                 Bucket=S3_BUCKET_NAME,
                 Key=s3_key,
-                Body=doc_content,
+                Body=doc_content,  # Processed bytes with fixed URLs
                 ContentType=content_type
             )
             
             if s3_key:
                 result['documentS3Keys'][doc_url] = s3_key
                 result['success'] = True
-                logger.info(f"Downloaded document to {s3_key} (preserved extension: {original_ext or 'none'}, size: {len(doc_content):,} bytes)")
+                logger.info(f"Downloaded document to {s3_key} (preserved extension: {original_ext or 'none'}, size: {len(doc_content):,} bytes, type: {type(doc_content).__name__})")
         except Exception as e:
             logger.error(f"Error downloading document {doc_url}: {e}")
             continue
