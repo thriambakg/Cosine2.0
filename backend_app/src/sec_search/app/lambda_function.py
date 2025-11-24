@@ -605,8 +605,33 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 logger.warning(f"Empty content for {doc_url}, skipping")
                 continue
             
+            # Preserve raw bytes - don't decode, just use as-is to preserve all content exactly
             doc_content = response.content
-            content_start = doc_content[:1000].lower() if len(doc_content) >= 1000 else doc_content.lower()
+            
+            # Get charset from response headers if available
+            response_charset = None
+            content_type_header = response.headers.get('Content-Type', '')
+            if 'charset=' in content_type_header:
+                try:
+                    charset_part = content_type_header.split('charset=')[1].split(';')[0].strip().strip('"\'')
+                    response_charset = charset_part
+                except (IndexError, AttributeError):
+                    pass
+            
+            # For detection only, decode a small sample (first 1000 bytes) to check content
+            # But preserve the original bytes for saving
+            try:
+                # Try to decode for detection, using response encoding or UTF-8 as fallback
+                encoding = response.encoding or response_charset or 'utf-8'
+                content_sample = doc_content[:1000] if len(doc_content) >= 1000 else doc_content
+                content_start = content_sample.decode(encoding, errors='ignore').lower()
+            except (UnicodeDecodeError, AttributeError, LookupError):
+                # If bytes can't be decoded, just use raw bytes for detection (ASCII only)
+                content_start = doc_content[:1000] if len(doc_content) >= 1000 else doc_content
+                try:
+                    content_start = content_start.decode('latin-1', errors='ignore').lower()
+                except:
+                    pass
             
             # Check for HTML indicators (matching glue script logic)
             is_html = any(indicator in content_start for indicator in [
@@ -698,14 +723,24 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 filename = f"{base_name}.html"
             
             # Determine content type based on actual content (for Content-Type header only)
+            # Preserve charset from response if available
             if is_xml and not is_html:
                 content_type = 'application/xml'
+                if response_charset:
+                    content_type += f'; charset={response_charset}'
             elif is_html:
                 content_type = 'text/html'
+                # Preserve charset from response, or default to UTF-8 for HTML
+                charset = response_charset or 'utf-8'
+                content_type += f'; charset={charset}'
             elif original_ext == 'txt':
                 content_type = 'text/plain'
+                if response_charset:
+                    content_type += f'; charset={response_charset}'
             elif original_ext == 'json':
                 content_type = 'application/json'
+                if response_charset:
+                    content_type += f'; charset={response_charset}'
             elif original_ext == 'pdf':
                 content_type = 'application/pdf'
             elif original_ext in ['jpg', 'jpeg']:
@@ -722,6 +757,8 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 # Default based on content detection if no extension
                 if is_xml:
                     content_type = 'application/xml'
+                    if response_charset:
+                        content_type += f'; charset={response_charset}'
                 else:
                     content_type = 'application/octet-stream'
             
