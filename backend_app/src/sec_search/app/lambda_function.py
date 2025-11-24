@@ -850,6 +850,9 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 logger.error(f"ERROR: doc_content is neither string nor bytes! Type: {type(doc_content)}")
                 doc_content = bytes(doc_content)
             
+            # Construct S3 key for upload
+            s3_key = f"filings/{filing_id}/documentformatfiles/{filename}"
+            
             s3_client.put_object(
                 Bucket=S3_BUCKET_NAME,
                 Key=s3_key,
