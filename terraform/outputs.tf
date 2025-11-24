@@ -91,6 +91,16 @@ output "api_endpoints" {
 }
 
 # WebSocket API Gateway Outputs
+output "sec_search_websocket_api" {
+  description = "SEC Search WebSocket API Gateway information"
+  value = {
+    api_id     = module.sec_search_websocket_api.api_id
+    api_arn    = module.sec_search_websocket_api.api_arn
+    stage_url  = module.sec_search_websocket_api.stage_url
+    stage_name = module.sec_search_websocket_api.stage_name
+  }
+}
+
 output "websocket_api" {
   description = "WebSocket API Gateway configuration"
   value = {

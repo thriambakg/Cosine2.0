@@ -9,6 +9,7 @@ export interface EnvironmentConfig {
   environment: 'development' | 'staging' | 'production';
   apiGatewayUrl: string;
   websocketUrl?: string;
+  secSearchWebSocketUrl?: string; // SEC search WebSocket API URL
   awsRegion: string;
   cognitoUserPoolId?: string;
   cognitoClientId?: string;
@@ -118,6 +119,11 @@ const getWebSocketUrl = (): string | undefined => {
   if (runtimeConfig?.websocketUrl && !runtimeConfig.websocketUrl.includes('{{')) {
     console.log('🔌 Using WebSocket URL from runtime config:', runtimeConfig.websocketUrl);
     return runtimeConfig.websocketUrl;
+  }
+  
+  // Also check for SEC search WebSocket URL in runtime config
+  if (typeof window !== 'undefined' && window.COSINE_CONFIG?.secSearchWebSocketUrl) {
+    // This is handled separately in secSearchWebSocket.ts
   }
   
   // Check for explicit WebSocket URL

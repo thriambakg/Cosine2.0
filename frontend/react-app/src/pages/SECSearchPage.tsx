@@ -1057,7 +1057,7 @@ const SECSearchPage: React.FC = () => {
     
     console.log('🔍 Starting WebSocket search:', { params, timestamp: new Date().toISOString() });
     
-    if (!user?.username) {
+    if (!user?.id && !user?.cognitoSub) {
       console.error('❌ User not authenticated');
       setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
       return;
@@ -1065,8 +1065,10 @@ const SECSearchPage: React.FC = () => {
     
     try {
       // Connect to WebSocket if not already connected
+      // Use cognitoSub (Cognito user ID) or fall back to id
+      const userId = user.cognitoSub || user.id;
       if (!wsService.isConnected()) {
-        await wsService.connect(user.username);
+        await wsService.connect(userId);
       }
       
       // Set up message handlers
