@@ -639,26 +639,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 logger.warning(f"Skipping {doc_url} - appears to be index page, not actual document")
                 continue
             
-            # Determine file extension and content type based on actual content
-            if is_xml and not is_html:
-                file_ext = 'xml'
-                content_type = 'application/xml'
-            elif is_html:
-                file_ext = 'html'
-                content_type = 'text/html'
-            else:
-                # Fallback: use URL extension or default to xml
-                if doc_url.endswith('.html') or doc_url.endswith('.htm'):
-                    file_ext = 'html'
-                    content_type = 'text/html'
-                elif doc_url.endswith('.txt'):
-                    file_ext = 'txt'
-                    content_type = 'text/plain'
-                else:
-                    file_ext = 'xml'
-                    content_type = 'application/xml'
-            
-            # Extract filename from URL, but use determined extension
+            # Extract filename from URL - PRESERVE original extension
             filename = doc_url.split('/')[-1]
             if not filename or filename == '' or '?' in filename:
                 # Generate filename from URL path
@@ -666,21 +647,62 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 if len(path_parts) > 1:
                     filename = path_parts[-1]
                 else:
+                    # If we can't get filename from URL, try to determine extension from content
+                    if is_xml and not is_html:
+                        file_ext = 'xml'
+                    elif is_html:
+                        file_ext = 'html'
+                    elif doc_url.endswith('.txt'):
+                        file_ext = 'txt'
+                    else:
+                        file_ext = 'xml'
                     filename = f"document_{abs(hash(doc_url)) % 100000}.{file_ext}"
             
             # Clean filename (remove query params if any)
             if '?' in filename:
                 filename = filename.split('?')[0]
             
-            # Replace extension with determined extension if different
+            # PRESERVE original extension from URL - don't change it based on content detection
+            # Extract original extension
+            original_ext = None
             if '.' in filename:
-                base_name = filename.rsplit('.', 1)[0]
-                filename = f"{base_name}.{file_ext}"
-            else:
-                filename = f"{filename}.{file_ext}"
+                original_ext = filename.rsplit('.', 1)[1].lower()
             
-            # Sanitize filename for S3 (remove invalid characters)
-            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
+            # Determine content type based on actual content (for Content-Type header only)
+            if is_xml and not is_html:
+                content_type = 'application/xml'
+            elif is_html:
+                content_type = 'text/html'
+            elif original_ext == 'txt':
+                content_type = 'text/plain'
+            elif original_ext == 'json':
+                content_type = 'application/json'
+            elif original_ext == 'pdf':
+                content_type = 'application/pdf'
+            elif original_ext in ['jpg', 'jpeg']:
+                content_type = 'image/jpeg'
+            elif original_ext == 'png':
+                content_type = 'image/png'
+            elif original_ext == 'gif':
+                content_type = 'image/gif'
+            elif original_ext in ['xls', 'xlsx']:
+                content_type = 'application/vnd.ms-excel' if original_ext == 'xls' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            elif original_ext in ['doc', 'docx']:
+                content_type = 'application/msword' if original_ext == 'doc' else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            else:
+                # Default based on content detection if no extension
+                if is_xml:
+                    content_type = 'application/xml'
+                else:
+                    content_type = 'application/octet-stream'
+            
+            # Sanitize filename for S3 (remove invalid characters, but preserve extension)
+            if '.' in filename:
+                base_name, ext = filename.rsplit('.', 1)
+                base_name = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', base_name)
+                filename = f"{base_name}.{ext}"
+            else:
+                filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
             
             # Upload to S3 in documentformatfiles/ subfolder
             s3_key = f"filings/{filing_id}/documentformatfiles/{filename}"
@@ -694,7 +716,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if s3_key:
                 result['documentS3Keys'][doc_url] = s3_key
                 result['success'] = True
-                logger.info(f"Downloaded document to {s3_key} (detected as {file_ext}, size: {len(doc_content):,} bytes)")
+                logger.info(f"Downloaded document to {s3_key} (preserved extension: {original_ext or 'none'}, size: {len(doc_content):,} bytes)")
         except Exception as e:
             logger.error(f"Error downloading document {doc_url}: {e}")
             continue
@@ -739,29 +761,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 logger.warning(f"Skipping {data_file_url} - appears to be index page, not actual data file")
                 continue
             
-            # Determine file extension and content type based on actual content
-            if is_xml and not is_html:
-                file_ext = 'xml'
-                content_type = 'application/xml'
-            elif is_html:
-                file_ext = 'html'
-                content_type = 'text/html'
-            else:
-                # Fallback: use URL extension or default to xml
-                if data_file_url.endswith('.html') or data_file_url.endswith('.htm'):
-                    file_ext = 'html'
-                    content_type = 'text/html'
-                elif data_file_url.endswith('.txt'):
-                    file_ext = 'txt'
-                    content_type = 'text/plain'
-                elif data_file_url.endswith('.json'):
-                    file_ext = 'json'
-                    content_type = 'application/json'
-                else:
-                    file_ext = 'xml'
-                    content_type = 'application/xml'
-            
-            # Extract filename from URL, but use determined extension
+            # Extract filename from URL - PRESERVE original extension
             filename = data_file_url.split('/')[-1]
             if not filename or filename == '' or '?' in filename:
                 # Generate filename from URL path
@@ -769,21 +769,64 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 if len(path_parts) > 1:
                     filename = path_parts[-1]
                 else:
+                    # If we can't get filename from URL, try to determine extension from content
+                    if is_xml and not is_html:
+                        file_ext = 'xml'
+                    elif is_html:
+                        file_ext = 'html'
+                    elif data_file_url.endswith('.txt'):
+                        file_ext = 'txt'
+                    elif data_file_url.endswith('.json'):
+                        file_ext = 'json'
+                    else:
+                        file_ext = 'xml'
                     filename = f"datafile_{abs(hash(data_file_url)) % 100000}.{file_ext}"
             
             # Clean filename (remove query params if any)
             if '?' in filename:
                 filename = filename.split('?')[0]
             
-            # Replace extension with determined extension if different
+            # PRESERVE original extension from URL - don't change it based on content detection
+            # Extract original extension
+            original_ext = None
             if '.' in filename:
-                base_name = filename.rsplit('.', 1)[0]
-                filename = f"{base_name}.{file_ext}"
-            else:
-                filename = f"{filename}.{file_ext}"
+                original_ext = filename.rsplit('.', 1)[1].lower()
             
-            # Sanitize filename for S3 (remove invalid characters)
-            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
+            # Determine content type based on actual content (for Content-Type header only)
+            if is_xml and not is_html:
+                content_type = 'application/xml'
+            elif is_html:
+                content_type = 'text/html'
+            elif original_ext == 'txt':
+                content_type = 'text/plain'
+            elif original_ext == 'json':
+                content_type = 'application/json'
+            elif original_ext == 'pdf':
+                content_type = 'application/pdf'
+            elif original_ext in ['jpg', 'jpeg']:
+                content_type = 'image/jpeg'
+            elif original_ext == 'png':
+                content_type = 'image/png'
+            elif original_ext == 'gif':
+                content_type = 'image/gif'
+            elif original_ext in ['xls', 'xlsx']:
+                content_type = 'application/vnd.ms-excel' if original_ext == 'xls' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            elif original_ext in ['doc', 'docx']:
+                content_type = 'application/msword' if original_ext == 'doc' else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            else:
+                # Default based on content detection if no extension
+                if is_xml:
+                    content_type = 'application/xml'
+                else:
+                    content_type = 'application/octet-stream'
+            
+            # Sanitize filename for S3 (remove invalid characters, but preserve extension)
+            if '.' in filename:
+                base_name, ext = filename.rsplit('.', 1)
+                base_name = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', base_name)
+                filename = f"{base_name}.{ext}"
+            else:
+                filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
             
             # Upload to S3 in datafiles/ subfolder
             s3_key = f"filings/{filing_id}/datafiles/{filename}"
@@ -797,7 +840,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if s3_key:
                 result['dataFileS3Keys'][data_file_url] = s3_key
                 result['success'] = True
-                logger.info(f"Downloaded data file to {s3_key} (detected as {file_ext}, size: {len(data_file_content):,} bytes)")
+                logger.info(f"Downloaded data file to {s3_key} (preserved extension: {original_ext or 'none'}, size: {len(data_file_content):,} bytes)")
         except Exception as e:
             logger.error(f"Error downloading data file {data_file_url}: {e}")
             continue
@@ -1504,23 +1547,31 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     
                     # Update DynamoDB cache with S3 keys
                     try:
-                        if cache_table and (document_s3_keys or data_file_s3_keys):
+                        if cache_table:
+                            # Always update, even if keys are empty (to ensure fields exist in DynamoDB)
                             logger.info(f"Updating cache with S3 keys for filing {filing_id}: {len(document_s3_keys)} document keys, {len(data_file_s3_keys)} data file keys")
+                            logger.debug(f"Document S3 keys: {document_s3_keys}")
+                            logger.debug(f"Data file S3 keys: {data_file_s3_keys}")
+                            
                             # Update the item with S3 keys (no need to check if item exists - update_item will work)
-                            cache_table.update_item(
+                            response = cache_table.update_item(
                                 Key={'filingId': filing_id},
                                 UpdateExpression='SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys',
                                 ExpressionAttributeValues={
                                     ':doc_keys': document_s3_keys if document_s3_keys else {},
                                     ':data_keys': data_file_s3_keys if data_file_s3_keys else {}
-                                }
+                                },
+                                ReturnValues='ALL_NEW'  # Return updated item to verify
                             )
+                            
+                            # Verify the update
+                            updated_item = response.get('Attributes', {})
+                            updated_doc_keys = updated_item.get('documentS3Keys', {})
+                            updated_data_keys = updated_item.get('dataFileS3Keys', {})
                             logger.info(f"✅ Successfully updated cache with S3 keys for filing {filing_id}")
+                            logger.info(f"   Verified: {len(updated_doc_keys)} document keys, {len(updated_data_keys)} data file keys in cache")
                         else:
-                            if not cache_table:
-                                logger.warning(f"Cache table not available - cannot update S3 keys for filing {filing_id}")
-                            else:
-                                logger.warning(f"No S3 keys to update for filing {filing_id}")
+                            logger.warning(f"Cache table not available - cannot update S3 keys for filing {filing_id}")
                     except Exception as e:
                         logger.error(f"❌ Failed to update cache with S3 keys for filing {filing_id}: {e}")
                         import traceback
