@@ -531,19 +531,23 @@ def download_filing_documents_to_s3(filing_id: str, document_format_files: List[
             html_url = None
             if doc_url.endswith('.xml'):
                 # Try to find HTML version in common SEC patterns
-                # Pattern 1: xslF345X05/ownership.html (common for Form 4)
-                # Pattern 2: Replace .xml with .html in same directory
                 base_url = '/'.join(doc_url.split('/')[:-1])
                 xml_filename = doc_url.split('/')[-1]
                 html_filename = xml_filename.replace('.xml', '.html')
                 
-                # Try pattern: xslF345X05/{filename}.html
-                possible_html_paths = [
-                    f"{base_url}/xslF345X05/{html_filename}",
-                    f"{base_url}/xslF345X03/{html_filename}",
-                    f"{base_url}/xslF345X05/{html_filename}",
-                    f"{base_url}/{html_filename}",  # Same directory
-                ]
+                # Check if XML is already in an xslF folder (e.g., xslF345X03/rrd280655.xml)
+                # If so, HTML should be in the same folder
+                if 'xslF' in base_url.lower():
+                    # XML is in xslF folder, HTML should be in same folder
+                    possible_html_paths = [f"{base_url}/{html_filename}"]
+                else:
+                    # XML is in base directory, try xslF folders first, then same directory
+                    possible_html_paths = [
+                        f"{base_url}/xslF345X05/{html_filename}",
+                        f"{base_url}/xslF345X03/{html_filename}",
+                        f"{base_url}/xslF345X04/{html_filename}",
+                        f"{base_url}/{html_filename}",  # Same directory as fallback
+                    ]
                 
                 # Check if HTML version exists
                 session = create_session()
@@ -555,7 +559,8 @@ def download_filing_documents_to_s3(filing_id: str, document_format_files: List[
                             html_url = html_path
                             logger.info(f"Found HTML version for {doc_url}: {html_url}")
                             break
-                    except:
+                    except Exception as e:
+                        logger.debug(f"HTML check failed for {html_path}: {e}")
                         continue
             
             # Use HTML URL if found, otherwise use original URL
@@ -608,12 +613,18 @@ def download_filing_documents_to_s3(filing_id: str, document_format_files: List[
                 xml_filename = doc_url.split('/')[-1]
                 html_filename = xml_filename.replace('.xml', '.html')
                 
-                # Try common patterns
-                possible_html_paths = [
-                    f"{base_url}/xslF345X05/{html_filename}",
-                    f"{base_url}/xslF345X03/{html_filename}",
-                    f"{base_url}/{html_filename}",  # Same directory
-                ]
+                # Check if XML is already in an xslF folder
+                if 'xslF' in base_url.lower():
+                    # XML is in xslF folder, HTML should be in same folder
+                    possible_html_paths = [f"{base_url}/{html_filename}"]
+                else:
+                    # XML is in base directory, try xslF folders first, then same directory
+                    possible_html_paths = [
+                        f"{base_url}/xslF345X05/{html_filename}",
+                        f"{base_url}/xslF345X03/{html_filename}",
+                        f"{base_url}/xslF345X04/{html_filename}",
+                        f"{base_url}/{html_filename}",  # Same directory as fallback
+                    ]
                 
                 # Check if HTML version exists
                 session = create_session()
@@ -625,7 +636,8 @@ def download_filing_documents_to_s3(filing_id: str, document_format_files: List[
                             html_url = html_path
                             logger.info(f"Found HTML version for data file {doc_url}: {html_url}")
                             break
-                    except:
+                    except Exception as e:
+                        logger.debug(f"HTML check failed for {html_path}: {e}")
                         continue
             
             # Use HTML URL if found, otherwise use original URL
