@@ -398,15 +398,19 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
         href_pattern = r'<a[^>]+href="([^"]+)"[^>]*>'
         all_hrefs = re.findall(href_pattern, table_section, re.IGNORECASE)
         
-        # Filter out index pages and XBRL/taxonomy files
+        # Filter out index pages, XBRL/taxonomy files, and SEC navigation pages
         document_urls = []
         for href in all_hrefs:
             href_lower = href.lower()
-            # Skip index pages, XBRL, and taxonomy files
+            # Skip index pages, XBRL, taxonomy files, and SEC navigation/search pages
             if ('index' not in href_lower and 
                 'xbrl' not in href_lower and
                 'taxonomy' not in href_lower and
-                'schema' not in href_lower):
+                'schema' not in href_lower and
+                'browse-edgar' not in href_lower and
+                'browse' not in href_lower and
+                '/cgi-bin/' not in href_lower and
+                'search' not in href_lower):
                 document_urls.append(href)
         
         # Remove duplicates while preserving order
@@ -428,11 +432,16 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
             else:
                 absolute_url = link
             
-            # Skip index pages and XBRL taxonomy files
-            if ('index' not in absolute_url.lower() and 
-                'xbrl' not in absolute_url.lower() and
-                'taxonomy' not in absolute_url.lower() and
-                'schema' not in absolute_url.lower()):
+            # Skip index pages, XBRL taxonomy files, and SEC navigation/search pages
+            absolute_url_lower = absolute_url.lower()
+            if ('index' not in absolute_url_lower and 
+                'xbrl' not in absolute_url_lower and
+                'taxonomy' not in absolute_url_lower and
+                'schema' not in absolute_url_lower and
+                'browse-edgar' not in absolute_url_lower and
+                'browse' not in absolute_url_lower and
+                '/cgi-bin/' not in absolute_url_lower and
+                'search' not in absolute_url_lower):
                 absolute_urls.append(absolute_url)
         
         # Sort: XML files first, then HTML, then TXT
@@ -617,8 +626,19 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                            b'data files' in content_start or
                            b'<table' in content_start and b'seq' in content_start and b'description' in content_start)
             
+            # Skip SEC navigation/search pages (browse-edgar, search pages, etc.)
+            is_sec_nav_page = (b'browse-edgar' in content_start or
+                             b'sec.gov/cgi-bin' in content_start or
+                             b'edgar search' in content_start or
+                             b'company search' in content_start or
+                             b'filings search' in content_start)
+            
             if is_index_page:
                 logger.warning(f"Skipping {doc_url} - appears to be index page, not actual document")
+                continue
+            
+            if is_sec_nav_page:
+                logger.warning(f"Skipping {doc_url} - appears to be SEC navigation/search page, not actual document")
                 continue
             
             # Extract filename from URL - PRESERVE original extension
@@ -644,11 +664,25 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if '?' in filename:
                 filename = filename.split('?')[0]
             
-            # PRESERVE original extension from URL - don't change it based on content detection
-            # Extract original extension
+            # Extract original extension from URL
             original_ext = None
             if '.' in filename:
                 original_ext = filename.rsplit('.', 1)[1].lower()
+                base_name = filename.rsplit('.', 1)[0]
+            else:
+                base_name = filename
+            
+            # DETECT HTML content and change extension if needed
+            # If file has .xml extension but content is actually HTML, change to .html
+            if original_ext == 'xml' and is_html:
+                logger.info(f"Detected HTML content in {filename}, changing extension from .xml to .html")
+                original_ext = 'html'
+                filename = f"{base_name}.html"
+            # If file has no extension but is HTML, add .html
+            elif not original_ext and is_html:
+                logger.info(f"Detected HTML content in {filename}, adding .html extension")
+                original_ext = 'html'
+                filename = f"{base_name}.html"
             
             # Determine content type based on actual content (for Content-Type header only)
             if is_xml and not is_html:
@@ -744,8 +778,19 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                            b'data files' in content_start or
                            b'<table' in content_start and b'seq' in content_start and b'description' in content_start)
             
+            # Skip SEC navigation/search pages (browse-edgar, search pages, etc.)
+            is_sec_nav_page = (b'browse-edgar' in content_start or
+                             b'sec.gov/cgi-bin' in content_start or
+                             b'edgar search' in content_start or
+                             b'company search' in content_start or
+                             b'filings search' in content_start)
+            
             if is_index_page:
                 logger.warning(f"Skipping {data_file_url} - appears to be index page, not actual data file")
+                continue
+            
+            if is_sec_nav_page:
+                logger.warning(f"Skipping {data_file_url} - appears to be SEC navigation/search page, not actual data file")
                 continue
             
             # Extract filename from URL - PRESERVE original extension
@@ -773,11 +818,25 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if '?' in filename:
                 filename = filename.split('?')[0]
             
-            # PRESERVE original extension from URL - don't change it based on content detection
-            # Extract original extension
+            # Extract original extension from URL
             original_ext = None
             if '.' in filename:
                 original_ext = filename.rsplit('.', 1)[1].lower()
+                base_name = filename.rsplit('.', 1)[0]
+            else:
+                base_name = filename
+            
+            # DETECT HTML content and change extension if needed
+            # If file has .xml extension but content is actually HTML, change to .html
+            if original_ext == 'xml' and is_html:
+                logger.info(f"Detected HTML content in {filename}, changing extension from .xml to .html")
+                original_ext = 'html'
+                filename = f"{base_name}.html"
+            # If file has no extension but is HTML, add .html
+            elif not original_ext and is_html:
+                logger.info(f"Detected HTML content in {filename}, adding .html extension")
+                original_ext = 'html'
+                filename = f"{base_name}.html"
             
             # Determine content type based on actual content (for Content-Type header only)
             if is_xml and not is_html:
