@@ -356,7 +356,7 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
         return []
 
 
-def download_document_to_s3(document_url: str, filing_id: str, filename: str, subfolder: Optional[str] = None) -> Optional[str]:
+def download_document_to_s3(document_url: str, filing_id: str, filename: str) -> Optional[str]:
     """
     Download a document from SEC and store it in S3
     
@@ -364,7 +364,6 @@ def download_document_to_s3(document_url: str, filing_id: str, filename: str, su
         document_url: URL of the document to download
         filing_id: Filing ID (used as S3 prefix)
         filename: Filename to use in S3 (extracted from URL or generated)
-        subfolder: Optional subfolder within the filing folder (e.g., "documentformatfiles")
     
     Returns:
         S3 key if successful, None otherwise
@@ -398,11 +397,8 @@ def download_document_to_s3(document_url: str, filing_id: str, filename: str, su
         elif filename.endswith('.pdf'):
             content_type = 'application/pdf'
         
-        # Generate S3 key: filings/{filing_id}/{subfolder}/{filename} or filings/{filing_id}/{filename}
-        if subfolder:
-            s3_key = f"filings/{filing_id}/{subfolder}/{filename}"
-        else:
-            s3_key = f"filings/{filing_id}/{filename}"
+        # Generate S3 key: filings/{filing_id}/{filename}
+        s3_key = f"filings/{filing_id}/{filename}"
         
         # Upload to S3
         s3_client.put_object(
@@ -424,13 +420,11 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
     """
     Download all documents for a filing to S3.
     This method is called after the DynamoDB index is created.
-    Creates folder structure: 
-    - filings/{filing_id}/index.htm (filing page)
-    - filings/{filing_id}/documentformatfiles/{document files} (documents from Document Format Files section)
+    Creates folder structure: filings/{filing_id}/
     
     Args:
         filing_id: DynamoDB primary key (filingId) in format: {form}-{CIK}-{fileNumber}-{filmNumber}
-        document_urls: List of document URLs to download from SEC (from Document Format Files section)
+        document_urls: List of document URLs to download from SEC
         filing_page_url: Optional URL to the filing page (index.htm)
     
     Returns:
@@ -469,9 +463,9 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
         logger.warning(f"Sanitized filing_id for S3: {filing_id} -> {sanitized_filing_id}")
         filing_id = sanitized_filing_id
     
-    logger.info(f"Downloading documents for filing_id: {filing_id} (folder: filings/{filing_id}/documentformatfiles/)")
+    logger.info(f"Downloading documents for filing_id: {filing_id} (folder: filings/{filing_id}/)")
     
-    # Download filing page (index.htm) if provided - save directly to filing folder root
+    # Download filing page (index.htm) if provided
     if filing_page_url:
         try:
             # Extract filename from URL
@@ -486,8 +480,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
             # Sanitize filename
             filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
             
-            # Save filing page directly to filing folder root (no subfolder)
-            filing_page_s3_key = download_document_to_s3(filing_page_url, filing_id, filename, subfolder=None)
+            filing_page_s3_key = download_document_to_s3(filing_page_url, filing_id, filename)
             if filing_page_s3_key:
                 result['filingPageS3Key'] = filing_page_s3_key
                 result['success'] = True
@@ -495,7 +488,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
         except Exception as e:
             logger.error(f"Error downloading filing page {filing_page_url}: {e}")
     
-    # Download each document from Document Format Files section - save to documentformatfiles subfolder
+    # Download each document
     for doc_url in document_urls:
         try:
             # Extract filename from URL
@@ -516,8 +509,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
             # Sanitize filename for S3 (remove invalid characters)
             filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
             
-            # Save documents to documentformatfiles subfolder
-            s3_key = download_document_to_s3(doc_url, filing_id, filename, subfolder='documentformatfiles')
+            s3_key = download_document_to_s3(doc_url, filing_id, filename)
             if s3_key:
                 result['documentS3Keys'][doc_url] = s3_key
                 result['success'] = True
