@@ -2871,7 +2871,7 @@ const SECSearchPage: React.FC = () => {
 
                 <Grid item xs={12}>
                   <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
-                    Documents ({selectedFiling.documentUrls?.length || 0})
+                    Document Format Files ({selectedFiling.documentUrls?.length || 0})
                   </Typography>
                   {selectedFiling.documentUrls && selectedFiling.documentUrls.length > 0 ? (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
@@ -2910,7 +2910,52 @@ const SECSearchPage: React.FC = () => {
                       })}
                     </Box>
                   ) : (
-                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No documents available</Typography>
+                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No document format files available</Typography>
+                  )}
+                </Grid>
+
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
+                    Data Files ({selectedFiling.dataFileUrls?.length || 0})
+                  </Typography>
+                  {selectedFiling.dataFileUrls && selectedFiling.dataFileUrls.length > 0 ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
+                      {selectedFiling.dataFileUrls.map((url, index) => {
+                        const filename = url.split('/').pop() || `Data File ${index + 1}`;
+                        return (
+                          <Box
+                            key={index}
+                            sx={{
+                              p: 1.5,
+                              border: '1px solid #374151',
+                              borderRadius: '4px',
+                              backgroundColor: 'rgba(31, 41, 55, 0.5)',
+                            }}
+                          >
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
+                              <Link
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  color: '#3b82f6',
+                                  textDecoration: 'none',
+                                  fontSize: '0.875rem',
+                                  flex: 1,
+                                  '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                                }}
+                              >
+                                {filename}
+                                <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
+                              </Link>
+                            </Box>
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No data files available</Typography>
                   )}
                 </Grid>
               </Grid>

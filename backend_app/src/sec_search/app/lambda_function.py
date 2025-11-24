@@ -194,6 +194,12 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
             if isinstance(document_urls, list):
                 item['documentUrls'] = document_urls  # DynamoDB will store as SS
         
+        # Add dataFileUrls as String Set (SS) if present
+        if filing_data.get('dataFileUrls'):
+            data_file_urls = filing_data['dataFileUrls']
+            if isinstance(data_file_urls, list):
+                item['dataFileUrls'] = data_file_urls  # DynamoDB will store as SS
+        
         # Add TTL (optional - 90 days from now)
         ttl_days = 90
         item['ttl'] = current_time + (ttl_days * 24 * 60 * 60)
@@ -205,6 +211,109 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
     except Exception as e:
         logger.error(f"Error storing filing in cache: {e}")
         return False
+
+
+def scrape_filing_page_for_data_files(filing_page_url: str) -> List[str]:
+    """
+    Scrape a SEC filing page (index.htm) to extract all data file URLs
+    Only extracts from the "Data Files" table, not "Document Format Files" table
+    
+    Args:
+        filing_page_url: URL to the SEC filing index page
+    
+    Returns:
+        List of data file URLs found in the Data Files table
+    """
+    session = create_session()
+    data_file_urls = []
+    
+    try:
+        time.sleep(0.1)  # Rate limiting
+        response = session.get(filing_page_url, timeout=30)
+        response.raise_for_status()
+        
+        html_text = response.text
+        
+        # Find the "Data Files" table section
+        data_table_start_patterns = [
+            r'Data Files',
+            r'<table[^>]*>.*?Data Files',
+            r'<th[^>]*>.*?Data Files',
+        ]
+        
+        # Find the start of Data Files table
+        data_table_start = -1
+        for pattern in data_table_start_patterns:
+            match = re.search(pattern, html_text, re.IGNORECASE)
+            if match:
+                data_table_start = match.start()
+                break
+        
+        if data_table_start < 0:
+            # No Data Files table found
+            return []
+        
+        # Find the end of the Data Files table (next table or end of HTML)
+        # Look for next table or end of document
+        after_data_start = html_text[data_table_start:]
+        next_table_match = re.search(r'<table[^>]*>', after_data_start[100:], re.IGNORECASE)
+        if next_table_match:
+            data_table_end = data_table_start + 100 + next_table_match.start()
+        else:
+            data_table_end = len(html_text)
+        
+        # Extract the section containing Data Files table
+        before_start = html_text[:data_table_start]
+        table_open_match = before_start.rfind('<table')
+        if table_open_match >= 0:
+            table_section_full = html_text[table_open_match:data_table_end]
+            table_close_match = table_section_full.find('</table>')
+            if table_close_match > 0:
+                table_section = table_section_full[:table_close_match + 8]
+            else:
+                table_section = table_section_full
+        else:
+            table_section = html_text[data_table_start:data_table_end]
+        
+        # Extract links from Data Files table
+        # Extract all file links (XML, HTML, TXT, etc.)
+        link_pattern = r'href="([^"]*)"'
+        all_links = re.findall(link_pattern, table_section, re.IGNORECASE)
+        
+        # Filter out index pages and XBRL taxonomy files
+        for link in all_links:
+            if ('index' not in link.lower() and 
+                'xbrl' not in link.lower() and
+                'taxonomy' not in link.lower() and
+                'schema' not in link.lower()):
+                data_file_urls.append(link)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_data_links = []
+        for link in data_file_urls:
+            if link not in seen:
+                seen.add(link)
+                unique_data_links.append(link)
+        
+        # Convert relative URLs to absolute
+        base_url = '/'.join(filing_page_url.split('/')[:-1])
+        absolute_urls = []
+        for link in unique_data_links:
+            if link.startswith('/'):
+                absolute_url = f"{SEC_BASE_URL}{link}"
+            elif not link.startswith('http'):
+                absolute_url = f"{base_url}/{link}"
+            else:
+                absolute_url = link
+            
+            absolute_urls.append(absolute_url)
+        
+        return absolute_urls
+        
+    except Exception as e:
+        logger.error(f"Error scraping data files from filing page: {e}")
+        return []
 
 
 def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
@@ -416,28 +525,32 @@ def download_document_to_s3(document_url: str, filing_id: str, filename: str) ->
         return None
 
 
-def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], filing_page_url: Optional[str] = None) -> Dict[str, Any]:
+def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], data_file_urls: List[str] = None, filing_page_url: Optional[str] = None) -> Dict[str, Any]:
     """
     Download all documents for a filing to S3.
     This method is called after the DynamoDB index is created.
-    Creates folder structure: filings/{filing_id}/
+    Creates folder structure: filings/{filing_id}/documentformatfiles/ and filings/{filing_id}/datafiles/
     
     Args:
         filing_id: DynamoDB primary key (filingId) in format: {form}-{CIK}-{fileNumber}-{filmNumber}
-        document_urls: List of document URLs to download from SEC
-        filing_page_url: Optional URL to the filing page (index.htm)
+        document_urls: List of document URLs from "Document Format Files" table to download
+        data_file_urls: Optional list of data file URLs from "Data Files" table to download
+        filing_page_url: Optional URL to the filing page (index.htm) - not downloaded
     
     Returns:
         Dict with:
-        - filingPageS3Key: S3 key for the filing page (index.htm) if downloaded
-        - documentS3Keys: Dict mapping document URL to S3 key
+        - documentS3Keys: Dict mapping document URL to S3 key (in documentformatfiles/)
+        - dataFileS3Keys: Dict mapping data file URL to S3 key (in datafiles/)
         - success: Boolean indicating if at least one document was downloaded
     """
     result = {
-        'filingPageS3Key': None,
         'documentS3Keys': {},
+        'dataFileS3Keys': {},
         'success': False
     }
+    
+    if data_file_urls is None:
+        data_file_urls = []
     
     if not s3_client or not S3_BUCKET_NAME:
         logger.warning("S3 client not configured, skipping downloads")
@@ -463,11 +576,13 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
         logger.warning(f"Sanitized filing_id for S3: {filing_id} -> {sanitized_filing_id}")
         filing_id = sanitized_filing_id
     
-    logger.info(f"Downloading documents for filing_id: {filing_id} (folder: filings/{filing_id}/)")
+    logger.info(f"Downloading documents for filing_id: {filing_id}")
+    logger.info(f"  - Document Format Files: {len(document_urls)} files")
+    logger.info(f"  - Data Files: {len(data_file_urls)} files")
     
     # Skip downloading the index page - we only need the actual document files
     
-    # Download each document
+    # Download each document from Document Format Files table
     # Match glue script behavior: download and verify content type (not just URL extension)
     for doc_url in document_urls:
         try:
@@ -557,8 +672,8 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
             # Sanitize filename for S3 (remove invalid characters)
             filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
             
-            # Upload to S3
-            s3_key = f"filings/{filing_id}/{filename}"
+            # Upload to S3 in documentformatfiles/ subfolder
+            s3_key = f"filings/{filing_id}/documentformatfiles/{filename}"
             s3_client.put_object(
                 Bucket=S3_BUCKET_NAME,
                 Key=s3_key,
@@ -574,10 +689,113 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], fi
             logger.error(f"Error downloading document {doc_url}: {e}")
             continue
     
+    # Download each data file from Data Files table
+    for data_file_url in data_file_urls:
+        try:
+            # Download the data file first to check its actual content type
+            session = create_session()
+            time.sleep(0.1)  # Rate limiting
+            response = session.get(data_file_url, timeout=30)
+            response.raise_for_status()
+            
+            if len(response.content) == 0:
+                logger.warning(f"Empty content for {data_file_url}, skipping")
+                continue
+            
+            data_file_content = response.content
+            content_start = data_file_content[:1000].lower() if len(data_file_content) >= 1000 else data_file_content.lower()
+            
+            # Check for HTML indicators
+            is_html = any(indicator in content_start for indicator in [
+                b'<!doctype html',
+                b'<html',
+                b'<head>',
+                b'<body>',
+                b'<style',
+            ])
+            
+            # Check for XML indicators
+            is_xml = (data_file_content.startswith(b'<?xml') or 
+                     b'<ownershipDocument' in data_file_content or 
+                     b'<document>' in data_file_content or 
+                     b'<edgarDocument' in data_file_content)
+            
+            # Skip if this is the index page
+            is_index_page = (b'document format files' in content_start or 
+                           b'data files' in content_start or
+                           b'<table' in content_start and b'seq' in content_start and b'description' in content_start)
+            
+            if is_index_page:
+                logger.warning(f"Skipping {data_file_url} - appears to be index page, not actual data file")
+                continue
+            
+            # Determine file extension and content type based on actual content
+            if is_xml and not is_html:
+                file_ext = 'xml'
+                content_type = 'application/xml'
+            elif is_html:
+                file_ext = 'html'
+                content_type = 'text/html'
+            else:
+                # Fallback: use URL extension or default to xml
+                if data_file_url.endswith('.html') or data_file_url.endswith('.htm'):
+                    file_ext = 'html'
+                    content_type = 'text/html'
+                elif data_file_url.endswith('.txt'):
+                    file_ext = 'txt'
+                    content_type = 'text/plain'
+                elif data_file_url.endswith('.json'):
+                    file_ext = 'json'
+                    content_type = 'application/json'
+                else:
+                    file_ext = 'xml'
+                    content_type = 'application/xml'
+            
+            # Extract filename from URL, but use determined extension
+            filename = data_file_url.split('/')[-1]
+            if not filename or filename == '' or '?' in filename:
+                # Generate filename from URL path
+                path_parts = data_file_url.split('/')
+                if len(path_parts) > 1:
+                    filename = path_parts[-1]
+                else:
+                    filename = f"datafile_{abs(hash(data_file_url)) % 100000}.{file_ext}"
+            
+            # Clean filename (remove query params if any)
+            if '?' in filename:
+                filename = filename.split('?')[0]
+            
+            # Replace extension with determined extension if different
+            if '.' in filename:
+                base_name = filename.rsplit('.', 1)[0]
+                filename = f"{base_name}.{file_ext}"
+            else:
+                filename = f"{filename}.{file_ext}"
+            
+            # Sanitize filename for S3 (remove invalid characters)
+            filename = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', filename)
+            
+            # Upload to S3 in datafiles/ subfolder
+            s3_key = f"filings/{filing_id}/datafiles/{filename}"
+            s3_client.put_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=s3_key,
+                Body=data_file_content,
+                ContentType=content_type
+            )
+            
+            if s3_key:
+                result['dataFileS3Keys'][data_file_url] = s3_key
+                result['success'] = True
+                logger.info(f"Downloaded data file to {s3_key} (detected as {file_ext}, size: {len(data_file_content):,} bytes)")
+        except Exception as e:
+            logger.error(f"Error downloading data file {data_file_url}: {e}")
+            continue
+    
     if result['success']:
-        logger.info(f"Successfully downloaded {len(result['documentS3Keys'])} document(s) for filing_id: {filing_id}")
+        logger.info(f"Successfully downloaded {len(result['documentS3Keys'])} document(s) and {len(result['dataFileS3Keys'])} data file(s) for filing_id: {filing_id}")
     else:
-        logger.warning(f"No documents were successfully downloaded for filing_id: {filing_id}")
+        logger.warning(f"No files were successfully downloaded for filing_id: {filing_id}")
     
     return result
 
@@ -1110,6 +1328,13 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 elif not isinstance(document_urls, list):
                     document_urls = []
                 
+                # Handle dataFileUrls - convert set to list if needed
+                data_file_urls = cached_item.get('dataFileUrls', [])
+                if isinstance(data_file_urls, set):
+                    data_file_urls = list(data_file_urls)
+                elif not isinstance(data_file_urls, list):
+                    data_file_urls = []
+                
                 # Return cached data
                 filing_page_url = cached_item.get('filingPageUrl', '')
                 result = {
@@ -1125,6 +1350,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'accession': cached_item.get('accession', filing_data['accession']),
                     'filingPageUrl': filing_page_url,
                     'documentUrls': document_urls,
+                    'dataFileUrls': data_file_urls,
                     'adsh': cached_item.get('adsh', filing_data['adsh']),
                     'filingId': filing_id,
                 }
@@ -1147,13 +1373,17 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                         base_url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_padded}/{accession_dashed}"
                         filing_page_url = f"{base_url}/{accession_dashed}-index.htm"
                 
-                # Scrape document URLs from filing page
+                # Scrape document URLs from filing page (Document Format Files table)
                 document_urls = []
                 primary_document_url = ''
+                # Scrape data file URLs from filing page (Data Files table)
+                data_file_urls = []
                 if filing_page_url:
                     document_urls = scrape_filing_page_for_documents(filing_page_url)
                     if document_urls:
                         primary_document_url = document_urls[0]
+                    # Also scrape data files from Data Files table
+                    data_file_urls = scrape_filing_page_for_data_files(filing_page_url)
                 
                 # Prepare result
                 result = {
@@ -1169,6 +1399,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'accession': filing_data['accession'],
                     'filingPageUrl': filing_page_url,
                     'documentUrls': document_urls,
+                    'dataFileUrls': data_file_urls,
                     'adsh': filing_data['adsh'],
                     'filingId': filing_id,  # Store filing_id for download step
                 }
@@ -1177,6 +1408,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 # Prepare data for DynamoDB storage and download
                 filing_data['filingPageUrl'] = filing_page_url
                 filing_data['documentUrls'] = document_urls
+                filing_data['dataFileUrls'] = data_file_urls
                 filing_data['primaryDocumentUrl'] = primary_document_url
                 filings_to_store_in_dynamodb.append(filing_data)
                 
@@ -1185,6 +1417,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'filingId': filing_id,
                     'filingPageUrl': filing_page_url,
                     'documentUrls': document_urls,
+                    'dataFileUrls': data_file_urls,
                 })
         
         # Step 1: Store new filings in DynamoDB cache
@@ -1207,14 +1440,15 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 try:
                     filing_id = filing_download_info.get('filingId')
                     document_urls = filing_download_info.get('documentUrls', [])
+                    data_file_urls = filing_download_info.get('dataFileUrls', [])
                     filing_page_url = filing_download_info.get('filingPageUrl', '')
                     
                     if not filing_id:
                         logger.warning(f"Skipping S3 download: missing filing_id")
                         continue
                     
-                    if not document_urls or len(document_urls) == 0:
-                        logger.info(f"Skipping S3 download for filing_id {filing_id}: no document URLs to download")
+                    if not document_urls and not data_file_urls:
+                        logger.info(f"Skipping S3 download for filing_id {filing_id}: no document or data file URLs to download")
                         continue
                     
                     # Validate filing_id format one more time before downloading
@@ -1225,18 +1459,19 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                                    f"Split into {len(parts)} parts: {parts}")
                         continue
                     
-                    logger.info(f"Downloading {len(document_urls)} document(s) to S3 for filing_id: {filing_id}")
+                    logger.info(f"Downloading {len(document_urls)} document(s) and {len(data_file_urls)} data file(s) to S3 for filing_id: {filing_id}")
                     download_result = download_filing_documents_to_s3(
                         filing_id=filing_id,
                         document_urls=document_urls,
+                        data_file_urls=data_file_urls if data_file_urls else None,
                         filing_page_url=filing_page_url if filing_page_url else None
                     )
                     
                     # Update results with S3 keys if this filing is in the current page results
                     for result in results:
                         if result.get('filingId') == filing_id:
-                            result['filingPageS3Key'] = download_result.get('filingPageS3Key')
                             result['documentS3Keys'] = download_result.get('documentS3Keys', {})
+                            result['dataFileS3Keys'] = download_result.get('dataFileS3Keys', {})
                             break
                         
                 except Exception as e:

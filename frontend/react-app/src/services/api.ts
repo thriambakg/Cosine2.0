@@ -779,9 +779,11 @@ export interface SECSearchResult {
   accession: string;
   filingPageUrl: string | null;
   documentUrls: string[];
+  dataFileUrls: string[];
   adsh: string;
   filingPageS3Key?: string | null;
   documentS3Keys?: Record<string, string>;
+  dataFileS3Keys?: Record<string, string>;
 }
 
 export interface SECFormFilter {
