@@ -48,7 +48,7 @@ import {
   Download as DownloadIcon,
 } from '@mui/icons-material';
 import { useSECAutocomplete } from '../hooks/useAPI';
-import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, SECSearchResponse } from '../services/api';
+import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../services/api';
 import { getSecSearchWebSocket, SECSearchWebSocketMessage } from '../services/secSearchWebSocket';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -776,8 +776,7 @@ const SECSearchPage: React.FC = () => {
 
   // Note: useSECSearch is no longer used - we use WebSocket now
   // searchResults is now managed via WebSocket messages, not REST API
-  const searchResults: SECSearchResponse | null = null; // Placeholder for type compatibility
-  const searchLoading = false; // Always false since we use WebSocket now (use searchState.isSearching instead)
+  // Removed searchResults constant - results come from WebSocket messages
   const [searchError, setSearchError] = useState<string | null>(null); // Errors from WebSocket messages
   const { execute: executeAutocomplete, loading: autocompleteLoading } = useSECAutocomplete();
   
@@ -1150,27 +1149,8 @@ const SECSearchPage: React.FC = () => {
     }
   };
   
-  // Store results when search completes
-  useEffect(() => {
-    if (searchResults?.results) {
-      // If this is a filtered search (API call with filters), use results directly
-      if (isFiltered) {
-        setCurrentResults(searchResults.results);
-        setTotalFound(searchResults.total_found || 0);
-      }
-      // Otherwise, results are being accumulated by fetchAllResults
-      
-      // Form types are dynamically updated from searchResults.form_filters in the sidebar
-    } else if (searchResults && !searchResults.results && searchResults.total_found === 0) {
-      // Only clear if this is a new search with no results (not a filter application)
-      // Don't clear if we already have stored results
-      if (allSearchResults.length === 0) {
-        setCurrentResults([]);
-        setAllSearchResults([]);
-        setTotalFound(0);
-      }
-    }
-  }, [searchResults, isFiltered, allSearchResults.length]);
+  // Note: Results are now handled via WebSocket messages in fetchAllResults
+  // This useEffect is no longer needed since we use WebSocket instead of REST API
   
   // Client-side filtering function
   // Logic: OR within each filter type, AND between filter types

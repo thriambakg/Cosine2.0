@@ -23,8 +23,6 @@ export interface SECSearchWebSocketMessage {
 
 export class SECSearchWebSocketService {
   private ws: WebSocket | null = null;
-  // Note: connectionId is not currently used but kept for future use
-  private _connectionId: string | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 3;
   private reconnectDelay = 1000;
@@ -126,7 +124,6 @@ export class SECSearchWebSocketService {
           console.log('🔌 SEC Search WebSocket closed:', event.code, event.reason);
           this.isConnecting = false;
           this.ws = null;
-          this._connectionId = null;
 
           // Attempt to reconnect if not a normal closure
           if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -152,7 +149,6 @@ export class SECSearchWebSocketService {
       console.log('🔌 Disconnecting SEC Search WebSocket');
       this.ws.close(1000, 'Client disconnect');
       this.ws = null;
-      this._connectionId = null;
     }
     this.messageHandlers.clear();
   }
