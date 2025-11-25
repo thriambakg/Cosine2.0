@@ -2010,7 +2010,7 @@ module "sec_search_lambda" {
   description   = "Lambda function for SEC EDGAR search and autocomplete functionality"
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.11"
-  timeout       = 30
+  timeout       = 300 # 5 minutes
   memory_size   = 512
 
   # Source directory

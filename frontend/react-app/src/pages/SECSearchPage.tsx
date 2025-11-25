@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   TextField,
   Autocomplete,
@@ -1033,12 +1033,22 @@ const SECSearchPage: React.FC = () => {
     };
   };
   
+  // Ref to track if search should continue (for stop button)
+  const shouldContinueSearchRef = useRef<boolean>(true);
+  // Ref to track the current active search ID (to isolate searches)
+  const currentSearchIdRef = useRef<string | null>(null);
+
   const fetchAllResults = async (params: SECSearchParams) => {
     const startTimestamp = Date.now();
+    // Generate a unique search ID for this search invocation
+    const searchId = `search_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    currentSearchIdRef.current = searchId;
+    // Reset the continue flag when starting a new search
+    shouldContinueSearchRef.current = true;
     setSearchState({ isSearching: true, currentPage: 1, totalPages: null, jobId: null });
     setSearchStartTime(startTimestamp);
     
-    console.log('🔍 Starting search:', { params, timestamp: new Date().toISOString() });
+    console.log('🔍 Starting search:', { params, timestamp: new Date().toISOString(), searchId });
     
     try {
       const allResults: SECSearchResult[] = [];
@@ -1048,13 +1058,24 @@ const SECSearchPage: React.FC = () => {
       let firstResponse: any = null;
       let estimatedTotalPages: number | null = null;
       
-      while (hasMore && allResults.length < MAX_RESULTS_TO_FETCH) {
+      while (hasMore && allResults.length < MAX_RESULTS_TO_FETCH && shouldContinueSearchRef.current) {
+        // Check if this search is still the active one
+        if (currentSearchIdRef.current !== searchId) {
+          console.log(`🛑 Search ${searchId} stopped - new search started`);
+          break;
+        }
         const pageParams = { ...params, page };
         console.log(`📄 Fetching page ${page}...`);
         // Update search state atomically with current page
         setSearchState(prev => ({ ...prev, isSearching: true, currentPage: page, totalPages: estimatedTotalPages }));
         
         const result = await secSearchAPI.search(pageParams);
+        
+        // Check if this search is still active before processing results
+        if (currentSearchIdRef.current !== searchId) {
+          console.log(`🛑 Ignoring results for page ${page} - search ${searchId} is no longer active`);
+          break;
+        }
         
         // Store filter metadata from first response
         if (page === 1 && result) {
@@ -1070,6 +1091,12 @@ const SECSearchPage: React.FC = () => {
         }
         
         if (result?.success && result.results && result.results.length > 0) {
+          // Double-check search is still active before updating state
+          if (currentSearchIdRef.current !== searchId) {
+            console.log(`🛑 Ignoring results update for page ${page} - search ${searchId} is no longer active`);
+            break;
+          }
+          
           allResults.push(...result.results);
           totalFound = result.total_found || allResults.length;
           console.log(`✅ Page ${page} fetched: ${result.results.length} results (total so far: ${allResults.length}/${totalFound})`);
@@ -1087,6 +1114,12 @@ const SECSearchPage: React.FC = () => {
           console.log(`⚠️ Page ${page} returned no results or failed`);
           hasMore = false;
         }
+      }
+      
+      // Only update UI if this search is still the active one
+      if (currentSearchIdRef.current !== searchId) {
+        console.log(`🛑 Search ${searchId} was stopped - not updating UI with results`);
+        return;
       }
       
       // Set filter metadata from API response or compute from results
@@ -1129,10 +1162,15 @@ const SECSearchPage: React.FC = () => {
       // Fallback to single page using hook
       await executeSearch(params);
     } finally {
-      // Always clear searching state when done (success or error)
-      setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-      setSearchStartTime(null);
-      console.log('🏁 Search completed - clearing search state');
+      // Only clear searching state if we completed normally (not stopped by user)
+      if (shouldContinueSearchRef.current) {
+        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+        setSearchStartTime(null);
+        console.log('🏁 Search completed - clearing search state');
+      } else {
+        // User stopped the search - state already cleared in handleStopSearch
+        console.log('🛑 Search stopped by user - frontend listener disabled, backend continues');
+      }
     }
   };
   
@@ -1314,35 +1352,22 @@ const SECSearchPage: React.FC = () => {
     }
   }, [selectedFilters, allSearchResults, currentPage]);
 
-  const handleCancelSearch = async () => {
-    try {
-      // If we have a job_id, cancel the async job
-      if (searchState.jobId) {
-        console.log(`🛑 Cancelling async search job ${searchState.jobId}`);
-        const result = await secSearchAPI.cancelJob(searchState.jobId);
-        
-        if (result.success) {
-          console.log('✅ Async search cancelled successfully');
-        } else {
-          console.error('❌ Failed to cancel async search:', result.error);
-        }
-      } else {
-        console.log('🛑 Cancelling sync search');
-      }
-      
-      // Always clear search state (works for both sync and async searches)
-      setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-      setSearchStartTime(null);
-      setAllSearchResults([]);
-      setCurrentResults([]);
-      setTotalFound(0);
-      console.log('✅ Search state cleared');
-    } catch (error) {
-      console.error('❌ Error cancelling search:', error);
-      // Still clear state even if API call fails
-      setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-      setSearchStartTime(null);
-    }
+  const handleStopSearch = () => {
+    // Stop the frontend listener - set flag to stop fetching more pages
+    shouldContinueSearchRef.current = false;
+    
+    // Invalidate the current search ID so any in-flight requests are ignored
+    currentSearchIdRef.current = null;
+    
+    // Clear frontend search state (stops showing progress, allows new search)
+    setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+    setSearchStartTime(null);
+    
+    // Note: We don't clear allSearchResults or currentResults here
+    // This allows user to see partial results if they want, or start a new search
+    // The backend will continue running and save results to cache for future searches
+    
+    console.log('🛑 Stopped frontend search listener - backend continues in background');
   };
 
   const handleSearch = async (page: number = 1, applyFilters: boolean = false) => {
@@ -1833,7 +1858,7 @@ const SECSearchPage: React.FC = () => {
             {searchState.isSearching && (
               <Button
                 variant="outlined"
-                onClick={handleCancelSearch}
+                onClick={handleStopSearch}
                 sx={{
                   borderColor: '#ef4444',
                   backgroundColor: 'transparent',
