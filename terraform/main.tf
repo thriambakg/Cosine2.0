@@ -164,6 +164,12 @@ module "api_gateway" {
     sec_search_autocomplete = {
       path_part = "sec-search-autocomplete"
     }
+    sec_search_status = {
+      path_part = "sec-search-status"
+    }
+    sec_search_cancel = {
+      path_part = "sec-search-cancel"
+    }
   }
 
   # Methods configuration
@@ -395,6 +401,24 @@ module "api_gateway" {
       lambda_arn              = module.sec_search_lambda.function_arn
       request_parameters      = {}
     }
+    # GET method for SEC search job status
+    sec_search_status_get = {
+      resource_key            = "sec_search_status"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.sec_search_lambda.function_arn
+      request_parameters      = {}
+    }
+    # POST method for SEC search job cancellation
+    sec_search_cancel_post = {
+      resource_key            = "sec_search_cancel"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.sec_search_lambda.function_arn
+      request_parameters      = {}
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -530,6 +554,16 @@ module "api_gateway" {
       function_arn  = module.sec_search_lambda.function_arn
       http_method   = "GET"
       resource_path = "sec-search-autocomplete"
+    }
+    sec_search_status_get = {
+      function_arn  = module.sec_search_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "sec-search-status"
+    }
+    sec_search_cancel_post = {
+      function_arn  = module.sec_search_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "sec-search-cancel"
     }
   }
 
