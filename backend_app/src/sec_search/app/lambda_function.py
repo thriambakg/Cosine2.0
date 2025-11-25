@@ -1285,6 +1285,9 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         logger.info(f"Base parameters: {base_params}")
         
         # Retry logic for handling timeouts
+        # HTTP timeout must be less than Lambda timeout (30s) to get proper error handling
+        # Using 25 seconds to leave buffer for processing time
+        HTTP_TIMEOUT = 25
         max_retries = 3
         retry_count = 0
         response = None
@@ -1292,7 +1295,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         while retry_count < max_retries:
             try:
                 time.sleep(0.1)  # Rate limiting
-                response = session.get(url, params=params, headers=headers, timeout=60)
+                response = session.get(url, params=params, headers=headers, timeout=HTTP_TIMEOUT)
                 response.raise_for_status()
                 break  # Success, exit retry loop
             except (requests.exceptions.Timeout, requests.exceptions.RequestException) as e:

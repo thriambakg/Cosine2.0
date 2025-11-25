@@ -692,6 +692,26 @@ resource "aws_iam_policy" "lambda_kms_policy" {
   tags = var.common_tags
 }
 
+# IAM Policy for Lambda functions to publish to SNS (restricted to specific topic)
+resource "aws_iam_policy" "lambda_sns_publish_policy_restricted" {
+  name        = "${var.project_name}-lambda-sns-publish-policy-restricted-${var.environment}"
+  description = "Policy for Lambda functions to publish to SEC search progress SNS topic (restricted)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sns:Publish"
+        ]
+        Resource = module.sec_search_progress_sns.topic_arn
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
 
 # IAM Policy for Lambda functions to manage WebSocket connections
 resource "aws_iam_policy" "lambda_websocket_policy" {
@@ -1962,6 +1982,26 @@ module "agent_files_processor_lambda" {
   tags = var.common_tags
 }
 
+# ============================================================================
+# SNS Topic for SEC Search Progress Updates
+# ============================================================================
+
+module "sec_search_progress_sns" {
+  source = "./modules/sns"
+
+  topic_name   = "${var.project_name}-sec-search-progress-${var.environment}"
+  display_name = "SEC Search Progress Updates"
+  purpose      = "Publish progress updates for SEC search operations"
+  kms_key_arn  = local.kms_key_arn
+
+  # Allow Lambda functions to publish to this topic
+  allow_lambda_publish = true
+
+  tags = merge(var.common_tags, {
+    Purpose = "SEC Search Progress"
+  })
+}
+
 # SEC Search Lambda Function
 module "sec_search_lambda" {
   source = "./modules/lambda"
@@ -1978,11 +2018,12 @@ module "sec_search_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT             = var.environment
-    LOG_LEVEL               = var.environment == "development" ? "DEBUG" : "INFO"
-    MAX_RESULTS             = "10"
-    SEC_FILINGS_CACHE_TABLE = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
-    SEC_FILINGS_S3_BUCKET   = "cosine-sec-filings-${var.environment}"
+    ENVIRONMENT                       = var.environment
+    LOG_LEVEL                         = var.environment == "development" ? "DEBUG" : "INFO"
+    MAX_RESULTS                       = "10"
+    SEC_FILINGS_CACHE_TABLE           = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
+    SEC_FILINGS_S3_BUCKET             = "cosine-sec-filings-${var.environment}"
+    SEC_SEARCH_PROGRESS_SNS_TOPIC_ARN = module.sec_search_progress_sns.topic_arn
   }
 
 
@@ -1991,12 +2032,13 @@ module "sec_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, and KMS for S3 encryption
+  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, KMS for S3 encryption, and SNS for progress updates
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
     data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
     aws_iam_policy.sec_search_s3_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn
+    aws_iam_policy.lambda_kms_policy.arn,
+    aws_iam_policy.lambda_sns_publish_policy_restricted.arn
   ]
 
   tags = var.common_tags

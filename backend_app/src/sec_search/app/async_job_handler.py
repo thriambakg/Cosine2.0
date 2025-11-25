@@ -22,6 +22,10 @@ cache_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if dynamodb and DYNAMODB_TABLE
 lambda_client = boto3.client('lambda')
 LAMBDA_FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME')
 
+# SNS client for progress updates
+sns_client = boto3.client('sns')
+SNS_TOPIC_ARN = os.environ.get('SEC_SEARCH_PROGRESS_SNS_TOPIC_ARN')
+
 
 def create_job(search_params: Dict[str, Any]) -> str:
     """
@@ -66,10 +70,10 @@ def create_job(search_params: Dict[str, Any]) -> str:
         return job_id
 
 
-def update_job_progress(job_id: str, current_page: int, total_pages: Optional[int], 
-                       results_count: int, total_found: int, status: str = 'IN_PROGRESS'):
+def publish_progress_to_sns(job_id: str, current_page: int, total_pages: Optional[int], 
+                            results_count: int, total_found: int, status: str = 'IN_PROGRESS'):
     """
-    Update job progress in DynamoDB
+    Publish job progress to SNS topic (decoupled from DynamoDB update)
     
     Args:
         job_id: Job identifier
@@ -79,27 +83,47 @@ def update_job_progress(job_id: str, current_page: int, total_pages: Optional[in
         total_found: Total results found
         status: Job status (IN_PROGRESS, COMPLETED, FAILED)
     """
-    if not cache_table:
+    if not SNS_TOPIC_ARN:
+        logger.warning("SNS topic ARN not configured, skipping progress publish")
         return
     
     try:
-        cache_table.update_item(
-            Key={'filingId': job_id},
-            UpdateExpression='SET job_status = :status, job_progress = :progress, updated_at = :updated',
-            ExpressionAttributeValues={
-                ':status': status,
-                ':progress': {
-                    'current_page': current_page,
-                    'total_pages': total_pages,
-                    'results_count': results_count,
-                    'total_found': total_found
-                },
-                ':updated': datetime.now(timezone.utc).isoformat()
-            }
+        progress_message = {
+            'job_id': job_id,
+            'current_page': current_page,
+            'total_pages': total_pages,
+            'results_count': results_count,
+            'total_found': total_found,
+            'status': status,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+        sns_client.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Message=json.dumps(progress_message),
+            Subject=f'SEC Search Progress: {job_id}'
         )
-        logger.info(f"Updated job {job_id} progress: page {current_page}/{total_pages}, {results_count} results")
+        
+        logger.info(f"Published progress to SNS for job {job_id}: page {current_page}/{total_pages}")
     except Exception as e:
-        logger.error(f"Error updating job progress: {e}")
+        logger.error(f"Error publishing progress to SNS: {e}")
+
+
+def update_job_progress(job_id: str, current_page: int, total_pages: Optional[int], 
+                       results_count: int, total_found: int, status: str = 'IN_PROGRESS'):
+    """
+    Update job progress in DynamoDB via SNS (decoupled approach)
+    
+    Args:
+        job_id: Job identifier
+        current_page: Current page being processed
+        total_pages: Total pages (None if unknown)
+        results_count: Number of results collected so far
+        total_found: Total results found
+        status: Job status (IN_PROGRESS, COMPLETED, FAILED)
+    """
+    # Publish to SNS - subscriber Lambda will update DynamoDB
+    publish_progress_to_sns(job_id, current_page, total_pages, results_count, total_found, status)
 
 
 def complete_job(job_id: str, results: Dict[str, Any]):
@@ -311,4 +335,5 @@ def invoke_async_search(job_id: str, search_params: Dict[str, Any]):
     except Exception as e:
         logger.error(f"Error invoking async search: {e}")
         fail_job(job_id, f"Failed to invoke async search: {str(e)}")
+
 
