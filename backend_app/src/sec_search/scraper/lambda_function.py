@@ -178,11 +178,21 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
         return False
     
     try:
+        filing_id = filing_data.get('filingId', '')
+        if not filing_id:
+            logger.error("Cannot store filing: missing filingId")
+            return False
+        
+        # Validate filing_id format - reject job IDs (jobs should be in separate table)
+        if filing_id.startswith('JOB#'):
+            logger.warning(f"Rejecting attempt to store job ID '{filing_id}' in filings cache table - jobs should be stored in separate jobs table")
+            return False
+        
         current_time = int(datetime.now(timezone.utc).timestamp())
         
         # Prepare item for DynamoDB
         item = {
-            'filingId': filing_data.get('filingId'),
+            'filingId': filing_id,
             'form': filing_data.get('form', 'N/A'),
             'cik': filing_data.get('cik', 'N/A'),
             'fileNumber': filing_data.get('fileNumber', 'N/A'),

@@ -13,9 +13,14 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 # DynamoDB configuration
-DYNAMODB_TABLE_NAME = os.environ.get('SEC_FILINGS_CACHE_TABLE')
-dynamodb = boto3.resource('dynamodb') if DYNAMODB_TABLE_NAME else None
-cache_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if dynamodb and DYNAMODB_TABLE_NAME else None
+# Jobs should be stored in a separate table, not in the filings cache table
+# Check for dedicated jobs table first, fall back to filings cache table for backward compatibility
+JOBS_TABLE_NAME = os.environ.get('SEC_SEARCH_JOBS_TABLE') or os.environ.get('SEC_FILINGS_CACHE_TABLE')
+dynamodb = boto3.resource('dynamodb') if JOBS_TABLE_NAME else None
+jobs_table = dynamodb.Table(JOBS_TABLE_NAME) if dynamodb and JOBS_TABLE_NAME else None
+
+# For backward compatibility, also reference the old variable name
+cache_table = jobs_table
 
 
 def update_job_progress(job_id: str, progress_data: Dict[str, Any]) -> bool:
