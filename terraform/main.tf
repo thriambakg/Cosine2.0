@@ -587,7 +587,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "40" # Updated to add SEC search endpoints
+  deployment_trigger = "41" # Updated to add SEC search results endpoint
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
