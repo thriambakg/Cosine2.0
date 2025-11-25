@@ -1897,6 +1897,13 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
             job_id = cached_query['job_id']
             job_status = get_job_status(job_id)
             
+            # Get S3 key from cache, job status, or construct from job_id
+            results_s3_key = (
+                cached_query.get('results_s3_key') or 
+                (job_status.get('results_s3_key') if job_status else None) or
+                f"jobs/{job_id}/results.json"  # Construct from job_id as fallback
+            )
+            
             if job_status:
                 # Job exists - return job_id as before
                 logger.info(f"Query cache hit for hash {query_hash}, job {job_id} exists, returning job_id")
@@ -1916,27 +1923,32 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
                         'cached': True
                     })
                 }
-            elif cached_query.get('results_s3_key'):
-                # Job doesn't exist but S3 key does - return S3 key directly
-                logger.info(f"Query cache hit for hash {query_hash}, job {job_id} expired but S3 key exists, returning S3 key")
-                return {
-                    'statusCode': 200,  # OK - results available
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Headers': 'Content-Type',
-                        'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
-                    },
-                    'body': json.dumps({
-                        'success': True,
-                        'job_id': job_id,
-                        'status': 'COMPLETED',
-                        'results_s3_key': cached_query['results_s3_key'],
-                        'total_found': cached_query.get('total_found', 0),
-                        'message': 'Search results retrieved from cache (S3)',
-                        'cached': True
-                    })
-                }
+            elif results_s3_key:
+                # Job doesn't exist but S3 key available - verify it exists and return it
+                from query_cache import check_s3_key_exists
+                if check_s3_key_exists(results_s3_key):
+                    logger.info(f"Query cache hit for hash {query_hash}, job {job_id} expired but S3 key exists, returning S3 key")
+                    return {
+                        'statusCode': 200,  # OK - results available
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*',
+                            'Access-Control-Allow-Headers': 'Content-Type',
+                            'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
+                        },
+                        'body': json.dumps({
+                            'success': True,
+                            'job_id': job_id,
+                            'status': 'COMPLETED',
+                            'results_s3_key': results_s3_key,
+                            'total_found': cached_query.get('total_found', 0),
+                            'message': 'Search results retrieved from cache (S3)',
+                            'cached': True
+                        })
+                    }
+                else:
+                    logger.warning(f"Query cache hit for hash {query_hash}, but S3 key {results_s3_key} doesn't exist, treating as cache miss")
+                    # Fall through to create new job
             else:
                 # Cache entry exists but job and S3 key are missing - treat as cache miss
                 logger.warning(f"Query cache hit for hash {query_hash}, but job {job_id} and S3 key missing, treating as cache miss")
