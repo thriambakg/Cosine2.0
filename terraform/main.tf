@@ -2014,7 +2014,7 @@ module "sec_search_lambda" {
   memory_size   = 512
 
   # Source directory
-  source_dir = "../backend_app/src/sec_search/app"
+  source_dir = "../backend_app/src/sec_search/scraper"
 
   # Environment variables
   environment_variables = {
