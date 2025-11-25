@@ -208,7 +208,7 @@ def fail_job(job_id: str, error: str):
             'status': 'FAILED',
             'error': error,
             'timestamp': datetime.now(timezone.utc).isoformat()
-        }
+            }
         
         # Publish failure to SNS
         sns_client.publish(

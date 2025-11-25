@@ -3085,7 +3085,23 @@ const SECSearchPage: React.FC = () => {
                 <CloseIcon />
               </IconButton>
             </DialogTitle>
-            <DialogContent sx={{ mt: 2 }}>
+            <DialogContent sx={{ 
+              mt: 2,
+              '&::-webkit-scrollbar': {
+                width: '8px',
+              },
+              '&::-webkit-scrollbar-track': {
+                background: 'rgba(31, 41, 55, 0.5)',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                background: '#3b82f6',
+                borderRadius: '4px',
+                '&:hover': {
+                  background: '#60a5fa',
+                },
+              },
+            }}>
               <Grid container spacing={2}>
                 <Grid item xs={12}>
                   <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
@@ -3140,7 +3156,27 @@ const SECSearchPage: React.FC = () => {
                     Document Format Files ({selectedFiling.documentUrls?.length || 0})
                   </Typography>
                   {selectedFiling.documentUrls && selectedFiling.documentUrls.length > 0 ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
+                    <Box sx={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: 1, 
+                      maxHeight: '400px', 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '8px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        background: 'rgba(31, 41, 55, 0.5)',
+                        borderRadius: '4px',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        background: '#3b82f6',
+                        borderRadius: '4px',
+                        '&:hover': {
+                          background: '#60a5fa',
+                        },
+                      },
+                    }}>
                       {selectedFiling.documentUrls.map((url, index) => {
                         const filename = url.split('/').pop() || `Document ${index + 1}`;
                         const s3Key = selectedFiling.documentS3Keys?.[url];
@@ -3233,7 +3269,27 @@ const SECSearchPage: React.FC = () => {
                     Data Files ({selectedFiling.dataFileUrls?.length || 0})
                   </Typography>
                   {selectedFiling.dataFileUrls && selectedFiling.dataFileUrls.length > 0 ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto' }}>
+                    <Box sx={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: 1, 
+                      maxHeight: '400px', 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '8px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        background: 'rgba(31, 41, 55, 0.5)',
+                        borderRadius: '4px',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        background: '#3b82f6',
+                        borderRadius: '4px',
+                        '&:hover': {
+                          background: '#60a5fa',
+                        },
+                      },
+                    }}>
                       {selectedFiling.dataFileUrls.map((url, index) => {
                         const filename = url.split('/').pop() || `Data File ${index + 1}`;
                         const s3Key = selectedFiling.dataFileS3Keys?.[url];
