@@ -707,19 +707,11 @@ resource "aws_iam_policy" "lambda_websocket_policy" {
           "execute-api:ManageConnections"
         ]
         Resource = [
-          "${module.websocket_api.api_execution_arn}/*",
-          "${module.sec_search_websocket_api.api_execution_arn}/*"
+          "${module.websocket_api.api_execution_arn}/*"
         ]
       }
     ]
   })
-
-  # Ensure this policy is created/updated after the WebSocket APIs exist
-  # This is critical because the policy references module outputs that must exist first
-  depends_on = [
-    module.websocket_api,
-    module.sec_search_websocket_api
-  ]
 
   tags = var.common_tags
 }
@@ -1284,7 +1276,7 @@ module "websocket_message_lambda" {
   tags = var.common_tags
 }
 
-# WebSocket API Gateway for Chat
+# WebSocket API Gateway
 module "websocket_api" {
   source = "./modules/websocket-api"
 
@@ -1296,22 +1288,6 @@ module "websocket_api" {
   connection_lambda_name = module.websocket_connection_lambda.function_name
   message_lambda_arn     = module.websocket_message_lambda.function_arn
   message_lambda_name    = module.websocket_message_lambda.function_name
-
-  tags = var.common_tags
-}
-
-# WebSocket API Gateway for SEC Search
-module "sec_search_websocket_api" {
-  source = "./modules/websocket-api"
-
-  api_name        = "${var.project_name}-sec-search-websocket-api-${var.environment}"
-  api_description = "WebSocket API for SEC search with real-time progress streaming"
-  stage_name      = var.environment
-
-  connection_lambda_arn  = module.sec_search_websocket_connection_lambda.function_arn
-  connection_lambda_name = module.sec_search_websocket_connection_lambda.function_name
-  message_lambda_arn     = module.sec_search_websocket_message_lambda.function_arn
-  message_lambda_name    = module.sec_search_websocket_message_lambda.function_name
 
   tags = var.common_tags
 }
@@ -2015,86 +1991,12 @@ module "sec_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, KMS for S3 encryption, and WebSocket access
+  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, and KMS for S3 encryption
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
     data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
     aws_iam_policy.sec_search_s3_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn,
-    aws_iam_policy.lambda_websocket_policy.arn # Allow sending messages to WebSocket API
-  ]
-
-  tags = var.common_tags
-}
-
-# SEC Search WebSocket Connection Manager Lambda Function
-module "sec_search_websocket_connection_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-sec-search-websocket-connection-${var.environment}"
-  description   = "Lambda function for SEC search WebSocket connection management"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 30
-  memory_size   = 256
-
-  # Source directory
-  source_dir = "../backend_app/src/sec_search/websocket_connection/app"
-
-  # Environment variables
-  environment_variables = {
-    WEBSOCKET_ENDPOINT = module.sec_search_websocket_api.stage_url
-    WEBSOCKET_API_ID   = module.sec_search_websocket_api.api_id
-    ENVIRONMENT        = var.environment
-    LOG_LEVEL          = var.environment == "development" ? "DEBUG" : "INFO"
-  }
-
-  # Attach core layer
-  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_websocket_policy.arn
-  ]
-
-  tags = var.common_tags
-}
-
-# SEC Search WebSocket Message Handler Lambda Function
-module "sec_search_websocket_message_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-sec-search-websocket-message-${var.environment}"
-  description   = "Lambda function for SEC search WebSocket message processing and search execution"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 900 # 15 minutes for long-running searches
-  memory_size   = 512
-
-  # Source directory
-  source_dir = "../backend_app/src/sec_search/websocket_message/app"
-
-  # Environment variables
-  environment_variables = {
-    WEBSOCKET_ENDPOINT       = module.sec_search_websocket_api.stage_url
-    WEBSOCKET_API_ID         = module.sec_search_websocket_api.api_id
-    SEC_SEARCH_FUNCTION_NAME = module.sec_search_lambda.function_name
-    SEC_FILINGS_CACHE_TABLE  = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
-    SEC_FILINGS_S3_BUCKET    = "cosine-sec-filings-${var.environment}"
-    ENVIRONMENT              = var.environment
-    LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
-  }
-
-  # Attach core layer
-  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_websocket_policy.arn,
-    aws_iam_policy.lambda_invoke_policy.arn,
-    aws_iam_policy.lambda_dynamodb_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn,
-    aws_iam_policy.sec_search_s3_policy.arn
+    aws_iam_policy.lambda_kms_policy.arn
   ]
 
   tags = var.common_tags

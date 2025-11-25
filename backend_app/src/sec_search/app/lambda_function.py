@@ -42,9 +42,6 @@ cache_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if dynamodb and DYNAMODB_TABLE
 S3_BUCKET_NAME = os.environ.get('SEC_FILINGS_S3_BUCKET', 'cosine-sec-filings-production')
 s3_client = boto3.client('s3') if S3_BUCKET_NAME else None
 
-# WebSocket API Gateway client cache (per connection)
-websocket_api_gateways = {}
-
 
 def create_session():
     """Create a requests session with proper headers"""
@@ -1996,207 +1993,6 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
-def get_websocket_api_gateway(websocket_endpoint: str):
-    """
-    Get or create WebSocket API Gateway client for the given endpoint
-    
-    Args:
-        websocket_endpoint: WebSocket endpoint URL
-        
-    Returns:
-        API Gateway client or None
-    """
-    if not websocket_endpoint:
-        return None
-    
-    # Check cache
-    if websocket_endpoint in websocket_api_gateways:
-        return websocket_api_gateways[websocket_endpoint]
-    
-    # Convert wss:// to https:// for the API Gateway Management API
-    endpoint_url = websocket_endpoint
-    if endpoint_url.startswith('wss://'):
-        endpoint_url = endpoint_url.replace('wss://', 'https://')
-    
-    try:
-        client = boto3.client(
-            'apigatewaymanagementapi',
-            endpoint_url=endpoint_url
-        )
-        websocket_api_gateways[websocket_endpoint] = client
-        return client
-    except Exception as e:
-        logger.error(f"Error creating WebSocket API Gateway client: {str(e)}")
-        return None
-
-def send_websocket_message(connection_id: str, message: Dict[str, Any], websocket_endpoint: str = None) -> bool:
-    """
-    Send message to WebSocket connection
-    
-    Args:
-        connection_id: WebSocket connection ID
-        message: Message data to send
-        websocket_endpoint: WebSocket endpoint URL (required)
-        
-    Returns:
-        True if sent successfully, False otherwise
-    """
-    try:
-        if not websocket_endpoint:
-            logger.warning("WebSocket endpoint not provided")
-            return False
-        
-        api_gateway = get_websocket_api_gateway(websocket_endpoint)
-        if not api_gateway:
-            logger.warning("WebSocket API Gateway client not available")
-            return False
-        
-        api_gateway.post_to_connection(
-            ConnectionId=connection_id,
-            Data=json.dumps(message)
-        )
-        logger.debug(f"Sent WebSocket message to {connection_id}: {message.get('type', 'unknown')}")
-        return True
-    except Exception as e:
-        error_str = str(e)
-        if 'GoneException' in error_str or 'gone' in error_str.lower():
-            logger.warning(f"WebSocket connection {connection_id} is gone")
-        else:
-            logger.error(f"Error sending WebSocket message: {error_str}")
-        return False
-
-def handle_websocket_search(event: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Handle WebSocket search request - stream progress and send results
-    
-    Args:
-        event: Event with websocket_connection_id and search_params
-        
-    Returns:
-        Response dict
-    """
-    try:
-        connection_id = event.get('websocket_connection_id')
-        search_params = event.get('search_params', {})
-        
-        if not connection_id:
-            logger.error("No websocket_connection_id in event")
-            return {'statusCode': 400}
-        
-        websocket_endpoint = event.get('websocket_endpoint')
-        
-        logger.info(f"Starting WebSocket search for connection {connection_id}")
-        
-        # Process search with WebSocket streaming
-        process_websocket_search(connection_id, search_params, websocket_endpoint)
-        
-        return {'statusCode': 200}
-        
-    except Exception as e:
-        logger.error(f"Error in handle_websocket_search: {str(e)}", exc_info=True)
-        return {'statusCode': 500}
-
-def process_websocket_search(connection_id: str, search_params: Dict[str, Any], websocket_endpoint: str = None):
-    """
-    Process search with WebSocket progress streaming
-    
-    Args:
-        connection_id: WebSocket connection ID
-        search_params: Search parameters
-        websocket_endpoint: WebSocket endpoint URL (required)
-    """
-    try:
-        if not websocket_endpoint:
-            logger.error("WebSocket endpoint not provided")
-            return
-        
-        MAX_RESULTS_TO_FETCH = 1000
-        RESULTS_PER_PAGE = 10
-        all_results = []
-        page = 1
-        total_found = 0
-        estimated_total_pages = None
-        
-        # Send initial progress
-        send_websocket_message(connection_id, {
-            'type': 'progress',
-            'current_page': 0,
-            'total_pages': None,
-            'results_count': 0,
-            'total_found': 0
-        }, websocket_endpoint)
-        
-        while len(all_results) < MAX_RESULTS_TO_FETCH:
-            # Check if connection is still alive (will fail if closed)
-            try:
-                # Send progress update
-                send_websocket_message(connection_id, {
-                    'type': 'progress',
-                    'current_page': page,
-                    'total_pages': estimated_total_pages,
-                    'results_count': len(all_results),
-                    'total_found': total_found
-                }, websocket_endpoint)
-            except Exception as e:
-                logger.warning(f"Connection {connection_id} may be closed: {str(e)}")
-                # Continue search in background even if connection is closed
-                logger.info(f"Continuing search in background for connection {connection_id}")
-            
-            # Fetch page
-            result = search_by_search_index_api(search_params, page=page)
-            
-            if not result.get('success'):
-                error_msg = result.get('error', 'Search failed')
-                send_websocket_message(connection_id, {
-                    'type': 'error',
-                    'error': error_msg
-                }, websocket_endpoint)
-                return
-            
-            if page == 1:
-                total_found = result.get('total_found', 0)
-                if total_found > 0:
-                    estimated_total_pages = min(MAX_RESULTS_TO_FETCH, total_found) // RESULTS_PER_PAGE
-                    if total_found % RESULTS_PER_PAGE > 0:
-                        estimated_total_pages += 1
-            
-            page_results = result.get('results', [])
-            if not page_results:
-                break
-            
-            all_results.extend(page_results)
-            
-            # Check if we've fetched all results
-            if len(all_results) >= total_found or len(all_results) >= MAX_RESULTS_TO_FETCH:
-                break
-            
-            page += 1
-        
-        # Send final results
-        final_result = {
-            'type': 'results',
-            'success': True,
-            'total_found': total_found,
-            'results': all_results,
-            'form_filters': result.get('form_filters', []),
-            'entity_filters': result.get('entity_filters', []),
-            'location_filters': result.get('location_filters', []),
-            'incorporation_filters': result.get('incorporation_filters', [])
-        }
-        
-        # Try to send results - if connection is closed, that's okay, search still completed
-        send_websocket_message(connection_id, final_result, websocket_endpoint)
-        
-        logger.info(f"Completed WebSocket search for connection {connection_id}: {len(all_results)} results")
-        
-    except Exception as e:
-        logger.error(f"Error in process_websocket_search: {str(e)}", exc_info=True)
-        # Try to send error message
-        send_websocket_message(connection_id, {
-            'type': 'error',
-            'error': str(e)
-        }, websocket_endpoint)
-
 def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
     """Handle job cancellation requests"""
     try:
@@ -2371,13 +2167,9 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main Lambda handler - routes requests based on path
-    Also handles async job processing and WebSocket requests
+    Also handles async job processing
     """
     try:
-        # Check if this is a WebSocket request
-        if event.get('websocket_connection_id'):
-            return handle_websocket_search(event)
-        
         # Check if this is an async job invocation
         if event.get('async_job'):
             job_id = event.get('job_id')

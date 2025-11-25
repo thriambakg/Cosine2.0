@@ -46,11 +46,10 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Download as DownloadIcon,
+  Stop as StopIcon,
 } from '@mui/icons-material';
-import { useSECAutocomplete } from '../hooks/useAPI';
-import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../services/api';
-import { getSecSearchWebSocket, SECSearchWebSocketMessage } from '../services/secSearchWebSocket';
-import { useAuth } from '../contexts/AuthContext';
+import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
+import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -684,12 +683,6 @@ const LOCATION_OPTIONS = [
 ];
 
 const SECSearchPage: React.FC = () => {
-  // Get user for WebSocket connection
-  const { user } = useAuth();
-  
-  // WebSocket service instance
-  const wsService = getSecSearchWebSocket();
-  
   // Session persistence key
   const SESSION_STORAGE_KEY = 'sec-search-page-state';
 
@@ -774,10 +767,7 @@ const SECSearchPage: React.FC = () => {
   
   const RESULTS_PER_PAGE = 10;
 
-  // Note: useSECSearch is no longer used - we use WebSocket now
-  // searchResults is now managed via WebSocket messages, not REST API
-  // Removed searchResults constant - results come from WebSocket messages
-  const [searchError, setSearchError] = useState<string | null>(null); // Errors from WebSocket messages
+  const { execute: executeSearch, data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
   const { execute: executeAutocomplete, loading: autocompleteLoading } = useSECAutocomplete();
   
   // Search state type: boolean (is searching), current page, total pages, job_id for async searches
@@ -845,15 +835,6 @@ const SECSearchPage: React.FC = () => {
       });
     }
   }, []); // Only log once on mount
-
-  // Cleanup WebSocket on unmount
-  useEffect(() => {
-    return () => {
-      if (wsService.isConnected()) {
-        wsService.disconnect();
-      }
-    };
-  }, []);
 
   // Immediately save searchState to sessionStorage when it changes
   // This ensures the button state persists even if user navigates away
@@ -994,7 +975,8 @@ const SECSearchPage: React.FC = () => {
       searchParams.fileNumber, searchParams.filmNumber, searchParams.cik, searchParams.entityName]);
 
   // Fetch all results when a new search is performed (for client-side filtering)
-  // Note: Results are now streamed via WebSocket, no need for MAX_RESULTS_TO_FETCH
+  // Limit to first 1000 results to avoid performance issues
+  const MAX_RESULTS_TO_FETCH = 1000;
   
   // Compute filters from results
   const computeFiltersFromResults = (results: SECSearchResult[]) => {
@@ -1052,105 +1034,129 @@ const SECSearchPage: React.FC = () => {
   };
   
   const fetchAllResults = async (params: SECSearchParams) => {
-    // Clear any previous errors when starting a new search
-    setSearchError(null);
     const startTimestamp = Date.now();
     setSearchState({ isSearching: true, currentPage: 1, totalPages: null, jobId: null });
     setSearchStartTime(startTimestamp);
     
-    console.log('🔍 Starting WebSocket search:', { params, timestamp: new Date().toISOString() });
-    
-    if (!user?.id && !user?.cognitoSub) {
-      console.error('❌ User not authenticated');
-      setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-      return;
-    }
+    console.log('🔍 Starting search:', { params, timestamp: new Date().toISOString() });
     
     try {
-      // Connect to WebSocket if not already connected
-      // Use cognitoSub (Cognito user ID) or fall back to id
-      const userId = user.cognitoSub || user.id;
-      if (!wsService.isConnected()) {
-        await wsService.connect(userId);
-      }
+      const allResults: SECSearchResult[] = [];
+      let page = 1;
+      let hasMore = true;
+      let totalFound = 0;
+      let firstResponse: any = null;
+      let estimatedTotalPages: number | null = null;
       
-      // Set up message handlers
-      const unsubscribeProgress = wsService.onMessage('progress', (message: SECSearchWebSocketMessage) => {
-        console.log('📊 Progress update:', message);
-        setSearchState({
-          isSearching: true,
-          currentPage: message.current_page || 0,
-          totalPages: message.total_pages || null,
-          jobId: null
-        });
-      });
-      
-      const unsubscribeResults = wsService.onMessage('results', (message: SECSearchWebSocketMessage) => {
-        console.log('✅ Results received:', message);
+      while (hasMore && allResults.length < MAX_RESULTS_TO_FETCH) {
+        const pageParams = { ...params, page };
+        console.log(`📄 Fetching page ${page}...`);
+        // Update search state atomically with current page
+        setSearchState(prev => ({ ...prev, isSearching: true, currentPage: page, totalPages: estimatedTotalPages }));
         
-        if (message.success && message.results) {
-          // Set filter metadata
-          if (message.form_filters || message.entity_filters || 
-              message.location_filters || message.incorporation_filters) {
-            setAvailableFilters({
-              form_filters: message.form_filters || [],
-              entity_filters: message.entity_filters || [],
-              location_filters: message.location_filters || [],
-              incorporation_filters: message.incorporation_filters || [],
-            });
-          } else {
-            // Compute filters from results
-            const computedFilters = computeFiltersFromResults(message.results);
-            setAvailableFilters(computedFilters);
+        const result = await secSearchAPI.search(pageParams);
+        
+        // Store filter metadata from first response
+        if (page === 1 && result) {
+          firstResponse = result;
+          totalFound = result.total_found || 0;
+          // Estimate total pages (each API call returns ~100 results, we fetch 10 per page)
+          if (totalFound > 0) {
+            estimatedTotalPages = Math.ceil(Math.min(totalFound, MAX_RESULTS_TO_FETCH) / RESULTS_PER_PAGE);
+            // Update state with total pages now that we know it
+            setSearchState(prev => ({ ...prev, isSearching: true, currentPage: page, totalPages: estimatedTotalPages }));
           }
-          
-          // Set all results
-          setIsFiltered(false);
-          setCurrentPage(1);
-          setAllSearchResults(message.results);
-          setTotalFound(message.total_found || message.results.length);
-          
-          console.log(`💾 Stored ${message.results.length} results in allSearchResults`);
+          console.log(`📊 First page response: ${result.results?.length || 0} results, total: ${totalFound}`);
         }
         
-        // Clear search state
-        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-        setSearchStartTime(null);
-        
-        // Clean up handlers
-        unsubscribeProgress();
-        unsubscribeResults();
-      });
+        if (result?.success && result.results && result.results.length > 0) {
+          allResults.push(...result.results);
+          totalFound = result.total_found || allResults.length;
+          console.log(`✅ Page ${page} fetched: ${result.results.length} results (total so far: ${allResults.length}/${totalFound})`);
+          
+          // Check if we've fetched all results or reached limit
+          if (allResults.length >= totalFound || 
+              result.results.length < RESULTS_PER_PAGE ||
+              allResults.length >= MAX_RESULTS_TO_FETCH) {
+            hasMore = false;
+            console.log(`🏁 Finished fetching: ${allResults.length} total results`);
+          } else {
+            page++;
+          }
+        } else {
+          console.log(`⚠️ Page ${page} returned no results or failed`);
+          hasMore = false;
+        }
+      }
       
-      const unsubscribeError = wsService.onMessage('error', (message: SECSearchWebSocketMessage) => {
-        console.error('❌ Search error:', message.error);
-        setSearchError(message.error || 'An error occurred during search');
-        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-        setSearchStartTime(null);
-        setAllSearchResults([]);
+      // Set filter metadata from API response or compute from results
+      if (firstResponse?.form_filters || firstResponse?.entity_filters || 
+          firstResponse?.location_filters || firstResponse?.incorporation_filters) {
+        // Use API-provided filters
+        setAvailableFilters({
+          form_filters: firstResponse.form_filters,
+          entity_filters: firstResponse.entity_filters,
+          location_filters: firstResponse.location_filters,
+          incorporation_filters: firstResponse.incorporation_filters,
+        });
+      } else {
+        // Compute filters from results
+        const computedFilters = computeFiltersFromResults(allResults);
+        setAvailableFilters(computedFilters);
+      }
+      
+      // Set all results - this will trigger the useEffect to paginate and display
+      // Reset state first
+      setIsFiltered(false);
+      setCurrentPage(1);
+      // Then set results - this triggers the useEffect
+      setAllSearchResults(allResults);
+      
+      console.log(`💾 Stored ${allResults.length} results in allSearchResults`);
+      
+      // If no results, still show the status (don't clear everything)
+      if (allResults.length === 0) {
+        console.log('⚠️ No results found for search, but keeping search state');
         setCurrentResults([]);
         setTotalFound(0);
-        setAvailableFilters({});
-        
-        // Clean up handlers
-        unsubscribeProgress();
-        unsubscribeResults();
-        unsubscribeError();
-      });
-      
-      // Send search request
-      wsService.sendSearch(params);
-      
+      }
     } catch (error) {
-      console.error('❌ Error starting WebSocket search:', error);
-      setSearchError(error instanceof Error ? error.message : 'Failed to start search');
+      console.error('❌ Error fetching all results:', error);
+      setAllSearchResults([]);
+      setCurrentResults([]);
+      setTotalFound(0);
+      setAvailableFilters({});
+      // Fallback to single page using hook
+      await executeSearch(params);
+    } finally {
+      // Always clear searching state when done (success or error)
       setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
       setSearchStartTime(null);
+      console.log('🏁 Search completed - clearing search state');
     }
   };
   
-  // Note: Results are now handled via WebSocket messages in fetchAllResults
-  // This useEffect is no longer needed since we use WebSocket instead of REST API
+  // Store results when search completes
+  useEffect(() => {
+    if (searchResults?.results) {
+      // If this is a filtered search (API call with filters), use results directly
+      if (isFiltered) {
+        setCurrentResults(searchResults.results);
+        setTotalFound(searchResults.total_found || 0);
+      }
+      // Otherwise, results are being accumulated by fetchAllResults
+      
+      // Form types are dynamically updated from searchResults.form_filters in the sidebar
+    } else if (searchResults && !searchResults.results && searchResults.total_found === 0) {
+      // Only clear if this is a new search with no results (not a filter application)
+      // Don't clear if we already have stored results
+      if (allSearchResults.length === 0) {
+        setCurrentResults([]);
+        setAllSearchResults([]);
+        setTotalFound(0);
+      }
+    }
+  }, [searchResults, isFiltered, allSearchResults.length]);
   
   // Client-side filtering function
   // Logic: OR within each filter type, AND between filter types
@@ -1310,26 +1316,30 @@ const SECSearchPage: React.FC = () => {
 
   const handleCancelSearch = async () => {
     try {
-      console.log('🛑 Cancelling WebSocket search');
-      
-      // Send cancel request via WebSocket (this will close the connection)
-      if (wsService.isConnected()) {
-        wsService.sendCancel();
+      // If we have a job_id, cancel the async job
+      if (searchState.jobId) {
+        console.log(`🛑 Cancelling async search job ${searchState.jobId}`);
+        const result = await secSearchAPI.cancelJob(searchState.jobId);
+        
+        if (result.success) {
+          console.log('✅ Async search cancelled successfully');
+        } else {
+          console.error('❌ Failed to cancel async search:', result.error);
+        }
+      } else {
+        console.log('🛑 Cancelling sync search');
       }
       
-      // Disconnect WebSocket
-      wsService.disconnect();
-      
-      // Clear search state
+      // Always clear search state (works for both sync and async searches)
       setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
       setSearchStartTime(null);
       setAllSearchResults([]);
       setCurrentResults([]);
       setTotalFound(0);
-      console.log('✅ Search cancelled - WebSocket connection closed (search continues in background)');
+      console.log('✅ Search state cleared');
     } catch (error) {
       console.error('❌ Error cancelling search:', error);
-      // Still clear state even if WebSocket call fails
+      // Still clear state even if API call fails
       setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
       setSearchStartTime(null);
     }
@@ -1791,8 +1801,8 @@ const SECSearchPage: React.FC = () => {
             <Button
               variant="contained"
               onClick={() => handleSearch()}
-              disabled={searchState.isSearching}
-              startIcon={searchState.isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
+              disabled={searchLoading || searchState.isSearching}
+              startIcon={(searchLoading || searchState.isSearching) ? <CircularProgress size={20} /> : <SearchIcon />}
               sx={{
                 background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
                 color: '#ffffff',
@@ -1814,7 +1824,7 @@ const SECSearchPage: React.FC = () => {
                 ? searchState.totalPages 
                   ? `Fetching page ${searchState.currentPage} of ${searchState.totalPages}...`
                   : `Fetching page ${searchState.currentPage}...`
-                : searchState.isSearching
+                : (searchLoading || searchState.isSearching)
                   ? 'Searching...'
                   : 'Search SEC Filings'}
             </Button>
@@ -2226,8 +2236,8 @@ const SECSearchPage: React.FC = () => {
                   <Button
                     variant="contained"
                     onClick={handleApplyFilters}
-                    disabled={searchState.isSearching}
-                    startIcon={searchState.isSearching ? <CircularProgress size={16} /> : <SearchIcon />}
+                    disabled={searchLoading}
+                    startIcon={searchLoading ? <CircularProgress size={16} /> : <SearchIcon />}
                     sx={{
                       background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
                       color: '#ffffff',
@@ -2246,7 +2256,7 @@ const SECSearchPage: React.FC = () => {
                       },
                     }}
                   >
-                    {searchState.isSearching ? 'Applying...' : 'Apply Filters'}
+                    {searchLoading ? 'Applying...' : 'Apply Filters'}
                   </Button>
                 </Box>
               )}
@@ -2255,7 +2265,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.entity_filters && availableFilters.entity_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, entity: !prev.entity }))}
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, entity: !prev.entity }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2387,7 +2397,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.form_filters && availableFilters.form_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, form: !prev.form }))}
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, form: !prev.form }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2500,7 +2510,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.location_filters && availableFilters.location_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, location: !prev.location }))}
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, location: !prev.location }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2644,7 +2654,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.incorporation_filters && availableFilters.incorporation_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, incorporation: !prev.incorporation }))}
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, incorporation: !prev.incorporation }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2994,7 +3004,7 @@ const SECSearchPage: React.FC = () => {
                   <Button
                     variant="outlined"
                     onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1 || searchState.isSearching}
+                    disabled={currentPage === 1 || searchLoading}
                     startIcon={<ChevronLeftIcon />}
                     sx={{
                       color: '#9ca3af',
@@ -3015,7 +3025,7 @@ const SECSearchPage: React.FC = () => {
                   <Button
                     variant="outlined"
                     onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={!totalFound || currentPage >= Math.ceil(totalFound / RESULTS_PER_PAGE) || searchState.isSearching}
+                    disabled={!totalFound || currentPage >= Math.ceil(totalFound / RESULTS_PER_PAGE) || searchLoading}
                     endIcon={<ChevronRightIcon />}
                     sx={{
                       color: '#9ca3af',

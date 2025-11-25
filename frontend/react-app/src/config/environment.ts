@@ -9,7 +9,6 @@ export interface EnvironmentConfig {
   environment: 'development' | 'staging' | 'production';
   apiGatewayUrl: string;
   websocketUrl?: string;
-  secSearchWebSocketUrl?: string; // SEC search WebSocket API URL
   awsRegion: string;
   cognitoUserPoolId?: string;
   cognitoClientId?: string;
@@ -31,7 +30,6 @@ const getRuntimeConfig = () => {
     return {
       apiGatewayUrl: window.COSINE_CONFIG.apiGatewayUrl,
       websocketUrl: window.COSINE_CONFIG.websocketUrl,
-      secSearchWebSocketUrl: window.COSINE_CONFIG.secSearchWebSocketUrl,
       awsRegion: window.COSINE_CONFIG.awsRegion,
       environment: window.COSINE_CONFIG.environment,
       cognitoUserPoolId: window.COSINE_CONFIG.cognitoUserPoolId,
@@ -141,34 +139,6 @@ const getWebSocketUrl = (): string | undefined => {
   return undefined;
 };
 
-// Get SEC Search WebSocket URL from runtime config or environment variables
-const getSecSearchWebSocketUrl = (): string | undefined => {
-  // Check runtime config first (highest priority)
-  const runtimeConfig = getRuntimeConfig();
-  if (runtimeConfig?.secSearchWebSocketUrl && !runtimeConfig.secSearchWebSocketUrl.includes('{{')) {
-    console.log('🔌 Using SEC Search WebSocket URL from runtime config:', runtimeConfig.secSearchWebSocketUrl);
-    return runtimeConfig.secSearchWebSocketUrl;
-  }
-  
-  // Check for explicit SEC Search WebSocket URL
-  const explicitUrl = process.env.NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL || process.env.VITE_SEC_SEARCH_WEBSOCKET_URL;
-  if (explicitUrl && !explicitUrl.includes('your-') && !explicitUrl.includes('{{')) {
-    console.log('🔌 Using SEC Search WebSocket URL from environment variable:', explicitUrl);
-    return explicitUrl;
-  }
-  
-  // Fall back to environment-specific config
-  const env = getCurrentEnvironment();
-  const envUrl = ENVIRONMENT_CONFIGS[env]?.secSearchWebSocketUrl;
-  if (envUrl) {
-    console.log('🔌 Using SEC Search WebSocket URL from environment config:', envUrl, '(environment:', env, ')');
-    return envUrl;
-  }
-  
-  console.log('🔌 No SEC Search WebSocket URL configured for environment:', env);
-  return undefined;
-};
-
 // Get Cognito configuration from runtime config or environment variables
 const getCognitoConfig = () => {
   // Check runtime config first
@@ -197,7 +167,6 @@ export const getEnvironmentConfig = (): EnvironmentConfig => {
     environment: environment as 'development' | 'staging' | 'production',
     apiGatewayUrl: getApiGatewayUrl(),
     websocketUrl: getWebSocketUrl(),
-    secSearchWebSocketUrl: getSecSearchWebSocketUrl(),
     awsRegion: getAwsRegion(),
     cognitoUserPoolId: cognitoConfig.userPoolId,
     cognitoClientId: cognitoConfig.clientId,
@@ -215,7 +184,6 @@ export const logEnvironmentConfig = () => {
   console.log('Environment:', ENV_CONFIG.environment);
   console.log('API Gateway URL:', ENV_CONFIG.apiGatewayUrl);
   console.log('WebSocket URL:', ENV_CONFIG.websocketUrl || 'Not configured');
-  console.log('SEC Search WebSocket URL:', ENV_CONFIG.secSearchWebSocketUrl || 'Not configured');
   console.log('AWS Region:', ENV_CONFIG.awsRegion);
   console.log('Project Name:', ENV_CONFIG.projectName);
   console.log('Cognito User Pool ID:', ENV_CONFIG.cognitoUserPoolId || 'Not configured');

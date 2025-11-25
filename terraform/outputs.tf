@@ -91,16 +91,6 @@ output "api_endpoints" {
 }
 
 # WebSocket API Gateway Outputs
-output "sec_search_websocket_api" {
-  description = "SEC Search WebSocket API Gateway information"
-  value = {
-    api_id     = module.sec_search_websocket_api.api_id
-    api_arn    = module.sec_search_websocket_api.api_arn
-    stage_url  = module.sec_search_websocket_api.stage_url
-    stage_name = module.sec_search_websocket_api.stage_name
-  }
-}
-
 output "websocket_api" {
   description = "WebSocket API Gateway configuration"
   value = {
@@ -359,10 +349,6 @@ output "build_environment_variables" {
 
     # API Gateway URL
     NEXT_PUBLIC_API_GATEWAY_URL = module.api_gateway.stage_url
-
-    # WebSocket URLs
-    NEXT_PUBLIC_WEBSOCKET_URL            = module.websocket_api.stage_url
-    NEXT_PUBLIC_SEC_SEARCH_WEBSOCKET_URL = module.sec_search_websocket_api.stage_url
 
     # DynamoDB table names (for client-side reference if needed)
     NEXT_PUBLIC_USER_PROFILES_TABLE   = try(data.terraform_remote_state.base_infra.outputs.user_profiles_table_name, "not_configured")

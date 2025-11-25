@@ -843,15 +843,43 @@ export interface SECAutocompleteResponse {
 }
 
 export const secSearchAPI = {
-  // Get autocomplete suggestions (REST endpoint - kept for name matching)
+  // Get autocomplete suggestions
   getAutocomplete: async (query: string): Promise<SECAutocompleteResponse> => {
     return apiRequest<SECAutocompleteResponse>(
       `/sec-search-autocomplete?query=${encodeURIComponent(query)}`
     );
   },
 
-  // Note: Search is now handled via WebSocket - see secSearchWebSocket.ts
-  // The REST endpoints below are deprecated but kept for backward compatibility during migration
+  // Perform full search (sync mode)
+  search: async (params: SECSearchParams): Promise<SECSearchResponse> => {
+    return apiRequest<SECSearchResponse>('/sec-search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  // Start async search (returns job_id)
+  searchAsync: async (params: SECSearchParams): Promise<SECSearchResponse> => {
+    return apiRequest<SECSearchResponse>('/sec-search', {
+      method: 'POST',
+      body: JSON.stringify({ ...params, async: true }),
+    });
+  },
+
+  // Get job status
+  getJobStatus: async (job_id: string): Promise<SECJobStatus> => {
+    return apiRequest<SECJobStatus>(`/sec-search-status?job_id=${encodeURIComponent(job_id)}`, {
+      method: 'GET',
+    });
+  },
+
+  // Cancel a job
+  cancelJob: async (job_id: string): Promise<{ success: boolean; message?: string; error?: string }> => {
+    return apiRequest<{ success: boolean; message?: string; error?: string }>('/sec-search-cancel', {
+      method: 'POST',
+      body: JSON.stringify({ job_id }),
+    });
+  },
 };
 
 // Session Management API
