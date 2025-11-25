@@ -144,17 +144,7 @@ def get_cached_filings(filing_ids: List[str]) -> Dict[str, Dict[str, Any]]:
                 if filing_id:
                     cached_items[filing_id] = item
             
-            # Update lastAccessed timestamp for cached items
-            current_time = int(datetime.now(timezone.utc).timestamp())
-            for filing_id in cached_items.keys():
-                try:
-                    cache_table.update_item(
-                        Key={'filingId': filing_id},
-                        UpdateExpression='SET lastAccessed = :ts',
-                        ExpressionAttributeValues={':ts': current_time}
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to update lastAccessed for {filing_id}: {e}")
+            # Note: We no longer update lastAccessed timestamp since we're not writing to SEC cache table
         
         logger.info(f"Found {len(cached_items)}/{len(filing_ids)} filings in cache")
         return cached_items
@@ -178,21 +168,11 @@ def store_filing_in_cache(filing_data: Dict[str, Any]) -> bool:
         return False
     
     try:
-        filing_id = filing_data.get('filingId', '')
-        if not filing_id:
-            logger.error("Cannot store filing: missing filingId")
-            return False
-        
-        # Validate filing_id format - reject job IDs (jobs should be in separate table)
-        if filing_id.startswith('JOB#'):
-            logger.warning(f"Rejecting attempt to store job ID '{filing_id}' in filings cache table - jobs should be stored in separate jobs table")
-            return False
-        
         current_time = int(datetime.now(timezone.utc).timestamp())
         
         # Prepare item for DynamoDB
         item = {
-            'filingId': filing_id,
+            'filingId': filing_data.get('filingId'),
             'form': filing_data.get('form', 'N/A'),
             'cik': filing_data.get('cik', 'N/A'),
             'fileNumber': filing_data.get('fileNumber', 'N/A'),
@@ -607,24 +587,16 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
         logger.warning(f"Sanitized filing_id for S3: {filing_id} -> {sanitized_filing_id}")
         filing_id = sanitized_filing_id
     
-    logger.info(f"📥 Starting download for filing_id: {filing_id}")
-    logger.info(f"   Filing page URL: {filing_page_url or 'N/A'}")
-    logger.info(f"   Document Format Files: {len(document_urls)} files")
-    logger.info(f"   Data Files: {len(data_file_urls)} files")
-    if document_urls:
-        logger.debug(f"   Document URLs: {document_urls[:3]}{'...' if len(document_urls) > 3 else ''}")
-    if data_file_urls:
-        logger.debug(f"   Data file URLs: {data_file_urls[:3]}{'...' if len(data_file_urls) > 3 else ''}")
+    logger.info(f"Downloading documents for filing_id: {filing_id}")
+    logger.info(f"  - Document Format Files: {len(document_urls)} files")
+    logger.info(f"  - Data Files: {len(data_file_urls)} files")
     
     # Skip downloading the index page - we only need the actual document files
     
     # Download each document from Document Format Files table
     # Match glue script behavior: download and verify content type (not just URL extension)
-    document_download_stats = {'attempted': 0, 'successful': 0, 'failed': 0, 'skipped': 0}
     for doc_url in document_urls:
-        document_download_stats['attempted'] += 1
         try:
-            logger.debug(f"   Downloading document {document_download_stats['attempted']}/{len(document_urls)}: {doc_url}")
             # Download the document first to check its actual content type
             # Use a session without compression to ensure we get exact bytes
             session = create_session()
@@ -715,13 +687,11 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                              b'filings search' in content_start_lower)
             
             if is_index_page:
-                logger.warning(f"   ⏭️  Skipping {doc_url} - appears to be filing index page, not actual document")
-                document_download_stats['skipped'] += 1
+                logger.warning(f"Skipping {doc_url} - appears to be filing index page, not actual document")
                 continue
             
             if is_sec_nav_page:
-                logger.warning(f"   ⏭️  Skipping {doc_url} - appears to be SEC navigation/search page, not actual document")
-                document_download_stats['skipped'] += 1
+                logger.warning(f"Skipping {doc_url} - appears to be SEC navigation/search page, not actual document")
                 continue
             
             # Extract filename from URL - PRESERVE original extension
@@ -820,106 +790,13 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 unique_id = str(uuid.uuid4())[:8]
                 filename = f"{filename}_{unique_id}"
             
-            # If this is HTML content, fix SEC URLs and download embedded images
+            # If this is HTML content, fix SEC URLs to use proper SEC.gov URLs
             # Do this BEFORE type verification since we need to decode bytes
             if is_html:
                 try:
                     # Decode to string for URL processing
                     encoding = response_charset or response.encoding or 'utf-8'
                     html_content = doc_content.decode(encoding, errors='replace')
-                    
-                    # Extract and download images referenced in HTML
-                    # Find all <img src="..."> tags with relative paths
-                    img_pattern = r'<img[^>]+src=["\']([^"\']+)["\']'
-                    img_matches = re.finditer(img_pattern, html_content, re.IGNORECASE)
-                    
-                    # Base URL for resolving relative image paths
-                    doc_base_url = '/'.join(doc_url.split('/')[:-1])
-                    
-                    downloaded_images = {}  # Map original src to new relative path (filename only)
-                    
-                    for img_match in img_matches:
-                        img_src = img_match.group(1)
-                        
-                        # Skip if already absolute URL (http/https)
-                        if img_src.startswith('http://') or img_src.startswith('https://'):
-                            continue
-                        
-                        # Skip if it's a data URI (base64 embedded image)
-                        if img_src.startswith('data:'):
-                            continue
-                        
-                        # Construct absolute URL for the image
-                        if img_src.startswith('/'):
-                            img_url = f"{SEC_BASE_URL}{img_src}"
-                        else:
-                            img_url = f"{doc_base_url}/{img_src}"
-                        
-                        # Extract image filename
-                        img_filename = img_src.split('/')[-1]
-                        if '?' in img_filename:
-                            img_filename = img_filename.split('?')[0]
-                        
-                        # Download the image
-                        try:
-                            logger.debug(f"   Downloading embedded image: {img_url}")
-                            img_session = create_session()
-                            time.sleep(0.05)  # Small delay for rate limiting
-                            img_response = img_session.get(img_url, timeout=30, headers=download_headers)
-                            img_response.raise_for_status()
-                            
-                            if len(img_response.content) == 0:
-                                logger.warning(f"   Empty image content for {img_url}, skipping")
-                                continue
-                            
-                            # Determine content type for image
-                            img_content_type = img_response.headers.get('Content-Type', 'image/jpeg')
-                            if img_filename.endswith('.png'):
-                                img_content_type = 'image/png'
-                            elif img_filename.endswith('.gif'):
-                                img_content_type = 'image/gif'
-                            elif img_filename.endswith('.jpg') or img_filename.endswith('.jpeg'):
-                                img_content_type = 'image/jpeg'
-                            
-                            # Sanitize image filename
-                            img_filename_clean = re.sub(r'[^a-zA-Z0-9!\-_.*\'()]', '_', img_filename)
-                            if not img_filename_clean:
-                                img_filename_clean = f"image_{abs(hash(img_url)) % 100000}.jpg"
-                            
-                            # Upload image to S3 in the same folder as the HTML document
-                            # We'll use the same folder structure, so relative paths work
-                            img_s3_key = f"filings/{filing_id}/documentformatfiles/{img_filename_clean}"
-                            
-                            s3_client.put_object(
-                                Bucket=S3_BUCKET_NAME,
-                                Key=img_s3_key,
-                                Body=img_response.content,
-                                ContentType=img_content_type
-                            )
-                            
-                            # Store mapping: original src -> new filename (relative path)
-                            downloaded_images[img_src] = img_filename_clean
-                            logger.info(f"   ✅ Downloaded embedded image: {img_filename_clean} ({len(img_response.content):,} bytes)")
-                            
-                        except Exception as img_error:
-                            logger.warning(f"   ⚠️  Failed to download embedded image {img_url}: {img_error}")
-                            # Continue - don't fail the whole document if one image fails
-                            continue
-                    
-                    # Update HTML to use the downloaded image filenames (relative paths)
-                    # This ensures images work when HTML and images are in the same folder
-                    for original_src, new_filename in downloaded_images.items():
-                        # Replace the src attribute with the new filename
-                        # Match the exact src value in quotes
-                        html_content = re.sub(
-                            rf'src=["\']{re.escape(original_src)}["\']',
-                            f'src="{new_filename}"',
-                            html_content,
-                            flags=re.IGNORECASE
-                        )
-                    
-                    if downloaded_images:
-                        logger.info(f"   📷 Downloaded {len(downloaded_images)} embedded image(s) and updated HTML references")
                     
                     # Fix SEC URLs in the HTML content
                     # Pattern 1: /cgi-bin/browse-edgar?action=getcompany&CIK=XXXXX -> https://www.sec.gov/edgar/browse/?CIK=XXXXX
@@ -970,11 +847,9 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                     
                     # Re-encode back to bytes with the same encoding
                     doc_content = html_content.encode(encoding, errors='replace')
-                    logger.debug(f"Fixed SEC URLs and images in HTML content (encoding: {encoding})")
+                    logger.debug(f"Fixed SEC URLs in HTML content (encoding: {encoding})")
                 except Exception as e:
-                    logger.warning(f"Error processing URLs and images in HTML content: {e}. Using original content.")
-                    import traceback
-                    logger.warning(f"Traceback: {traceback.format_exc()}")
+                    logger.warning(f"Error processing URLs in HTML content: {e}. Using original content.")
                     # If URL processing fails, use original content
             
             # Verify we have bytes, not a string (after URL processing)
@@ -998,24 +873,14 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if s3_key:
                 result['documentS3Keys'][doc_url] = s3_key
                 result['success'] = True
-                document_download_stats['successful'] += 1
-                logger.info(f"   ✅ Downloaded document to {s3_key} (extension: {original_ext or 'none'}, size: {len(doc_content):,} bytes)")
-            else:
-                logger.warning(f"   ⚠️  No S3 key returned for {doc_url}")
-                document_download_stats['failed'] += 1
+                logger.info(f"Downloaded document to {s3_key} (preserved extension: {original_ext or 'none'}, size: {len(doc_content):,} bytes, type: {type(doc_content).__name__})")
         except Exception as e:
-            logger.error(f"   ❌ Error downloading document {doc_url}: {e}")
-            import traceback
-            logger.error(f"   ❌ Traceback: {traceback.format_exc()}")
-            document_download_stats['failed'] += 1
+            logger.error(f"Error downloading document {doc_url}: {e}")
             continue
     
     # Download each data file from Data Files table
-    data_file_download_stats = {'attempted': 0, 'successful': 0, 'failed': 0, 'skipped': 0}
     for data_file_url in data_file_urls:
-        data_file_download_stats['attempted'] += 1
         try:
-            logger.debug(f"   Downloading data file {data_file_download_stats['attempted']}/{len(data_file_urls)}: {data_file_url}")
             # Download the data file first to check its actual content type
             session = create_session()
             time.sleep(0.1)  # Rate limiting
@@ -1066,13 +931,11 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                              b'filings search' in content_start_lower)
             
             if is_index_page:
-                logger.warning(f"   ⏭️  Skipping {data_file_url} - appears to be filing index page, not actual data file")
-                data_file_download_stats['skipped'] += 1
+                logger.warning(f"Skipping {data_file_url} - appears to be filing index page, not actual data file")
                 continue
             
             if is_sec_nav_page:
-                logger.warning(f"   ⏭️  Skipping {data_file_url} - appears to be SEC navigation/search page, not actual data file")
-                data_file_download_stats['skipped'] += 1
+                logger.warning(f"Skipping {data_file_url} - appears to be SEC navigation/search page, not actual data file")
                 continue
             
             # Extract filename from URL - PRESERVE original extension
@@ -1173,30 +1036,15 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             if s3_key:
                 result['dataFileS3Keys'][data_file_url] = s3_key
                 result['success'] = True
-                data_file_download_stats['successful'] += 1
-                logger.info(f"   ✅ Downloaded data file to {s3_key} (extension: {original_ext or 'none'}, size: {len(data_file_content):,} bytes)")
-            else:
-                logger.warning(f"   ⚠️  No S3 key returned for {data_file_url}")
-                data_file_download_stats['failed'] += 1
+                logger.info(f"Downloaded data file to {s3_key} (preserved extension: {original_ext or 'none'}, size: {len(data_file_content):,} bytes)")
         except Exception as e:
-            logger.error(f"   ❌ Error downloading data file {data_file_url}: {e}")
-            import traceback
-            logger.error(f"   ❌ Traceback: {traceback.format_exc()}")
-            data_file_download_stats['failed'] += 1
+            logger.error(f"Error downloading data file {data_file_url}: {e}")
             continue
     
-    # Log summary statistics
-    logger.info(f"📊 Download summary for filing_id: {filing_id}")
-    logger.info(f"   Document Format Files: {document_download_stats['attempted']} attempted, {document_download_stats['successful']} successful, {document_download_stats['failed']} failed, {document_download_stats['skipped']} skipped")
-    logger.info(f"   Data Files: {data_file_download_stats['attempted']} attempted, {data_file_download_stats['successful']} successful, {data_file_download_stats['failed']} failed, {data_file_download_stats['skipped']} skipped")
-    logger.info(f"   Total S3 keys stored: {len(result['documentS3Keys'])} documents, {len(result['dataFileS3Keys'])} data files")
-    
     if result['success']:
-        logger.info(f"✅ Successfully downloaded files for filing_id: {filing_id}")
+        logger.info(f"Successfully downloaded {len(result['documentS3Keys'])} document(s) and {len(result['dataFileS3Keys'])} data file(s) for filing_id: {filing_id}")
     else:
-        logger.warning(f"⚠️  No files were successfully downloaded for filing_id: {filing_id}")
-        if document_download_stats['attempted'] > 0 or data_file_download_stats['attempted'] > 0:
-            logger.warning(f"   This may indicate download failures or all files were filtered out")
+        logger.warning(f"No files were successfully downloaded for filing_id: {filing_id}")
     
     return result
 
@@ -1838,16 +1686,10 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'dataFileUrls': data_file_urls,
                 })
         
-        # Step 1: Store new filings in DynamoDB cache
+        # Step 1: Prepare filing data (but don't store in SEC cache table - only query cache)
+        # The filing data is still prepared for use in results, but we no longer write to sec_filings_table
         if filings_to_store_in_dynamodb:
-            logger.info(f"Storing {len(filings_to_store_in_dynamodb)} new filings in DynamoDB cache")
-            for filing_data in filings_to_store_in_dynamodb:
-                try:
-                    store_filing_in_cache(filing_data)
-                    logger.info(f"Stored filing {filing_data.get('filingId')} in DynamoDB cache")
-                except Exception as e:
-                    logger.error(f"Failed to cache filing {filing_data.get('filingId')}: {e}")
-                    # Continue - don't fail the request if caching fails
+            logger.info(f"Prepared {len(filings_to_store_in_dynamodb)} new filings (not storing in SEC cache table - only query cache)")
         
         # Step 2: Download documents to S3 for NEW filings only (not cached ones)
         # Cached filings should already have their files in S3 since indexing and downloading are tied together
@@ -1896,38 +1738,9 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                             result['dataFileS3Keys'] = data_file_s3_keys
                             break
                     
-                    # Update DynamoDB cache with S3 keys
-                    try:
-                        if cache_table:
-                            # Always update, even if keys are empty (to ensure fields exist in DynamoDB)
-                            logger.info(f"Updating cache with S3 keys for filing {filing_id}: {len(document_s3_keys)} document keys, {len(data_file_s3_keys)} data file keys")
-                            logger.debug(f"Document S3 keys: {document_s3_keys}")
-                            logger.debug(f"Data file S3 keys: {data_file_s3_keys}")
-                            
-                            # Update the item with S3 keys (no need to check if item exists - update_item will work)
-                            response = cache_table.update_item(
-                                Key={'filingId': filing_id},
-                                UpdateExpression='SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys',
-                                ExpressionAttributeValues={
-                                    ':doc_keys': document_s3_keys if document_s3_keys else {},
-                                    ':data_keys': data_file_s3_keys if data_file_s3_keys else {}
-                                },
-                                ReturnValues='ALL_NEW'  # Return updated item to verify
-                            )
-                            
-                            # Verify the update
-                            updated_item = response.get('Attributes', {})
-                            updated_doc_keys = updated_item.get('documentS3Keys', {})
-                            updated_data_keys = updated_item.get('dataFileS3Keys', {})
-                            logger.info(f"✅ Successfully updated cache with S3 keys for filing {filing_id}")
-                            logger.info(f"   Verified: {len(updated_doc_keys)} document keys, {len(updated_data_keys)} data file keys in cache")
-                        else:
-                            logger.warning(f"Cache table not available - cannot update S3 keys for filing {filing_id}")
-                    except Exception as e:
-                        logger.error(f"❌ Failed to update cache with S3 keys for filing {filing_id}: {e}")
-                        import traceback
-                        logger.error(f"❌ Traceback: {traceback.format_exc()}")
-                        # Continue - don't fail the request if cache update fails
+                    # Note: We no longer update the SEC cache table (sec_filings_table) with S3 keys
+                    # Only the query cache is maintained. S3 keys are included in the API response.
+                    logger.info(f"Downloaded S3 files for filing {filing_id}: {len(document_s3_keys)} document keys, {len(data_file_s3_keys)} data file keys (not updating SEC cache table)")
                         
                 except Exception as e:
                     logger.error(f"Failed to download documents for filing {filing_download_info.get('filingId')}: {e}")
