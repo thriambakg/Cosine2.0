@@ -1962,7 +1962,9 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'error': 'job_id parameter required'
@@ -1976,7 +1978,9 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 404,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'error': 'Job not found'
@@ -2017,7 +2021,9 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'error': 'job_id or s3_key parameter required'
@@ -2057,7 +2063,9 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 500,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'error': 'S3 client not configured'
@@ -2065,36 +2073,61 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
             }
         
         try:
+            logger.info(f"Fetching results from S3: bucket={S3_BUCKET_NAME}, key={s3_key}")
             response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
             results_json = response['Body'].read().decode('utf-8')
             results = json.loads(results_json)
             
+            logger.info(f"Successfully fetched results from S3: {len(results.get('results', []))} results")
             return {
                 'statusCode': 200,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps(results)
             }
-        except s3_client.exceptions.NoSuchKey:
+        except s3_client.exceptions.NoSuchKey as e:
+            logger.error(f"S3 key not found: {s3_key} - {e}")
             return {
                 'statusCode': 404,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'error': 'Results file not found in S3'
                 })
             }
+        except s3_client.exceptions.ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            error_message = e.response.get('Error', {}).get('Message', str(e))
+            logger.error(f"S3 ClientError fetching {s3_key}: {error_code} - {error_message}")
+            return {
+                'statusCode': 403 if error_code == 'AccessDenied' else 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
+                },
+                'body': json.dumps({
+                    'error': f'S3 error ({error_code}): {error_message}'
+                })
+            }
         except Exception as e:
-            logger.error(f"Error fetching results from S3: {e}")
+            logger.error(f"Error fetching results from S3: {e}", exc_info=True)
             return {
                 'statusCode': 500,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'error': str(e)
@@ -2136,7 +2169,9 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'error': 'job_id parameter required'
@@ -2150,7 +2185,9 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 200,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'success': True,
@@ -2162,7 +2199,9 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'success': False,
@@ -2332,16 +2371,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return handle_job_status(event)
         # Results fetch endpoint: /sec-search-results (GET) - fetch results from S3
         elif 'sec-search-results' in path and http_method == 'GET':
+            logger.info(f"Routing to handle_fetch_results for path: {path}")
             return handle_fetch_results(event)
         # Search endpoint: /sec-search (POST)
-        elif 'sec-search' in path and 'autocomplete' not in path:
+        elif 'sec-search' in path and 'autocomplete' not in path and 'status' not in path and 'results' not in path and 'cancel' not in path:
             return handle_search(event)
         else:
             return {
                 'statusCode': 404,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
                 'body': json.dumps({
                     'error': 'Not found'
