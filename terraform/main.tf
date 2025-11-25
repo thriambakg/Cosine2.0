@@ -2078,3 +2078,55 @@ module "sec_search_lambda" {
 
   tags = var.common_tags
 }
+
+# SEC Search Progress Subscriber Lambda Function
+module "sec_search_progress_subscriber_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-sec-search-progress-subscriber-${var.environment}"
+  description   = "Lambda function that subscribes to SNS progress events and updates DynamoDB"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 256
+
+  # Source directory
+  source_dir = "../backend_app/src/sec_search/progress_subscriber"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT             = var.environment
+    LOG_LEVEL               = var.environment == "development" ? "DEBUG" : "INFO"
+    SEC_FILINGS_CACHE_TABLE = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
+  }
+
+  # Attach core layer
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies - DynamoDB access for updating job status
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# SNS Subscription: Subscribe progress subscriber Lambda to SNS topic
+resource "aws_sns_topic_subscription" "sec_search_progress_subscription" {
+  topic_arn = module.sec_search_progress_sns.topic_arn
+  protocol  = "lambda"
+  endpoint  = module.sec_search_progress_subscriber_lambda.function_arn
+}
+
+# Lambda Permission: Allow SNS to invoke the progress subscriber Lambda
+resource "aws_lambda_permission" "sec_search_progress_subscriber_sns_invoke" {
+  statement_id  = "AllowExecutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = module.sec_search_progress_subscriber_lambda.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = module.sec_search_progress_sns.topic_arn
+}

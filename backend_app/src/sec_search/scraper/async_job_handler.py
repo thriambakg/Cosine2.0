@@ -10,6 +10,7 @@ import boto3
 import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+from decimal import Decimal
 
 logger = logging.getLogger()
 
@@ -290,6 +291,28 @@ def is_job_cancelled(job_id: str) -> bool:
         return False
 
 
+def convert_decimals(obj):
+    """
+    Recursively convert Decimal types to native Python types for JSON serialization
+    
+    Args:
+        obj: Object that may contain Decimal values
+        
+    Returns:
+        Object with Decimal values converted to int or float
+    """
+    if isinstance(obj, Decimal):
+        # Convert Decimal to int if it's a whole number, otherwise float
+        if obj % 1 == 0:
+            return int(obj)
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimals(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimals(item) for item in obj]
+    return obj
+
+
 def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     """
     Get job status from DynamoDB
@@ -307,7 +330,7 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
         response = cache_table.get_item(Key={'filingId': job_id})
         if 'Item' in response:
             item = response['Item']
-            return {
+            job_status = {
                 'job_id': job_id,
                 'status': item.get('job_status', 'UNKNOWN'),
                 'progress': item.get('job_progress', {}),
@@ -318,6 +341,8 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
                 'created_at': item.get('created_at'),
                 'updated_at': item.get('updated_at')
             }
+            # Convert Decimal types to native Python types for JSON serialization
+            return convert_decimals(job_status)
         return None
     except Exception as e:
         logger.error(f"Error getting job status: {e}")
