@@ -46,7 +46,6 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Download as DownloadIcon,
-  Stop as StopIcon,
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
@@ -767,7 +766,7 @@ const SECSearchPage: React.FC = () => {
   
   const RESULTS_PER_PAGE = 10;
 
-  const { execute: executeSearch, data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
+  const { data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
   const { execute: executeAutocomplete, loading: autocompleteLoading } = useSECAutocomplete();
   
   // Search state type: boolean (is searching), current page, total pages, job_id for async searches
@@ -974,10 +973,6 @@ const SECSearchPage: React.FC = () => {
       searchParams.reportingFor, searchParams.located, searchParams.incorporated, 
       searchParams.fileNumber, searchParams.filmNumber, searchParams.cik, searchParams.entityName]);
 
-  // Fetch all results when a new search is performed (for client-side filtering)
-  // Limit to first 1000 results to avoid performance issues
-  const MAX_RESULTS_TO_FETCH = 1000;
-  
   // Compute filters from results
   const computeFiltersFromResults = (results: SECSearchResult[]) => {
     const formCounts = new Map<string, number>();
@@ -1037,6 +1032,8 @@ const SECSearchPage: React.FC = () => {
   const shouldContinueSearchRef = useRef<boolean>(true);
   // Ref to track the current active search ID (to isolate searches)
   const currentSearchIdRef = useRef<string | null>(null);
+  // Ref to store polling interval for cleanup
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchAllResults = async (params: SECSearchParams) => {
     const startTimestamp = Date.now();
@@ -2311,7 +2308,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.entity_filters && availableFilters.entity_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, entity: !prev.entity }))}
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, entity: !prev.entity }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2443,7 +2440,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.form_filters && availableFilters.form_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, form: !prev.form }))}
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, form: !prev.form }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2556,7 +2553,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.location_filters && availableFilters.location_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, location: !prev.location }))}
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, location: !prev.location }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -2700,7 +2697,7 @@ const SECSearchPage: React.FC = () => {
               {availableFilters.incorporation_filters && availableFilters.incorporation_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, incorporation: !prev.incorporation }))}
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, incorporation: !prev.incorporation }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
