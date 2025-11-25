@@ -1050,6 +1050,41 @@ const SECSearchPage: React.FC = () => {
       }
       
       const jobId = startResponse.job_id;
+      
+      // Check if this is a cached response with results_s3_key
+      if (startResponse.cached && startResponse.status === 'COMPLETED' && startResponse.results_s3_key) {
+        console.log(`✅ Cached search found, fetching results from S3: ${startResponse.results_s3_key}`);
+        try {
+          const s3Results = await secSearchAPI.fetchResultsFromS3(jobId, startResponse.results_s3_key);
+          if (s3Results.results) {
+            const results = s3Results.results;
+            setAllSearchResults(results);
+            setTotalFound(s3Results.total_found || results.length);
+            
+            // Set filter metadata
+            if (s3Results.form_filters || s3Results.entity_filters) {
+              setAvailableFilters({
+                form_filters: s3Results.form_filters || [],
+                entity_filters: s3Results.entity_filters || [],
+                location_filters: s3Results.location_filters || [],
+                incorporation_filters: s3Results.incorporation_filters || [],
+              });
+            } else if (results.length > 0) {
+              const computedFilters = computeFiltersFromResults(results);
+              setAvailableFilters(computedFilters);
+            }
+            
+            setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+            setSearchStartTime(null);
+            console.log(`✅ Fetched ${results.length} cached results from S3`);
+            return; // Done - no need to poll
+          }
+        } catch (error) {
+          console.error(`❌ Error fetching cached results from S3: ${error}`);
+          // Fall through to polling as backup
+        }
+      }
+      
       setSearchState({ isSearching: true, currentPage: 0, totalPages: null, jobId });
       setSearchStartTime(startTimestamp);
       

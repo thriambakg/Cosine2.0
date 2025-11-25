@@ -819,6 +819,9 @@ export interface SECSearchResponse {
   job_id?: string;
   status?: string;
   message?: string;
+  // Cache fields
+  cached?: boolean;
+  results_s3_key?: string;
 }
 
 export interface SECJobStatus {

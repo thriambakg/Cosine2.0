@@ -1893,24 +1893,54 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         cached_query = get_cached_query_with_validation(query_hash)
         
         if cached_query:
-            # Cache hit - return existing job_id
-            logger.info(f"Query cache hit for hash {query_hash}, returning existing job_id {cached_query['job_id']}")
-            return {
-                'statusCode': 202,  # Accepted
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
-                },
-                'body': json.dumps({
-                    'success': True,
-                    'job_id': cached_query['job_id'],
-                    'status': 'COMPLETED',  # Cached results are already complete
-                    'message': 'Search results retrieved from cache',
-                    'cached': True
-                })
-            }
+            # Cache hit - verify job still exists in DynamoDB
+            job_id = cached_query['job_id']
+            job_status = get_job_status(job_id)
+            
+            if job_status:
+                # Job exists - return job_id as before
+                logger.info(f"Query cache hit for hash {query_hash}, job {job_id} exists, returning job_id")
+                return {
+                    'statusCode': 202,  # Accepted
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
+                    },
+                    'body': json.dumps({
+                        'success': True,
+                        'job_id': job_id,
+                        'status': job_status.get('status', 'COMPLETED'),
+                        'message': 'Search results retrieved from cache',
+                        'cached': True
+                    })
+                }
+            elif cached_query.get('results_s3_key'):
+                # Job doesn't exist but S3 key does - return S3 key directly
+                logger.info(f"Query cache hit for hash {query_hash}, job {job_id} expired but S3 key exists, returning S3 key")
+                return {
+                    'statusCode': 200,  # OK - results available
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
+                    },
+                    'body': json.dumps({
+                        'success': True,
+                        'job_id': job_id,
+                        'status': 'COMPLETED',
+                        'results_s3_key': cached_query['results_s3_key'],
+                        'total_found': cached_query.get('total_found', 0),
+                        'message': 'Search results retrieved from cache (S3)',
+                        'cached': True
+                    })
+                }
+            else:
+                # Cache entry exists but job and S3 key are missing - treat as cache miss
+                logger.warning(f"Query cache hit for hash {query_hash}, but job {job_id} and S3 key missing, treating as cache miss")
+                # Fall through to create new job
         
         # Cache miss - create new job
         logger.info(f"Query cache miss for hash {query_hash}, creating new job")
