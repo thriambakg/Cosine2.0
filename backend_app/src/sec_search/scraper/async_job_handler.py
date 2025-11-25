@@ -14,10 +14,10 @@ from decimal import Decimal
 
 logger = logging.getLogger()
 
-# DynamoDB configuration
-DYNAMODB_TABLE_NAME = os.environ.get('SEC_FILINGS_CACHE_TABLE')
-dynamodb = boto3.resource('dynamodb') if DYNAMODB_TABLE_NAME else None
-cache_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if dynamodb and DYNAMODB_TABLE_NAME else None
+# DynamoDB configuration for job storage (query cache table)
+QUERY_CACHE_TABLE_NAME = os.environ.get('SEC_SEARCH_QUERY_CACHE_TABLE')
+dynamodb = boto3.resource('dynamodb') if QUERY_CACHE_TABLE_NAME else None
+query_cache_table = dynamodb.Table(QUERY_CACHE_TABLE_NAME) if dynamodb and QUERY_CACHE_TABLE_NAME else None
 
 # Lambda client for async invocation
 lambda_client = boto3.client('lambda')
@@ -32,6 +32,9 @@ def create_job(search_params: Dict[str, Any]) -> str:
     """
     Create a new async search job and return job_id
     
+    Note: Jobs are stored in the query cache table via store_cached_query() in query_cache.py
+    This function only generates and returns the job_id.
+    
     Args:
         search_params: Search parameters
         
@@ -39,36 +42,8 @@ def create_job(search_params: Dict[str, Any]) -> str:
         job_id: Unique job identifier
     """
     job_id = f"JOB#{uuid.uuid4().hex[:16]}"
-    
-    if not cache_table:
-        logger.error("DynamoDB table not configured")
-        return job_id
-    
-    try:
-        # Store initial job status
-        # Use job_id as the primary key (DynamoDB table uses 'filingId' as key)
-        job_item = {
-            'filingId': job_id,  # Primary key field name in DynamoDB
-            'job_status': 'PENDING',
-            'job_progress': {
-                'current_page': 0,
-                'total_pages': None,
-                'results_count': 0,
-                'total_found': 0
-            },
-            'search_params': search_params,
-            'created_at': datetime.now(timezone.utc).isoformat(),
-            'updated_at': datetime.now(timezone.utc).isoformat(),
-            'ttl': int((datetime.now(timezone.utc).timestamp() + 3600))  # Expire after 1 hour
-        }
-        
-        cache_table.put_item(Item=job_item)
-        logger.info(f"Created job {job_id}")
-        
-        return job_id
-    except Exception as e:
-        logger.error(f"Error creating job: {e}")
-        return job_id
+    logger.info(f"Generated job_id {job_id} (will be stored in query cache table)")
+    return job_id
 
 
 def publish_progress_to_sns(job_id: str, current_page: int, total_pages: Optional[int], 
@@ -232,17 +207,24 @@ def cancel_job(job_id: str) -> bool:
     Returns:
         True if job was cancelled, False otherwise
     """
-    if not cache_table:
+    if not query_cache_table:
         return False
     
     try:
-        # Check if job exists and is cancellable
-        response = cache_table.get_item(Key={'filingId': job_id})
-        if 'Item' not in response:
+        # Query GSI to find job by job_id
+        response = query_cache_table.query(
+            IndexName='JobIdIndex',
+            KeyConditionExpression='job_id = :job_id',
+            ExpressionAttributeValues={':job_id': job_id}
+        )
+        
+        if not response.get('Items'):
             logger.warning(f"Job {job_id} not found for cancellation")
             return False
         
-        item = response['Item']
+        # Get the first item (should only be one)
+        item = response['Items'][0]
+        query_hash = item.get('queryHash')
         current_status = item.get('job_status', 'UNKNOWN')
         
         # Only cancel if job is pending or in progress
@@ -250,9 +232,9 @@ def cancel_job(job_id: str) -> bool:
             logger.info(f"Job {job_id} cannot be cancelled (status: {current_status})")
             return False
         
-        # Set cancellation flag
-        cache_table.update_item(
-            Key={'filingId': job_id},
+        # Update using queryHash as primary key
+        query_cache_table.update_item(
+            Key={'queryHash': query_hash},
             UpdateExpression='SET job_status = :status, job_cancelled = :cancelled, updated_at = :updated',
             ExpressionAttributeValues={
                 ':status': 'CANCELLED',
@@ -277,13 +259,19 @@ def is_job_cancelled(job_id: str) -> bool:
     Returns:
         True if job is cancelled, False otherwise
     """
-    if not cache_table:
+    if not query_cache_table:
         return False
     
     try:
-        response = cache_table.get_item(Key={'filingId': job_id})
-        if 'Item' in response:
-            item = response['Item']
+        # Query GSI to find job by job_id
+        response = query_cache_table.query(
+            IndexName='JobIdIndex',
+            KeyConditionExpression='job_id = :job_id',
+            ExpressionAttributeValues={':job_id': job_id}
+        )
+        
+        if response.get('Items'):
+            item = response['Items'][0]
             return item.get('job_cancelled', False) or item.get('job_status') == 'CANCELLED'
         return False
     except Exception as e:
@@ -315,7 +303,7 @@ def convert_decimals(obj):
 
 def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     """
-    Get job status from DynamoDB
+    Get job status from DynamoDB query cache table (using GSI on job_id)
     
     Args:
         job_id: Job identifier
@@ -323,20 +311,26 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Job status dictionary or None if not found
     """
-    if not cache_table:
+    if not query_cache_table:
         return None
     
     try:
-        response = cache_table.get_item(Key={'filingId': job_id})
-        if 'Item' in response:
-            item = response['Item']
+        # Query GSI to find job by job_id
+        response = query_cache_table.query(
+            IndexName='JobIdIndex',
+            KeyConditionExpression='job_id = :job_id',
+            ExpressionAttributeValues={':job_id': job_id}
+        )
+        
+        if response.get('Items'):
+            item = response['Items'][0]  # Should only be one item
             job_status = {
                 'job_id': job_id,
                 'status': item.get('job_status', 'UNKNOWN'),
                 'progress': item.get('job_progress', {}),
                 'results': item.get('job_results'),
-                'results_s3_key': item.get('job_results_s3_key'),
-                'error': item.get('error') or item.get('job_error'),  # Support both field names
+                'results_s3_key': item.get('job_results_s3_key') or item.get('results_s3_key'),
+                'error': item.get('error') or item.get('job_error'),
                 'cancelled': item.get('job_cancelled', False) or item.get('job_status') == 'CANCELLED',
                 'created_at': item.get('created_at'),
                 'updated_at': item.get('updated_at')

@@ -2114,9 +2114,9 @@ module "sec_search_progress_subscriber_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT             = var.environment
-    LOG_LEVEL               = var.environment == "development" ? "DEBUG" : "INFO"
-    SEC_FILINGS_CACHE_TABLE = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
+    ENVIRONMENT                  = var.environment
+    LOG_LEVEL                    = var.environment == "development" ? "DEBUG" : "INFO"
+    SEC_SEARCH_QUERY_CACHE_TABLE = data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_name
   }
 
   # Attach core layer
@@ -2124,10 +2124,10 @@ module "sec_search_progress_subscriber_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for updating job status
+  # Additional IAM policies - DynamoDB access for updating job status in query cache table
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
+    data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_policy_arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
 

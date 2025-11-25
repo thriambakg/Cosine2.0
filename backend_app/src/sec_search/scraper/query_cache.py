@@ -183,9 +183,10 @@ def get_cached_query_with_validation(query_hash: str) -> Optional[Dict[str, Any]
 
 def store_cached_query(query_hash: str, job_id: str, search_params: Dict[str, Any], 
                       results_s3_key: Optional[str] = None, total_found: int = 0, 
-                      results_count: int = 0) -> bool:
+                      results_count: int = 0, job_status: str = 'PENDING',
+                      job_progress: Optional[Dict[str, Any]] = None) -> bool:
     """
-    Store query cache entry in DynamoDB
+    Store query cache entry in DynamoDB (includes job status for new jobs)
     
     Args:
         query_hash: Hash of normalized search parameters
@@ -194,6 +195,8 @@ def store_cached_query(query_hash: str, job_id: str, search_params: Dict[str, An
         results_s3_key: S3 key where results are stored (optional)
         total_found: Total results found
         results_count: Number of results returned
+        job_status: Job status (default: 'PENDING')
+        job_progress: Job progress dictionary (optional)
         
     Returns:
         True if successful, False otherwise
@@ -211,10 +214,22 @@ def store_cached_query(query_hash: str, job_id: str, search_params: Dict[str, An
             'queryHash': query_hash,
             'job_id': job_id,
             'search_params': normalize_search_params(search_params),  # Store normalized params
+            'job_status': job_status,
             'created_at': now,
             'updated_at': now,
             'ttl': ttl
         }
+        
+        if job_progress:
+            item['job_progress'] = job_progress
+        elif job_status == 'PENDING':
+            # Initialize progress for new jobs
+            item['job_progress'] = {
+                'current_page': 0,
+                'total_pages': None,
+                'results_count': 0,
+                'total_found': 0
+            }
         
         if results_s3_key:
             item['results_s3_key'] = results_s3_key
@@ -226,7 +241,7 @@ def store_cached_query(query_hash: str, job_id: str, search_params: Dict[str, An
             item['results_count'] = results_count
         
         query_cache_table.put_item(Item=item)
-        logger.info(f"Stored cached query for hash {query_hash}: job_id={job_id}")
+        logger.info(f"Stored cached query for hash {query_hash}: job_id={job_id}, status={job_status}")
         return True
     except Exception as e:
         logger.error(f"Error storing cached query: {e}")

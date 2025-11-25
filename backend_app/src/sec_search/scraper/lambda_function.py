@@ -144,7 +144,17 @@ def get_cached_filings(filing_ids: List[str]) -> Dict[str, Dict[str, Any]]:
                 if filing_id:
                     cached_items[filing_id] = item
             
-            # Note: We no longer update lastAccessed timestamp since we're not writing to SEC cache table
+            # Update lastAccessed timestamp for cached items
+            current_time = int(datetime.now(timezone.utc).timestamp())
+            for filing_id in cached_items.keys():
+                try:
+                    cache_table.update_item(
+                        Key={'filingId': filing_id},
+                        UpdateExpression='SET lastAccessed = :ts',
+                        ExpressionAttributeValues={':ts': current_time}
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to update lastAccessed for {filing_id}: {e}")
         
         logger.info(f"Found {len(cached_items)}/{len(filing_ids)} filings in cache")
         return cached_items
@@ -1686,10 +1696,16 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'dataFileUrls': data_file_urls,
                 })
         
-        # Step 1: Prepare filing data (but don't store in SEC cache table - only query cache)
-        # The filing data is still prepared for use in results, but we no longer write to sec_filings_table
+        # Step 1: Store new filings in DynamoDB cache
         if filings_to_store_in_dynamodb:
-            logger.info(f"Prepared {len(filings_to_store_in_dynamodb)} new filings (not storing in SEC cache table - only query cache)")
+            logger.info(f"Storing {len(filings_to_store_in_dynamodb)} new filings in DynamoDB cache")
+            for filing_data in filings_to_store_in_dynamodb:
+                try:
+                    store_filing_in_cache(filing_data)
+                    logger.info(f"Stored filing {filing_data.get('filingId')} in DynamoDB cache")
+                except Exception as e:
+                    logger.error(f"Failed to cache filing {filing_data.get('filingId')}: {e}")
+                    # Continue - don't fail the request if caching fails
         
         # Step 2: Download documents to S3 for NEW filings only (not cached ones)
         # Cached filings should already have their files in S3 since indexing and downloading are tied together
@@ -1738,9 +1754,38 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                             result['dataFileS3Keys'] = data_file_s3_keys
                             break
                     
-                    # Note: We no longer update the SEC cache table (sec_filings_table) with S3 keys
-                    # Only the query cache is maintained. S3 keys are included in the API response.
-                    logger.info(f"Downloaded S3 files for filing {filing_id}: {len(document_s3_keys)} document keys, {len(data_file_s3_keys)} data file keys (not updating SEC cache table)")
+                    # Update DynamoDB cache with S3 keys
+                    try:
+                        if cache_table:
+                            # Always update, even if keys are empty (to ensure fields exist in DynamoDB)
+                            logger.info(f"Updating cache with S3 keys for filing {filing_id}: {len(document_s3_keys)} document keys, {len(data_file_s3_keys)} data file keys")
+                            logger.debug(f"Document S3 keys: {document_s3_keys}")
+                            logger.debug(f"Data file S3 keys: {data_file_s3_keys}")
+                            
+                            # Update the item with S3 keys (no need to check if item exists - update_item will work)
+                            response = cache_table.update_item(
+                                Key={'filingId': filing_id},
+                                UpdateExpression='SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys',
+                                ExpressionAttributeValues={
+                                    ':doc_keys': document_s3_keys if document_s3_keys else {},
+                                    ':data_keys': data_file_s3_keys if data_file_s3_keys else {}
+                                },
+                                ReturnValues='ALL_NEW'  # Return updated item to verify
+                            )
+                            
+                            # Verify the update
+                            updated_item = response.get('Attributes', {})
+                            updated_doc_keys = updated_item.get('documentS3Keys', {})
+                            updated_data_keys = updated_item.get('dataFileS3Keys', {})
+                            logger.info(f"✅ Successfully updated cache with S3 keys for filing {filing_id}")
+                            logger.info(f"   Verified: {len(updated_doc_keys)} document keys, {len(updated_data_keys)} data file keys in cache")
+                        else:
+                            logger.warning(f"Cache table not available - cannot update S3 keys for filing {filing_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to update cache with S3 keys for filing {filing_id}: {e}")
+                        import traceback
+                        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+                        # Continue - don't fail the request if cache update fails
                         
                 except Exception as e:
                     logger.error(f"Failed to download documents for filing {filing_download_info.get('filingId')}: {e}")
@@ -1862,22 +1907,22 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
             if job_status:
                 # Job exists - return job_id as before
                 logger.info(f"Query cache hit for hash {query_hash}, job {job_id} exists, returning job_id")
-                return {
-                    'statusCode': 202,  # Accepted
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Headers': 'Content-Type',
-                        'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
-                    },
-                    'body': json.dumps({
-                        'success': True,
-                        'job_id': job_id,
+            return {
+                'statusCode': 202,  # Accepted
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
+                },
+                'body': json.dumps({
+                    'success': True,
+                    'job_id': job_id,
                         'status': job_status.get('status', 'COMPLETED'),
                         'message': 'Search results retrieved from cache',
                         'cached': True
-                    })
-                }
+                })
+            }
             elif results_s3_key:
                 # Job doesn't exist but S3 key available - verify it exists and return it
                 from query_cache import check_s3_key_exists
@@ -1913,8 +1958,8 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Query cache miss for hash {query_hash}, creating new job")
         job_id = create_job(search_params)
         
-        # Store in query cache
-        store_cached_query(query_hash, job_id, search_params)
+        # Store in query cache with initial job status
+        store_cached_query(query_hash, job_id, search_params, job_status='PENDING')
         
         invoke_async_search(job_id, search_params)
         

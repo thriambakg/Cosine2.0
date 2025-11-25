@@ -3091,15 +3091,14 @@ const SECSearchPage: React.FC = () => {
                 width: '8px',
               },
               '&::-webkit-scrollbar-track': {
-                background: 'rgba(31, 41, 55, 0.5)',
-                borderRadius: '4px',
+                backgroundColor: 'rgba(55, 65, 81, 0.3)',
               },
               '&::-webkit-scrollbar-thumb': {
-                background: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.5)',
                 borderRadius: '4px',
-                '&:hover': {
-                  background: '#60a5fa',
-                },
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.7)',
               },
             }}>
               <Grid container spacing={2}>
@@ -3166,15 +3165,14 @@ const SECSearchPage: React.FC = () => {
                         width: '8px',
                       },
                       '&::-webkit-scrollbar-track': {
-                        background: 'rgba(31, 41, 55, 0.5)',
-                        borderRadius: '4px',
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
                       },
                       '&::-webkit-scrollbar-thumb': {
-                        background: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
                         borderRadius: '4px',
-                        '&:hover': {
-                          background: '#60a5fa',
-                        },
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
                       },
                     }}>
                       {selectedFiling.documentUrls.map((url, index) => {
@@ -3279,15 +3277,14 @@ const SECSearchPage: React.FC = () => {
                         width: '8px',
                       },
                       '&::-webkit-scrollbar-track': {
-                        background: 'rgba(31, 41, 55, 0.5)',
-                        borderRadius: '4px',
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
                       },
                       '&::-webkit-scrollbar-thumb': {
-                        background: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
                         borderRadius: '4px',
-                        '&:hover': {
-                          background: '#60a5fa',
-                        },
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
                       },
                     }}>
                       {selectedFiling.dataFileUrls.map((url, index) => {

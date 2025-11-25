@@ -12,15 +12,15 @@ from typing import Dict, Any
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
-# DynamoDB configuration
-DYNAMODB_TABLE_NAME = os.environ.get('SEC_FILINGS_CACHE_TABLE')
-dynamodb = boto3.resource('dynamodb') if DYNAMODB_TABLE_NAME else None
-cache_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if dynamodb and DYNAMODB_TABLE_NAME else None
+# DynamoDB configuration for job storage (query cache table)
+QUERY_CACHE_TABLE_NAME = os.environ.get('SEC_SEARCH_QUERY_CACHE_TABLE')
+dynamodb = boto3.resource('dynamodb') if QUERY_CACHE_TABLE_NAME else None
+query_cache_table = dynamodb.Table(QUERY_CACHE_TABLE_NAME) if dynamodb and QUERY_CACHE_TABLE_NAME else None
 
 
 def update_job_progress(job_id: str, progress_data: Dict[str, Any]) -> bool:
     """
-    Update job progress in DynamoDB
+    Update job progress in DynamoDB query cache table
     
     Args:
         job_id: Job identifier
@@ -29,12 +29,29 @@ def update_job_progress(job_id: str, progress_data: Dict[str, Any]) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
-    if not cache_table:
+    if not query_cache_table:
         logger.error("DynamoDB table not configured")
         return False
     
     try:
-        # Update job progress in DynamoDB
+        # Query GSI to find job by job_id and get queryHash
+        response = query_cache_table.query(
+            IndexName='JobIdIndex',
+            KeyConditionExpression='job_id = :job_id',
+            ExpressionAttributeValues={':job_id': job_id}
+        )
+        
+        if not response.get('Items'):
+            logger.warning(f"Job {job_id} not found for progress update")
+            return False
+        
+        # Get queryHash from the first item
+        query_hash = response['Items'][0].get('queryHash')
+        if not query_hash:
+            logger.error(f"Job {job_id} found but missing queryHash")
+            return False
+        
+        # Update job progress using queryHash as primary key
         update_expression = "SET job_status = :status, job_progress = :progress, updated_at = :updated_at"
         expression_values = {
             ':status': 'IN_PROGRESS',
@@ -47,8 +64,8 @@ def update_job_progress(job_id: str, progress_data: Dict[str, Any]) -> bool:
             ':updated_at': progress_data.get('timestamp', '')
         }
         
-        cache_table.update_item(
-            Key={'filingId': job_id},
+        query_cache_table.update_item(
+            Key={'queryHash': query_hash},
             UpdateExpression=update_expression,
             ExpressionAttributeValues=expression_values,
             ReturnValues='ALL_NEW'
@@ -64,7 +81,7 @@ def update_job_progress(job_id: str, progress_data: Dict[str, Any]) -> bool:
 
 def update_job_completion(job_id: str, completion_data: Dict[str, Any]) -> bool:
     """
-    Update job completion in DynamoDB
+    Update job completion in DynamoDB query cache table
     
     Args:
         job_id: Job identifier
@@ -73,15 +90,32 @@ def update_job_completion(job_id: str, completion_data: Dict[str, Any]) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
-    if not cache_table:
+    if not query_cache_table:
         logger.error("DynamoDB table not configured")
         return False
     
     try:
+        # Query GSI to find job by job_id and get queryHash
+        response = query_cache_table.query(
+            IndexName='JobIdIndex',
+            KeyConditionExpression='job_id = :job_id',
+            ExpressionAttributeValues={':job_id': job_id}
+        )
+        
+        if not response.get('Items'):
+            logger.warning(f"Job {job_id} not found for completion update")
+            return False
+        
+        # Get queryHash from the first item
+        query_hash = response['Items'][0].get('queryHash')
+        if not query_hash:
+            logger.error(f"Job {job_id} found but missing queryHash")
+            return False
+        
         # Build update expression based on whether results are in S3 or inline
         if 'results_s3_key' in completion_data:
-            # Results stored in S3
-            update_expression = "SET job_status = :status, job_results_s3_key = :s3_key, updated_at = :updated_at"
+            # Results stored in S3 - update both job_results_s3_key and results_s3_key
+            update_expression = "SET job_status = :status, job_results_s3_key = :s3_key, results_s3_key = :s3_key, updated_at = :updated_at"
             expression_values = {
                 ':status': 'COMPLETED',
                 ':s3_key': completion_data.get('results_s3_key'),
@@ -96,8 +130,8 @@ def update_job_completion(job_id: str, completion_data: Dict[str, Any]) -> bool:
                 ':updated_at': completion_data.get('timestamp', '')
             }
         
-        cache_table.update_item(
-            Key={'filingId': job_id},
+        query_cache_table.update_item(
+            Key={'queryHash': query_hash},
             UpdateExpression=update_expression,
             ExpressionAttributeValues=expression_values,
             ReturnValues='ALL_NEW'
@@ -114,7 +148,7 @@ def update_job_completion(job_id: str, completion_data: Dict[str, Any]) -> bool:
 
 def update_job_failure(job_id: str, failure_data: Dict[str, Any]) -> bool:
     """
-    Update job failure in DynamoDB
+    Update job failure in DynamoDB query cache table
     
     Args:
         job_id: Job identifier
@@ -123,11 +157,28 @@ def update_job_failure(job_id: str, failure_data: Dict[str, Any]) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
-    if not cache_table:
+    if not query_cache_table:
         logger.error("DynamoDB table not configured")
         return False
     
     try:
+        # Query GSI to find job by job_id and get queryHash
+        response = query_cache_table.query(
+            IndexName='JobIdIndex',
+            KeyConditionExpression='job_id = :job_id',
+            ExpressionAttributeValues={':job_id': job_id}
+        )
+        
+        if not response.get('Items'):
+            logger.warning(f"Job {job_id} not found for failure update")
+            return False
+        
+        # Get queryHash from the first item
+        query_hash = response['Items'][0].get('queryHash')
+        if not query_hash:
+            logger.error(f"Job {job_id} found but missing queryHash")
+            return False
+        
         update_expression = "SET job_status = :status, error = :error, updated_at = :updated_at"
         expression_values = {
             ':status': 'FAILED',
@@ -135,8 +186,8 @@ def update_job_failure(job_id: str, failure_data: Dict[str, Any]) -> bool:
             ':updated_at': failure_data.get('timestamp', '')
         }
         
-        cache_table.update_item(
-            Key={'filingId': job_id},
+        query_cache_table.update_item(
+            Key={'queryHash': query_hash},
             UpdateExpression=update_expression,
             ExpressionAttributeValues=expression_values,
             ReturnValues='ALL_NEW'
