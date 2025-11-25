@@ -1907,22 +1907,22 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
             if job_status:
                 # Job exists - return job_id as before
                 logger.info(f"Query cache hit for hash {query_hash}, job {job_id} exists, returning job_id")
-            return {
-                'statusCode': 202,  # Accepted
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
-                },
-                'body': json.dumps({
-                    'success': True,
-                    'job_id': job_id,
+                return {
+                    'statusCode': 202,  # Accepted
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
+                    },
+                    'body': json.dumps({
+                        'success': True,
+                        'job_id': job_id,
                         'status': job_status.get('status', 'COMPLETED'),
                         'message': 'Search results retrieved from cache',
                         'cached': True
-                })
-            }
+                    })
+                }
             elif results_s3_key:
                 # Job doesn't exist but S3 key available - verify it exists and return it
                 from query_cache import check_s3_key_exists
