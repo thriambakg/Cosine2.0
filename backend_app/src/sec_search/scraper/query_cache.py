@@ -10,8 +10,31 @@ import logging
 import boto3
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+from decimal import Decimal
 
 logger = logging.getLogger()
+
+
+def convert_decimals(obj):
+    """
+    Recursively convert Decimal types to native Python types for JSON serialization
+    
+    Args:
+        obj: Object that may contain Decimal values
+        
+    Returns:
+        Object with Decimal values converted to int or float
+    """
+    if isinstance(obj, Decimal):
+        # Convert Decimal to int if it's a whole number, otherwise float
+        if obj % 1 == 0:
+            return int(obj)
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimals(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimals(item) for item in obj]
+    return obj
 
 # DynamoDB configuration
 QUERY_CACHE_TABLE_NAME = os.environ.get('SEC_SEARCH_QUERY_CACHE_TABLE')
@@ -92,7 +115,7 @@ def get_cached_query(query_hash: str) -> Optional[Dict[str, Any]]:
         if 'Item' in response:
             item = response['Item']
             logger.info(f"Found cached query for hash {query_hash}: job_id={item.get('job_id')}")
-            return {
+            cached_data = {
                 'queryHash': item.get('queryHash'),
                 'job_id': item.get('job_id'),
                 'results_s3_key': item.get('results_s3_key'),
@@ -102,6 +125,8 @@ def get_cached_query(query_hash: str) -> Optional[Dict[str, Any]]:
                 'total_found': item.get('total_found'),
                 'results_count': item.get('results_count')
             }
+            # Convert Decimal types to native Python types for JSON serialization
+            return convert_decimals(cached_data)
         return None
     except Exception as e:
         logger.error(f"Error getting cached query: {e}")
