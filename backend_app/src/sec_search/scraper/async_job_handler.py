@@ -128,80 +128,97 @@ def update_job_progress(job_id: str, current_page: int, total_pages: Optional[in
 
 def complete_job(job_id: str, results: Dict[str, Any]):
     """
-    Mark job as completed and store results
+    Mark job as completed and publish results to SNS (subscriber will update DynamoDB)
     
     Args:
         job_id: Job identifier
         results: Search results to store
     """
-    if not cache_table:
+    if not SNS_TOPIC_ARN:
+        logger.warning("SNS topic ARN not configured, cannot complete job")
         return
     
     try:
-        # Store results in DynamoDB (may need to split if too large)
-        # For large results, we could store in S3 and reference it
-        cache_table.update_item(
-            Key={'filingId': job_id},
-            UpdateExpression='SET job_status = :status, job_results = :results, updated_at = :updated',
-            ExpressionAttributeValues={
-                ':status': 'COMPLETED',
-                ':results': results,
-                ':updated': datetime.now(timezone.utc).isoformat()
-            }
-        )
-        logger.info(f"Completed job {job_id} with {len(results.get('results', []))} results")
-    except Exception as e:
-        logger.error(f"Error completing job: {e}")
-        # If results are too large, store in S3
-        try:
+        # Check if results are too large for SNS (256KB limit)
+        results_json = json.dumps(results)
+        results_size = len(results_json.encode('utf-8'))
+        
+        # If results are too large (>200KB to leave room for other fields), store in S3 first
+        if results_size > 200 * 1024:  # 200KB threshold
+            logger.info(f"Results for job {job_id} are large ({results_size} bytes), storing in S3")
             s3_client = boto3.client('s3')
             s3_bucket = os.environ.get('SEC_FILINGS_S3_BUCKET', 'cosine-sec-filings-production')
             s3_key = f"jobs/{job_id}/results.json"
             s3_client.put_object(
                 Bucket=s3_bucket,
                 Key=s3_key,
-                Body=json.dumps(results),
+                Body=results_json,
                 ContentType='application/json'
             )
-            # Store S3 reference in DynamoDB
-            cache_table.update_item(
-                Key={'filingId': job_id},
-                UpdateExpression='SET job_status = :status, job_results_s3_key = :s3_key, updated_at = :updated',
-                ExpressionAttributeValues={
-                    ':status': 'COMPLETED',
-                    ':s3_key': s3_key,
-                    ':updated': datetime.now(timezone.utc).isoformat()
-                }
-            )
             logger.info(f"Stored job {job_id} results in S3: {s3_key}")
-        except Exception as s3_error:
-            logger.error(f"Error storing results in S3: {s3_error}")
+            
+            # Publish S3 reference to SNS
+            completion_message = {
+                'job_id': job_id,
+                'status': 'COMPLETED',
+                'results_s3_key': s3_key,
+                'results_count': len(results.get('results', [])),
+                'total_found': results.get('total_found', 0),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+        else:
+            # Results are small enough, include them directly
+            completion_message = {
+                'job_id': job_id,
+                'status': 'COMPLETED',
+                'results': results,
+                'results_count': len(results.get('results', [])),
+                'total_found': results.get('total_found', 0),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+        
+        # Publish completion to SNS
+        sns_client.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Message=json.dumps(completion_message),
+            Subject=f'SEC Search Completed: {job_id}'
+        )
+        
+        logger.info(f"Published job {job_id} completion to SNS with {completion_message.get('results_count', 0)} results")
+    except Exception as e:
+        logger.error(f"Error completing job {job_id}: {e}", exc_info=True)
 
 
 def fail_job(job_id: str, error: str):
     """
-    Mark job as failed
+    Mark job as failed and publish to SNS (subscriber will update DynamoDB)
     
     Args:
         job_id: Job identifier
         error: Error message
     """
-    if not cache_table:
+    if not SNS_TOPIC_ARN:
+        logger.warning("SNS topic ARN not configured, cannot fail job")
         return
     
     try:
-        cache_table.update_item(
-            Key={'filingId': job_id},
-            UpdateExpression='SET job_status = :status, job_error = :error, updated_at = :updated',
-            ExpressionAttributeValues={
-                ':status': 'FAILED',
-                ':error': error,
-                ':updated': datetime.now(timezone.utc).isoformat()
-            }
+        failure_message = {
+            'job_id': job_id,
+            'status': 'FAILED',
+            'error': error,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Publish failure to SNS
+        sns_client.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Message=json.dumps(failure_message),
+            Subject=f'SEC Search Failed: {job_id}'
         )
-        logger.error(f"Failed job {job_id}: {error}")
+        
+        logger.info(f"Published job {job_id} failure to SNS: {error}")
     except Exception as e:
-        logger.error(f"Error failing job: {e}")
+        logger.error(f"Error failing job {job_id}: {e}", exc_info=True)
 
 
 def cancel_job(job_id: str) -> bool:
@@ -296,8 +313,8 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
                 'progress': item.get('job_progress', {}),
                 'results': item.get('job_results'),
                 'results_s3_key': item.get('job_results_s3_key'),
-                'error': item.get('job_error'),
-                'cancelled': item.get('job_cancelled', False),
+                'error': item.get('error') or item.get('job_error'),  # Support both field names
+                'cancelled': item.get('job_cancelled', False) or item.get('job_status') == 'CANCELLED',
                 'created_at': item.get('created_at'),
                 'updated_at': item.get('updated_at')
             }

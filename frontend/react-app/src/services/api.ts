@@ -858,11 +858,11 @@ export const secSearchAPI = {
     });
   },
 
-  // Start async search (returns job_id)
+  // Start async search (returns job_id) - all searches are now async
   searchAsync: async (params: SECSearchParams): Promise<SECSearchResponse> => {
     return apiRequest<SECSearchResponse>('/sec-search', {
       method: 'POST',
-      body: JSON.stringify({ ...params, async: true }),
+      body: JSON.stringify(params),
     });
   },
 

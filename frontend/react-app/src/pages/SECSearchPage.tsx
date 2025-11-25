@@ -1045,132 +1045,138 @@ const SECSearchPage: React.FC = () => {
     currentSearchIdRef.current = searchId;
     // Reset the continue flag when starting a new search
     shouldContinueSearchRef.current = true;
-    setSearchState({ isSearching: true, currentPage: 1, totalPages: null, jobId: null });
-    setSearchStartTime(startTimestamp);
     
-    console.log('🔍 Starting search:', { params, timestamp: new Date().toISOString(), searchId });
+    console.log('🔍 Starting async search:', { params, timestamp: new Date().toISOString(), searchId });
     
     try {
-      const allResults: SECSearchResult[] = [];
-      let page = 1;
-      let hasMore = true;
-      let totalFound = 0;
-      let firstResponse: any = null;
-      let estimatedTotalPages: number | null = null;
+      // Start async search - returns job_id immediately
+      const startResponse = await secSearchAPI.searchAsync(params);
       
-      while (hasMore && allResults.length < MAX_RESULTS_TO_FETCH && shouldContinueSearchRef.current) {
-        // Check if this search is still the active one
-        if (currentSearchIdRef.current !== searchId) {
-          console.log(`🛑 Search ${searchId} stopped - new search started`);
-          break;
-        }
-        const pageParams = { ...params, page };
-        console.log(`📄 Fetching page ${page}...`);
-        // Update search state atomically with current page
-        setSearchState(prev => ({ ...prev, isSearching: true, currentPage: page, totalPages: estimatedTotalPages }));
-        
-        const result = await secSearchAPI.search(pageParams);
-        
-        // Check if this search is still active before processing results
-        if (currentSearchIdRef.current !== searchId) {
-          console.log(`🛑 Ignoring results for page ${page} - search ${searchId} is no longer active`);
-          break;
-        }
-        
-        // Store filter metadata from first response
-        if (page === 1 && result) {
-          firstResponse = result;
-          totalFound = result.total_found || 0;
-          // Estimate total pages (each API call returns ~100 results, we fetch 10 per page)
-          if (totalFound > 0) {
-            estimatedTotalPages = Math.ceil(Math.min(totalFound, MAX_RESULTS_TO_FETCH) / RESULTS_PER_PAGE);
-            // Update state with total pages now that we know it
-            setSearchState(prev => ({ ...prev, isSearching: true, currentPage: page, totalPages: estimatedTotalPages }));
+      if (!startResponse.job_id) {
+        throw new Error('No job_id returned from async search');
+      }
+      
+      const jobId = startResponse.job_id;
+      setSearchState({ isSearching: true, currentPage: 0, totalPages: null, jobId });
+      setSearchStartTime(startTimestamp);
+      
+      console.log(`✅ Async search started with job_id: ${jobId}`);
+      
+      // Clear any existing polling interval
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+      
+      // Poll for job status
+      pollingIntervalRef.current = setInterval(async () => {
+        // Check if search was stopped
+        if (currentSearchIdRef.current !== searchId || !shouldContinueSearchRef.current) {
+          console.log(`🛑 Stopping poll for job ${jobId} - search ${searchId} was stopped`);
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
           }
-          console.log(`📊 First page response: ${result.results?.length || 0} results, total: ${totalFound}`);
+          return;
         }
         
-        if (result?.success && result.results && result.results.length > 0) {
-          // Double-check search is still active before updating state
-          if (currentSearchIdRef.current !== searchId) {
-            console.log(`🛑 Ignoring results update for page ${page} - search ${searchId} is no longer active`);
-            break;
+        try {
+          const jobStatus = await secSearchAPI.getJobStatus(jobId);
+          
+          if (!jobStatus) {
+            console.warn(`⚠️ No status found for job ${jobId}`);
+            return;
           }
           
-          allResults.push(...result.results);
-          totalFound = result.total_found || allResults.length;
-          console.log(`✅ Page ${page} fetched: ${result.results.length} results (total so far: ${allResults.length}/${totalFound})`);
-          
-          // Check if we've fetched all results or reached limit
-          if (allResults.length >= totalFound || 
-              result.results.length < RESULTS_PER_PAGE ||
-              allResults.length >= MAX_RESULTS_TO_FETCH) {
-            hasMore = false;
-            console.log(`🏁 Finished fetching: ${allResults.length} total results`);
-          } else {
-            page++;
+          // Update progress from backend
+          if (jobStatus.progress) {
+            setSearchState({
+              isSearching: true,
+              currentPage: jobStatus.progress.current_page || 0,
+              totalPages: jobStatus.progress.total_pages || null,
+              jobId
+            });
           }
-        } else {
-          console.log(`⚠️ Page ${page} returned no results or failed`);
-          hasMore = false;
+          
+          // Check if job is complete
+          if (jobStatus.status === 'COMPLETED') {
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            
+            // Check if search is still active
+            if (currentSearchIdRef.current !== searchId) {
+              console.log(`🛑 Job ${jobId} completed but search ${searchId} was stopped - ignoring results`);
+              return;
+            }
+            
+            // Get results from job_status
+            let results: SECSearchResult[] = [];
+            if (jobStatus.results?.results) {
+              results = jobStatus.results.results;
+            } else if (jobStatus.results_s3_key) {
+              // TODO: Fetch from S3 if needed (for now, results should be in DynamoDB)
+              console.warn(`Results stored in S3: ${jobStatus.results_s3_key} - need to fetch`);
+            }
+            
+            // Set filter metadata
+            if (jobStatus.results?.form_filters || jobStatus.results?.entity_filters) {
+              setAvailableFilters({
+                form_filters: jobStatus.results.form_filters || [],
+                entity_filters: jobStatus.results.entity_filters || [],
+                location_filters: jobStatus.results.location_filters || [],
+                incorporation_filters: jobStatus.results.incorporation_filters || [],
+              });
+            } else if (results.length > 0) {
+              // Compute filters from results
+              const computedFilters = computeFiltersFromResults(results);
+              setAvailableFilters(computedFilters);
+            }
+            
+            // Set results
+            setIsFiltered(false);
+            setCurrentPage(1);
+            setAllSearchResults(results);
+            setTotalFound(jobStatus.progress?.total_found || results.length);
+            
+            console.log(`💾 Stored ${results.length} results from completed job ${jobId}`);
+            
+            // Clear search state
+            setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+            setSearchStartTime(null);
+          } else if (jobStatus.status === 'FAILED') {
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            console.error(`❌ Job ${jobId} failed: ${jobStatus.error}`);
+            setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+            setSearchStartTime(null);
+            setAllSearchResults([]);
+            setCurrentResults([]);
+            setTotalFound(0);
+          } else if (jobStatus.status === 'CANCELLED') {
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            console.log(`🛑 Job ${jobId} was cancelled`);
+            setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+            setSearchStartTime(null);
+          }
+        } catch (error) {
+          console.error(`❌ Error polling job status for ${jobId}:`, error);
         }
-      }
+      }, 2000); // Poll every 2 seconds
       
-      // Only update UI if this search is still the active one
-      if (currentSearchIdRef.current !== searchId) {
-        console.log(`🛑 Search ${searchId} was stopped - not updating UI with results`);
-        return;
-      }
-      
-      // Set filter metadata from API response or compute from results
-      if (firstResponse?.form_filters || firstResponse?.entity_filters || 
-          firstResponse?.location_filters || firstResponse?.incorporation_filters) {
-        // Use API-provided filters
-        setAvailableFilters({
-          form_filters: firstResponse.form_filters,
-          entity_filters: firstResponse.entity_filters,
-          location_filters: firstResponse.location_filters,
-          incorporation_filters: firstResponse.incorporation_filters,
-        });
-      } else {
-        // Compute filters from results
-        const computedFilters = computeFiltersFromResults(allResults);
-        setAvailableFilters(computedFilters);
-      }
-      
-      // Set all results - this will trigger the useEffect to paginate and display
-      // Reset state first
-      setIsFiltered(false);
-      setCurrentPage(1);
-      // Then set results - this triggers the useEffect
-      setAllSearchResults(allResults);
-      
-      console.log(`💾 Stored ${allResults.length} results in allSearchResults`);
-      
-      // If no results, still show the status (don't clear everything)
-      if (allResults.length === 0) {
-        console.log('⚠️ No results found for search, but keeping search state');
-        setCurrentResults([]);
-        setTotalFound(0);
-      }
     } catch (error) {
-      console.error('❌ Error fetching all results:', error);
+      console.error('❌ Error starting async search:', error);
+      setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+      setSearchStartTime(null);
       setAllSearchResults([]);
       setCurrentResults([]);
       setTotalFound(0);
       setAvailableFilters({});
-      // Fallback to single page using hook
-      await executeSearch(params);
-    } finally {
-      // Only clear searching state if we completed normally (not stopped by user)
-      if (shouldContinueSearchRef.current) {
-        setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-        setSearchStartTime(null);
-        console.log('🏁 Search completed - clearing search state');
-      } else {
-        // User stopped the search - state already cleared in handleStopSearch
-        console.log('🛑 Search stopped by user - frontend listener disabled, backend continues');
-      }
     }
   };
   
@@ -1353,22 +1359,37 @@ const SECSearchPage: React.FC = () => {
   }, [selectedFilters, allSearchResults, currentPage]);
 
   const handleStopSearch = () => {
-    // Stop the frontend listener - set flag to stop fetching more pages
+    // Stop the frontend listener - set flag to stop polling
     shouldContinueSearchRef.current = false;
+    
+    // Clear polling interval
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
     
     // Invalidate the current search ID so any in-flight requests are ignored
     currentSearchIdRef.current = null;
     
     // Clear frontend search state (stops showing progress, allows new search)
-    setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
-    setSearchStartTime(null);
-    
     // Note: We don't clear allSearchResults or currentResults here
     // This allows user to see partial results if they want, or start a new search
     // The backend will continue running and save results to cache for future searches
+    setSearchState({ isSearching: false, currentPage: 0, totalPages: null, jobId: null });
+    setSearchStartTime(null);
     
     console.log('🛑 Stopped frontend search listener - backend continues in background');
   };
+  
+  // Cleanup polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   const handleSearch = async (page: number = 1, applyFilters: boolean = false) => {
     // If applying filters and we have stored results, just update pagination

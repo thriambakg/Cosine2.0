@@ -1863,9 +1863,6 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         else:
             body = event.get('queryStringParameters') or {}
         
-        # Check if async mode is requested
-        async_mode = body.get('async', False)
-        
         # Extract search parameters
         search_params = {
             'cik': body.get('cik'),
@@ -1885,47 +1882,24 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         # Remove None values
         search_params = {k: v for k, v in search_params.items() if v is not None}
         
-        # If async mode, create job and return job_id
-        if async_mode:
-            job_id = create_job(search_params)
-            invoke_async_search(job_id, search_params)
-            
-            return {
-                'statusCode': 202,  # Accepted
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
-                },
-                'body': json.dumps({
-                    'success': True,
-                    'job_id': job_id,
-                    'status': 'PENDING',
-                    'message': 'Search started asynchronously'
-                })
-            }
-        
-        # Sync mode - extract page number (default to 1)
-        page = body.get('page', 1)
-        try:
-            page = int(page)
-            if page < 1:
-                page = 1
-        except (ValueError, TypeError):
-            page = 1
-        
-        result = search_by_search_index_api(search_params, page=page)
+        # Always use async mode - create job and return job_id immediately
+        job_id = create_job(search_params)
+        invoke_async_search(job_id, search_params)
         
         return {
-            'statusCode': 200 if result.get('success') else 500,
+            'statusCode': 202,  # Accepted
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Headers': 'Content-Type',
                 'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
             },
-            'body': json.dumps(result)
+            'body': json.dumps({
+                'success': True,
+                'job_id': job_id,
+                'status': 'PENDING',
+                'message': 'Search started asynchronously'
+            })
         }
     except Exception as e:
         logger.error(f"Error in handle_search: {e}")
