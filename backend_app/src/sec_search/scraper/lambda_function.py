@@ -21,6 +21,12 @@ from async_job_handler import (
     get_job_status, invoke_async_search, cancel_job, is_job_cancelled
 )
 
+# Import query cache helper
+from query_cache import (
+    generate_query_hash, get_cached_query_with_validation,
+    store_cached_query, update_cached_query_results
+)
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -1882,8 +1888,37 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         # Remove None values
         search_params = {k: v for k, v in search_params.items() if v is not None}
         
-        # Always use async mode - create job and return job_id immediately
+        # Check query cache first
+        query_hash = generate_query_hash(search_params)
+        cached_query = get_cached_query_with_validation(query_hash)
+        
+        if cached_query:
+            # Cache hit - return existing job_id
+            logger.info(f"Query cache hit for hash {query_hash}, returning existing job_id {cached_query['job_id']}")
+            return {
+                'statusCode': 202,  # Accepted
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
+                },
+                'body': json.dumps({
+                    'success': True,
+                    'job_id': cached_query['job_id'],
+                    'status': 'COMPLETED',  # Cached results are already complete
+                    'message': 'Search results retrieved from cache',
+                    'cached': True
+                })
+            }
+        
+        # Cache miss - create new job
+        logger.info(f"Query cache miss for hash {query_hash}, creating new job")
         job_id = create_job(search_params)
+        
+        # Store in query cache
+        store_cached_query(query_hash, job_id, search_params)
+        
         invoke_async_search(job_id, search_params)
         
         return {
@@ -1958,6 +1993,115 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Error in handle_job_status: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': str(e)
+            })
+        }
+
+
+def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle requests to fetch results from S3"""
+    try:
+        query_params = event.get('queryStringParameters') or {}
+        job_id = query_params.get('job_id')
+        s3_key = query_params.get('s3_key')
+        
+        if not job_id and not s3_key:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'job_id or s3_key parameter required'
+                })
+            }
+        
+        # If job_id provided, get S3 key from job status
+        if job_id and not s3_key:
+            job_status = get_job_status(job_id)
+            if not job_status:
+                return {
+                    'statusCode': 404,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    'body': json.dumps({
+                        'error': 'Job not found'
+                    })
+                }
+            s3_key = job_status.get('results_s3_key')
+            if not s3_key:
+                return {
+                    'statusCode': 404,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    'body': json.dumps({
+                        'error': 'Results not found in S3'
+                    })
+                }
+        
+        # Fetch from S3
+        if not s3_client:
+            return {
+                'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'S3 client not configured'
+                })
+            }
+        
+        try:
+            response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+            results_json = response['Body'].read().decode('utf-8')
+            results = json.loads(results_json)
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps(results)
+            }
+        except s3_client.exceptions.NoSuchKey:
+            return {
+                'statusCode': 404,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'Results file not found in S3'
+                })
+            }
+        except Exception as e:
+            logger.error(f"Error fetching results from S3: {e}")
+            return {
+                'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': str(e)
+                })
+            }
+    except Exception as e:
+        logger.error(f"Error in handle_fetch_results: {e}")
         return {
             'statusCode': 500,
             'headers': {
@@ -2133,6 +2277,21 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
                 'incorporation_filters': result.get('incorporation_filters', [])
             }
             complete_job(job_id, final_result)
+            
+            # Update query cache with results
+            # Get job status to find results_s3_key (set by complete_job if results >200KB)
+            job_status = get_job_status(job_id)
+            if job_status:
+                query_hash = generate_query_hash(search_params)
+                results_s3_key = job_status.get('results_s3_key')
+                if results_s3_key:
+                    update_cached_query_results(query_hash, results_s3_key, total_found, len(all_results))
+                else:
+                    # Results are inline, update cache without S3 key
+                    store_cached_query(query_hash, job_id, search_params, 
+                                     results_s3_key=None, total_found=total_found, 
+                                     results_count=len(all_results))
+            
             logger.info(f"Completed async search for job {job_id}: {len(all_results)} results")
         
     except Exception as e:
@@ -2171,6 +2330,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Job status endpoint: /sec-search-status (GET)
         elif 'sec-search-status' in path and http_method == 'GET':
             return handle_job_status(event)
+        # Results fetch endpoint: /sec-search-results (GET) - fetch results from S3
+        elif 'sec-search-results' in path and http_method == 'GET':
+            return handle_fetch_results(event)
         # Search endpoint: /sec-search (POST)
         elif 'sec-search' in path and 'autocomplete' not in path:
             return handle_search(event)

@@ -77,13 +77,9 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => {
 const DEFAULT_COLUMNS = [
   'Form & File',
   'Filed',
-  'Reporting for',
   'Filing entity/person',
   'CIK',
   'Located',
-  'Incorporated',
-  'File number',
-  'Film number',
 ];
 
 // SEC Form Categories (from SEC website)
@@ -1112,8 +1108,20 @@ const SECSearchPage: React.FC = () => {
             if (jobStatus.results?.results) {
               results = jobStatus.results.results;
             } else if (jobStatus.results_s3_key) {
-              // TODO: Fetch from S3 if needed (for now, results should be in DynamoDB)
-              console.warn(`Results stored in S3: ${jobStatus.results_s3_key} - need to fetch`);
+              // Fetch from S3
+              console.log(`Results stored in S3: ${jobStatus.results_s3_key} - fetching...`);
+              try {
+                const s3Results = await secSearchAPI.fetchResultsFromS3(jobId, jobStatus.results_s3_key);
+                if (s3Results.results) {
+                  results = s3Results.results;
+                  console.log(`✅ Fetched ${results.length} results from S3`);
+                } else {
+                  console.warn(`⚠️ No results in S3 response`);
+                }
+              } catch (error) {
+                console.error(`❌ Error fetching results from S3: ${error}`);
+                // Continue with empty results - user can retry
+              }
             }
             
             // Set filter metadata
@@ -1457,20 +1465,12 @@ const SECSearchPage: React.FC = () => {
         return result.form || 'N/A';
       case 'Filed':
         return result.filingDate || 'N/A';
-      case 'Reporting for':
-        return result.reportingFor || 'N/A';
       case 'Filing entity/person':
         return result.filingEntity || 'N/A';
       case 'CIK':
         return result.cik || 'N/A';
       case 'Located':
         return result.located || 'N/A';
-      case 'Incorporated':
-        return result.incorporated || 'N/A';
-      case 'File number':
-        return result.fileNumber || 'N/A';
-      case 'Film number':
-        return result.filmNumber || 'N/A';
       default:
         return 'N/A';
     }
@@ -1682,6 +1682,10 @@ const SECSearchPage: React.FC = () => {
                   value={searchParams.dateFrom || ''}
                   onChange={(e) => setSearchParams(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
                   InputLabelProps={{ shrink: true }}
+                  inputProps={{
+                    min: '2001-01-01',
+                    max: new Date().toISOString().split('T')[0],
+                  }}
                   variant="outlined"
                   sx={{
                     flex: 1,
@@ -1700,6 +1704,10 @@ const SECSearchPage: React.FC = () => {
                   value={searchParams.dateTo || ''}
                   onChange={(e) => setSearchParams(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
                   InputLabelProps={{ shrink: true }}
+                  inputProps={{
+                    min: '2001-01-01',
+                    max: new Date().toISOString().split('T')[0],
+                  }}
                   variant="outlined"
                   sx={{
                     flex: 1,
@@ -1736,23 +1744,6 @@ const SECSearchPage: React.FC = () => {
           {/* Advanced Filters */}
           <Collapse in={showAdvanced}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px', mt: 2 }}>
-              <TextField
-                label="Reporting for"
-                value={searchParams.reportingFor || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, reportingFor: e.target.value || undefined }))}
-                variant="outlined"
-                size="small"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
-              />
-              
               {/* Located - Dropdown */}
               <FormControl 
                 variant="outlined" 
@@ -1787,55 +1778,6 @@ const SECSearchPage: React.FC = () => {
                   ))}
                 </Select>
               </FormControl>
-
-              <TextField
-                label="Incorporated"
-                value={searchParams.incorporated || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, incorporated: e.target.value || undefined }))}
-                variant="outlined"
-                size="small"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
-              />
-              <TextField
-                label="File number"
-                value={searchParams.fileNumber || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, fileNumber: e.target.value || undefined }))}
-                variant="outlined"
-                size="small"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
-              />
-              <TextField
-                label="Film number"
-                value={searchParams.filmNumber || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, filmNumber: e.target.value || undefined }))}
-                variant="outlined"
-                size="small"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
-              />
             </Box>
           </Collapse>
 
@@ -2913,9 +2855,6 @@ const SECSearchPage: React.FC = () => {
                       {shouldShowColumn('Filed') && (
                         <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Filed</TableCell>
                       )}
-                      {shouldShowColumn('Reporting for') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Reporting for</TableCell>
-                      )}
                       {shouldShowColumn('Filing entity/person') && (
                         <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Filing entity/person</TableCell>
                       )}
@@ -2924,15 +2863,6 @@ const SECSearchPage: React.FC = () => {
                       )}
                       {shouldShowColumn('Located') && (
                         <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Located</TableCell>
-                      )}
-                      {shouldShowColumn('Incorporated') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Incorporated</TableCell>
-                      )}
-                      {shouldShowColumn('File number') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>File number</TableCell>
-                      )}
-                      {shouldShowColumn('Film number') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Film number</TableCell>
                       )}
                       <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Actions</TableCell>
                     </TableRow>
@@ -2957,15 +2887,6 @@ const SECSearchPage: React.FC = () => {
                         )}
                         {shouldShowColumn('Located') && (
                           <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Located')}</TableCell>
-                        )}
-                        {shouldShowColumn('Incorporated') && (
-                          <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Incorporated')}</TableCell>
-                        )}
-                        {shouldShowColumn('File number') && (
-                          <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'File number')}</TableCell>
-                        )}
-                        {shouldShowColumn('Film number') && (
-                          <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Film number')}</TableCell>
                         )}
                         <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>
                           <Button

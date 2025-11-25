@@ -170,6 +170,9 @@ module "api_gateway" {
     sec_search_cancel = {
       path_part = "sec-search-cancel"
     }
+    sec_search_results = {
+      path_part = "sec-search-results"
+    }
   }
 
   # Methods configuration
@@ -419,6 +422,15 @@ module "api_gateway" {
       lambda_arn              = module.sec_search_lambda.function_arn
       request_parameters      = {}
     }
+    # GET method for SEC search results (fetch from S3)
+    sec_search_results_get = {
+      resource_key            = "sec_search_results"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.sec_search_lambda.function_arn
+      request_parameters      = {}
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -564,6 +576,11 @@ module "api_gateway" {
       function_arn  = module.sec_search_lambda.function_arn
       http_method   = "POST"
       resource_path = "sec-search-cancel"
+    }
+    sec_search_results_get = {
+      function_arn  = module.sec_search_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "sec-search-results"
     }
   }
 
@@ -2056,6 +2073,7 @@ module "sec_search_lambda" {
     LOG_LEVEL                         = var.environment == "development" ? "DEBUG" : "INFO"
     MAX_RESULTS                       = "10"
     SEC_FILINGS_CACHE_TABLE           = data.terraform_remote_state.base_infra.outputs.sec_filings_table_name
+    SEC_SEARCH_QUERY_CACHE_TABLE      = data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_name
     SEC_FILINGS_S3_BUCKET             = "cosine-sec-filings-${var.environment}"
     SEC_SEARCH_PROGRESS_SNS_TOPIC_ARN = module.sec_search_progress_sns.topic_arn
   }
@@ -2066,10 +2084,11 @@ module "sec_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, KMS for S3 encryption, SNS for progress updates, and Lambda self-invocation for async jobs
+  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, KMS for S3 encryption, SNS for progress updates, Lambda self-invocation for async jobs, and query cache table access
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
     data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
+    data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_policy_arn,
     aws_iam_policy.sec_search_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_sns_publish_policy_restricted.arn,

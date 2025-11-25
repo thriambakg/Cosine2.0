@@ -880,6 +880,17 @@ export const secSearchAPI = {
       body: JSON.stringify({ job_id }),
     });
   },
+
+  // Fetch results from S3
+  fetchResultsFromS3: async (job_id: string, s3_key?: string): Promise<SECSearchResponse> => {
+    const params = new URLSearchParams({ job_id });
+    if (s3_key) {
+      params.append('s3_key', s3_key);
+    }
+    return apiRequest<SECSearchResponse>(`/sec-search-results?${params.toString()}`, {
+      method: 'GET',
+    });
+  },
 };
 
 // Session Management API
