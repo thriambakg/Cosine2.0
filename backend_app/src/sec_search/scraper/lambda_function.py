@@ -339,16 +339,16 @@ def scrape_filing_page_for_data_files(filing_page_url: str) -> List[str]:
         return []
 
 
-def scrape_xbrl_data(filing_page_url: str) -> Optional[str]:
+def download_xbrl_zip(filing_page_url: str) -> Optional[bytes]:
     """
-    Scrape XBRL/Interactive Data from SEC filing page.
-    The viewer page uses JavaScript to load content dynamically, so we fetch the report file directly (R1.htm).
+    Download XBRL ZIP file from SEC filing page.
+    This is the preferred method as it provides the complete structured XBRL package.
     
     Args:
         filing_page_url: URL to the SEC filing index page (e.g., .../0001404912-25-000040-index.htm)
     
     Returns:
-        XBRL table HTML content as string, or None if not available or error
+        XBRL ZIP file content as bytes, or None if not available or error
     """
     session = create_session()
     
@@ -375,80 +375,78 @@ def scrape_xbrl_data(filing_page_url: str) -> Optional[str]:
         
         # Accession directory is the part after CIK (before the filename)
         accession_dir = None
+        accession = None
         if data_index + 2 < len(url_parts):
             dir_name = url_parts[data_index + 2]
             if dir_name and not dir_name.endswith('.htm'):
                 accession_dir = dir_name
+                # Try to extract accession number from directory name or filename
+                # Directory format: 000140491225000040 (no dashes)
+                # Accession format: 0001404912-25-000040 (with dashes)
+                if len(dir_name) >= 18:
+                    # Try to construct accession from directory: 000140491225000040 -> 0001404912-25-000040
+                    # Format: 10 digits + 2 digits + 6 digits
+                    try:
+                        accession = f"{dir_name[:10]}-{dir_name[10:12]}-{dir_name[12:]}"
+                    except:
+                        accession = dir_name
+        
+        # Also try to extract from filename if available
+        if not accession and data_index + 3 < len(url_parts):
+            filename = url_parts[data_index + 3]
+            if filename.endswith('-index.htm') or filename.endswith('-index.html'):
+                accession = filename.replace('-index.htm', '').replace('-index.html', '')
         
         if not cik or not accession_dir:
             logger.warning(f"Could not extract CIK or accession directory from URL: {filing_page_url} (CIK: {cik}, dir: {accession_dir})")
             return None
         
         # Construct base URL for the filing directory
-        # The viewer page JavaScript loads reports from URLs like:
-        # /Archives/edgar/data/1404912/000140491225000040/R1.htm
         base_url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik}/{accession_dir}"
         
-        # Try to fetch the report file directly (R1.htm is the most common)
-        # The XBRL table is in the report file, not the viewer page
-        report_urls = [
-            f"{base_url}/R1.htm",  # Most common report file
-            f"{base_url}/R2.htm",  # Sometimes there are multiple reports
-            f"{base_url}/R3.htm",
-        ]
+        # Try different possible ZIP file locations
+        zip_urls = []
+        if accession:
+            zip_urls.append(f"{base_url}/{accession}-xbrl.zip")  # Most common format: {accession}-xbrl.zip
+        zip_urls.append(f"{base_url}/{accession_dir}-xbrl.zip")  # Alternative: {dir}-xbrl.zip
+        zip_urls.append(f"{base_url}/xbrl.zip")  # Simple format
         
-        xbrl_table_html = None
-        
-        # Try each report URL until we find one with the XBRL table
-        for report_url in report_urls:
+        # Try each ZIP URL until we find one
+        for zip_url in zip_urls:
             try:
-                logger.info(f"Trying to fetch XBRL report from: {report_url}")
+                logger.info(f"Trying to download XBRL ZIP from: {zip_url}")
                 time.sleep(0.1)  # Rate limiting
-                response = session.get(report_url, timeout=30)
+                response = session.get(zip_url, timeout=30, stream=True)
                 
                 if response.status_code == 200:
-                    html_text = response.text
+                    content_type = response.headers.get('Content-Type', '')
+                    content_length = response.headers.get('Content-Length', 'unknown')
                     
-                    # Find the XBRL table - look for table with class "report" and id="id2"
-                    # The table contains the XBRL data (e.g., <table class="report" border="0" cellspacing="2" id="id2">)
-                    # Use a more robust pattern that handles the full table including tbody and all rows
-                    xbrl_table_pattern = r'<table[^>]*class="report"[^>]*id="id2"[^>]*>.*?</table>'
-                    match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
-                    
-                    if not match:
-                        # Try alternative pattern - look for table with class "report" (without id requirement)
-                        xbrl_table_pattern = r'<table[^>]*class="report"[^>]*>.*?</table>'
-                        match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
-                    
-                    # If still no match, try to find the table by looking for the specific structure
-                    # (table with tbody containing rows with class "re", "ro", "rh")
-                    if not match:
-                        xbrl_table_pattern = r'<table[^>]*class="report"[^>]*>\s*<tbody>.*?</tbody>\s*</table>'
-                        match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
-                    
-                    if match:
-                        xbrl_table_html = match.group(0)
-                        logger.info(f"Successfully extracted XBRL table from {report_url} ({len(xbrl_table_html)} bytes)")
-                        break
+                    # Check if it's actually a ZIP file
+                    if 'zip' in content_type.lower() or zip_url.endswith('.zip'):
+                        # Read the entire ZIP file content
+                        zip_content = response.content
+                        logger.info(f"Successfully downloaded XBRL ZIP from {zip_url} ({len(zip_content):,} bytes, Content-Type: {content_type})")
+                        return zip_content
+                    else:
+                        logger.debug(f"Unexpected content type {content_type} for {zip_url}, trying next URL...")
+                        continue
                 elif response.status_code == 404:
-                    logger.debug(f"Report file not found: {report_url}")
+                    logger.debug(f"ZIP file not found: {zip_url}")
                     continue
                 else:
-                    logger.warning(f"Unexpected status code {response.status_code} for {report_url}")
+                    logger.warning(f"Unexpected status code {response.status_code} for {zip_url}")
                     continue
                     
             except Exception as e:
-                logger.debug(f"Error fetching report {report_url}: {e}")
+                logger.debug(f"Error fetching ZIP {zip_url}: {e}")
                 continue
         
-        if xbrl_table_html:
-            return xbrl_table_html
-        else:
-            logger.warning(f"XBRL table not found in any report files for {filing_page_url}")
-            return None
+        logger.warning(f"XBRL ZIP file not found for {filing_page_url}")
+        return None
             
     except Exception as e:
-        logger.error(f"Error scraping XBRL data from {filing_page_url}: {e}")
+        logger.error(f"Error downloading XBRL ZIP from {filing_page_url}: {e}")
         return None
 
 
@@ -1165,10 +1163,39 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
             logger.error(f"Error downloading data file {data_file_url}: {e}")
             continue
     
+    # Download XBRL ZIP file if requested and filing page URL is provided
+    if download_xbrl and filing_page_url:
+        try:
+            logger.info(f"Attempting to download XBRL ZIP file for filing_id: {filing_id}")
+            xbrl_zip_content = download_xbrl_zip(filing_page_url)
+            
+            if xbrl_zip_content:
+                # Generate unique filename for ZIP file
+                unique_id = str(uuid.uuid4())[:8]
+                zip_filename = f"xbrl_{unique_id}.zip"
+                
+                # Upload to S3 in xbrl/ subfolder
+                xbrl_s3_key = f"filings/{filing_id}/xbrl/{zip_filename}"
+                s3_client.put_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=xbrl_s3_key,
+                    Body=xbrl_zip_content,
+                    ContentType='application/zip'
+                )
+                
+                result['xbrlS3Key'] = xbrl_s3_key
+                result['success'] = True
+                logger.info(f"Successfully downloaded XBRL ZIP file to {xbrl_s3_key} (size: {len(xbrl_zip_content):,} bytes)")
+            else:
+                logger.info(f"No XBRL ZIP file available for filing_id: {filing_id}")
+        except Exception as e:
+            logger.error(f"Error downloading XBRL ZIP file for {filing_id}: {e}")
+            # Don't fail the entire download if XBRL download fails
+    
     if result['success']:
         logger.info(f"Successfully downloaded {len(result['documentS3Keys'])} document(s) and {len(result['dataFileS3Keys'])} data file(s) for filing_id: {filing_id}")
         if result.get('xbrlS3Key'):
-            logger.info(f"XBRL data downloaded to: {result['xbrlS3Key']}")
+            logger.info(f"XBRL ZIP file downloaded to: {result['xbrlS3Key']}")
     else:
         logger.warning(f"No files were successfully downloaded for filing_id: {filing_id}")
     
