@@ -342,7 +342,7 @@ def scrape_filing_page_for_data_files(filing_page_url: str) -> List[str]:
 def scrape_xbrl_data(filing_page_url: str) -> Optional[str]:
     """
     Scrape XBRL/Interactive Data from SEC filing page.
-    Constructs the XBRL viewer URL and extracts the XBRL table HTML.
+    The viewer page uses JavaScript to load content dynamically, so we fetch the report file directly (R1.htm).
     
     Args:
         filing_page_url: URL to the SEC filing index page (e.g., .../0001404912-25-000040-index.htm)
@@ -353,11 +353,7 @@ def scrape_xbrl_data(filing_page_url: str) -> Optional[str]:
     session = create_session()
     
     try:
-        # Extract CIK and accession number from filing page URL
-        # URL format: https://www.sec.gov/Archives/edgar/data/{CIK}/{accession}-index.htm
-        # Example: https://www.sec.gov/Archives/edgar/data/1404912/0001404912-25-000040/0001404912-25-000040-index.htm
-        
-        # Extract CIK and accession from URL
+        # Extract CIK and accession directory from URL
         # URL format: https://www.sec.gov/Archives/edgar/data/{CIK}/{accession-dir}/{accession}-index.htm
         # Example: https://www.sec.gov/Archives/edgar/data/1404912/0001404912-25-000040/0001404912-25-000040-index.htm
         
@@ -377,59 +373,78 @@ def scrape_xbrl_data(filing_page_url: str) -> Optional[str]:
         # CIK is the part after 'data'
         cik = url_parts[data_index + 1]
         
-        # Accession is in the directory name (the part after CIK, before the filename)
-        # Or we can extract it from the filename itself
-        accession = None
+        # Accession directory is the part after CIK (before the filename)
+        accession_dir = None
         if data_index + 2 < len(url_parts):
-            # Try directory name first
             dir_name = url_parts[data_index + 2]
             if dir_name and not dir_name.endswith('.htm'):
-                accession = dir_name
-            elif data_index + 3 < len(url_parts):
-                # Try filename
-                filename = url_parts[data_index + 3]
-                if filename.endswith('-index.htm'):
-                    accession = filename.replace('-index.htm', '')
+                accession_dir = dir_name
         
-        # If still no accession, try to extract from any part that looks like an accession
-        if not accession:
-            for part in url_parts:
-                if part and len(part) > 10 and part.replace('-', '').isdigit():
-                    # Looks like an accession number (e.g., "0001404912-25-000040")
-                    accession = part
-                    break
-        
-        if not cik or not accession:
-            logger.warning(f"Could not extract CIK or accession from URL: {filing_page_url} (CIK: {cik}, accession: {accession})")
+        if not cik or not accession_dir:
+            logger.warning(f"Could not extract CIK or accession directory from URL: {filing_page_url} (CIK: {cik}, dir: {accession_dir})")
             return None
         
-        # Construct XBRL viewer URL
-        # Format: https://www.sec.gov/cgi-bin/viewer?action=view&cik={cik}&accession_number={accession}&xbrl_type=v
-        xbrl_viewer_url = f"{SEC_BASE_URL}/cgi-bin/viewer?action=view&cik={cik}&accession_number={accession}&xbrl_type=v"
+        # Construct base URL for the filing directory
+        # The viewer page JavaScript loads reports from URLs like:
+        # /Archives/edgar/data/1404912/000140491225000040/R1.htm
+        base_url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik}/{accession_dir}"
         
-        logger.info(f"Fetching XBRL data from: {xbrl_viewer_url}")
-        time.sleep(0.1)  # Rate limiting
-        response = session.get(xbrl_viewer_url, timeout=30)
-        response.raise_for_status()
+        # Try to fetch the report file directly (R1.htm is the most common)
+        # The XBRL table is in the report file, not the viewer page
+        report_urls = [
+            f"{base_url}/R1.htm",  # Most common report file
+            f"{base_url}/R2.htm",  # Sometimes there are multiple reports
+            f"{base_url}/R3.htm",
+        ]
         
-        html_text = response.text
+        xbrl_table_html = None
         
-        # Find the XBRL table - look for table with class "report" and id "id2"
-        # The table contains the XBRL data
-        xbrl_table_pattern = r'<table[^>]*class="report"[^>]*id="id2"[^>]*>.*?</table>'
-        match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
+        # Try each report URL until we find one with the XBRL table
+        for report_url in report_urls:
+            try:
+                logger.info(f"Trying to fetch XBRL report from: {report_url}")
+                time.sleep(0.1)  # Rate limiting
+                response = session.get(report_url, timeout=30)
+                
+                if response.status_code == 200:
+                    html_text = response.text
+                    
+                    # Find the XBRL table - look for table with class "report" and id="id2"
+                    # The table contains the XBRL data (e.g., <table class="report" border="0" cellspacing="2" id="id2">)
+                    # Use a more robust pattern that handles the full table including tbody and all rows
+                    xbrl_table_pattern = r'<table[^>]*class="report"[^>]*id="id2"[^>]*>.*?</table>'
+                    match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
+                    
+                    if not match:
+                        # Try alternative pattern - look for table with class "report" (without id requirement)
+                        xbrl_table_pattern = r'<table[^>]*class="report"[^>]*>.*?</table>'
+                        match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
+                    
+                    # If still no match, try to find the table by looking for the specific structure
+                    # (table with tbody containing rows with class "re", "ro", "rh")
+                    if not match:
+                        xbrl_table_pattern = r'<table[^>]*class="report"[^>]*>\s*<tbody>.*?</tbody>\s*</table>'
+                        match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
+                    
+                    if match:
+                        xbrl_table_html = match.group(0)
+                        logger.info(f"Successfully extracted XBRL table from {report_url} ({len(xbrl_table_html)} bytes)")
+                        break
+                elif response.status_code == 404:
+                    logger.debug(f"Report file not found: {report_url}")
+                    continue
+                else:
+                    logger.warning(f"Unexpected status code {response.status_code} for {report_url}")
+                    continue
+                    
+            except Exception as e:
+                logger.debug(f"Error fetching report {report_url}: {e}")
+                continue
         
-        if not match:
-            # Try alternative pattern - just look for table with class "report"
-            xbrl_table_pattern = r'<table[^>]*class="report"[^>]*>.*?</table>'
-            match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
-        
-        if match:
-            xbrl_table_html = match.group(0)
-            logger.info(f"Successfully extracted XBRL table ({len(xbrl_table_html)} bytes)")
+        if xbrl_table_html:
             return xbrl_table_html
         else:
-            logger.warning(f"XBRL table not found in viewer page for {filing_page_url}")
+            logger.warning(f"XBRL table not found in any report files for {filing_page_url}")
             return None
             
     except Exception as e:
