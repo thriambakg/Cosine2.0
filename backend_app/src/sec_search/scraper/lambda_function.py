@@ -339,6 +339,104 @@ def scrape_filing_page_for_data_files(filing_page_url: str) -> List[str]:
         return []
 
 
+def scrape_xbrl_data(filing_page_url: str) -> Optional[str]:
+    """
+    Scrape XBRL/Interactive Data from SEC filing page.
+    Constructs the XBRL viewer URL and extracts the XBRL table HTML.
+    
+    Args:
+        filing_page_url: URL to the SEC filing index page (e.g., .../0001404912-25-000040-index.htm)
+    
+    Returns:
+        XBRL table HTML content as string, or None if not available or error
+    """
+    session = create_session()
+    
+    try:
+        # Extract CIK and accession number from filing page URL
+        # URL format: https://www.sec.gov/Archives/edgar/data/{CIK}/{accession}-index.htm
+        # Example: https://www.sec.gov/Archives/edgar/data/1404912/0001404912-25-000040/0001404912-25-000040-index.htm
+        
+        # Extract CIK and accession from URL
+        # URL format: https://www.sec.gov/Archives/edgar/data/{CIK}/{accession-dir}/{accession}-index.htm
+        # Example: https://www.sec.gov/Archives/edgar/data/1404912/0001404912-25-000040/0001404912-25-000040-index.htm
+        
+        url_parts = filing_page_url.split('/')
+        
+        # Find the index of 'data' in the URL path
+        data_index = -1
+        for i, part in enumerate(url_parts):
+            if part == 'data':
+                data_index = i
+                break
+        
+        if data_index == -1 or data_index + 1 >= len(url_parts):
+            logger.warning(f"Cannot find 'data' in filing page URL: {filing_page_url}")
+            return None
+        
+        # CIK is the part after 'data'
+        cik = url_parts[data_index + 1]
+        
+        # Accession is in the directory name (the part after CIK, before the filename)
+        # Or we can extract it from the filename itself
+        accession = None
+        if data_index + 2 < len(url_parts):
+            # Try directory name first
+            dir_name = url_parts[data_index + 2]
+            if dir_name and not dir_name.endswith('.htm'):
+                accession = dir_name
+            elif data_index + 3 < len(url_parts):
+                # Try filename
+                filename = url_parts[data_index + 3]
+                if filename.endswith('-index.htm'):
+                    accession = filename.replace('-index.htm', '')
+        
+        # If still no accession, try to extract from any part that looks like an accession
+        if not accession:
+            for part in url_parts:
+                if part and len(part) > 10 and part.replace('-', '').isdigit():
+                    # Looks like an accession number (e.g., "0001404912-25-000040")
+                    accession = part
+                    break
+        
+        if not cik or not accession:
+            logger.warning(f"Could not extract CIK or accession from URL: {filing_page_url} (CIK: {cik}, accession: {accession})")
+            return None
+        
+        # Construct XBRL viewer URL
+        # Format: https://www.sec.gov/cgi-bin/viewer?action=view&cik={cik}&accession_number={accession}&xbrl_type=v
+        xbrl_viewer_url = f"{SEC_BASE_URL}/cgi-bin/viewer?action=view&cik={cik}&accession_number={accession}&xbrl_type=v"
+        
+        logger.info(f"Fetching XBRL data from: {xbrl_viewer_url}")
+        time.sleep(0.1)  # Rate limiting
+        response = session.get(xbrl_viewer_url, timeout=30)
+        response.raise_for_status()
+        
+        html_text = response.text
+        
+        # Find the XBRL table - look for table with class "report" and id "id2"
+        # The table contains the XBRL data
+        xbrl_table_pattern = r'<table[^>]*class="report"[^>]*id="id2"[^>]*>.*?</table>'
+        match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
+        
+        if not match:
+            # Try alternative pattern - just look for table with class "report"
+            xbrl_table_pattern = r'<table[^>]*class="report"[^>]*>.*?</table>'
+            match = re.search(xbrl_table_pattern, html_text, re.DOTALL | re.IGNORECASE)
+        
+        if match:
+            xbrl_table_html = match.group(0)
+            logger.info(f"Successfully extracted XBRL table ({len(xbrl_table_html)} bytes)")
+            return xbrl_table_html
+        else:
+            logger.warning(f"XBRL table not found in viewer page for {filing_page_url}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error scraping XBRL data from {filing_page_url}: {e}")
+        return None
+
+
 def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
     """
     Scrape a SEC filing page (index.htm) to extract all document URLs
@@ -546,7 +644,7 @@ def download_document_to_s3(document_url: str, filing_id: str, filename: str) ->
         return None
 
 
-def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], data_file_urls: List[str] = None, filing_page_url: Optional[str] = None) -> Dict[str, Any]:
+def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], data_file_urls: List[str] = None, filing_page_url: Optional[str] = None, download_xbrl: bool = True) -> Dict[str, Any]:
     """
     Download all documents for a filing to S3.
     This method is called after the DynamoDB index is created.
@@ -567,6 +665,7 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
     result = {
         'documentS3Keys': {},
         'dataFileS3Keys': {},
+        'xbrlS3Key': None,
         'success': False
     }
     
@@ -1053,6 +1152,8 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
     
     if result['success']:
         logger.info(f"Successfully downloaded {len(result['documentS3Keys'])} document(s) and {len(result['dataFileS3Keys'])} data file(s) for filing_id: {filing_id}")
+        if result.get('xbrlS3Key'):
+            logger.info(f"XBRL data downloaded to: {result['xbrlS3Key']}")
     else:
         logger.warning(f"No files were successfully downloaded for filing_id: {filing_id}")
     
@@ -1606,6 +1707,8 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 if not isinstance(data_file_s3_keys, dict):
                     data_file_s3_keys = {}
                 
+                xbrl_s3_key = cached_item.get('xbrlS3Key')
+                
                 # Return cached data
                 filing_page_url = cached_item.get('filingPageUrl', '')
                 result = {
@@ -1624,6 +1727,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'dataFileUrls': data_file_urls,
                     'documentS3Keys': document_s3_keys,
                     'dataFileS3Keys': data_file_s3_keys,
+                    'xbrlS3Key': xbrl_s3_key,
                     'adsh': cached_item.get('adsh', filing_data['adsh']),
                     'filingId': filing_id,
                 }
@@ -1746,30 +1850,46 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     # Update the filing_data with S3 keys for cache update
                     document_s3_keys = download_result.get('documentS3Keys', {})
                     data_file_s3_keys = download_result.get('dataFileS3Keys', {})
+                    xbrl_s3_key = download_result.get('xbrlS3Key')
                     
                     # Update results with S3 keys if this filing is in the current page results
                     for result in results:
                         if result.get('filingId') == filing_id:
                             result['documentS3Keys'] = document_s3_keys
                             result['dataFileS3Keys'] = data_file_s3_keys
+                            if xbrl_s3_key:
+                                result['xbrlS3Key'] = xbrl_s3_key
                             break
                     
                     # Update DynamoDB cache with S3 keys
                     try:
                         if cache_table:
                             # Always update, even if keys are empty (to ensure fields exist in DynamoDB)
-                            logger.info(f"Updating cache with S3 keys for filing {filing_id}: {len(document_s3_keys)} document keys, {len(data_file_s3_keys)} data file keys")
+                            logger.info(f"Updating cache with S3 keys for filing {filing_id}: {len(document_s3_keys)} document keys, {len(data_file_s3_keys)} data file keys" + 
+                                       (f", XBRL key: {xbrl_s3_key}" if xbrl_s3_key else ""))
                             logger.debug(f"Document S3 keys: {document_s3_keys}")
                             logger.debug(f"Data file S3 keys: {data_file_s3_keys}")
+                            
+                            # Build update expression - include XBRL key if available
+                            if xbrl_s3_key:
+                                update_expression = 'SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys, xbrlS3Key = :xbrl_key'
+                                expression_values = {
+                                    ':doc_keys': document_s3_keys if document_s3_keys else {},
+                                    ':data_keys': data_file_s3_keys if data_file_s3_keys else {},
+                                    ':xbrl_key': xbrl_s3_key
+                                }
+                            else:
+                                update_expression = 'SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys'
+                                expression_values = {
+                                    ':doc_keys': document_s3_keys if document_s3_keys else {},
+                                    ':data_keys': data_file_s3_keys if data_file_s3_keys else {}
+                                }
                             
                             # Update the item with S3 keys (no need to check if item exists - update_item will work)
                             response = cache_table.update_item(
                                 Key={'filingId': filing_id},
-                                UpdateExpression='SET documentS3Keys = :doc_keys, dataFileS3Keys = :data_keys',
-                                ExpressionAttributeValues={
-                                    ':doc_keys': document_s3_keys if document_s3_keys else {},
-                                    ':data_keys': data_file_s3_keys if data_file_s3_keys else {}
-                                },
+                                UpdateExpression=update_expression,
+                                ExpressionAttributeValues=expression_values,
                                 ReturnValues='ALL_NEW'  # Return updated item to verify
                             )
                             
