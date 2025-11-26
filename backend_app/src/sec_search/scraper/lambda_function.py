@@ -379,13 +379,13 @@ def download_xbrl_zip(filing_page_url: str) -> Optional[bytes]:
         if data_index + 2 < len(url_parts):
             dir_name = url_parts[data_index + 2]
             if dir_name and not dir_name.endswith('.htm'):
-                accession_dir = dir_name
-                # Try to extract accession number from directory name or filename
-                # Directory format: 000140491225000040 (no dashes)
-                # Accession format: 0001404912-25-000040 (with dashes)
-                if len(dir_name) >= 18:
-                    # Try to construct accession from directory: 000140491225000040 -> 0001404912-25-000040
-                    # Format: 10 digits + 2 digits + 6 digits
+                # SEC sometimes serves the index page from a dashed directory but the ZIPs live under
+                # the undashed version (e.g., 0001404912-25-000040-index.htm vs 000140491225000040/xbrl.zip)
+                accession_dir = dir_name.replace('-', '')
+                # Build the accession with dashes for filenames
+                if '-' in dir_name:
+                    accession = dir_name
+                elif len(dir_name) >= 18:
                     try:
                         accession = f"{dir_name[:10]}-{dir_name[10:12]}-{dir_name[12:]}"
                     except:
@@ -401,15 +401,15 @@ def download_xbrl_zip(filing_page_url: str) -> Optional[bytes]:
             logger.warning(f"Could not extract CIK or accession directory from URL: {filing_page_url} (CIK: {cik}, dir: {accession_dir})")
             return None
         
-        # Construct base URL for the filing directory
+        # Construct base URL for the filing directory (using undashed directory like the test script)
         base_url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik}/{accession_dir}"
         
-        # Try different possible ZIP file locations
+        # Try the same ZIP locations as the test script
         zip_urls = []
         if accession:
-            zip_urls.append(f"{base_url}/{accession}-xbrl.zip")  # Most common format: {accession}-xbrl.zip
-        zip_urls.append(f"{base_url}/{accession_dir}-xbrl.zip")  # Alternative: {dir}-xbrl.zip
-        zip_urls.append(f"{base_url}/xbrl.zip")  # Simple format
+            zip_urls.append(f"{base_url}/{accession}-xbrl.zip")
+        zip_urls.append(f"{base_url}/{accession_dir}-xbrl.zip")
+        zip_urls.append(f"{base_url}/xbrl.zip")
         
         # Try each ZIP URL until we find one
         for zip_url in zip_urls:
@@ -418,12 +418,12 @@ def download_xbrl_zip(filing_page_url: str) -> Optional[bytes]:
                 time.sleep(0.1)  # Rate limiting
                 response = session.get(zip_url, timeout=30, stream=True)
                 
+                content_type = response.headers.get('Content-Type', '')
+                content_length = response.headers.get('Content-Length', 'unknown')
+                
+                logger.info(f"Response for {zip_url}: status={response.status_code}, Content-Type={content_type}, Content-Length={content_length}")
+                
                 if response.status_code == 200:
-                    content_type = response.headers.get('Content-Type', '')
-                    content_length = response.headers.get('Content-Length', 'unknown')
-                    
-                    logger.debug(f"Response status: {response.status_code}, Content-Type: {content_type}, Content-Length: {content_length}")
-                    
                     # Check if it's actually a ZIP file
                     if 'zip' in content_type.lower() or zip_url.endswith('.zip'):
                         # Read the entire ZIP file content using iter_content (matching test script)
@@ -439,16 +439,24 @@ def download_xbrl_zip(filing_page_url: str) -> Optional[bytes]:
                                 return zip_content
                             else:
                                 logger.warning(f"Downloaded content from {zip_url} doesn't appear to be a valid ZIP file (magic bytes check failed)")
-                                logger.debug(f"First 20 bytes (hex): {zip_content[:20].hex() if len(zip_content) >= 20 else 'too short'}")
+                                logger.info(f"First 20 bytes (hex): {zip_content[:20].hex() if len(zip_content) >= 20 else 'too short'}")
+                                logger.info(f"First 100 bytes (text): {zip_content[:100] if len(zip_content) >= 100 else zip_content}")
                                 continue
                         else:
                             logger.warning(f"ZIP file appears to be empty from {zip_url}")
                             continue
                     else:
-                        logger.debug(f"Unexpected content type {content_type} for {zip_url}, trying next URL...")
+                        logger.info(f"Unexpected content type {content_type} for {zip_url}, trying next URL...")
+                        # Read a bit to see what we got
+                        try:
+                            peek = response.raw.read(200)
+                            logger.info(f"First 200 bytes of response: {peek[:200]}")
+                            response.raw.seek(0)  # Reset for potential retry
+                        except:
+                            pass
                         continue
                 elif response.status_code == 404:
-                    logger.debug(f"ZIP file not found: {zip_url} (404)")
+                    logger.info(f"ZIP file not found: {zip_url} (404)")
                     continue
                 else:
                     logger.warning(f"Unexpected status code {response.status_code} for {zip_url}")
@@ -457,7 +465,7 @@ def download_xbrl_zip(filing_page_url: str) -> Optional[bytes]:
             except Exception as e:
                 logger.error(f"Error fetching ZIP {zip_url}: {e}")
                 import traceback
-                logger.debug(traceback.format_exc())
+                logger.error(traceback.format_exc())
                 continue
         
         logger.warning(f"XBRL ZIP file not found for {filing_page_url}")
@@ -1807,8 +1815,9 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     accession_clean = filing_data['accession'].replace('-', '')
                     if len(accession_clean) >= 12:
                         accession_dashed = f"{accession_clean[:10]}-{accession_clean[10:12]}-{accession_clean[12:]}"
-                        base_url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_padded}/{accession_dashed}"
-                        filing_page_url = f"{base_url}/{accession_dashed}-index.htm"
+                        # Match the test script: directory path without dashes, filenames (viewer/index) with dashes
+                        base_dir = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_padded}/{accession_clean}"
+                        filing_page_url = f"{base_dir}/{accession_dashed}-index.htm"
                 
                 # Scrape document URLs from filing page (Document Format Files table)
                 document_urls = []

@@ -336,10 +336,10 @@ def test_viewer_page(cik: str, accession: str):
         return None, None
 
 if __name__ == "__main__":
-    # Test data from the user's example
+    # Test data for Form 8-K (Accession 0001404912-25-000040)
     cik = "1404912"
-    accession_dir = "000114036121012169"  # Note: no dashes in directory name
-    accession = "0001140361-21-012169"    # With dashes for viewer URL
+    accession_dir = "000140491225000040"  # Directory with no dashes
+    accession = "0001404912-25-000040"    # With dashes for viewer URL
     
     print("\n" + "="*80)
     print("XBRL Parsing Test Script")
