@@ -739,6 +739,17 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
     logger.info(f"  - Document Format Files: {len(document_urls)} files")
     logger.info(f"  - Data Files: {len(data_file_urls)} files")
     
+    # Identify the iXBRL document link (if any) so we can associate the ZIP with it
+    def is_ixbrl_document(url: str) -> bool:
+        if not url:
+            return False
+        url_lower = url.lower()
+        return 'ix?doc=' in url_lower or url_lower.startswith(f"{SEC_BASE_URL}/ix?")
+    
+    ixbrl_doc_url = next((url for url in document_urls if is_ixbrl_document(url)), None)
+    if ixbrl_doc_url:
+        logger.info(f"Detected iXBRL document link: {ixbrl_doc_url}")
+    
     # Skip downloading the index page - we only need the actual document files
     
     # Download each document from Document Format Files table
@@ -1200,8 +1211,8 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 unique_id = str(uuid.uuid4())[:8]
                 zip_filename = f"xbrl_{unique_id}.zip"
                 
-                # Upload to S3 in xbrl/ subfolder
-                xbrl_s3_key = f"filings/{filing_id}/xbrl/{zip_filename}"
+                # Upload to S3 alongside other document format files
+                xbrl_s3_key = f"filings/{filing_id}/documentformatfiles/{zip_filename}"
                 s3_client.put_object(
                     Bucket=S3_BUCKET_NAME,
                     Key=xbrl_s3_key,
@@ -1210,6 +1221,14 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
                 )
                 
                 result['xbrlS3Key'] = xbrl_s3_key
+                
+                # Link the XBRL ZIP to the iXBRL document entry so the frontend download button serves the ZIP
+                if ixbrl_doc_url:
+                    result['documentS3Keys'][ixbrl_doc_url] = xbrl_s3_key
+                    logger.info(f"Linked XBRL ZIP to document entry {ixbrl_doc_url}")
+                else:
+                    logger.info("No iXBRL document link detected to associate with the ZIP")
+                
                 result['success'] = True
                 logger.info(f"Successfully downloaded XBRL ZIP file to {xbrl_s3_key} (size: {len(xbrl_zip_content):,} bytes)")
             else:
