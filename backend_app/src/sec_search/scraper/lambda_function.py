@@ -756,6 +756,10 @@ def download_filing_documents_to_s3(filing_id: str, document_urls: List[str], da
     # Match glue script behavior: download and verify content type (not just URL extension)
     for doc_url in document_urls:
         try:
+            if ixbrl_doc_url and doc_url == ixbrl_doc_url:
+                logger.info(f"Skipping direct download for iXBRL viewer link {doc_url} - will attach XBRL ZIP instead")
+                continue
+        
             # Download the document first to check its actual content type
             # Use a session without compression to ensure we get exact bytes
             session = create_session()

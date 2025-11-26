@@ -136,7 +136,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         is_sec_filing = bucket_name == 'SEC_FILINGS' or (s3_key and s3_key.startswith('filings/'))
         
         if is_sec_filing:
-            # SEC filing download - skip session validation
+            # SEC filing download - skip session/user validation
             if not s3_key or not filename:
                 return {
                     'statusCode': 400,
@@ -144,38 +144,39 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                     'body': json.dumps({'error': 'Missing required parameters: s3_key, filename'})
                 }
             
-            # Use SEC filings bucket
             target_bucket = SEC_FILINGS_BUCKET or S3_BUCKET
+            # Always derive filename from the requested S3 key so SEC downloads match the actual object (e.g., ZIP)
+            filename = s3_key.split('/')[-1]
             logger.info(f"📄 SEC filing download request: {s3_key} from bucket {target_bucket}")
         else:
             # Chat session file download - require session validation
-        if not session_id or not user_id or not filename:
-            return {
-                'statusCode': 400,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
-            }
-        
-        # Validate that the authenticated user matches the requested user
-        if authenticated_user_id != user_id:
-            logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
-            return {
-                'statusCode': 403,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Forbidden: User mismatch'})
-            }
-        
-        # Validate session access
-        if not validate_session_access(user_id, session_id):
-            return {
-                'statusCode': 403,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Forbidden: Session access denied'})
-            }
-        
-        # Use provided s3_key or construct it
-        if not s3_key:
-            s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
+            if not session_id or not user_id or not filename:
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
+                }
+            
+            # Validate that the authenticated user matches the requested user
+            if authenticated_user_id != user_id:
+                logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
+                return {
+                    'statusCode': 403,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Forbidden: User mismatch'})
+                }
+            
+            # Validate session access
+            if not validate_session_access(user_id, session_id):
+                return {
+                    'statusCode': 403,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Forbidden: Session access denied'})
+                }
+            
+            # Use provided s3_key or construct it
+            if not s3_key:
+                s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
             
             target_bucket = S3_BUCKET
         
@@ -253,7 +254,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return handle_file_download(event, body, 'SEC_FILING_USER')
         else:
             # For chat files, require authentication
-        authenticated_user_id = validate_user_identity(event)
+            authenticated_user_id = validate_user_identity(event)
         
         if not authenticated_user_id:
             return {
