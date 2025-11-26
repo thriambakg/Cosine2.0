@@ -673,6 +673,9 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
         import agent as agent_module  # Import with alias to avoid shadowing the agent instance variable
         agent_module.agent_logger = agent_logger
         
+        # Check if new context items were added (flag from WebSocket processor)
+        has_new_context_items = event_body.get('hasNewContextItems', False)
+        
         # Create enhanced message with session context for the agent
         enhanced_message = f"""
 User Message: {user_message}
@@ -685,7 +688,21 @@ Session Context:
 - SECURITY: You have access to the full conversation history through the CONVERSATION HISTORY section in your system prompt
 - Use the conversation history in your system prompt to reference previous messages in THIS conversation
 """
+        
+        # Add note about new context items if present
+        if has_new_context_items:
+            enhanced_message += f"""
+🚨 IMPORTANT: NEW CONTEXT ITEMS DETECTED
+========================================
+The user has just added new context items to this session (articles, stock tiles, etc.).
+You MUST call get_session_context_tool(session_id="{session_id}", user_id="{user_id}") immediately 
+to discover and access these new context items before responding to the user's question.
 
+The user's question "{user_message}" likely references these newly added context items.
+Do NOT respond without first checking what context items are available in the session.
+
+"""
+        
         # Add context items to the enhanced message if present
         if context_items:
             context_items_json = json.dumps(context_items)

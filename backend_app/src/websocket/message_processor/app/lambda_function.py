@@ -415,6 +415,9 @@ def process_message(connection_id, user_id, session_id, message_data):
         else:
             logger.info(f"📌 No context or files, sending original message: '{message_text}'")
         
+        # Determine if new context items were added (for agent awareness)
+        has_new_context_items = has_context and CONTEXT_BUILDER_AVAILABLE and len(context_items) > 0
+        
         # Call the existing chat agent Lambda asynchronously (with enriched message if context present)
         # Pass original_user_message so the chat agent can store it for display
         try:
@@ -426,7 +429,8 @@ def process_message(connection_id, user_id, session_id, message_data):
                 session_id, 
                 context_items if has_context else None,
                 original_user_message if (has_context or has_files) else None,  # Original message for frontend display
-                uploaded_files if has_files else None  # Uploaded files for AI processing
+                uploaded_files if has_files else None,  # Uploaded files for AI processing
+                has_new_context_items  # Flag indicating new context items were added
             )
             
             # For asynchronous invocation, we don't get a response payload
@@ -591,7 +595,7 @@ def handle_kill_signal(connection_id, user_id, session_id, message_data):
             'body': json_dumps_safe({'error': f'Failed to process kill signal: {str(e)}'})
         }
 
-def call_chat_agent(user_id, message_text, model, files, session_id, context_items=None, original_user_message=None, uploaded_files=None):
+def call_chat_agent(user_id, message_text, model, files, session_id, context_items=None, original_user_message=None, uploaded_files=None, has_new_context_items=False):
     """
     Call the existing chat agent Lambda function with kill signal checking
     
@@ -604,6 +608,7 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
         context_items: Optional context items (only passed if context builder not available)
         original_user_message: Original user message (before context enrichment) for frontend display
         uploaded_files: Optional uploaded files for AI processing
+        has_new_context_items: Flag indicating new context items were just added to the session
         
     Returns:
         AI response text
@@ -645,6 +650,11 @@ def call_chat_agent(user_id, message_text, model, files, session_id, context_ite
         if original_user_message:
             payload['originalMessage'] = original_user_message
             logger.info(f"📌 Including original user message for frontend display")
+        
+        # Include flag indicating new context items were added
+        if has_new_context_items:
+            payload['hasNewContextItems'] = True
+            logger.info(f"📌 Flagging message as having new context items - agent should check session context")
         
         # Only include contextItems if context builder is not available (fallback)
         if context_items and not CONTEXT_BUILDER_AVAILABLE:

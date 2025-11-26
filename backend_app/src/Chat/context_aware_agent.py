@@ -370,6 +370,8 @@ Page Type: {session_variables.get('page_type', 'unknown')}
 ============================
 🚨 CRITICAL: When users ask about context items, ALWAYS call get_session_context_tool(session_id, user_id) first!
 💡 Use get_session_context_tool() to discover and access context items
+🚨 NEW CONTEXT ITEMS: If the user message indicates new context items were just added, IMMEDIATELY call get_session_context_tool() 
+   to discover what items are available before responding. The user's question likely references these new items.
 
 🎯 SESSION FOCUS:
 ================
