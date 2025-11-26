@@ -344,6 +344,9 @@ def download_xbrl_zip(filing_page_url: str) -> Optional[bytes]:
     Download XBRL ZIP file from SEC filing page.
     This is the preferred method as it provides the complete structured XBRL package.
     
+    First checks if the filing has XBRL data by looking for "Interactive Data" button/link.
+    Then tries to download the ZIP file from common locations.
+    
     Args:
         filing_page_url: URL to the SEC filing index page (e.g., .../0001404912-25-000040-index.htm)
     
@@ -401,15 +404,54 @@ def download_xbrl_zip(filing_page_url: str) -> Optional[bytes]:
             logger.warning(f"Could not extract CIK or accession directory from URL: {filing_page_url} (CIK: {cik}, dir: {accession_dir})")
             return None
         
+        # First, check if the filing has XBRL data by checking the filing page
+        # Also check Data Files table for XBRL-related files
+        has_xbrl = False
+        try:
+            logger.debug(f"Checking filing page for XBRL/Interactive Data availability: {filing_page_url}")
+            time.sleep(0.1)  # Rate limiting
+            page_response = session.get(filing_page_url, timeout=30)
+            if page_response.status_code == 200:
+                page_html = page_response.text
+                # Check for Interactive Data button/link
+                has_xbrl = ('Interactive Data' in page_html or 
+                           'interactiveDataBtn' in page_html or 
+                           'iXBRL' in page_html or
+                           'xbrl_type=v' in page_html)
+                
+                if has_xbrl:
+                    logger.info(f"XBRL/Interactive Data indicator found on filing page")
+                else:
+                    # Also check Data Files table for XBRL files
+                    if 'Data Files' in page_html:
+                        # Look for XBRL-related files in Data Files table
+                        xbrl_indicators = ['xbrl', 'xml', 'xsd', 'EX-101']
+                        for indicator in xbrl_indicators:
+                            if indicator.lower() in page_html.lower():
+                                has_xbrl = True
+                                logger.info(f"Found XBRL-related file indicator '{indicator}' in Data Files table")
+                                break
+                
+                if not has_xbrl:
+                    logger.info(f"No XBRL/Interactive Data found on filing page for {filing_page_url}")
+                    return None
+        except Exception as e:
+            logger.debug(f"Could not check filing page for XBRL availability: {e}")
+            # Continue anyway - try to download ZIP
+        
         # Construct base URL for the filing directory
         base_url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik}/{accession_dir}"
         
-        # Try different possible ZIP file locations
+        # Try different possible ZIP file locations (matching test script order)
         zip_urls = []
         if accession:
             zip_urls.append(f"{base_url}/{accession}-xbrl.zip")  # Most common format: {accession}-xbrl.zip
         zip_urls.append(f"{base_url}/{accession_dir}-xbrl.zip")  # Alternative: {dir}-xbrl.zip
         zip_urls.append(f"{base_url}/xbrl.zip")  # Simple format
+        
+        logger.info(f"Attempting to download XBRL ZIP file for CIK={cik}, accession_dir={accession_dir}, accession={accession}")
+        logger.info(f"Base URL: {base_url}")
+        logger.info(f"Trying {len(zip_urls)} ZIP URL patterns")
         
         # Try each ZIP URL until we find one
         for zip_url in zip_urls:
@@ -418,35 +460,63 @@ def download_xbrl_zip(filing_page_url: str) -> Optional[bytes]:
                 time.sleep(0.1)  # Rate limiting
                 response = session.get(zip_url, timeout=30, stream=True)
                 
+                logger.debug(f"Response status: {response.status_code}")
+                
                 if response.status_code == 200:
                     content_type = response.headers.get('Content-Type', '')
                     content_length = response.headers.get('Content-Length', 'unknown')
                     
+                    logger.info(f"Response status: {response.status_code}, Content-Type: {content_type}, Content-Length: {content_length}")
+                    
                     # Check if it's actually a ZIP file
                     if 'zip' in content_type.lower() or zip_url.endswith('.zip'):
-                        # Read the entire ZIP file content
-                        zip_content = response.content
-                        logger.info(f"Successfully downloaded XBRL ZIP from {zip_url} ({len(zip_content):,} bytes, Content-Type: {content_type})")
-                        return zip_content
+                        # Read the entire ZIP file content using iter_content (matching test script)
+                        zip_content = b''
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                zip_content += chunk
+                        
+                        if len(zip_content) > 0:
+                            # Verify it's actually a ZIP file by checking magic bytes
+                            if zip_content.startswith(b'PK\x03\x04') or zip_content.startswith(b'PK\x05\x06'):
+                                logger.info(f"✅ Successfully downloaded XBRL ZIP from {zip_url} ({len(zip_content):,} bytes, Content-Type: {content_type})")
+                                return zip_content
+                            else:
+                                logger.warning(f"Downloaded content from {zip_url} doesn't appear to be a valid ZIP file (magic bytes check failed)")
+                                logger.debug(f"First 20 bytes (hex): {zip_content[:20].hex()}")
+                                continue
+                        else:
+                            logger.warning(f"ZIP file appears to be empty from {zip_url}")
+                            continue
                     else:
                         logger.debug(f"Unexpected content type {content_type} for {zip_url}, trying next URL...")
+                        # Log first few bytes to see what we got
+                        try:
+                            preview = response.content[:100] if hasattr(response, 'content') else b''
+                            logger.debug(f"Content preview (first 100 bytes): {preview[:100]}")
+                        except:
+                            pass
                         continue
                 elif response.status_code == 404:
-                    logger.debug(f"ZIP file not found: {zip_url}")
+                    logger.debug(f"ZIP file not found: {zip_url} (404)")
                     continue
                 else:
                     logger.warning(f"Unexpected status code {response.status_code} for {zip_url}")
                     continue
                     
             except Exception as e:
-                logger.debug(f"Error fetching ZIP {zip_url}: {e}")
+                logger.error(f"Error fetching ZIP {zip_url}: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
                 continue
         
-        logger.warning(f"XBRL ZIP file not found for {filing_page_url}")
+        logger.warning(f"XBRL ZIP file not found for {filing_page_url} after trying {len(zip_urls)} URL patterns")
         return None
             
     except Exception as e:
         logger.error(f"Error downloading XBRL ZIP from {filing_page_url}: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
         return None
 
 
