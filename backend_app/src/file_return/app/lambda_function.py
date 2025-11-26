@@ -149,33 +149,33 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             logger.info(f"📄 SEC filing download request: {s3_key} from bucket {target_bucket}")
         else:
             # Chat session file download - require session validation
-        if not session_id or not user_id or not filename:
-            return {
-                'statusCode': 400,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
-            }
-        
-        # Validate that the authenticated user matches the requested user
-        if authenticated_user_id != user_id:
-            logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
-            return {
-                'statusCode': 403,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Forbidden: User mismatch'})
-            }
-        
-        # Validate session access
-        if not validate_session_access(user_id, session_id):
-            return {
-                'statusCode': 403,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Forbidden: Session access denied'})
-            }
-        
-        # Use provided s3_key or construct it
-        if not s3_key:
-            s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
+            if not session_id or not user_id or not filename:
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
+                }
+            
+            # Validate that the authenticated user matches the requested user
+            if authenticated_user_id != user_id:
+                logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
+                return {
+                    'statusCode': 403,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Forbidden: User mismatch'})
+                }
+            
+            # Validate session access
+            if not validate_session_access(user_id, session_id):
+                return {
+                    'statusCode': 403,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Forbidden: Session access denied'})
+                }
+            
+            # Use provided s3_key or construct it
+            if not s3_key:
+                s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
             
             target_bucket = S3_BUCKET
         
@@ -253,14 +253,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return handle_file_download(event, body, 'SEC_FILING_USER')
         else:
             # For chat files, require authentication
-        authenticated_user_id = validate_user_identity(event)
-        
-        if not authenticated_user_id:
-            return {
-                'statusCode': 401,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Authentication failed: No authenticated user ID found in request'})
-            }
+            authenticated_user_id = validate_user_identity(event)
+            
+            if not authenticated_user_id:
+                return {
+                    'statusCode': 401,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Authentication failed: No authenticated user ID found in request'})
+                }
         
         # Generate fresh presigned URL for download
         return handle_file_download(event, body, authenticated_user_id)
