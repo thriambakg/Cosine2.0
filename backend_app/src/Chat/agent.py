@@ -6,8 +6,36 @@ os.environ.setdefault('OTEL_PYTHON_CONTEXT', 'contextvars_context')
 
 # Disable Strands metrics/telemetry to prevent hanging during Agent initialization
 os.environ.setdefault('STRANDS_DISABLE_METRICS', 'true')
-os.environ.setdefault('STRANDS_DISABLE_TELEMETRY', 'true')
+os.environ.setdefault('STRANDS_DISABLED_TELEMETRY', 'true')
 os.environ.setdefault('STRANDS_METRICS_ENABLED', 'false')
+
+# Configure boto3 timeouts BEFORE any boto3/Strands imports
+# This ensures the config is applied to all boto3 clients, including those created by Strands
+try:
+    import boto3
+    from botocore.config import Config
+    
+    # Create extended timeout config for Bedrock streaming
+    BEDROCK_CONFIG = Config(
+        read_timeout=850,  # 14+ minutes (Lambda timeout is 900s)
+        connect_timeout=10,
+        retries={'max_attempts': 3, 'mode': 'adaptive'}
+    )
+    
+    # Set default session config
+    boto3.setup_default_session(config=BEDROCK_CONFIG)
+    
+    # Monkey-patch boto3.client to ensure all clients use extended timeout
+    _original_boto3_client = boto3.client
+    def _patched_boto3_client(*args, **kwargs):
+        if 'config' not in kwargs:
+            kwargs['config'] = BEDROCK_CONFIG
+        return _original_boto3_client(*args, **kwargs)
+    boto3.client = _patched_boto3_client
+    
+except Exception as e:
+    # Log but don't fail - boto3 might not be available yet
+    pass
 
 import json
 import logging
@@ -631,24 +659,8 @@ class FinancialTools:
 # Load environment variables from .env file
 load_dotenv()
 
-# Configure boto3 default session with longer timeouts for Bedrock streaming
-# This prevents ReadTimeoutError during long streaming responses
-try:
-    import boto3
-    from botocore.config import Config
-    
-    # Set default config for all boto3 clients (including Bedrock)
-    # read_timeout set to 850 seconds (slightly less than Lambda's 900s timeout to allow for other operations)
-    boto3.setup_default_session(
-        config=Config(
-            read_timeout=850,  # 14+ minutes for streaming responses (Lambda timeout is 900s)
-            connect_timeout=10,  # 10 seconds for connection
-            retries={'max_attempts': 3, 'mode': 'adaptive'}
-        )
-    )
-    logger.debug("Configured boto3 default session with extended timeouts for Bedrock streaming")
-except Exception as e:
-    logger.warning(f"Could not configure boto3 default session: {e}")
+# Note: boto3 timeout configuration moved to top of file (before imports)
+# to ensure it's applied before Strands creates any boto3 clients
 
 # Configure different Bedrock models
 MODELS = {
