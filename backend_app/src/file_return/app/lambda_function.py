@@ -132,11 +132,28 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         s3_key = body.get('s3_key')
         bucket_name = body.get('bucket')  # Optional: specify bucket (for SEC filings)
         
-        # Determine if this is a SEC filing download (SEC filings don't require session validation)
+        # Determine if this is a SEC filing download
         is_sec_filing = bucket_name == 'SEC_FILINGS' or (s3_key and s3_key.startswith('filings/'))
         
+        # Validate user_id and session_id are provided (required for all downloads)
+        if not user_id or not session_id:
+            return {
+                'statusCode': 400,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Missing required parameters: user_id, session_id'})
+            }
+        
+        # Validate that the authenticated user matches the requested user (for all downloads)
+        if authenticated_user_id != user_id:
+            logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
+            return {
+                'statusCode': 403,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Forbidden: User mismatch'})
+            }
+        
         if is_sec_filing:
-            # SEC filing download - skip session/user validation
+            # SEC filing download - validate user but skip session access check (SEC filings aren't session-specific)
             if not s3_key or not filename:
                 return {
                     'statusCode': 400,
@@ -147,38 +164,32 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             target_bucket = SEC_FILINGS_BUCKET or S3_BUCKET
             # Always derive filename from the requested S3 key so SEC downloads match the actual object (e.g., ZIP)
             filename = s3_key.split('/')[-1]
-            logger.info(f"📄 SEC filing download request: {s3_key} from bucket {target_bucket}")
+            logger.info(f"📄 SEC filing download request: {s3_key} from bucket {target_bucket} for user {user_id}")
         else:
             # Chat session file download - require session validation
-            if not session_id or not user_id or not filename:
+            if not filename:
                 return {
                     'statusCode': 400,
                     'headers': get_cors_headers(),
-                    'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
+                    'body': json.dumps({'error': 'Missing required parameter: filename'})
                 }
-        
-        # Validate that the authenticated user matches the requested user
-        if authenticated_user_id != user_id:
-            logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
-            return {
-                'statusCode': 403,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Forbidden: User mismatch'})
-            }
-        
-        # Validate session access
-        if not validate_session_access(user_id, session_id):
-            return {
-                'statusCode': 403,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Forbidden: Session access denied'})
-            }
-        
-        # Use provided s3_key or construct it
-        if not s3_key:
-            s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
+            
+            # Validate session access (ONLY for chat files - SEC filings skip this)
+            if not validate_session_access(user_id, session_id):
+                return {
+                    'statusCode': 403,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Forbidden: Session access denied'})
+                }
+            
+            # Use provided s3_key or construct it for chat files
+            if not s3_key:
+                s3_key = f"users/{user_id}/sessions/{session_id}/files/{filename}"
             
             target_bucket = S3_BUCKET
+        
+        # For SEC filings, target_bucket is already set above
+        # For chat files, target_bucket is set in the else block above
         
         # Check if file exists in S3
         try:
@@ -242,20 +253,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Direct Lambda invocation - event is the payload
             body = event
         
-        # Check if this is a SEC filing download (doesn't require authentication)
-        bucket_name = body.get('bucket')
-        s3_key = body.get('s3_key')
-        is_sec_filing = bucket_name == 'SEC_FILINGS' or (s3_key and s3_key.startswith('filings/'))
-        
-        # For SEC filings, skip authentication
-        if is_sec_filing:
-            logger.info("📄 SEC filing download - skipping authentication")
-            # Use a dummy user_id for SEC filings (not used in validation)
-            return handle_file_download(event, body, 'SEC_FILING_USER')
-        else:
-            # For chat files, require authentication
-            authenticated_user_id = validate_user_identity(event)
-        
+        # Always require authentication (for both SEC filings and chat files)
+        authenticated_user_id = validate_user_identity(event)
         if not authenticated_user_id:
             return {
                 'statusCode': 401,
@@ -264,6 +263,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         # Generate fresh presigned URL for download
+        # handle_file_download will validate user_id and session_id for all requests
+        # For SEC filings, it will skip session access check but still validate user_id
         return handle_file_download(event, body, authenticated_user_id)
             
     except Exception as e:

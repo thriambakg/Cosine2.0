@@ -49,6 +49,8 @@ import {
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { useGlobalChat } from '@/contexts/GlobalChatContext';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -678,6 +680,10 @@ const LOCATION_OPTIONS = [
 ];
 
 const SECSearchPage: React.FC = () => {
+  // Get user and session info for authenticated downloads
+  const { user } = useAuth();
+  const { activeSessionId } = useGlobalChat();
+  
   // Session persistence key
   const SESSION_STORAGE_KEY = 'sec-search-page-state';
 
@@ -3212,11 +3218,18 @@ const SECSearchPage: React.FC = () => {
                                     try {
                                       console.log('📥 Downloading SEC filing document:', filename);
                                       
+                                      if (!user?.id || !activeSessionId) {
+                                        console.error('Missing user ID or session ID for file download');
+                                        return;
+                                      }
+                                      
                                       const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
                                       const response = await fetch(`${apiUrl}/file-download`, {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({
+                                          user_id: user.id,
+                                          session_id: activeSessionId,
                                           bucket: 'SEC_FILINGS',
                                           s3_key: s3Key,
                                           filename: filename
@@ -3324,11 +3337,18 @@ const SECSearchPage: React.FC = () => {
                                     try {
                                       console.log('📥 Downloading SEC filing data file:', filename);
                                       
+                                      if (!user?.id || !activeSessionId) {
+                                        console.error('Missing user ID or session ID for file download');
+                                        return;
+                                      }
+                                      
                                       const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
                                       const response = await fetch(`${apiUrl}/file-download`, {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({
+                                          user_id: user.id,
+                                          session_id: activeSessionId,
                                           bucket: 'SEC_FILINGS',
                                           s3_key: s3Key,
                                           filename: filename
