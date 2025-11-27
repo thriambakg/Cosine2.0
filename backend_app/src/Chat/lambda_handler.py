@@ -702,7 +702,7 @@ The user's question "{user_message}" likely references these newly added context
 Do NOT respond without first checking what context items are available in the session.
 
 """
-        
+
         # Add context items to the enhanced message if present
         if context_items:
             context_items_json = json.dumps(context_items)

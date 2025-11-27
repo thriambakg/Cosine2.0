@@ -631,6 +631,25 @@ class FinancialTools:
 # Load environment variables from .env file
 load_dotenv()
 
+# Configure boto3 default session with longer timeouts for Bedrock streaming
+# This prevents ReadTimeoutError during long streaming responses
+try:
+    import boto3
+    from botocore.config import Config
+    
+    # Set default config for all boto3 clients (including Bedrock)
+    # read_timeout set to 850 seconds (slightly less than Lambda's 900s timeout to allow for other operations)
+    boto3.setup_default_session(
+        config=Config(
+            read_timeout=850,  # 14+ minutes for streaming responses (Lambda timeout is 900s)
+            connect_timeout=10,  # 10 seconds for connection
+            retries={'max_attempts': 3, 'mode': 'adaptive'}
+        )
+    )
+    logger.debug("Configured boto3 default session with extended timeouts for Bedrock streaming")
+except Exception as e:
+    logger.warning(f"Could not configure boto3 default session: {e}")
+
 # Configure different Bedrock models
 MODELS = {
     'claude-sonnet-4': BedrockModel(
