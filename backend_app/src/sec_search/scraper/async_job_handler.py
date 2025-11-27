@@ -43,7 +43,7 @@ def create_job(search_params: Dict[str, Any]) -> str:
     """
     job_id = f"JOB#{uuid.uuid4().hex[:16]}"
     logger.info(f"Generated job_id {job_id} (will be stored in query cache table)")
-        return job_id
+    return job_id
 
 
 def publish_progress_to_sns(job_id: str, current_page: int, total_pages: Optional[int], 
