@@ -1,4 +1,7 @@
 import json
+# Set matplotlib to use non-interactive backend (required for Lambda)
+import matplotlib
+matplotlib.use('Agg')  # Must be set before importing pyplot
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime
@@ -329,8 +332,11 @@ class UnifiedChartGenerator:
                 if isinstance(data_dict, dict) and 'data_points' in data_dict and 'symbol' in data_dict and 'current_price' in data_dict:
                     logger.error(f"❌ This appears to be incomplete stock data - missing 'historical_data' field")
                     return f"Error: You passed incomplete data for {symbol}. The data contains metadata (current_price, data_points, etc.) but is missing the 'historical_data' field needed for chart generation. Please call get_financial_data('{symbol}', '{data_dict.get('timeframe', '2y')}') again and pass the COMPLETE result to generate_chart_tool."
-            else:
+                else:
                     return f"Error: Unable to detect data type for {symbol}. Please ensure you call get_financial_data(symbol, timeframe) first to fetch the data, then pass the COMPLETE result to generate_chart_tool. The data must contain 'historical_data' for stocks or 'chart_data' for crypto."
+            
+            # If we get here, data_type is valid (stock, crypto, or multiple_stocks)
+            logger.info(f"✅ Data type validated: {data_type} for {symbol}")
             
             # Check for errors
             if "error" in data_dict:
@@ -490,10 +496,25 @@ class UnifiedChartGenerator:
             else:
                 filename = f"{symbol}_{chart_type}_chart_{timestamp}.png"
             
-            return self._save_chart_to_s3(
-                fig, filename, symbol, chart_type, 
-                timeframe, len(normalized_data), data_type
-            )
+            logger.info(f"📊 Chart figure created successfully, saving to S3: {filename}")
+            
+            try:
+                result = self._save_chart_to_s3(
+                    fig, filename, symbol, chart_type, 
+                    timeframe, len(normalized_data), data_type
+                )
+                logger.info(f"📊 Chart save result: {result}")
+                return result
+            except Exception as save_error:
+                logger.error(f"❌ Error in _save_chart_to_s3: {str(save_error)}")
+                import traceback
+                logger.error(f"❌ Save traceback: {traceback.format_exc()}")
+                # Make sure to close the figure even if save fails
+                try:
+                    plt.close(fig)
+                except:
+                    pass
+                return f"Error saving chart: {str(save_error)}"
             
         except Exception as e:
             logger.error(f"Error generating chart for {symbol}: {str(e)}")
