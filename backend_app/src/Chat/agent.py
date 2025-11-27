@@ -14,6 +14,7 @@ os.environ.setdefault('STRANDS_METRICS_ENABLED', 'false')
 try:
     import boto3
     from botocore.config import Config
+    import botocore.client
     
     # Create extended timeout config for Bedrock streaming
     BEDROCK_CONFIG = Config(
@@ -30,12 +31,40 @@ try:
     def _patched_boto3_client(*args, **kwargs):
         if 'config' not in kwargs:
             kwargs['config'] = BEDROCK_CONFIG
-        return _original_boto3_client(*args, **kwargs)
+        result = _original_boto3_client(*args, **kwargs)
+        # Verify config was applied
+        if hasattr(result, '_client_config') and result._client_config:
+            if result._client_config.read_timeout != 850:
+                print(f"WARNING: Client config read_timeout is {result._client_config.read_timeout}, expected 850")
+        return result
     boto3.client = _patched_boto3_client
+    
+    # Also patch botocore.client.BaseClient.__init__ to ensure config is always applied
+    _original_base_client_init = botocore.client.BaseClient.__init__
+    def _patched_base_client_init(self, *args, **kwargs):
+        # If config is not provided or has default timeout, replace with extended timeout
+        if 'config' in kwargs:
+            config = kwargs['config']
+            # If config has a read_timeout less than 850, replace it
+            if hasattr(config, 'read_timeout') and config.read_timeout and config.read_timeout < 850:
+                # Create new config with extended timeout, preserving other settings
+                kwargs['config'] = Config(
+                    read_timeout=850,
+                    connect_timeout=getattr(config, 'connect_timeout', 10),
+                    retries=getattr(config, 'retries', {'max_attempts': 3, 'mode': 'adaptive'})
+                )
+        elif 'config' not in kwargs:
+            kwargs['config'] = BEDROCK_CONFIG
+        return _original_base_client_init(self, *args, **kwargs)
+    botocore.client.BaseClient.__init__ = _patched_base_client_init
+    
+    print("✅ Configured boto3 with extended timeouts (850s) for Bedrock streaming")
     
 except Exception as e:
     # Log but don't fail - boto3 might not be available yet
-    pass
+    print(f"⚠️ Could not configure boto3 timeouts: {e}")
+    import traceback
+    traceback.print_exc()
 
 import json
 import logging
@@ -123,7 +152,7 @@ from tools.session_database_access import get_session_files_tool, get_session_co
 from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
 from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
 from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
-from tools.chart_generator import generate_chart_tool
+from tools.chart_generator import generate_chart_tool, generate_stock_chart
 from tools.chat_history_tool import get_chat_history_tool, search_chat_history_tool
 from tools.chat_session_context_tool import process_chat_session_context_tool, analyze_chat_session_context_tool
 
@@ -728,7 +757,8 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 16. compare_crypto_tool(symbols, timeframe, start_date, end_date) - Compare multiple cryptocurrencies side by side with flexible timeframes
 17. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
 18. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
-19. generate_chart_tool(symbol, data_json, chart_type, title) - Generate unified charts for both stocks and crypto using matplotlib (line, candlestick, volume, ohlc) and save directly to S3
+19. generate_chart_tool(symbol, data_json, chart_type, title) - Generate unified charts for both stocks and crypto using matplotlib (line, candlestick, volume, ohlc) and save directly to S3. Requires pre-fetched data from get_financial_data or get_crypto_data_tool.
+20. generate_stock_chart(symbol, timeframe, chart_type, title, start_date, end_date) - Convenience tool: Fetch stock data and generate chart in one step. Use this for simpler stock chart requests when you don't already have the data.
 20. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
 21. return_session_files_wrapper(file_indices) - Return files from current session to user
 22. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
@@ -793,17 +823,32 @@ When get_chat_history_tool returns data:
 
 📊 CHART GENERATION WORKFLOW:
 When users request charts (e.g., "generate a chart for AAPL", "show me TSLA price history", "create a candlestick chart for MSFT", "generate a BTC chart"):
-1. **FOR STOCKS**: Use get_financial_data(symbol, timeframe, start_date, end_date) to fetch historical data
-2. **FOR CRYPTO**: Use get_crypto_data_tool(symbol, timeframe, start_date, end_date) to fetch historical data
-3. **TIMEFRAMES**: '1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max' (stocks) | '1d', '7d', '30d', '1y', '2y', '5y', 'max' (crypto)
-4. **DATE RANGES**: Use start_date and end_date parameters for custom date ranges (format: 'YYYY-MM-DD')
-5. **CRITICAL**: You MUST pass the EXACT result from get_financial_data/get_crypto_data_tool to generate_chart_tool
-6. **CHART GENERATION**: Use generate_chart_tool(symbol, data_json, chart_type, title) where data_json is the FULL result from step 1 or 2
-7. **CHART TYPES**: 'line' (default), 'candlestick', 'volume', 'ohlc' - all work for both stocks and crypto
-8. **RESULT**: Chart is automatically saved to S3 agent-files folder and will appear in the files section
-9. **EXAMPLES**: 
-   - "I want a chart for AAPL past 2 years" → data = get_financial_data("AAPL", "2y") → generate_chart_tool("AAPL", data, "line")
-   - "Generate a BTC candlestick chart" → data = get_crypto_data_tool("BTC", "1y") → generate_chart_tool("BTC", data, "candlestick")
+
+**OPTION 1 - SIMPLIFIED (RECOMMENDED FOR STOCKS):**
+- For stock charts when you don't already have the data: Use generate_stock_chart(symbol, timeframe, chart_type, title, start_date, end_date)
+- This tool fetches the data and generates the chart in one step
+- Example: "I want a chart for AAPL past 2 years" → generate_stock_chart("AAPL", "2y", "line")
+- Example: "Generate a candlestick chart for MSFT" → generate_stock_chart("MSFT", "1y", "candlestick")
+
+**OPTION 2 - FLEXIBLE (WHEN YOU ALREADY HAVE DATA):**
+- When you already have data from get_financial_data or get_crypto_data_tool: Use generate_chart_tool(symbol, data_json, chart_type, title)
+- This allows you to reuse data or customize the workflow
+- Example: data = get_financial_data("AAPL", "2y") → generate_chart_tool("AAPL", data, "line")
+
+**FOR CRYPTO:**
+- Use get_crypto_data_tool(symbol, timeframe, start_date, end_date) to fetch data
+- Then use generate_chart_tool(symbol, data_json, chart_type, title) with the fetched data
+- Example: "Generate a BTC candlestick chart" → data = get_crypto_data_tool("BTC", "1y") → generate_chart_tool("BTC", data, "candlestick")
+
+**TIMEFRAMES**: 
+- Stocks: '1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max'
+- Crypto: '1d', '7d', '30d', '1y', '2y', '5y', 'max'
+
+**DATE RANGES**: Use start_date and end_date parameters for custom date ranges (format: 'YYYY-MM-DD')
+
+**CHART TYPES**: 'line' (default), 'candlestick', 'volume', 'ohlc' - all work for both stocks and crypto
+
+**RESULT**: Chart is automatically saved to S3 agent-files folder and will appear in the files section
 
 🚨 CRITICAL DATA HANDLING RULES:
 
@@ -826,12 +871,19 @@ When users request charts (e.g., "generate a chart for AAPL", "show me TSLA pric
 
 📋 CORRECT CHART GENERATION EXAMPLES:
 
-STOCK CHART:
+STOCK CHART - SIMPLIFIED APPROACH (RECOMMENDED):
+User: "Generate a chart for AAPL past 2 years"
+Agent: 
+✅ generate_stock_chart("AAPL", "2y", "line")
+- Single call, handles data fetching and chart generation automatically
+
+STOCK CHART - FLEXIBLE APPROACH (WHEN YOU NEED THE DATA):
 User: "Generate a chart for AAPL past 2 years"
 Agent: 
 1. Call get_financial_data("AAPL", "2y") 
 2. Store the FULL result in a variable (e.g., data = get_financial_data("AAPL", "2y"))
 3. Call generate_chart_tool("AAPL", data, "line") - pass the ENTIRE data object
+- Use this when you need the data for other purposes or want more control
 
 CRYPTO CHART:
 User: "Generate a BTC candlestick chart"
@@ -845,7 +897,8 @@ Agent:
 ❌ WRONG: generate_chart_tool("AAPL", data["historical_data"], "line")
 ❌ WRONG: generate_chart_tool("AAPL", {"symbol": "AAPL", "historical_data": [...]}, "line")
 ❌ WRONG: Calling generate_chart_tool multiple times
-✅ CORRECT: generate_chart_tool("AAPL", data, "line") where data is the complete result from get_financial_data
+✅ CORRECT (Simplified): generate_stock_chart("AAPL", "1y", "line") - for simple stock chart requests
+✅ CORRECT (Flexible): generate_chart_tool("AAPL", data, "line") where data is the complete result from get_financial_data
 
 📝 NOTE: The "pass data as-is" rule ONLY applies to generate_chart_tool. For other tools like generate_excel_file_tool, you should process and format the data as needed.
 
@@ -1080,7 +1133,10 @@ FOR SESSION VARIABLES AND TILES QUESTIONS:
 🚀 PERFORMANCE OPTIMIZATION:
 - **Data Compression**: Large datasets from get_financial_data and get_crypto_data_tool are automatically compressed using gzip compression (70-90% size reduction)
 - **Tool Communication**: All tools automatically handle compressed data - no manual decompression needed
-- **Chart Generation**: Use generate_chart_tool with compressed data from either financial or crypto tools for best performance
+- **Chart Generation**: 
+  - For stocks: Use generate_stock_chart(symbol, timeframe, chart_type) for simplified one-step chart generation
+  - For flexibility: Use generate_chart_tool with compressed data from get_financial_data or get_crypto_data_tool
+  - Both tools support line, candlestick, volume, and ohlc chart types
 - **Memory Management**: Full historical data preserved while minimizing token usage
 - **Compression Strategy**: Entire data objects are compressed when large, not just individual fields
 
@@ -1916,7 +1972,8 @@ enhanced_tools = [
     search_sec_filings,  # Search SEC filings by criteria
     get_filing_exhibits,  # Get exhibits for SEC filing
     download_filing_pdf,  # Download SEC filing as PDF
-    generate_chart_tool,  # Generate unified charts for both stocks and crypto
+    generate_chart_tool,  # Generate unified charts for both stocks and crypto (requires pre-fetched data)
+    generate_stock_chart,  # Convenience tool: fetch stock data and generate chart in one step
     get_chat_history_tool,  # Get chat history on-demand with pagination
     search_chat_history_tool,  # Search chat history for specific terms
     process_chat_session_context_tool,  # Process chat session context from history sidebar

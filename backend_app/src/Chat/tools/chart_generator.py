@@ -528,3 +528,59 @@ def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", t
     except Exception as e:
         logger.error(f"Error generating chart for {symbol}: {str(e)}")
         return f"❌ Error generating chart: {str(e)}"
+
+@tool
+def generate_stock_chart(symbol: str, timeframe: str = "1y", chart_type: str = "line", title: str = None, start_date: str = None, end_date: str = None) -> str:
+    """
+    Convenience tool to generate a stock chart by fetching data and creating the chart in one step.
+    This is a simplified wrapper that handles data fetching internally.
+    
+    Args:
+        symbol: Stock ticker symbol (e.g., 'AAPL', 'MSFT')
+        timeframe: Time period for the chart ('1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max') - defaults to '1y'
+        chart_type: Type of chart ('line', 'candlestick', 'volume', 'ohlc') - defaults to 'line'
+        title: Custom title for the chart (optional)
+        start_date: Start date in 'YYYY-MM-DD' format (optional, overrides timeframe if provided)
+        end_date: End date in 'YYYY-MM-DD' format (optional)
+    
+    Returns:
+        Success message with file details
+    
+    Example:
+        generate_stock_chart("AAPL", "1y", "candlestick")
+        generate_stock_chart("MSFT", "6mo", "line", "Microsoft Stock Price")
+    """
+    try:
+        agent_logger.info(f"Generating {chart_type} chart for {symbol} (timeframe: {timeframe})")
+        logger.info(f"🔍 DEBUG: generate_stock_chart called with symbol={symbol}, timeframe={timeframe}, chart_type={chart_type}")
+        
+        # Import FinancialTools to fetch data
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+        try:
+            from agent import FinancialTools
+        except ImportError:
+            # Fallback: try importing from parent directory
+            parent_dir = os.path.dirname(os.path.dirname(__file__))
+            sys.path.append(parent_dir)
+            from agent import FinancialTools
+        
+        # Fetch stock data
+        logger.info(f"📊 Fetching stock data for {symbol}...")
+        stock_data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
+        
+        # Convert to JSON string (matching the format expected by generate_chart_tool)
+        import json
+        data_json = json.dumps(stock_data)
+        
+        logger.info(f"✅ Data fetched successfully, generating chart...")
+        
+        # Generate chart using the existing method
+        return chart_generator.generate_chart(symbol, data_json, chart_type, title)
+        
+    except Exception as e:
+        logger.error(f"Error generating stock chart for {symbol}: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return f"❌ Error generating stock chart: {str(e)}"

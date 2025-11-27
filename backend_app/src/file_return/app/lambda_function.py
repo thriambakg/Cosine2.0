@@ -150,12 +150,12 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             logger.info(f"📄 SEC filing download request: {s3_key} from bucket {target_bucket}")
         else:
             # Chat session file download - require session validation
-        if not session_id or not user_id or not filename:
-            return {
-                'statusCode': 400,
-                'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
-            }
+            if not session_id or not user_id or not filename:
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Missing required parameters: session_id, user_id, filename'})
+                }
         
         # Validate that the authenticated user matches the requested user
         if authenticated_user_id != user_id:
@@ -254,7 +254,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return handle_file_download(event, body, 'SEC_FILING_USER')
         else:
             # For chat files, require authentication
-        authenticated_user_id = validate_user_identity(event)
+            authenticated_user_id = validate_user_identity(event)
         
         if not authenticated_user_id:
             return {
