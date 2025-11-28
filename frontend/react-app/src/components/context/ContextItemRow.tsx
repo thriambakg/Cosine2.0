@@ -38,14 +38,6 @@ const formatLabel = (key: string) =>
     ?.replace(/_/g, ' ')
     ?.replace(/\b\w/g, (char) => char.toUpperCase()) || '';
 
-const formatValue = (value: any): string => {
-  if (value === null || value === undefined) return '—';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
-  if (typeof value === 'object') return 'Details available below';
-  return String(value);
-};
-
 const deriveDocumentName = (url: string) => {
   try {
     const parsed = new URL(url);
