@@ -33,6 +33,7 @@ import {
   Chat as SidebarChatIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -217,7 +218,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
           id: `politician_trade_${trade.tradeId}_${Date.now()}`,
           type: 'politician_trade' as const,
           title: `${trade.politicianName || 'Unknown'} - ${trade.securitySymbol || 'N/A'}`,
-          subtitle: `${trade.transactionType || 'N/A'} on ${trade.transactionDate ? new Date(trade.transactionDate * 1000).toLocaleDateString() : 'N/A'}`,
+          subtitle: `${trade.transactionType || 'N/A'} on ${formatTransactionDate(trade.transactionDate)}`,
           timestamp: Date.now(),
           data: trade,
         };
@@ -242,31 +243,67 @@ const PoliticianTradesSearchPage: React.FC = () => {
   
   // Format amount range
   const formatAmountRange = (trade: PoliticianTrade): string => {
-    if (trade.amountRange) {
-      return trade.amountRange;
+    const UNPARSED_AMOUNT_VALUE = 999999999999; // High value indicating unparsed/unreadable document
+    
+    // Check if this is an unparsed document (high amount values)
+    const isUnparsed = 
+      (trade.amountMin && trade.amountMin >= UNPARSED_AMOUNT_VALUE) ||
+      (trade.amountMax && trade.amountMax >= UNPARSED_AMOUNT_VALUE) ||
+      (Array.isArray(trade.amountRange) && trade.amountRange[0] >= UNPARSED_AMOUNT_VALUE);
+    
+    if (isUnparsed) {
+      return 'See filing document';
     }
-    if (trade.amountMin && trade.amountMax) {
+    
+    // Handle amountRange array (from DynamoDB)
+    if (trade.amountRange) {
+      if (Array.isArray(trade.amountRange) && trade.amountRange.length >= 2) {
+        const min = trade.amountRange[0];
+        const max = trade.amountRange[1];
+        return `$${formatNumber(min)} - $${formatNumber(max)}`;
+      } else if (typeof trade.amountRange === 'string') {
+        return trade.amountRange;
+      }
+    }
+    // Handle amountMin/amountMax
+    if (trade.amountMin !== undefined && trade.amountMax !== undefined) {
       return `$${formatNumber(trade.amountMin)} - $${formatNumber(trade.amountMax)}`;
     }
-    if (trade.amountMin) {
+    if (trade.amountMin !== undefined) {
       return `$${formatNumber(trade.amountMin)}+`;
+    }
+    if (trade.amountMax !== undefined) {
+      return `Up to $${formatNumber(trade.amountMax)}`;
     }
     return 'N/A';
   };
   
   // Format number with commas
-  const formatNumber = (num: number): string => {
-    return num.toLocaleString('en-US');
+  const formatNumber = (num: number | string): string => {
+    const numValue = typeof num === 'string' ? parseFloat(num) : num;
+    if (isNaN(numValue)) return 'N/A';
+    return numValue.toLocaleString('en-US');
   };
   
-  // Format date from timestamp
-  const formatDate = (timestamp?: number): string => {
-    if (!timestamp) return 'N/A';
-    return new Date(timestamp * 1000).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+  // Format transaction date from YYYYMMDD integer
+  const formatTransactionDate = (dateNum?: number): string => {
+    if (!dateNum) return 'N/A';
+    // transactionDate is stored as YYYYMMDD integer (e.g., 20251103)
+    const dateStr = dateNum.toString();
+    if (dateStr.length === 8) {
+      const year = dateStr.substring(0, 4);
+      const month = dateStr.substring(4, 6);
+      const day = dateStr.substring(6, 8);
+      return `${year}-${month}-${day}`;
+    }
+    return 'N/A';
+  };
+  
+  // Format filing date (already a string in YYYY-MM-DD format)
+  const formatFilingDate = (dateStr?: string): string => {
+    if (!dateStr) return 'N/A';
+    // filingDate is already in YYYY-MM-DD format
+    return dateStr;
   };
   
   const totalPages = Math.ceil(totalFound / pageSize);
@@ -660,9 +697,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Party</TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Security</TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Transaction</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Date</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Transaction Date</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Filing Date</TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Amount</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Confidence</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -709,13 +746,32 @@ const PoliticianTradesSearchPage: React.FC = () => {
                       {trade.transactionType || 'N/A'}
                     </TableCell>
                     <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {formatDate(trade.transactionDate)}
+                      {formatTransactionDate(trade.transactionDate)}
+                    </TableCell>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
+                      {formatFilingDate(trade.filingDate)}
                     </TableCell>
                     <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {formatAmountRange(trade)}
                     </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {trade.matchConfidence ? `${(trade.matchConfidence * 100).toFixed(0)}%` : 'N/A'}
+                    <TableCell sx={{ py: 1 }}>
+                      {trade.formS3Key && (
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDownload(trade);
+                          }}
+                          sx={{
+                            color: '#3b82f6',
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            },
+                          }}
+                        >
+                          <DownloadIcon fontSize="small" />
+                        </IconButton>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

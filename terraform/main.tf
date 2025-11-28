@@ -698,6 +698,30 @@ resource "aws_iam_policy" "sec_search_s3_policy" {
   tags = var.common_tags
 }
 
+resource "aws_iam_policy" "politician_trades_s3_policy" {
+  name        = "${var.project_name}-politician-trades-s3-policy-${var.environment}"
+  description = "Policy for file return Lambda to access S3 politician trades bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::cosine-politician-trades-${var.environment}",
+          "arn:aws:s3:::cosine-politician-trades-${var.environment}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
 # IAM Policy for Lambda functions to access DynamoDB
 resource "aws_iam_policy" "lambda_dynamodb_policy" {
   name        = "${var.project_name}-lambda-dynamodb-policy-${var.environment}"
@@ -1951,12 +1975,13 @@ module "file_return_lambda" {
   source_dir = "../backend_app/src/file_return/app"
 
   environment_variables = {
-    S3_BUCKET          = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
-    SEC_FILINGS_BUCKET = "cosine-sec-filings-${var.environment}"
-    SESSIONS_TABLE     = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    WEBSOCKET_ENDPOINT = module.websocket_api.stage_url
-    ENVIRONMENT        = var.environment
-    LOG_LEVEL          = var.environment == "development" ? "DEBUG" : "INFO"
+    S3_BUCKET                = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    SEC_FILINGS_BUCKET       = "cosine-sec-filings-${var.environment}"
+    POLITICIAN_TRADES_BUCKET = "cosine-politician-trades-${var.environment}"
+    SESSIONS_TABLE           = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    WEBSOCKET_ENDPOINT       = module.websocket_api.stage_url
+    ENVIRONMENT              = var.environment
+    LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
   additional_policy_arns = [
@@ -1964,7 +1989,8 @@ module "file_return_lambda" {
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
     aws_iam_policy.lambda_websocket_policy.arn,
     data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn,
-    aws_iam_policy.sec_search_s3_policy.arn # Add SEC filings bucket access
+    aws_iam_policy.sec_search_s3_policy.arn,       # Add SEC filings bucket access
+    aws_iam_policy.politician_trades_s3_policy.arn # Add politician trades bucket access
   ]
 
   tags = var.common_tags

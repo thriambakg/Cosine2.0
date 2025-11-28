@@ -922,10 +922,10 @@ export interface PoliticianTrade {
   tradeId: string;
   amountMax?: number;
   amountMin?: number;
-  amountRange?: string;
+  amountRange?: number[] | string; // Array of [min, max] or string
   assetType?: string;
   comment?: string;
-  filingDate?: string;
+  filingDate?: string; // YYYY-MM-DD format
   formS3Key?: string;
   formType?: string;
   isUnparsed?: boolean;
@@ -941,7 +941,7 @@ export interface PoliticianTrade {
   securitySymbol?: string;
   source?: string;
   stateDistrict?: string;
-  transactionDate?: number;
+  transactionDate?: number; // YYYYMMDD integer format (e.g., 20251103)
   transactionType?: string;
   websiteUrl?: string;
 }
