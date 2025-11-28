@@ -30,34 +30,29 @@ try:
     # Monkey-patch boto3.client to ensure all clients use extended timeout
     _original_boto3_client = boto3.client
     def _patched_boto3_client(*args, **kwargs):
+        # Only add config if it's not already provided
         if 'config' not in kwargs:
             kwargs['config'] = BEDROCK_CONFIG
-        result = _original_boto3_client(*args, **kwargs)
-        # Verify config was applied
-        if hasattr(result, '_client_config') and result._client_config:
-            if result._client_config.read_timeout != 850:
-                print(f"WARNING: Client config read_timeout is {result._client_config.read_timeout}, expected 850")
-        return result
+        else:
+            # If config is provided but has a shorter timeout, upgrade it
+            existing_config = kwargs.get('config')
+            if existing_config and hasattr(existing_config, 'read_timeout'):
+                if existing_config.read_timeout and existing_config.read_timeout < 850:
+                    kwargs['config'] = Config(
+                        read_timeout=850,
+                        connect_timeout=getattr(existing_config, 'connect_timeout', 10),
+                        retries=getattr(existing_config, 'retries', {'max_attempts': 3, 'mode': 'adaptive'})
+                    )
+        return _original_boto3_client(*args, **kwargs)
     boto3.client = _patched_boto3_client
     
-    # Also patch botocore.client.BaseClient.__init__ to ensure config is always applied
-    _original_base_client_init = botocore.client.BaseClient.__init__
-    def _patched_base_client_init(self, *args, **kwargs):
-        # If config is not provided or has default timeout, replace with extended timeout
-        if 'config' in kwargs:
-            config = kwargs['config']
-            # If config has a read_timeout less than 850, replace it
-            if hasattr(config, 'read_timeout') and config.read_timeout and config.read_timeout < 850:
-                # Create new config with extended timeout, preserving other settings
-                kwargs['config'] = Config(
-                    read_timeout=850,
-                    connect_timeout=getattr(config, 'connect_timeout', 10),
-                    retries=getattr(config, 'retries', {'max_attempts': 3, 'mode': 'adaptive'})
-                )
-        elif 'config' not in kwargs:
+    # Also patch boto3.resource for resources that might need extended timeouts
+    _original_boto3_resource = boto3.resource
+    def _patched_boto3_resource(*args, **kwargs):
+        if 'config' not in kwargs:
             kwargs['config'] = BEDROCK_CONFIG
-        return _original_base_client_init(self, *args, **kwargs)
-    botocore.client.BaseClient.__init__ = _patched_base_client_init
+        return _original_boto3_resource(*args, **kwargs)
+    boto3.resource = _patched_boto3_resource
     
     print("✅ Configured boto3 with extended timeouts (850s) for Bedrock streaming")
     
