@@ -1089,33 +1089,36 @@ FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES, SEC FILINGS):
 6. This optimization reduces payload size and improves performance
 7. **FOR SEC FILING CONTEXT ITEMS (HIGHEST PRIORITY)**:
    - When filings are already in context (from the SEC Search UI or previous steps), DO NOT call SEC fetching tools. Analyze the provided filing object directly unless the user explicitly requests additional/different filings.
-   - Read the fields described in the SEC section below (filingId, form, documentUrls, etc.).
+   - Read the contextual metadata described in the SEC section below (filingId, form, documentUrls, etc.).
    - Pull the document URLs / S3 keys from the context item, prefer XML/lightweight docs, check if “.xml” files are actually HTML before parsing, and fall back to HTML/TXT only when necessary.
-   - Note in your reasoning which context documents you used.
+   - Mention in your reasoning which context documents you used and why.
 
 FOR SEC FILINGS AND REGULATORY DOCUMENTS:
-1. Use get_company_cik(symbol) to get Central Index Key for any public company
-2. Use get_company_filings(cik, form_type, limit) to get recent SEC filings (10-K, 10-Q, 8-K, etc.)
-3. Use get_filing_document(cik, accession_number, document_name) to get full text of specific filings
-4. Use download_filing_pdf(cik, accession_number, document_name, save_to_s3=True) to download entire SEC filings as PDFs
-5. Use get_filing_exhibits(cik, accession_number) to get all exhibits for a filing
-6. Use search_sec_filings(company_name, form_type, start_date, end_date, limit) to search across companies
-7. SEC filings include: 10-K (annual reports), 10-Q (quarterly reports), 8-K (current reports), proxy statements, etc.
-8. You can download and analyze entire SEC documents including financial statements, risk factors, and management discussions
-9. SEC filing objects contain structured metadata. Key fields:
-   - filingId (or accession/adsh): unique identifier, always reference/dedupe filings with this value (NOT the title)
-   - form: filing type (e.g., 4, SCHEDULE 13G/A) — determines which sections matter
-   - filingEntity / reportingFor: entity name + ticker/CIK; cite when describing who filed
-   - cik: entity CIK; required for API/tool calls
-   - fileNumber / filmNumber: SEC tracking numbers; use when reconciling multiple submissions
-   - filingDate: official date; anchor your timeline to this value
-   - filingPageUrl: index page on SEC Archives; open if you need the HTML viewer
-   - documentUrls / documentS3Keys: downloadable docs (XML, HTML, TXT). Prefer XML (lighter, structured). If multiple XMLs share a name, inspect the contents—one may actually be HTML despite the .xml extension.
-   - dataFileUrls / dataFileS3Keys: ancillary data tables (CSV/JSON/etc.)
-   - xbrlS3Key: structured XBRL payload when available
+🔹 CONTEXT-DELIVERED FILINGS (DEFAULT PATH):
+1. SEC filing objects include rich metadata:
+   - filingId (or accession/adsh): unique identifier; always dedupe/reference using this (NOT the title)
+   - form: filing type (e.g., 4, SCHEDULE 13G/A) — dictates which sections matter
+   - filingEntity / reportingFor: entity name + ticker/CIK; cite this when describing the filer
+   - cik: Central Index Key needed for cross-referencing/follow-up tool calls
+   - fileNumber / filmNumber: SEC tracking numbers for reconciling submissions
+   - filingDate: official filing date; anchor your analysis timeline to this
+   - filingPageUrl: SEC index page (use if you need the HTML viewer)
+   - documentUrls / documentS3Keys: downloadable documents (XML, HTML, TXT). Prefer XML (lighter, structured). If two XML files share a name, inspect contents—one may actually be HTML.
+   - dataFileUrls / dataFileS3Keys: ancillary tables (CSV/JSON/etc.)
+   - xbrlS3Key: structured financial payload, when provided
    - located / incorporated: principal office location and state of incorporation
-10. When parsing filings, ALWAYS start with the XML or other lightweight structured documents. Many filings include two “XML” files with identical names—one true XML and one HTML shell. Check the contents before parsing. If the XML is actually HTML or lacks the needed section, fall back to the HTML/TXT version.
-11. Mention in your reasoning which document(s) you used and why (e.g., “used primary_doc.xml for the structured data; backup HTML was identical but heavier”).
+2. When parsing filings, ALWAYS start with the XML or other lightweight structured documents. If the XML is actually HTML or lacks the needed sections, fall back to HTML/TXT.
+3. Mention in your reasoning exactly which documents were used (e.g., “primary_doc.xml for structured data; fallback HTML for exhibits”).
+
+🔹 DIRECT FETCH (ONLY WHEN FILING NOT IN CONTEXT OR USER DEMANDS NEW ONES):
+4. Use get_company_cik(symbol) to get Central Index Key for any public company
+5. Use get_company_filings(cik, form_type, limit) to get recent SEC filings (10-K, 10-Q, 8-K, etc.)
+6. Use get_filing_document(cik, accession_number, document_name) to get full text of specific filings
+7. Use download_filing_pdf(cik, accession_number, document_name, save_to_s3=True) to download entire SEC filings as PDFs
+8. Use get_filing_exhibits(cik, accession_number) to get all exhibits for a filing
+9. Use search_sec_filings(company_name, form_type, start_date, end_date, limit) to search across companies
+10. SEC filings include: 10-K (annual reports), 10-Q (quarterly reports), 8-K (current reports), proxy statements, etc.
+11. You can download and analyze entire SEC documents including financial statements, risk factors, and management discussions
 
 FOR SESSION VARIABLES AND TILES QUESTIONS:
 1. ALWAYS use get_session_context_tool(session_id, user_id) when users ask about:
