@@ -7,7 +7,7 @@
 
 export interface ContextItem {
   id: string;
-  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'custom';
+  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'custom';
   title: string;
   subtitle?: string;
   data: any;
@@ -414,6 +414,82 @@ export const addMultipleChatSessionsToContext = (
     });
     
     return contextItem;
+  });
+  
+  if (target === 'sidebar') {
+    // Add multiple items to current sidebar session's context
+    const event = new CustomEvent('add-multiple-to-sidebar-context', {
+      detail: contextItems
+    });
+    window.dispatchEvent(event);
+  } else {
+    // Add to new chat (existing behavior) - dispatch each item separately
+    contextItems.forEach(item => addToContext(item));
+  }
+};
+
+/**
+ * Add a SEC filing to the context window
+ * Used for adding individual filings from the SEC search page
+ */
+export const addFilingToContext = (
+  filing: any,
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  // Use filingId as the primary unique identifier, fallback to other fields
+  const filingId = filing.filingId || filing.adsh || filing.objectAccession || 
+                   `${filing.cik || 'unknown'}_${filing.form || 'filing'}_${filing.filingDate || Date.now()}`;
+  const title = `${filing.form || 'SEC Filing'} - ${filing.filingEntity || filing.reportingFor || 'Unknown Entity'}`;
+  const subtitle = filing.filingDate 
+    ? `Filed: ${filing.filingDate}${filing.cik ? ` • CIK: ${filing.cik}` : ''}`
+    : filing.cik ? `CIK: ${filing.cik}` : 'SEC Filing';
+  
+  const contextItem: ContextItem = {
+    id: `sec_filing_${filingId}_${Date.now()}`,
+    type: 'sec_filing',
+    title,
+    subtitle,
+    data: filing, // Include all filing data
+    timestamp: Date.now(),
+  };
+  
+  if (target === 'sidebar') {
+    // Add to current sidebar session's context
+    const event = new CustomEvent('add-to-sidebar-context', {
+      detail: contextItem
+    });
+    window.dispatchEvent(event);
+  } else {
+    // Add to new chat (existing behavior)
+    addToContext(contextItem);
+  }
+};
+
+/**
+ * Add multiple SEC filings to the context window
+ * Used for adding multiple selected filings from the SEC search page
+ */
+export const addMultipleFilingsToContext = (
+  filings: any[],
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  const contextItems: ContextItem[] = filings.map(filing => {
+    // Use filingId as the primary unique identifier, fallback to other fields
+    const filingId = filing.filingId || filing.adsh || filing.objectAccession || 
+                     `${filing.cik || 'unknown'}_${filing.form || 'filing'}_${filing.filingDate || Date.now()}`;
+    const title = `${filing.form || 'SEC Filing'} - ${filing.filingEntity || filing.reportingFor || 'Unknown Entity'}`;
+    const subtitle = filing.filingDate 
+      ? `Filed: ${filing.filingDate}${filing.cik ? ` • CIK: ${filing.cik}` : ''}`
+      : filing.cik ? `CIK: ${filing.cik}` : 'SEC Filing';
+    
+    return {
+      id: `sec_filing_${filingId}_${Date.now()}-batch-${Math.random()}`,
+      type: 'sec_filing' as const,
+      title,
+      subtitle,
+      data: filing, // Include all filing data
+      timestamp: Date.now(),
+    };
   });
   
   if (target === 'sidebar') {

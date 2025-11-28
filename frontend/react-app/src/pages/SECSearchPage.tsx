@@ -33,6 +33,8 @@ import {
   DialogActions,
   IconButton,
   Grid,
+  Menu,
+  Tooltip,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -46,11 +48,15 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Download as DownloadIcon,
+  Dashboard as AddToContextIcon,
+  AddComment as NewChatIcon,
+  Chat as SidebarChatIcon,
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
+import { addFilingToContext, addMultipleFilingsToContext } from '../components/tiles/common';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -823,6 +829,10 @@ const SECSearchPage: React.FC = () => {
     : null;
   const [selectedFiling, setSelectedFiling] = useState<SECSearchResult | null>(null);
   const [isRestoringState] = useState<boolean>(false); // Set to false since we initialize from storage
+  
+  // Selection state for adding to context
+  const [selectedFilings, setSelectedFilings] = useState<Set<number>>(new Set());
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
 
   // Log state restoration (state is already initialized from sessionStorage above)
   useEffect(() => {
@@ -1487,6 +1497,8 @@ const SECSearchPage: React.FC = () => {
     
     // Client-side pagination - just update page, useEffect will handle slicing
     setCurrentPage(newPage);
+    // Clear selections when page changes (indices are page-specific)
+    setSelectedFilings(new Set());
   };
 
   const handleColumnToggle = (column: string) => {
@@ -1560,6 +1572,59 @@ const SECSearchPage: React.FC = () => {
     const selected = searchParams.formTypes || [];
     return filteredFormTypes.length > 0 && filteredFormTypes.every(form => selected.includes(form.id));
   }, [filteredFormTypes, searchParams.formTypes]);
+
+  // Handler functions for filing selection and context
+  const handleFilingSelect = (index: number) => {
+    setSelectedFilings(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(index)) {
+        newSet.delete(index);
+      } else {
+        newSet.add(index);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAllFilings = (checked: boolean) => {
+    if (checked) {
+      const allIndices = new Set(currentResults.map((_, idx) => idx));
+      setSelectedFilings(allIndices);
+    } else {
+      setSelectedFilings(new Set());
+    }
+  };
+
+  const handleContextMenuClose = () => {
+    setContextMenuAnchor(null);
+  };
+
+  const handleAddToContext = (target: 'new' | 'sidebar') => {
+    if (selectedFilings.size === 0) return;
+    
+    // Get the selected filing objects from currentResults
+    const selectedFilingObjects = currentResults.filter((_, idx) => selectedFilings.has(idx));
+    
+    console.log(`📦 Adding ${selectedFilingObjects.length} filing(s) to context (target: ${target})`);
+    
+    // Log all filing data for debugging
+    selectedFilingObjects.forEach((filing, idx) => {
+      console.log(`📄 Filing ${idx + 1}:`, filing);
+    });
+    
+    // Add to context using the context manager functions
+    if (selectedFilingObjects.length > 1) {
+      addMultipleFilingsToContext(selectedFilingObjects, target);
+      console.log(`✅ Added ${selectedFilingObjects.length} filings to context in batch`);
+    } else if (selectedFilingObjects.length === 1) {
+      addFilingToContext(selectedFilingObjects[0], target);
+      console.log(`✅ Added filing to context: ${selectedFilingObjects[0].form || 'SEC Filing'}`);
+    }
+    
+    // Clear selection and close menu
+    setSelectedFilings(new Set());
+    handleContextMenuClose();
+  };
 
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
@@ -2806,9 +2871,34 @@ const SECSearchPage: React.FC = () => {
                     Search Results
                   </Typography>
                   
-                  {/* Status Indicator */}
+                  {/* Status Indicator and Add to Context Button */}
                   {allSearchResults.length > 0 || searchState.isSearching ? (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      {/* Add to Context Button */}
+                      {currentResults.length > 0 && (
+                        <Tooltip title={`Add ${selectedFilings.size > 0 ? `${selectedFilings.size} filing(s)` : 'selected filings'} to context`}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                if (selectedFilings.size === 0) {
+                                  alert('Please select at least one filing to add to context');
+                                  return;
+                                }
+                                setContextMenuAnchor(e.currentTarget);
+                              }}
+                              disabled={selectedFilings.size === 0}
+                              sx={{ 
+                                color: selectedFilings.size > 0 ? '#10b981' : '#9ca3af', 
+                                '&:hover': { color: '#10b981' },
+                                '&:disabled': { color: '#4b5563' }
+                              }}
+                            >
+                              <AddToContextIcon sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      )}
                       {totalFound > 0 ? (
                         <Chip
                           label={`${totalFound} filing${totalFound !== 1 ? 's' : ''} found`}
@@ -2890,6 +2980,19 @@ const SECSearchPage: React.FC = () => {
                 <Table>
                   <TableHead>
                     <TableRow>
+                      <TableCell padding="checkbox" sx={{ width: '48px', borderColor: '#374151' }}>
+                        <Checkbox
+                          size="small"
+                          checked={selectedFilings.size === currentResults.length && currentResults.length > 0}
+                          indeterminate={selectedFilings.size > 0 && selectedFilings.size < currentResults.length}
+                          onChange={(e) => handleSelectAllFilings(e.target.checked)}
+                          sx={{
+                            color: '#9ca3af',
+                            '&.Mui-checked': { color: '#10b981' },
+                            '&.MuiCheckbox-indeterminate': { color: '#10b981' },
+                          }}
+                        />
+                      </TableCell>
                       {shouldShowColumn('Form & File') && (
                         <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Form & File</TableCell>
                       )}
@@ -2910,7 +3013,31 @@ const SECSearchPage: React.FC = () => {
                   </TableHead>
                   <TableBody>
                     {currentResults.map((result, index) => (
-                      <TableRow key={index} sx={{ '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' } }}>
+                      <TableRow 
+                        key={index} 
+                        hover
+                        selected={selectedFilings.has(index)}
+                        sx={{ 
+                          '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                          '&.Mui-selected': {
+                            backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                          },
+                          '&.Mui-selected:hover': {
+                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                          },
+                        }}
+                      >
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            size="small"
+                            checked={selectedFilings.has(index)}
+                            onChange={() => handleFilingSelect(index)}
+                            sx={{
+                              color: '#9ca3af',
+                              '&.Mui-checked': { color: '#10b981' },
+                            }}
+                          />
+                        </TableCell>
                         {shouldShowColumn('Form & File') && (
                           <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Form & File')}</TableCell>
                         )}
@@ -3409,6 +3536,29 @@ const SECSearchPage: React.FC = () => {
           </>
         )}
       </Dialog>
+
+      {/* Context Target Menu */}
+      <Menu
+        anchorEl={contextMenuAnchor}
+        open={Boolean(contextMenuAnchor)}
+        onClose={handleContextMenuClose}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+            color: 'white',
+          },
+        }}
+      >
+        <MenuItem onClick={() => handleAddToContext('new')}>
+          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
+          Add to New Chat
+        </MenuItem>
+        <MenuItem onClick={() => handleAddToContext('sidebar')}>
+          <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+          Add to Current Sidebar Chat
+        </MenuItem>
+      </Menu>
     </Box>
   );
 };
