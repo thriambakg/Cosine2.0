@@ -36,7 +36,6 @@ import {
   ListItemText,
   Tooltip,
   Checkbox,
-  Collapse,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -53,8 +52,6 @@ import {
   Dashboard as ContextIcon,
   Chat as SidebarChatIcon,
   OpenInNew as OpenInNewIcon,
-  ExpandLess as ExpandLessIcon,
-  ExpandMore as ExpandMoreIcon,
   Download as DownloadIcon,
   SmartToy as SmartToyIcon,
 } from '@mui/icons-material';
@@ -328,8 +325,9 @@ export default function ChatPage() {
   // Context state
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
   const previousContextRef = useRef<ContextItem[]>([]);
-  const [isContextExpanded, setIsContextExpanded] = useState(false);
-  const [isFilesExpanded, setIsFilesExpanded] = useState(false);
+  const [isContextDrawerOpen, setIsContextDrawerOpen] = useState(false);
+  const [isFilesDrawerOpen, setIsFilesDrawerOpen] = useState(false);
+  const headerHeight = 64; // Top navigation bar height
   const handleRemoveContextItem = useCallback(async (index: number) => {
     const newContext = sessionContext.filter((_, i) => i !== index);
     setSessionContext(newContext);
@@ -1750,15 +1748,16 @@ export default function ChatPage() {
 
       {/* Main Chat Area */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', height: 'calc(100vh - 64px)', maxHeight: 'calc(100vh - 64px)', overflow: 'hidden' }}>
-        {/* Floating Menu */}
+        {/* Floating Menu - Top Right */}
         <Box sx={{ 
           position: 'absolute', 
           top: 16, 
           right: 16, 
           zIndex: 1000,
           display: 'flex',
+          flexDirection: 'column',
           gap: 1,
-          alignItems: 'center'
+          alignItems: 'flex-end'
         }}>
           {/* Sidebar Toggle - Only shows when sidebar is completely closed */}
           {!sidebarOpen && (
@@ -1780,6 +1779,47 @@ export default function ChatPage() {
             </Tooltip>
           )}
           
+          {/* Context Button */}
+          <Tooltip title={isContextDrawerOpen ? 'Hide Context' : `Show Context (${sessionContext.length})`}>
+            <IconButton
+              onClick={() => {
+                setIsContextDrawerOpen((v) => !v);
+                if (!isContextDrawerOpen) setIsFilesDrawerOpen(false);
+              }}
+              sx={{
+                color: isContextDrawerOpen ? '#10b981' : '#9ca3af',
+                backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                border: '1px solid #374151',
+                '&:hover': {
+                  color: '#10b981',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                },
+              }}
+            >
+              <ContextIcon />
+            </IconButton>
+          </Tooltip>
+
+          {/* Files Button */}
+          <Tooltip title={isFilesDrawerOpen ? 'Hide Files' : 'Show Files'}>
+            <IconButton
+              onClick={() => {
+                setIsFilesDrawerOpen((v) => !v);
+                if (!isFilesDrawerOpen) setIsContextDrawerOpen(false);
+              }}
+              sx={{
+                color: isFilesDrawerOpen ? '#3b82f6' : '#9ca3af',
+                backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                border: '1px solid #374151',
+                '&:hover': {
+                  color: '#3b82f6',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+              }}
+            >
+              <FileIcon />
+            </IconButton>
+          </Tooltip>
         </Box>
 
         {/* Messages */}
@@ -2035,396 +2075,6 @@ export default function ChatPage() {
           </GlassCard>
         )}
 
-        {/* Context Items - Collapsible */}
-        {sessionContext.length > 0 && (
-          <Box sx={{ borderTop: '2px solid #374151', backgroundColor: 'rgba(15, 23, 42, 0.95)' }}>
-            <Box
-              sx={{
-                p: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                cursor: 'pointer',
-                '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
-              }}
-              onClick={() => setIsContextExpanded(!isContextExpanded)}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <ContextIcon sx={{ color: '#10b981', fontSize: '1rem' }} />
-                <Typography variant="body2" sx={{ color: '#10b981', fontSize: '0.8rem', fontWeight: 600 }}>
-                  Context ({sessionContext.length} {sessionContext.length === 1 ? 'item' : 'items'})
-                </Typography>
-              </Box>
-              {isContextExpanded ? <ExpandLessIcon fontSize="small" sx={{ color: '#9ca3af' }} /> : <ExpandMoreIcon fontSize="small" sx={{ color: '#9ca3af' }} />}
-            </Box>
-            <Collapse in={isContextExpanded}>
-              <List dense sx={{ py: 0, px: 1, maxHeight: 150, overflow: 'auto' }}>
-                {sessionContext.map((item, index) => (
-                  <ListItem key={item.id || index} disableGutters sx={{ display: 'block', px: 0 }}>
-                    <ContextItemRow
-                      item={item}
-                      sessionId={currentSession?.session_id}
-                      userId={user?.id}
-                      onRemove={() => handleRemoveContextItem(index)}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Collapse>
-          </Box>
-        )}
-
-        {/* Files Section - User Files and Agent Files */}
-        {((currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0) || 
-          (currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0)) ? (
-          <Box sx={{ borderTop: '2px solid #374151', backgroundColor: 'rgba(15, 23, 42, 0.95)' }}>
-            <Box
-              sx={{
-                p: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                cursor: 'pointer',
-                '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
-              }}
-              onClick={() => setIsFilesExpanded(!isFilesExpanded)}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <FileIcon sx={{ color: '#3b82f6', fontSize: '1rem' }} />
-                <Typography variant="body2" sx={{ color: '#3b82f6', fontSize: '0.8rem', fontWeight: 600 }}>
-                  Files
-                </Typography>
-              </Box>
-              {isFilesExpanded ? <ExpandLessIcon fontSize="small" sx={{ color: '#9ca3af' }} /> : <ExpandMoreIcon fontSize="small" sx={{ color: '#9ca3af' }} />}
-            </Box>
-            <Collapse in={isFilesExpanded}>
-              <Box sx={{ 
-                py: 1, 
-                px: 1, 
-                maxHeight: 200, 
-                overflow: 'auto',
-                '&::-webkit-scrollbar': {
-                  width: '6px',
-                },
-                '&::-webkit-scrollbar-track': {
-                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                  borderRadius: '3px',
-                },
-                '&::-webkit-scrollbar-thumb:hover': {
-                  backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                },
-              }}>
-                {/* User Files Section */}
-                <Box sx={{ mb: 2 }}>
-                  <Typography variant="subtitle2" sx={{ 
-                    fontWeight: 600, 
-                    color: '#3b82f6', 
-                    mb: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                    fontSize: '0.75rem'
-                  }}>
-                    <PersonIcon fontSize="small" />
-                    User Files ({currentSession?.session_variables?.uploaded_files?.length || 0})
-                  </Typography>
-                  
-                  {currentSession?.session_variables?.uploaded_files && currentSession.session_variables.uploaded_files.length > 0 ? (
-                    <List dense sx={{ py: 0 }}>
-                      {currentSession.session_variables.uploaded_files.map((file: any, index: number) => (
-                        <ListItem 
-                          key={index} 
-                          sx={{ 
-                            py: 0.5, 
-                            px: 1,
-                            borderRadius: '4px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            '&:hover': {
-                              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                              '& .remove-file-btn': {
-                                opacity: 1,
-                              }
-                            }
-                          }}
-                        >
-                          {/* Delete button on the left */}
-                          <IconButton
-                            size="small"
-                            className="remove-file-btn"
-                            onClick={async () => {
-                              const newFiles = currentSession.session_variables?.uploaded_files?.filter((_: any, i: number) => i !== index) || [];
-                              
-                              // Update the session using the hook function
-                              updateSessionFiles(currentSession.session_id, newFiles);
-                              console.log(`🗑️ Removed file: ${file.filename}`);
-                              
-                              // Persist the updated files to backend immediately
-                              if (currentSession?.session_id && user?.id) {
-                                try {
-                                  await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
-                                    session_variables: {
-                                      ...currentSession.session_variables,
-                                      uploaded_files: newFiles,
-                                      files_added_at: Date.now(),
-                                    }
-                                  });
-                                  console.log('✅ Updated files in backend');
-                                } catch (error) {
-                                  console.error('❌ Failed to update files in backend:', error);
-                                }
-                              }
-                            }}
-                            sx={{ 
-                              opacity: 0,
-                              transition: 'opacity 0.2s',
-                              color: '#dc2626',
-                              mr: 0.5,
-                              '&:hover': { color: '#ef4444' }
-                            }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                          
-                          {/* Download button */}
-                          <IconButton
-                            size="small"
-                            className="remove-file-btn"
-                            onClick={async () => {
-                              if (!currentSession?.session_id || !user?.id) {
-                                console.error('Missing session ID or user ID for file download');
-                                return;
-                              }
-
-                              try {
-                                console.log('📥 Downloading file:', file.filename);
-                                
-                                // Request fresh presigned URL from file return Lambda
-                                const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                                const response = await fetch(`${apiUrl}/file-download`, {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({
-                                    user_id: user.id,
-                                    session_id: currentSession.session_id,
-                                    filename: file.filename,
-                                    s3_key: file.s3_key
-                                  })
-                                });
-                                
-                                if (!response.ok) {
-                                  throw new Error(`Download request failed: ${response.status}`);
-                                }
-                                
-                                const { download_url } = await response.json();
-                                
-                                // Create download link and trigger download in new tab
-                                const link = document.createElement('a');
-                                link.href = download_url;
-                                link.download = file.filename;
-                                link.target = '_blank';  // Open in new tab to avoid redirect issues
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                                
-                                console.log('✅ File download started');
-                              } catch (error) {
-                                console.error('❌ Download failed:', error);
-                              }
-                            }}
-                            sx={{ 
-                              opacity: 0,
-                              transition: 'opacity 0.2s',
-                              color: '#3b82f6',
-                              mr: 1,
-                              '&:hover': { color: '#60a5fa' }
-                            }}
-                          >
-                            <DownloadIcon fontSize="small" />
-                          </IconButton>
-                          
-                          {/* Content on the right */}
-                          <ListItemText
-                            primary={file.filename}
-                            secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type}`}
-                            primaryTypographyProps={{
-                              fontSize: '0.75rem',
-                              color: '#ffffff',
-                            }}
-                            secondaryTypographyProps={{
-                              fontSize: '0.65rem',
-                              color: '#9ca3af',
-                            }}
-                          />
-                        </ListItem>
-                      ))}
-                    </List>
-                  ) : (
-                    <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem', fontStyle: 'italic' }}>
-                      No user files uploaded
-                    </Typography>
-                  )}
-                </Box>
-
-                {/* Agent Files Section */}
-                <Box sx={{ mb: 1 }}>
-                  <Typography variant="subtitle2" sx={{ 
-                    fontWeight: 600, 
-                    color: '#22c55e', 
-                    mb: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                    fontSize: '0.75rem'
-                  }}>
-                    <SmartToyIcon fontSize="small" />
-                    Agent Files ({currentSession?.session_variables?.agent_files?.length || 0})
-                  </Typography>
-                  
-                  {currentSession?.session_variables?.agent_files && currentSession.session_variables.agent_files.length > 0 ? (
-                    <List dense sx={{ py: 0 }}>
-                      {currentSession.session_variables.agent_files.map((file: any, index: number) => (
-                        <ListItem 
-                          key={index} 
-                          sx={{ 
-                            py: 0.5, 
-                            px: 1,
-                            borderRadius: '4px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                            border: '1px solid rgba(34, 197, 94, 0.3)',
-                            '&:hover': {
-                              backgroundColor: 'rgba(34, 197, 94, 0.15)',
-                              '& .remove-file-btn': {
-                                opacity: 1,
-                              }
-                            }
-                          }}
-                        >
-                          {/* Delete button on the left */}
-                          <IconButton
-                            size="small"
-                            className="remove-file-btn"
-                            onClick={async () => {
-                              const newFiles = currentSession.session_variables?.agent_files?.filter((_: any, i: number) => i !== index) || [];
-                              
-                              // Update the session using the hook function
-                              updateSessionAgentFiles(currentSession.session_id, newFiles);
-                              console.log(`🗑️ Removed agent file: ${file.filename}`);
-                              
-                              // Persist the updated files to backend immediately
-                              if (currentSession?.session_id && user?.id) {
-                                try {
-                                  await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
-                                    session_variables: {
-                                      ...currentSession.session_variables,
-                                      agent_files: newFiles,
-                                    }
-                                  });
-                                  console.log('✅ Updated agent files in backend');
-                                } catch (error) {
-                                  console.error('❌ Failed to update agent files in backend:', error);
-                                }
-                              }
-                            }}
-                            sx={{ 
-                              opacity: 0,
-                              transition: 'opacity 0.2s',
-                              color: '#dc2626',
-                              mr: 0.5,
-                              '&:hover': { color: '#ef4444' }
-                            }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                          
-                          {/* Download button */}
-                          <IconButton
-                            size="small"
-                            className="remove-file-btn"
-                            onClick={async () => {
-                              if (!currentSession?.session_id || !user?.id) {
-                                console.error('Missing session ID or user ID for file download');
-                                return;
-                              }
-
-                              try {
-                                console.log('📥 Downloading agent file:', file.filename);
-                                
-                                // Request fresh presigned URL from file return Lambda
-                                const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                                const response = await fetch(`${apiUrl}/file-download`, {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({
-                                    user_id: user.id,
-                                    session_id: currentSession.session_id,
-                                    filename: file.filename,
-                                    s3_key: file.s3_key
-                                  })
-                                });
-                                
-                                if (!response.ok) {
-                                  throw new Error(`Download request failed: ${response.status}`);
-                                }
-                                
-                                const { download_url } = await response.json();
-                                
-                                // Create download link and trigger download in new tab
-                                const link = document.createElement('a');
-                                link.href = download_url;
-                                link.download = file.filename;
-                                link.target = '_blank';  // Open in new tab to avoid redirect issues
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                                
-                                console.log('✅ Agent file download started');
-                              } catch (error) {
-                                console.error('❌ Agent file download failed:', error);
-                              }
-                            }}
-                            sx={{ 
-                              opacity: 0,
-                              transition: 'opacity 0.2s',
-                              color: '#22c55e',
-                              mr: 1,
-                              '&:hover': { color: '#16a34a' }
-                            }}
-                          >
-                            <DownloadIcon fontSize="small" />
-                          </IconButton>
-                          
-                          {/* Content on the right */}
-                          <ListItemText
-                            primary={file.filename}
-                            secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type} • Generated`}
-                            primaryTypographyProps={{
-                              fontSize: '0.75rem',
-                              color: '#ffffff',
-                            }}
-                            secondaryTypographyProps={{
-                              fontSize: '0.65rem',
-                              color: '#9ca3af',
-                            }}
-                          />
-                        </ListItem>
-                      ))}
-                    </List>
-                  ) : (
-                    <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem', fontStyle: 'italic' }}>
-                      No agent files generated
-                    </Typography>
-                  )}
-                </Box>
-              </Box>
-            </Collapse>
-          </Box>
-        ) : null}
 
         {/* Input Area - Compact with Paperclip */}
         <GlassCard sx={{ p: 2, borderTop: '2px solid #374151', flexShrink: 0 }}>
@@ -2458,6 +2108,196 @@ export default function ChatPage() {
           </Box>
         </GlassCard>
       </Box>
+
+      {/* Context Drawer */}
+      <Drawer
+        anchor="right"
+        open={isContextDrawerOpen}
+        variant="persistent"
+        PaperProps={{
+          sx: {
+            width: 360,
+            top: `${headerHeight}px`,
+            height: `calc(100vh - ${headerHeight}px)`,
+            backgroundColor: 'rgba(15, 23, 42, 0.98)',
+            borderLeft: '1px solid #374151',
+          }
+        }}
+        ModalProps={{ keepMounted: true }}
+        sx={{ zIndex: 1300 }}
+      >
+        <Box sx={{ p: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #374151' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <ContextIcon sx={{ color: '#10b981', fontSize: '1rem' }} />
+            <Typography variant="body2" sx={{ color: '#10b981', fontSize: '0.85rem', fontWeight: 600 }}>
+              Context ({sessionContext.length})
+            </Typography>
+          </Box>
+          <IconButton size="small" onClick={() => setIsContextDrawerOpen(false)} sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Box>
+        <Box sx={{ p: 1, overflow: 'auto', '&::-webkit-scrollbar': { width: '6px' }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' }, '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' } }}>
+          {sessionContext.length > 0 ? (
+            <List dense sx={{ py: 0, px: 1 }}>
+              {sessionContext.map((item, index) => (
+                <ListItem key={item.id || index} sx={{ py: 0.5, px: 1, borderRadius: '4px', display: 'flex', alignItems: 'center', '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', '& .remove-context-btn': { opacity: 1 } } }}>
+                  <IconButton size="small" className="remove-context-btn" onClick={async () => {
+                    const newContext = sessionContext.filter((_, i) => i !== index);
+                    setSessionContext(newContext);
+                    if (currentSession?.session_id) {
+                      const syncEvent = new CustomEvent('session-context-updated', { detail: { sessionId: currentSession.session_id, contextItems: newContext } });
+                      window.dispatchEvent(syncEvent);
+                    }
+                    if (currentSession?.session_id && user?.id) {
+                      try {
+                        await sessionManagementAPI.updateSession(currentSession.session_id, user.id, { session_variables: { context_items: newContext, context_added_at: Date.now() } });
+                      } catch (error) { console.error('❌ Failed to update context in backend:', error); }
+                    }
+                  }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', mr: 1, '&:hover': { color: '#ef4444' } }}>
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                  <Box sx={{ flex: 1 }}>
+                    <ContextItemRow
+                      item={item}
+                      sessionId={currentSession?.session_id}
+                      userId={user?.id}
+                      onRemove={() => handleRemoveContextItem(index)}
+                    />
+                  </Box>
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem', fontStyle: 'italic', p: 2, display: 'block' }}>
+              No context items
+            </Typography>
+          )}
+        </Box>
+      </Drawer>
+
+      {/* Files Drawer */}
+      <Drawer
+        anchor="right"
+        open={isFilesDrawerOpen}
+        variant="persistent"
+        PaperProps={{
+          sx: {
+            width: 360,
+            top: `${headerHeight}px`,
+            height: `calc(100vh - ${headerHeight}px)`,
+            backgroundColor: 'rgba(15, 23, 42, 0.98)',
+            borderLeft: '1px solid #374151',
+          }
+        }}
+        ModalProps={{ keepMounted: true }}
+        sx={{ zIndex: 1300 }}
+      >
+        <Box sx={{ p: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #374151' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <FileIcon sx={{ color: '#3b82f6', fontSize: '1rem' }} />
+            <Typography variant="body2" sx={{ color: '#3b82f6', fontSize: '0.85rem', fontWeight: 600 }}>Files</Typography>
+          </Box>
+          <IconButton size="small" onClick={() => setIsFilesDrawerOpen(false)} sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Box>
+        <Box sx={{ p: 1, overflow: 'auto', '&::-webkit-scrollbar': { width: '6px' }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' }, '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' } }}>
+          {/* User Files */}
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#3b82f6', mb: 1, display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.8rem' }}>
+              <PersonIcon fontSize="small" />
+              User Files ({currentSession?.session_variables?.uploaded_files?.length || 0})
+            </Typography>
+            {(currentSession?.session_variables?.uploaded_files?.length ?? 0) > 0 ? (
+              <List dense sx={{ py: 0 }}>
+                {(currentSession?.session_variables?.uploaded_files ?? []).map((file: any, index: number) => (
+                  <ListItem key={index} sx={{ py: 0.5, px: 1, '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', '& .remove-file-btn': { opacity: 1 } } }}
+                    secondaryAction={
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <IconButton size="small" className="remove-file-btn" onClick={async () => {
+                          if (!currentSession?.session_id || !user?.id) return;
+                          try {
+                            const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                            const response = await fetch(`${apiUrl}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: currentSession.session_id, filename: file.filename, s3_key: file.s3_key }) });
+                            if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
+                            const { download_url } = await response.json();
+                            const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                          } catch (error) { console.error('❌ Download failed:', error); }
+                        }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#3b82f6', '&:hover': { color: '#60a5fa' } }}>
+                          <DownloadIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton edge="end" size="small" className="remove-file-btn" onClick={async () => {
+                          const newFiles = (currentSession?.session_variables?.uploaded_files ?? []).filter((_: any, i: number) => i !== index);
+                          if (currentSession?.session_id) {
+                            updateSessionFiles(currentSession.session_id, newFiles);
+                            if (currentSession?.session_id && user?.id) {
+                              try {
+                                await sessionManagementAPI.updateSession(currentSession.session_id, user.id, { session_variables: { ...(currentSession?.session_variables || {}), uploaded_files: newFiles, files_added_at: Date.now() } });
+                              } catch (error) { console.error('❌ Failed to update files in backend:', error); }
+                            }
+                          }
+                        }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', '&:hover': { color: '#ef4444' } }}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    }>
+                    <ListItemText primary={file.filename} secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type}`} primaryTypographyProps={{ fontSize: '0.8rem', color: '#ffffff' }} secondaryTypographyProps={{ fontSize: '0.7rem', color: '#9ca3af' }} />
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem', fontStyle: 'italic' }}>No user files uploaded</Typography>
+            )}
+          </Box>
+
+          {/* Agent Files */}
+          <Box sx={{ mb: 1 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#22c55e', mb: 1, display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.8rem' }}>
+              <SmartToyIcon fontSize="small" />
+              Agent Files ({currentSession?.session_variables?.agent_files?.length || 0})
+            </Typography>
+            {(currentSession?.session_variables?.agent_files?.length ?? 0) > 0 ? (
+              <List dense sx={{ py: 0 }}>
+                {(currentSession?.session_variables?.agent_files ?? []).map((file: any, index: number) => (
+                  <ListItem key={index} sx={{ py: 0.5, px: 1, backgroundColor: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '4px', mb: 0.5, '&:hover': { backgroundColor: 'rgba(34, 197, 94, 0.15)', '& .remove-file-btn': { opacity: 1 } } }}
+                    secondaryAction={
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <IconButton size="small" className="remove-file-btn" onClick={async () => {
+                          if (!currentSession?.session_id || !user?.id) return;
+                          try {
+                            const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                            const response = await fetch(`${apiUrl}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: currentSession.session_id, filename: file.filename, s3_key: file.s3_key }) });
+                            if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
+                            const { download_url } = await response.json();
+                            const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                          } catch (error) { console.error('❌ Agent file download failed:', error); }
+                        }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#22c55e', '&:hover': { color: '#16a34a' } }}>
+                          <DownloadIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton edge="end" size="small" className="remove-file-btn" onClick={async () => {
+                          const newFiles = (currentSession?.session_variables?.agent_files ?? []).filter((_: any, i: number) => i !== index);
+                          if (currentSession?.session_id) updateSessionAgentFiles(currentSession.session_id, newFiles);
+                          if (currentSession?.session_id && user?.id) {
+                            try {
+                              await sessionManagementAPI.updateSession(currentSession.session_id, user.id, { session_variables: { ...(currentSession?.session_variables || {}), agent_files: newFiles } });
+                            } catch (error) { console.error('❌ Failed to update agent files in backend:', error); }
+                          }
+                        }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', '&:hover': { color: '#ef4444' } }}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    }>
+                    <ListItemText primary={file.filename} secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type} • Generated`} primaryTypographyProps={{ fontSize: '0.8rem', color: '#ffffff' }} secondaryTypographyProps={{ fontSize: '0.7rem', color: '#9ca3af' }} />
+                  </ListItem>
+                ))}
+              </List>
+            ) : (
+              <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem', fontStyle: 'italic' }}>No agent files generated</Typography>
+            )}
+          </Box>
+        </Box>
+      </Drawer>
 
       {/* Session Context Menu */}
       <Menu

@@ -1291,6 +1291,55 @@ def handle_file_handler_message(event):
             )
             logger.info(f"📌 Stored original user message in conversation history")
             
+            # Also store user message in messages array for UI display
+            try:
+                # Get current messages array
+                session_response = chat_sessions_table.get_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    ConsistentRead=True
+                )
+                
+                if 'Item' in session_response:
+                    messages = session_response['Item'].get('messages', [])
+                    
+                    # Create user message for messages array (different format than conversation_history)
+                    user_message_for_display = {
+                        'id': message_id,
+                        'text': message_text,
+                        'sender': 'user',
+                        'timestamp': int(datetime.now().timestamp()),
+                        'message_type': 'text'
+                    }
+                    
+                    # Add file metadata if present
+                    if file_metadata:
+                        user_message_for_display['files'] = file_metadata
+                    
+                    # Append user message
+                    messages.append(user_message_for_display)
+                    
+                    # Update session with user message in messages array
+                    chat_sessions_table.update_item(
+                        Key={
+                            'user_id': user_id,
+                            'session_id': session_id
+                        },
+                        UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                        ExpressionAttributeValues={
+                            ':messages': messages,
+                            ':count': len(messages),
+                            ':timestamp': int(datetime.now().timestamp())
+                        }
+                    )
+                    logger.info(f"✅ Saved user message with files to messages array: {message_id}")
+                else:
+                    logger.warning(f"⚠️ Session {session_id} not found when storing message in messages array")
+            except Exception as msg_e:
+                logger.error(f"❌ Failed to store user message in messages array: {msg_e}")
+            
         except Exception as e:
             logger.error(f"❌ Failed to store user message: {e}")
         
@@ -1338,86 +1387,157 @@ def handle_file_handler_message(event):
             
             if response_payload.get('statusCode') == 200:
                 response_body = json.loads(response_payload.get('body', '{}'))
-                ai_response = response_body.get('response', 'I apologize, but I encountered an error processing your request.')
                 
-                # Send AI response back to frontend via WebSocket
-                try:
-                    # Find active WebSocket connections for this user/session
-                    active_connections = get_active_connections_for_user_session(user_id, session_id)
-                    
-                    if active_connections:
-                        ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
-                        
-                        for connection_id in active_connections:
-                            # Send user message confirmation first
-                            user_message_confirmation = {
-                                'type': 'message_received',
-                                'message_id': message_id,
-                                'session_id': session_id,
-                                'timestamp': datetime.now().isoformat()
-                            }
-                            
-                            send_message_to_client(connection_id, user_message_confirmation)
-                            logger.info(f"📨 Sent user message confirmation to connection {connection_id}")
-                            
-                            # Send user message with files for display
-                            user_message_display = {
-                                'type': 'user_message_with_files',
-                                'message_id': message_id,
-                                'content': message_text,
-                                'session_id': session_id,
-                                'timestamp': datetime.now().isoformat(),
-                                'files': file_metadata if file_metadata else []
-                            }
-                            
-                            send_message_to_client(connection_id, user_message_display)
-                            logger.info(f"📨 Sent user message with files to connection {connection_id}")
-                            
-                            # Send AI response
-                            ai_response_message = {
-                                'type': 'ai_response',
-                                'message_id': ai_message_id,
-                                'content': ai_response,
-                                'session_id': session_id,
-                                'timestamp': datetime.now().isoformat()
-                            }
-                            
-                            send_message_to_client(connection_id, ai_response_message)
-                            logger.info(f"📨 Sent AI response to connection {connection_id}")
-                            
-                            # Send session variables update to frontend
-                            try:
-                                # Get updated session variables from database
-                                session_response = chat_sessions_table.get_item(
-                                    Key={
-                                        'user_id': user_id,
-                                        'session_id': session_id
-                                    }
-                                )
+                # Check if response is being sent asynchronously (via SQS)
+                response_message = response_body.get('message', '')
+                is_async_delivery = 'async delivery' in response_message.lower() or 'async' in response_message.lower()
+                
+                # Only send immediate response if we have an actual response content
+                # If it's async delivery, the real response will come via SQS
+                ai_response = response_body.get('response')
+                
+                if is_async_delivery:
+                    logger.info(f"📨 Chat agent response will be delivered asynchronously via SQS, not sending immediate response")
+                    # Still send user message confirmation and display
+                    try:
+                        active_connections = get_active_connections_for_user_session(user_id, session_id)
+                        if active_connections:
+                            for connection_id in active_connections:
+                                # Send user message confirmation
+                                user_message_confirmation = {
+                                    'type': 'message_received',
+                                    'message_id': message_id,
+                                    'session_id': session_id,
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                                send_message_to_client(connection_id, user_message_confirmation)
+                                logger.info(f"📨 Sent user message confirmation to connection {connection_id}")
                                 
-                                if 'Item' in session_response:
-                                    session_item = session_response['Item']
-                                    session_variables = session_item.get('session_variables', {})
-                                    
-                                    # Send session update message
-                                    session_update_message = {
-                                        'type': 'session_updated',
-                                        'session_id': session_id,
-                                        'session_variables': session_variables,
-                                        'timestamp': datetime.now().isoformat()
-                                    }
-                                    
-                                    send_message_to_client(connection_id, session_update_message)
-                                    logger.info(f"📁 Sent session variables update to connection {connection_id}")
-                                    
-                            except Exception as e:
-                                logger.error(f"❌ Failed to send session variables update: {str(e)}")
+                                # Send user message with files for display
+                                user_message_display = {
+                                    'type': 'user_message_with_files',
+                                    'message_id': message_id,
+                                    'content': message_text,
+                                    'session_id': session_id,
+                                    'timestamp': datetime.now().isoformat(),
+                                    'files': file_metadata if file_metadata else []
+                                }
+                                send_message_to_client(connection_id, user_message_display)
+                                logger.info(f"📨 Sent user message with files to connection {connection_id}")
                                 
-                    else:
-                        logger.warning(f"⚠️ No active connections found for user {user_id}, session {session_id}")
+                                # Send session variables update to frontend
+                                try:
+                                    # Get updated session variables from database
+                                    session_response = chat_sessions_table.get_item(
+                                        Key={
+                                            'user_id': user_id,
+                                            'session_id': session_id
+                                        }
+                                    )
+                                    
+                                    if 'Item' in session_response:
+                                        session_item = session_response['Item']
+                                        session_variables = session_item.get('session_variables', {})
+                                        
+                                        # Send session update message
+                                        session_update_message = {
+                                            'type': 'session_updated',
+                                            'session_id': session_id,
+                                            'session_variables': session_variables,
+                                            'timestamp': datetime.now().isoformat()
+                                        }
+                                        
+                                        send_message_to_client(connection_id, session_update_message)
+                                        logger.info(f"📁 Sent session variables update to connection {connection_id}")
+                                        
+                                except Exception as e:
+                                    logger.error(f"❌ Failed to send session variables update: {str(e)}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to send user message confirmation: {str(e)}")
+                elif ai_response:
+                    # We have an actual response, send it immediately
+                    logger.info(f"📨 Chat agent returned immediate response, sending to frontend")
+                    try:
+                        # Find active WebSocket connections for this user/session
+                        active_connections = get_active_connections_for_user_session(user_id, session_id)
                         
-                except Exception as e:
-                    logger.error(f"❌ Failed to send AI response via WebSocket: {str(e)}")
+                        if active_connections:
+                            ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+                            
+                            for connection_id in active_connections:
+                                # Send user message confirmation first
+                                user_message_confirmation = {
+                                    'type': 'message_received',
+                                    'message_id': message_id,
+                                    'session_id': session_id,
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                                
+                                send_message_to_client(connection_id, user_message_confirmation)
+                                logger.info(f"📨 Sent user message confirmation to connection {connection_id}")
+                                
+                                # Send user message with files for display
+                                user_message_display = {
+                                    'type': 'user_message_with_files',
+                                    'message_id': message_id,
+                                    'content': message_text,
+                                    'session_id': session_id,
+                                    'timestamp': datetime.now().isoformat(),
+                                    'files': file_metadata if file_metadata else []
+                                }
+                                
+                                send_message_to_client(connection_id, user_message_display)
+                                logger.info(f"📨 Sent user message with files to connection {connection_id}")
+                                
+                                # Send AI response
+                                ai_response_message = {
+                                    'type': 'ai_response',
+                                    'message_id': ai_message_id,
+                                    'content': ai_response,
+                                    'session_id': session_id,
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                                
+                                send_message_to_client(connection_id, ai_response_message)
+                                logger.info(f"📨 Sent AI response to connection {connection_id}")
+                                
+                                # Send session variables update to frontend
+                                try:
+                                    # Get updated session variables from database
+                                    session_response = chat_sessions_table.get_item(
+                                        Key={
+                                            'user_id': user_id,
+                                            'session_id': session_id
+                                        }
+                                    )
+                                    
+                                    if 'Item' in session_response:
+                                        session_item = session_response['Item']
+                                        session_variables = session_item.get('session_variables', {})
+                                        
+                                        # Send session update message
+                                        session_update_message = {
+                                            'type': 'session_updated',
+                                            'session_id': session_id,
+                                            'session_variables': session_variables,
+                                            'timestamp': datetime.now().isoformat()
+                                        }
+                                        
+                                        send_message_to_client(connection_id, session_update_message)
+                                        logger.info(f"📁 Sent session variables update to connection {connection_id}")
+                                        
+                                except Exception as e:
+                                    logger.error(f"❌ Failed to send session variables update: {str(e)}")
+                                    
+                        else:
+                            logger.warning(f"⚠️ No active connections found for user {user_id}, session {session_id}")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Failed to send AI response via WebSocket: {str(e)}")
+                else:
+                    # No response and not async - this is an actual error
+                    logger.warning(f"⚠️ Chat agent returned 200 but no response content and not async delivery")
+                    # Don't send error message - let SQS handle it or wait for real response
             else:
                 logger.error(f"❌ Chat agent returned error: {response_payload}")
                 ai_response = 'I apologize, but I encountered an error processing your request.'
@@ -1482,16 +1602,38 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
             try:
                 context_summary_decimal = convert_floats_to_decimal(context_summary)
                 
-                # Prepare session variables with separate fields
+                # Get existing session_variables to preserve context_items
+                response = chat_sessions_table.get_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    }
+                )
+                
+                existing_session_vars = response.get('Item', {}).get('session_variables', {})
+                existing_context_items = existing_session_vars.get('context_items', [])
+                
+                # Merge context items (avoid duplicates by ID)
+                if context_items_decimal and len(context_items_decimal) > 0:
+                    existing_ids = {item.get('id') for item in existing_context_items if item.get('id')}
+                    new_items = [item for item in context_items_decimal if item.get('id') not in existing_ids]
+                    merged_context_items = existing_context_items + new_items
+                else:
+                    merged_context_items = existing_context_items
+                
+                # Prepare session variables with separate fields, preserving existing data
                 session_vars = {
-                    'context_items': context_items_decimal,
+                    **existing_session_vars,  # Preserve all existing session variables
+                    'context_items': merged_context_items,
                     'context_added_at': int(datetime.now().timestamp()),
                     'context_summary': context_summary_decimal,
                 }
                 
-                # Add uploaded files if any
+                # Add uploaded files if any (merge with existing)
                 if uploaded_files:
-                    session_vars['uploaded_files'] = uploaded_files_decimal
+                    existing_files = existing_session_vars.get('uploaded_files', [])
+                    all_files = existing_files + uploaded_files_decimal
+                    session_vars['uploaded_files'] = all_files
                     session_vars['files_added_at'] = int(datetime.now().timestamp())
                 
                 chat_sessions_table.update_item(
@@ -1505,19 +1647,30 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
                         ':updated': int(datetime.now().timestamp())
                     }
                 )
-                logger.info(f"📌 Stored context and uploaded files in session_variables")
+                logger.info(f"📌 Stored context and uploaded files in session_variables (preserved {len(existing_context_items)} existing context items)")
             except Exception as e:
                 logger.error(f"❌ Failed to store context in session_variables: {e}")
         
         # Store the original user message in the database first
         try:
+            # Prepare file metadata for message display (without actual file data)
+            file_metadata = []
+            if uploaded_files:
+                for file_info in uploaded_files:
+                    file_metadata.append({
+                        'name': file_info.get('filename', 'Unknown'),
+                        'size': file_info.get('file_size', 0),
+                        'type': file_info.get('content_type', 'application/octet-stream')
+                    })
+            
             # Add user message to conversation history
             user_message_data = {
                 'id': message_id,
                 'role': 'user',
                 'content': message_text,  # Store original message text
                 'timestamp': int(datetime.now().timestamp() * 1000),
-                'model': model
+                'model': model,
+                'files': file_metadata if file_metadata else None  # Include file metadata for display
             }
             
             # Update conversation history in DynamoDB
@@ -1533,6 +1686,55 @@ def process_message_direct(user_id, session_id, message_text, message_id, contex
                 }
             )
             logger.info(f"📌 Stored original user message in conversation history")
+            
+            # Also store user message in messages array for UI display
+            try:
+                # Get current messages array
+                session_response = chat_sessions_table.get_item(
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    ConsistentRead=True
+                )
+                
+                if 'Item' in session_response:
+                    messages = session_response['Item'].get('messages', [])
+                    
+                    # Create user message for messages array (different format than conversation_history)
+                    user_message_for_display = {
+                        'id': message_id,
+                        'text': message_text,
+                        'sender': 'user',
+                        'timestamp': int(datetime.now().timestamp()),
+                        'message_type': 'text'
+                    }
+                    
+                    # Add file metadata if present
+                    if file_metadata:
+                        user_message_for_display['files'] = file_metadata
+                    
+                    # Append user message
+                    messages.append(user_message_for_display)
+                    
+                    # Update session with user message in messages array
+                    chat_sessions_table.update_item(
+                        Key={
+                            'user_id': user_id,
+                            'session_id': session_id
+                        },
+                        UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                        ExpressionAttributeValues={
+                            ':messages': messages,
+                            ':count': len(messages),
+                            ':timestamp': int(datetime.now().timestamp())
+                        }
+                    )
+                    logger.info(f"✅ Saved user message with files to messages array: {message_id}")
+                else:
+                    logger.warning(f"⚠️ Session {session_id} not found when storing message in messages array")
+            except Exception as msg_e:
+                logger.error(f"❌ Failed to store user message in messages array: {msg_e}")
             
         except Exception as e:
             logger.error(f"❌ Failed to store user message: {e}")

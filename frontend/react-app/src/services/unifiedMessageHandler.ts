@@ -432,7 +432,10 @@ class UnifiedMessageHandlerService {
       throw new Error('No files provided for file message');
     }
 
-    // Broadcast loading state for file upload
+    // Add user message to local cache immediately for display
+    this.addUserMessageToLocalCache(sessionId, messageData);
+
+    // Broadcast loading state for file upload (keep loading until AI response)
     this.broadcastLoadingState(sessionId, true, messageData.source);
 
     try {
@@ -445,9 +448,14 @@ class UnifiedMessageHandlerService {
       // Send file message via WebSocket
       await this.sendFileMessage(sessionId, messageData);
       console.log('✅ UnifiedMessageHandler: File message sent for session:', sessionId);
-    } finally {
-      // Clear loading state
+      
+      // Note: Don't clear loading state here - let it stay until AI response arrives
+      // The loading state will be cleared when handleAIResponse is called
+    } catch (error) {
+      // Only clear loading state on error
+      console.error('❌ UnifiedMessageHandler: Error processing file message:', error);
       this.broadcastLoadingState(sessionId, false, messageData.source);
+      throw error;
     }
   }
 
@@ -751,6 +759,12 @@ class UnifiedMessageHandlerService {
         break;
       case 'message_received':
         console.log('📨 UnifiedMessageHandler: Message received confirmation for session:', sessionId);
+        // Update user message status from 'sending' to 'sent'
+        this.updateUserMessageStatus(sessionId, data.message_id, 'sent');
+        break;
+      case 'user_message_with_files':
+        // Handle user message with files confirmation from backend
+        this.handleUserMessageWithFiles(sessionId, data);
         break;
       case 'kill_signal_acknowledged':
         this.handleKillSignalAcknowledgment(sessionId, data);
@@ -787,13 +801,7 @@ class UnifiedMessageHandlerService {
   private handleAIResponse(sessionId: string, data: any): void {
     const { message_id, content, timestamp } = data;
     
-    console.log('🤖 UnifiedMessageHandler: Received AI response for session:', sessionId);
-    
-    // Clear loading state for all interfaces
-    this.broadcastLoadingState(sessionId, false, 'chatpage');
-    
-    // Clear agent log when AI response arrives
-    this.clearAgentLog(sessionId);
+    console.log('🤖 UnifiedMessageHandler: Received AI response for session:', sessionId, 'message_id:', message_id);
     
     // Validate content before creating message
     const validContent = content && content.trim() && content !== 'Processing your request...';
@@ -803,13 +811,87 @@ class UnifiedMessageHandlerService {
       return;
     }
     
+    // Check for duplicate messages (prevent adding the same message twice)
+    const messages = this.localCache.get(sessionId) || [];
+    const existingMessage = messages.find(m => m.id === message_id && m.sender === 'ai');
+    
+    if (existingMessage) {
+      console.log('⚠️ UnifiedMessageHandler: Duplicate AI response detected, skipping:', message_id);
+      // Still clear loading state and agent log even if duplicate
+      this.broadcastLoadingState(sessionId, false, 'chatpage');
+      this.broadcastLoadingState(sessionId, false, 'sidebar');
+      this.clearAgentLog(sessionId);
+      return;
+    }
+    
+    // Check if this looks like an error message
+    const errorPatterns = [
+      /^I apologize, but I encountered an error/i,
+      /^An error occurred/i,
+      /^Error processing/i
+    ];
+    
+    const isErrorResponse = errorPatterns.some(pattern => pattern.test(content));
+    
+    // If this is an error response, check if there's already a non-error response
+    // If so, skip this error message
+    if (isErrorResponse) {
+      const hasNonErrorResponse = messages.some(m => 
+        m.sender === 'ai' && 
+        m.timestamp >= (timestamp - 5000) && // Within 5 seconds
+        !errorPatterns.some(p => p.test(m.text))
+      );
+      
+      if (hasNonErrorResponse) {
+        console.log('⚠️ UnifiedMessageHandler: Skipping error response, real response already exists');
+        // Still clear loading state
+        this.broadcastLoadingState(sessionId, false, 'chatpage');
+        this.broadcastLoadingState(sessionId, false, 'sidebar');
+        this.clearAgentLog(sessionId);
+        return;
+      }
+    }
+    
+    // Valid response - add it immediately
+    this.addAIResponseToCache(sessionId, message_id, content, timestamp);
+    
+    // If we just added a non-error response, remove any recent error responses
+    if (!isErrorResponse) {
+      const recentErrorMessages = messages.filter(m => 
+        m.sender === 'ai' && 
+        m.timestamp >= (timestamp - 5000) && // Within 5 seconds
+        errorPatterns.some(p => p.test(m.text))
+      );
+      
+      if (recentErrorMessages.length > 0) {
+        console.log(`⚠️ UnifiedMessageHandler: Removing ${recentErrorMessages.length} error message(s) since real response arrived`);
+        const updatedMessages = messages.filter(m => !recentErrorMessages.includes(m));
+        this.localCache.set(sessionId, updatedMessages);
+        this.notifyMessageUpdate(sessionId, updatedMessages);
+      }
+    }
+    
+    // Clear loading state for all interfaces
+    this.broadcastLoadingState(sessionId, false, 'chatpage');
+    this.broadcastLoadingState(sessionId, false, 'sidebar');
+    
+    // Clear agent log when AI response arrives
+    this.clearAgentLog(sessionId);
+    
+    console.log('✅ UnifiedMessageHandler: Added AI response to local cache:', message_id);
+  }
+
+  /**
+   * Add AI response to local cache
+   */
+  private addAIResponseToCache(sessionId: string, messageId: string, content: string, timestamp: number): void {
     const aiMessage: SharedMessage = {
-      id: message_id || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: messageId || `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       sender: 'ai',
       text: content,
       timestamp: timestamp || Date.now(),
       sessionId: sessionId,
-      source: 'chatpage'
+      source: 'database' // Use 'database' so both chatpage and sidebar can see it
     };
 
     // Add to local cache
@@ -831,8 +913,6 @@ class UnifiedMessageHandlerService {
       }
     });
     window.dispatchEvent(typingEvent);
-    
-    console.log('✅ UnifiedMessageHandler: Added AI response to local cache:', aiMessage.id);
   }
 
   /**
@@ -851,15 +931,103 @@ class UnifiedMessageHandlerService {
   }
 
   /**
+   * Handle user message with files from WebSocket
+   */
+  private handleUserMessageWithFiles(sessionId: string, data: any): void {
+    const { message_id, content, files, timestamp } = data;
+    console.log('📨 UnifiedMessageHandler: Received user message with files for session:', sessionId);
+    
+    // Update existing user message in cache (if it exists) or add new one
+    const messages = this.localCache.get(sessionId) || [];
+    const messageIndex = messages.findIndex(m => m.id === message_id && m.sender === 'user');
+    
+    if (messageIndex !== -1) {
+      // Update existing message
+      messages[messageIndex] = {
+        ...messages[messageIndex],
+        text: content || messages[messageIndex].text,
+        status: 'sent',
+        files: files || messages[messageIndex].files,
+        timestamp: timestamp || messages[messageIndex].timestamp
+      };
+    } else {
+      // Add new message if not found (shouldn't happen, but handle gracefully)
+      const userMessage: SharedMessage = {
+        id: message_id,
+        sender: 'user',
+        text: content || '',
+        timestamp: timestamp || Date.now(),
+        status: 'sent',
+        files: files?.map((f: any) => ({
+          name: f.name || f.filename || 'Unknown',
+          size: f.size || 0,
+          type: f.type || f.content_type || 'application/octet-stream'
+        })),
+        sessionId: sessionId,
+        source: 'chatpage'
+      };
+      messages.push(userMessage);
+    }
+    
+    this.localCache.set(sessionId, messages);
+    this.notifyMessageUpdate(sessionId, messages);
+    
+    console.log('✅ UnifiedMessageHandler: Updated user message with files in cache:', message_id);
+  }
+
+  /**
+   * Update user message status in local cache
+   */
+  private updateUserMessageStatus(sessionId: string, messageId: string, status: 'sending' | 'sent' | 'error'): void {
+    const messages = this.localCache.get(sessionId) || [];
+    const messageIndex = messages.findIndex(m => m.id === messageId && m.sender === 'user');
+    
+    if (messageIndex !== -1) {
+      messages[messageIndex] = {
+        ...messages[messageIndex],
+        status
+      };
+      this.localCache.set(sessionId, messages);
+      this.notifyMessageUpdate(sessionId, messages);
+      console.log(`✅ UnifiedMessageHandler: Updated message ${messageId} status to ${status}`);
+    }
+  }
+
+  /**
    * Handle error message from WebSocket
    */
   private handleErrorMessage(sessionId: string, data: any): void {
     const errorMessage = data.message || data.error || 'An error occurred';
     console.error('❌ UnifiedMessageHandler: Received error from WebSocket:', errorMessage, 'for session:', sessionId);
     
-    // Clear loading state for all interfaces since there was an error
-    this.broadcastLoadingState(sessionId, false, 'chatpage');
-    this.broadcastLoadingState(sessionId, false, 'sidebar');
+    // Don't show error messages that are just status updates or temporary issues
+    // Only show real errors that prevent processing
+    const ignorableErrors = [
+      'Processing your request',
+      'message already being processed',
+      'duplicate send detected'
+    ];
+    
+    const isIgnorableError = ignorableErrors.some(ignorable => 
+      errorMessage.toLowerCase().includes(ignorable.toLowerCase())
+    );
+    
+    if (isIgnorableError) {
+      console.log('⚠️ UnifiedMessageHandler: Ignoring ignorable error message:', errorMessage);
+      return;
+    }
+    
+    // Update user message status to error if message_id is provided
+    if (data.message_id) {
+      this.updateUserMessageStatus(sessionId, data.message_id, 'error');
+    }
+    
+    // Only clear loading state if this is a real error (not a temporary status)
+    // For file messages, we want to keep loading until we get an AI response
+    if (!errorMessage.toLowerCase().includes('processing')) {
+      this.broadcastLoadingState(sessionId, false, 'chatpage');
+      this.broadcastLoadingState(sessionId, false, 'sidebar');
+    }
   }
 
   /**

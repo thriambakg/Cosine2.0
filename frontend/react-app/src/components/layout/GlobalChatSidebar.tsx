@@ -1680,11 +1680,24 @@ const GlobalChatSidebar: React.FC = () => {
                             border: '1px solid #374151',
                           }}
                         >
-                          <FileIcon sx={{ color: '#22c55e' }} />
-                          <Typography variant="body2" color="white">
+                          <FileIcon sx={{ color: '#22c55e', flexShrink: 0 }} />
+                          <Typography 
+                            variant="body2" 
+                            color="white"
+                            sx={{
+                              wordBreak: 'break-word',
+                              overflowWrap: 'break-word',
+                              flex: 1,
+                              minWidth: 0, // Allows flex item to shrink below content size
+                            }}
+                          >
                             {file.name}
                           </Typography>
-                          <Typography variant="caption" color="#9ca3af">
+                          <Typography 
+                            variant="caption" 
+                            color="#9ca3af"
+                            sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+                          >
                             ({(file.size / 1024).toFixed(1)} KB)
                           </Typography>
                         </Box>

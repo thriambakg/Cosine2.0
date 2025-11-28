@@ -289,9 +289,19 @@ def update_session_variables(user_id, session_id, uploaded_files, context_items)
             merged_session_vars['uploaded_files'] = all_files
             logger.info(f"📌 Merged uploaded files: {len(existing_files)} existing + {len(uploaded_files_decimal)} new = {len(all_files)} total")
             
-            # Update context items (these can be replaced as they're typically from the current message)
-            merged_session_vars['context_items'] = context_items_decimal
-            logger.info(f"📌 Updated context items: {len(context_items_decimal)} items")
+            # Preserve existing context items - only update if new context items are provided
+            existing_context_items = existing_session_vars.get('context_items', [])
+            if context_items_decimal and len(context_items_decimal) > 0:
+                # If new context items are provided, merge them (avoid duplicates by ID)
+                existing_ids = {item.get('id') for item in existing_context_items if item.get('id')}
+                new_items = [item for item in context_items_decimal if item.get('id') not in existing_ids]
+                merged_context_items = existing_context_items + new_items
+                merged_session_vars['context_items'] = merged_context_items
+                logger.info(f"📌 Merged context items: {len(existing_context_items)} existing + {len(new_items)} new = {len(merged_context_items)} total")
+            else:
+                # No new context items provided, preserve existing ones
+                merged_session_vars['context_items'] = existing_context_items
+                logger.info(f"📌 Preserved existing context items: {len(existing_context_items)} items")
             
             # Update the session with merged session_variables
             table.update_item(
