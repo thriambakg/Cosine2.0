@@ -6,6 +6,7 @@ import { useClock } from '@/contexts/ClockContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { sessionManagementAPI } from '@/services/api';
 import { ContextItem } from '@/components/tiles/common/contextManager';
+import ContextItemRow from '@/components/context/ContextItemRow';
 // NEW: Import shared file upload service
 import { FileUploadService, UploadedFile } from '@/services/fileUploadService';
 // NEW: Import unified messaging system
@@ -329,6 +330,31 @@ export default function ChatPage() {
   const previousContextRef = useRef<ContextItem[]>([]);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [isFilesExpanded, setIsFilesExpanded] = useState(false);
+  const handleRemoveContextItem = useCallback(async (index: number) => {
+    const newContext = sessionContext.filter((_, i) => i !== index);
+    setSessionContext(newContext);
+    console.log(`🗑️ Removed context item: ${sessionContext[index]?.title}`);
+    if (currentSession?.session_id) {
+      const syncEvent = new CustomEvent('session-context-updated', {
+        detail: { sessionId: currentSession.session_id, contextItems: newContext }
+      });
+      window.dispatchEvent(syncEvent);
+    }
+    if (currentSession?.session_id && user?.id) {
+      try {
+        await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
+          session_variables: {
+            context_items: newContext,
+            context_added_at: Date.now(),
+          }
+        });
+        console.log('✅ Updated context in backend');
+        updateSessionContext(currentSession.session_id, newContext);
+      } catch (error) {
+        console.error('❌ Failed to update context in backend:', error);
+      }
+    }
+  }, [sessionContext, currentSession?.session_id, user?.id, updateSessionContext]);
   
   // Function to detect if context has changed
   const hasContextChanged = useCallback(() => {
@@ -2034,80 +2060,12 @@ export default function ChatPage() {
             <Collapse in={isContextExpanded}>
               <List dense sx={{ py: 0, px: 1, maxHeight: 150, overflow: 'auto' }}>
                 {sessionContext.map((item, index) => (
-                  <ListItem 
-                    key={index} 
-                    sx={{ 
-                      py: 0.5, 
-                      px: 1,
-                      borderRadius: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      '&:hover': {
-                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        '& .remove-context-btn': {
-                          opacity: 1,
-                        }
-                      }
-                    }}
-                  >
-                    {/* Delete button on the left */}
-                    <IconButton
-                      size="small"
-                      className="remove-context-btn"
-                      onClick={async () => {
-                        const newContext = sessionContext.filter((_, i) => i !== index);
-                        setSessionContext(newContext);
-                        console.log(`🗑️ Removed context item: ${item.title}`);
-                        
-                        // Notify Sidebar of context change immediately
-                        if (currentSession?.session_id) {
-                          const syncEvent = new CustomEvent('session-context-updated', {
-                            detail: { sessionId: currentSession.session_id, contextItems: newContext }
-                          });
-                          window.dispatchEvent(syncEvent);
-                        }
-                        
-                        // Persist the updated context to backend immediately
-                        if (currentSession?.session_id && user?.id) {
-                          try {
-                            await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
-                              session_variables: {
-                                context_items: newContext,
-                                context_added_at: Date.now(),
-                              }
-                            });
-                            console.log('✅ Updated context in backend');
-                            
-                            // Update sessions list with new context
-                            updateSessionContext(currentSession.session_id, newContext);
-                          } catch (error) {
-                            console.error('❌ Failed to update context in backend:', error);
-                          }
-                        }
-                      }}
-                      sx={{ 
-                        opacity: 0,
-                        transition: 'opacity 0.2s',
-                        color: '#dc2626',
-                        mr: 1,
-                        '&:hover': { color: '#ef4444' }
-                      }}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                    
-                    {/* Content on the right */}
-                    <ListItemText
-                      primary={item.title}
-                      secondary={item.subtitle}
-                      primaryTypographyProps={{
-                        fontSize: '0.75rem',
-                        color: '#ffffff',
-                      }}
-                      secondaryTypographyProps={{
-                        fontSize: '0.65rem',
-                        color: '#9ca3af',
-                      }}
+                  <ListItem key={item.id || index} disableGutters sx={{ display: 'block', px: 0 }}>
+                    <ContextItemRow
+                      item={item}
+                      sessionId={currentSession?.session_id}
+                      userId={user?.id}
+                      onRemove={() => handleRemoveContextItem(index)}
                     />
                   </ListItem>
                 ))}

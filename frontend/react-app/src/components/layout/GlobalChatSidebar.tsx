@@ -35,6 +35,7 @@ import { useAuth } from '../../contexts/AuthContext';
 // COMMENTED OUT: Old WebSocket context (replaced by messaging service)
 // import { useWebSocket } from '../../contexts/WebSocketContext';
 import { ContextItem } from '../tiles/common/contextManager';
+import ContextItemRow from '../context/ContextItemRow';
 import { sessionManagementAPI } from '../../services/api';
 // COMMENTED OUT: useMessagingService (replaced with unified architecture)
 // import { useMessagingService } from '../../hooks/useMessagingService';
@@ -265,6 +266,29 @@ const GlobalChatSidebar: React.FC = () => {
   const [isFilesPanelOpen, setIsFilesPanelOpen] = useState(false);
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
+  const handleSidebarRemoveContextItem = useCallback(async (index: number) => {
+    const newContext = sessionContext.filter((_, i) => i !== index);
+    setSessionContext(newContext);
+    if (activeSessionId) {
+      const syncEvent = new CustomEvent('session-context-updated', {
+        detail: { sessionId: activeSessionId, contextItems: newContext }
+      });
+      window.dispatchEvent(syncEvent);
+    }
+    if (activeSessionId && user?.id) {
+      try {
+        await sessionManagementAPI.updateSession(activeSessionId, user.id, {
+          session_variables: {
+            context_items: newContext,
+            context_added_at: Date.now(),
+          }
+        });
+        console.log('✅ Updated context in backend (sidebar)');
+      } catch (error) {
+        console.error('❌ Failed to update context in backend (sidebar):', error);
+      }
+    }
+  }, [sessionContext, activeSessionId, user?.id]);
   
   // File upload state
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -2029,23 +2053,13 @@ const GlobalChatSidebar: React.FC = () => {
       <Box sx={{ p: 1, overflow: 'auto', '&::-webkit-scrollbar': { width: '6px' }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' }, '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' } }}>
         <List dense sx={{ py: 0, px: 1 }}>
           {sessionContext.map((item, index) => (
-            <ListItem key={index} sx={{ py: 0.5, px: 1, borderRadius: '4px', display: 'flex', alignItems: 'center', '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', '& .remove-context-btn': { opacity: 1 } } }}>
-              <IconButton size="small" className="remove-context-btn" onClick={async () => {
-                const newContext = sessionContext.filter((_, i) => i !== index);
-                setSessionContext(newContext);
-                if (activeSessionId) {
-                  const syncEvent = new CustomEvent('session-context-updated', { detail: { sessionId: activeSessionId, contextItems: newContext } });
-                  window.dispatchEvent(syncEvent);
-                }
-                if (activeSessionId && user?.id) {
-                  try {
-                    await sessionManagementAPI.updateSession(activeSessionId, user.id, { session_variables: { context_items: newContext, context_added_at: Date.now() } });
-                  } catch (error) { console.error('❌ Failed to update context in backend:', error); }
-                }
-              }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', mr: 1, '&:hover': { color: '#ef4444' } }}>
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-              <ListItemText primary={item.title} secondary={item.subtitle} primaryTypographyProps={{ fontSize: '0.8rem', color: '#ffffff' }} secondaryTypographyProps={{ fontSize: '0.7rem', color: '#9ca3af' }} />
+            <ListItem key={item.id || index} disableGutters sx={{ display: 'block', px: 0 }}>
+              <ContextItemRow
+                item={item}
+                sessionId={activeSessionId}
+                userId={user?.id}
+                onRemove={() => handleSidebarRemoveContextItem(index)}
+              />
             </ListItem>
           ))}
         </List>
