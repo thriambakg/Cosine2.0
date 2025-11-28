@@ -81,6 +81,13 @@ const defaultNavigationItems: NavigationItem[] = [
     path: '/sec-search',
     icon: 'DescriptionIcon',
     category: 'analysis'
+  },
+  {
+    id: 'politician-trades-search',
+    label: 'Politician Trades',
+    path: '/politician-trades-search',
+    icon: 'DescriptionIcon',
+    category: 'analysis'
   }
 ];
 

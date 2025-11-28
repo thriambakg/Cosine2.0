@@ -16,6 +16,7 @@ import StockAlertsPage from './pages/StockAlertsPage';
 import OptionPricingPage from './pages/OptionPricingPage';
 import HeatmapPage from './pages/HeatmapPage';
 import SECSearchPage from './pages/SECSearchPage';
+import PoliticianTradesSearchPage from './pages/PoliticianTradesSearchPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import { ConfirmDialog } from './components/tiles/common';
 
@@ -92,6 +93,11 @@ function AppContent() {
               <Route path="/sec-search" element={
                 <ProtectedRoute>
                   <SECSearchPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/politician-trades-search" element={
+                <ProtectedRoute>
+                  <PoliticianTradesSearchPage />
                 </ProtectedRoute>
               } />
               <Route path="*" element={<Navigate to="/" replace />} />

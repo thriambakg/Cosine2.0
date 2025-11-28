@@ -896,6 +896,75 @@ export const secSearchAPI = {
   },
 };
 
+// Politician Trades Search API
+export interface PoliticianTradesSearchParams {
+  politicianName?: string;
+  position?: string;
+  party?: string;
+  securitySymbol?: string;
+  securityName?: string;
+  formType?: string;
+  transactionType?: string;
+  owner?: string;
+  stateDistrict?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  amountMin?: number;
+  amountMax?: number;
+  requiresManualReview?: boolean;
+  isUnparsed?: boolean;
+  matchConfidence?: number;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PoliticianTrade {
+  tradeId: string;
+  amountMax?: number;
+  amountMin?: number;
+  amountRange?: string;
+  assetType?: string;
+  comment?: string;
+  filingDate?: string;
+  formS3Key?: string;
+  formType?: string;
+  isUnparsed?: boolean;
+  matchConfidence?: number;
+  metadata?: any;
+  owner?: string;
+  party?: string;
+  politicianName?: string;
+  position?: string;
+  processingDate?: string;
+  requiresManualReview?: boolean;
+  securityName?: string;
+  securitySymbol?: string;
+  source?: string;
+  stateDistrict?: string;
+  transactionDate?: number;
+  transactionType?: string;
+  websiteUrl?: string;
+}
+
+export interface PoliticianTradesSearchResponse {
+  success: boolean;
+  results?: PoliticianTrade[];
+  total_found?: number;
+  page?: number;
+  page_size?: number;
+  has_more?: boolean;
+  error?: string;
+}
+
+export const politicianTradesSearchAPI = {
+  search: async (params: PoliticianTradesSearchParams): Promise<PoliticianTradesSearchResponse> => {
+    return apiRequest<PoliticianTradesSearchResponse>('/politician-trades-search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
 // Session Management API
 export const sessionManagementAPI = {
   // Get all sessions for a user
@@ -969,6 +1038,7 @@ export const api = {
   dashboard: dashboardAPI,
   sessions: sessionManagementAPI,
   secSearch: secSearchAPI,
+  politicianTradesSearch: politicianTradesSearchAPI,
 };
 
 export default api;

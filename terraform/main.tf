@@ -173,6 +173,9 @@ module "api_gateway" {
     sec_search_results = {
       path_part = "sec-search-results"
     }
+    politician_trades_search = {
+      path_part = "politician-trades-search"
+    }
   }
 
   # Methods configuration
@@ -431,6 +434,16 @@ module "api_gateway" {
       lambda_arn              = module.sec_search_lambda.function_arn
       request_parameters      = {}
     }
+    # POST method for politician trades search
+    politician_trades_search_post = {
+      resource_key            = "politician_trades_search"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.politician_trades_search_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -581,6 +594,11 @@ module "api_gateway" {
       function_arn  = module.sec_search_lambda.function_arn
       http_method   = "GET"
       resource_path = "sec-search-results"
+    }
+    politician_trades_search_post = {
+      function_arn  = module.politician_trades_search_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "politician-trades-search"
     }
   }
 
@@ -735,6 +753,33 @@ resource "aws_iam_policy" "lambda_kms_policy" {
         Resource = [
           data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn,
           data.terraform_remote_state.base_infra.outputs.kms_key_arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for Politician Trades Search Lambda to access DynamoDB
+resource "aws_iam_policy" "politician_trades_search_dynamodb_policy" {
+  name        = "${var.project_name}-politician-trades-search-dynamodb-policy-${var.environment}"
+  description = "Policy for Politician Trades Search Lambda to access DynamoDB table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem"
+        ]
+        Resource = [
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}",
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}/index/*"
         ]
       }
     ]
@@ -2093,6 +2138,43 @@ module "sec_search_lambda" {
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_sns_publish_policy_restricted.arn,
     aws_iam_policy.lambda_invoke_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Politician Trades Search Lambda Function
+module "politician_trades_search_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-politician-trades-search-${var.environment}"
+  description   = "Lambda function for searching politician trades in DynamoDB"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/politician_trades_search/app"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT         = var.environment
+    LOG_LEVEL           = var.environment == "development" ? "DEBUG" : "INFO"
+    MAX_RESULTS         = "100"
+    DYNAMODB_TABLE_NAME = "cosine-politician-trades-${var.environment}"
+  }
+
+  # Attach core layer
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies - DynamoDB access for politician trades table
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.politician_trades_search_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
   ]
 
   tags = var.common_tags
