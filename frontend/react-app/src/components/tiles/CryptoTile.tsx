@@ -29,7 +29,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { useCryptoStats } from '../../hooks/useAPI';
 import { useTileCache } from '../../hooks/useDashboardCache';
-import { useTilePinning, PinButton } from './common';
+import { useTilePinning, PinButton, confirmDialog } from './common';
 
 interface CryptoTileProps {
   id: string;
@@ -187,8 +187,15 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     togglePin();
   };
 
-  const handleRemove = () => {
-    if (window.confirm(`Remove ${symbol} from dashboard?`)) {
+  const handleRemove = async () => {
+    const confirmed = await confirmDialog({
+      title: 'Remove Tile',
+      message: `Remove ${symbol} from dashboard?`,
+      confirmText: 'Remove',
+      cancelText: 'Cancel',
+      confirmColor: 'error',
+    });
+    if (confirmed) {
       onRemove(id);
     }
   };

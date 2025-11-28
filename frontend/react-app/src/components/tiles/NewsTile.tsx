@@ -41,7 +41,7 @@ import {
   Chat as SidebarChatIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest } from '../../services/api';
-import { useTilePinning, PinButton, addArticleToContext, addMultipleArticlesToContext } from './common';
+import { useTilePinning, PinButton, addArticleToContext, addMultipleArticlesToContext, confirmDialog } from './common';
 
 interface NewsTileProps {
   id: string;
@@ -167,11 +167,55 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const tileRef = useRef<HTMLDivElement>(null);
   const localFiltersRef = useRef(localFilters);
   const initialLoadDone = useRef(false);
+  const CACHE_KEY = `news_tile_${id}_cache`;
+  const CACHE_TIMESTAMP_KEY = `news_tile_${id}_timestamp`;
+  const CACHE_DURATION_MS = 8 * 60 * 1000; // 8 minutes in milliseconds
 
   // Update ref when localFilters changes
   useEffect(() => {
     localFiltersRef.current = localFilters;
   }, [localFilters]);
+
+  // Load cached data on mount
+  useEffect(() => {
+    try {
+      const cachedTimestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY);
+      const cachedArticles = sessionStorage.getItem(CACHE_KEY);
+      
+      if (cachedTimestamp && cachedArticles) {
+        const cacheAge = Date.now() - parseInt(cachedTimestamp, 10);
+        
+        // If cache is still fresh (less than 8 minutes old)
+        if (cacheAge < CACHE_DURATION_MS) {
+          const parsedArticles = JSON.parse(cachedArticles);
+          setNewsArticles(parsedArticles);
+          initialLoadDone.current = true;
+          console.log(`📰 NewsTile ${id}: Loaded ${parsedArticles.length} articles from cache (${Math.round(cacheAge / 1000 / 60)} minutes old)`);
+          return; // Don't do a fresh search
+        } else {
+          // Cache expired, clear it
+          sessionStorage.removeItem(CACHE_KEY);
+          sessionStorage.removeItem(CACHE_TIMESTAMP_KEY);
+          console.log(`📰 NewsTile ${id}: Cache expired, will fetch fresh data`);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading cached news data:', error);
+    }
+  }, [id]); // Only run on mount
+
+  // Save articles to cache whenever articles change
+  useEffect(() => {
+    if (newsArticles.length > 0 && initialLoadDone.current) {
+      try {
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(newsArticles));
+        sessionStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+        console.log(`📰 NewsTile ${id}: Cached ${newsArticles.length} articles`);
+      } catch (error) {
+        console.error('Error caching news data:', error);
+      }
+    }
+  }, [newsArticles, id]);
 
   // Helper function to clean up trailing operators from expressions
   const cleanupTrailingOperators = (expression: any[]) => {
@@ -1107,12 +1151,30 @@ const NewsTile: React.FC<NewsTileProps> = ({
   }, []);
 
   // Run news search
-  const runNewsSearch = useCallback(async () => {
+  const runNewsSearch = useCallback(async (forceRefresh: boolean = false) => {
+    // Check cache age if not forcing refresh
+    if (!forceRefresh) {
+      const cachedTimestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY);
+      if (cachedTimestamp) {
+        const cacheAge = Date.now() - parseInt(cachedTimestamp, 10);
+        if (cacheAge < CACHE_DURATION_MS) {
+          console.log(`📰 NewsTile ${id}: Cache still fresh (${Math.round(cacheAge / 1000 / 60)} minutes old), skipping search`);
+          return; // Don't search if cache is still fresh
+        }
+      }
+    }
+
     setIsLoading(true);
     setError(null);
     
     // Clear selected articles when running a new search
     setSelectedArticles([]);
+    
+    // Clear cache when forcing refresh
+    if (forceRefresh) {
+      sessionStorage.removeItem(CACHE_KEY);
+      sessionStorage.removeItem(CACHE_TIMESTAMP_KEY);
+    }
     
     try {
       // Get current filters at the time of execution
@@ -1125,7 +1187,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
       console.log('🔍 News API Call Payload:', {
         timestamp: new Date().toISOString(),
         tileId: id,
-        payload: apiPayload
+        payload: apiPayload,
+        forceRefresh
       });
       
       // Also log a formatted version for better readability
@@ -1160,6 +1223,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         });
         
         setNewsArticles(response.articles);
+        initialLoadDone.current = true;
         
         // Note: Not calling onUpdate to avoid triggering dashboard persistence issues
         // The tile state is managed internally and doesn't need to update the dashboard
@@ -1177,6 +1241,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         const filteredArticles = filterArticles(mockNewsData, currentFilters);
         setNewsArticles(filteredArticles);
         setError(null); // Clear error since we have fallback data
+        initialLoadDone.current = true;
         
         // Note: Not calling onUpdate to avoid triggering dashboard persistence issues
         // The tile state is managed internally and doesn't need to update the dashboard
@@ -1190,24 +1255,31 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
   }, [filterArticles, id, buildApiPayload]);
 
-  // Auto-refresh functionality
+  // Auto-refresh functionality - refresh every 8 minutes
   useEffect(() => {
     if (!autoRefresh) return;
 
     const interval = setInterval(() => {
-      runNewsSearch();
-    }, 10 * 60 * 1000); // 10 minutes
+      console.log(`📰 NewsTile ${id}: Auto-refresh triggered`);
+      runNewsSearch(true); // Force refresh on auto-refresh
+    }, CACHE_DURATION_MS); // 8 minutes
 
     return () => clearInterval(interval);
-  }, [autoRefresh, runNewsSearch]);
+  }, [autoRefresh, runNewsSearch, id]);
 
-  // Initial load
+  // Initial load - only if we don't have cached data
   useEffect(() => {
     if (!initialLoadDone.current && newsArticles.length === 0) {
       initialLoadDone.current = true;
-      runNewsSearch();
+      // Check if we have fresh cached data (this check happens in the cache loading effect above)
+      // If no cache exists or cache is expired, run search
+      const cachedTimestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY);
+      if (!cachedTimestamp) {
+        console.log(`📰 NewsTile ${id}: No cache found, running initial search`);
+        runNewsSearch();
+      }
     }
-  }, []); // Empty dependency array - only run once on mount
+  }, [id]); // Only run on mount or when id changes
 
   const handleSettingsOpen = (event: React.MouseEvent<HTMLElement>) => {
     setSettingsAnchor(event.currentTarget);
@@ -1241,8 +1313,15 @@ const NewsTile: React.FC<NewsTileProps> = ({
     togglePin();
   };
 
-  const handleRemove = () => {
-    if (window.confirm('Remove News Tile from dashboard?')) {
+  const handleRemove = async () => {
+    const confirmed = await confirmDialog({
+      title: 'Remove Tile',
+      message: 'Remove News Tile from dashboard?',
+      confirmText: 'Remove',
+      cancelText: 'Cancel',
+      confirmColor: 'error',
+    });
+    if (confirmed) {
       onRemove(id);
     }
   };
@@ -1515,10 +1594,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
             </Tooltip>
           )}
 
-          <Tooltip title="Search News">
+          <Tooltip title="Refresh News">
             <IconButton
               size="small"
-              onClick={runNewsSearch}
+              onClick={() => runNewsSearch(true)} // Force refresh when button is clicked
               disabled={isLoading}
               onMouseDown={(e) => e.stopPropagation()}
               sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}

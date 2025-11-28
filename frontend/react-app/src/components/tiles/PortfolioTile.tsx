@@ -24,6 +24,7 @@ import {
   TableRow,
   Alert,
   InputLabel,
+  Tooltip,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -37,7 +38,7 @@ import {
 } from '@mui/icons-material';
 import { usePortfolioAnalysis } from '../../hooks/useAPI';
 import { useTileCache } from '../../hooks/useDashboardCache';
-import { useTilePinning, PinButton } from './common';
+import { useTilePinning, PinButton, confirmDialog } from './common';
 
 interface PortfolioEntry {
   stock: string;
@@ -270,9 +271,18 @@ const PortfolioTile = memo(({
     setSettingsOpen(false);
   };
 
-  const handleRemove = () => {
-    onRemove?.(id);
-    handleMenuClose();
+  const handleRemove = async () => {
+    handleMenuClose(); // Close menu first
+    const confirmed = await confirmDialog({
+      title: 'Remove Tile',
+      message: 'Remove Portfolio Analysis from dashboard?',
+      confirmText: 'Remove',
+      cancelText: 'Cancel',
+      confirmColor: 'error',
+    });
+    if (confirmed) {
+      onRemove?.(id);
+    }
   };
 
   const handleExpand = () => {
@@ -367,22 +377,39 @@ const PortfolioTile = memo(({
             onTogglePin={togglePin}
           />
           
-          <IconButton
-            size="small"
-            onClick={handleRefresh}
-            disabled={isLoading || !results}
-            sx={{ color: '#9ca3af' }}
-          >
-            <RefreshIcon fontSize="small" />
-          </IconButton>
+          <Tooltip title="Refresh data">
+            <IconButton
+              size="small"
+              onClick={handleRefresh}
+              disabled={isLoading || !results}
+              onMouseDown={(e) => e.stopPropagation()}
+              sx={{ color: '#9ca3af', '&:hover': { color: '#10b981' } }}
+            >
+              <RefreshIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           
-          <IconButton
-            size="small"
-            onClick={handleMenuOpen}
-            sx={{ color: '#9ca3af' }}
-          >
-            <SettingsIcon fontSize="small" />
-          </IconButton>
+          <Tooltip title="Settings">
+            <IconButton
+              size="small"
+              onClick={handleMenuOpen}
+              onMouseDown={(e) => e.stopPropagation()}
+              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+            >
+              <SettingsIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Remove tile">
+            <IconButton
+              size="small"
+              onClick={handleRemove}
+              onMouseDown={(e) => e.stopPropagation()}
+              sx={{ color: '#9ca3af', '&:hover': { color: '#dc2626' } }}
+            >
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
 
@@ -410,10 +437,6 @@ const PortfolioTile = memo(({
         <MenuItem onClick={handleClear} sx={{ color: '#ef4444' }}>
           <DeleteIcon sx={{ mr: 1, fontSize: '1rem' }} />
           Clear Data
-        </MenuItem>
-        <MenuItem onClick={handleRemove} sx={{ color: '#ef4444' }}>
-          <CloseIcon sx={{ mr: 1, fontSize: '1rem' }} />
-          Remove Tile
         </MenuItem>
       </Menu>
 

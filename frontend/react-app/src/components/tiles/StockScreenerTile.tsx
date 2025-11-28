@@ -45,7 +45,7 @@ import {
   Chat as SidebarChatIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
-import { useTilePinning, PinButton, addStockToContext, addMultipleStocksToContext } from './common';
+import { useTilePinning, PinButton, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
 
 interface StockScreenerTileProps {
   id: string;
@@ -447,8 +447,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     togglePin();
   };
 
-  const handleRemove = () => {
-    if (window.confirm('Remove Stock Screener from dashboard?')) {
+  const handleRemove = async () => {
+    const confirmed = await confirmDialog({
+      title: 'Remove Tile',
+      message: 'Remove Stock Screener from dashboard?',
+      confirmText: 'Remove',
+      cancelText: 'Cancel',
+      confirmColor: 'error',
+    });
+    if (confirmed) {
       onRemove(id);
     }
   };

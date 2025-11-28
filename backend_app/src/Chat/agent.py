@@ -23,8 +23,9 @@ try:
         retries={'max_attempts': 3, 'mode': 'adaptive'}
     )
     
-    # Set default session config
-    boto3.setup_default_session(config=BEDROCK_CONFIG)
+    # Note: boto3.setup_default_session doesn't accept config parameter directly
+    # Instead, we'll configure clients individually when created
+    # The monkey-patching below will handle this
     
     # Monkey-patch boto3.client to ensure all clients use extended timeout
     _original_boto3_client = boto3.client
@@ -155,6 +156,7 @@ from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing
 from tools.chart_generator import generate_chart_tool, generate_stock_chart
 from tools.chat_history_tool import get_chat_history_tool, search_chat_history_tool
 from tools.chat_session_context_tool import process_chat_session_context_tool, analyze_chat_session_context_tool
+from tools.web_scraper import fetch_web_content_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -769,6 +771,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 27. search_sec_filings(company_name, form_type, start_date, end_date, limit) - Search SEC filings by criteria
 28. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
 29. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
+30. fetch_web_content_tool(url) - Fetch and extract content from web URLs, especially for article context items. Use this when context items have type "article" and contain URLs.
 
 🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
 
@@ -1079,7 +1082,15 @@ FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES):
 2. Use get_session_context_tool(session_id, user_id) to retrieve full context when needed
 3. For tile data, use get_financial_data() to get current market data
 4. For crypto tiles, use get_crypto_data_tool() to get current cryptocurrency data
-5. For articles, use search_financial_news() to get current news
+5. **FOR ARTICLE CONTEXT ITEMS**:
+   - When you see a context item with type "article", the article URL is embedded in the item's ID field
+   - ID format: "article_https://example.com/article/_timestamp"
+   - Extract the URL by removing "article_" prefix and timestamp suffix (everything after last underscore)
+   - Use fetch_web_content_tool(url="...") to fetch and read the article content from the web
+   - DO NOT use read_s3_file_tool for article context items - they are web URLs, not S3 files!
+   - Example: ID "article_https://www.rawstory.com/donald-trump-economy-2674296183/_1764286733691"
+     → Extract: "https://www.rawstory.com/donald-trump-economy-2674296183"
+     → Call: fetch_web_content_tool(url="https://www.rawstory.com/donald-trump-economy-2674296183")
 6. This optimization reduces payload size and improves performance
 
 FOR SEC FILINGS AND REGULATORY DOCUMENTS:
@@ -1947,6 +1958,7 @@ def get_excel_formatting(template_type: str) -> dict:
 
 # Define the tools list that Strands can automatically detect
 enhanced_tools = [
+    fetch_web_content_tool,  # Web content fetcher for article context items
     get_financial_data,
     get_multiple_financial_data,
     search_financial_news, 
@@ -1978,6 +1990,7 @@ enhanced_tools = [
     search_chat_history_tool,  # Search chat history for specific terms
     process_chat_session_context_tool,  # Process chat session context from history sidebar
     analyze_chat_session_context_tool,  # Analyze chat session context for insights
+    fetch_web_content_tool,  # Fetch and extract content from web URLs (for article context items)
 ]
 
 # Function to create agents with different models

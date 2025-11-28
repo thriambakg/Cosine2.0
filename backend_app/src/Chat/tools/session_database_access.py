@@ -364,7 +364,41 @@ def get_session_context_tool(session_id: str, user_id: str) -> str:
         if result['context_items']:
             response_parts.append(f"\nContext Items ({len(result['context_items'])}):")
             for i, item in enumerate(result['context_items'], 1):
-                response_parts.append(f"{i}. {item.get('title', 'Unknown')} ({item.get('type', 'unknown')})")
+                item_type = item.get('type', 'unknown')
+                item_title = item.get('title', 'Unknown')
+                item_id = item.get('id', '')
+                
+                response_parts.append(f"{i}. {item_title} ({item_type})")
+                
+                # Special handling for article context items - extract URL from ID
+                if item_type == 'article':
+                    # Extract URL from article ID (format: "article_https://example.com/article/_timestamp")
+                    url = None
+                    if item_id.startswith('article_'):
+                        # Remove "article_" prefix and timestamp suffix
+                        url_part = item_id.replace('article_', '')
+                        # Find the last underscore before the timestamp
+                        last_underscore = url_part.rfind('_')
+                        if last_underscore > 0:
+                            url = url_part[:last_underscore]
+                        else:
+                            url = url_part
+                        
+                        # Validate it looks like a URL
+                        if url and (url.startswith('http://') or url.startswith('https://')):
+                            response_parts.append(f"   📰 Article URL: {url}")
+                            response_parts.append(f"   💡 To read this article, use: fetch_web_content_tool(url=\"{url}\")")
+                            response_parts.append(f"   ⚠️  Do NOT use read_s3_file_tool for article context items - they are web URLs, not S3 files!")
+                    
+                    # Also check if URL is in data
+                    if not url and item.get('data'):
+                        data = item.get('data', {})
+                        if isinstance(data, dict):
+                            url = data.get('url') or data.get('source_url') or data.get('link')
+                            if url:
+                                response_parts.append(f"   📰 Article URL: {url}")
+                                response_parts.append(f"   💡 To read this article, use: fetch_web_content_tool(url=\"{url}\")")
+                
                 if item.get('data'):
                     data = item['data']
                     

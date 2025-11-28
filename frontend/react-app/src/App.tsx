@@ -17,6 +17,7 @@ import OptionPricingPage from './pages/OptionPricingPage';
 import HeatmapPage from './pages/HeatmapPage';
 import SECSearchPage from './pages/SECSearchPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
+import { ConfirmDialog } from './components/tiles/common';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -108,6 +109,7 @@ function App() {
     <Provider store={store}>
       <AuthProvider>
         <AppContent />
+        <ConfirmDialog />
       </AuthProvider>
     </Provider>
   );
