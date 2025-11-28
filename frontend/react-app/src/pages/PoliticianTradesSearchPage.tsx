@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   TextField,
-  Autocomplete,
   Typography,
   Box,
   Card,
@@ -9,14 +8,12 @@ import {
   Container,
   Alert,
   Button,
-  Chip,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   CircularProgress,
   Checkbox,
   FormControl,
@@ -24,9 +21,8 @@ import {
   Select,
   MenuItem,
   IconButton,
-  Tooltip,
-  Grid,
   Menu,
+  Collapse,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -35,6 +31,8 @@ import {
   Dashboard as AddToContextIcon,
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -272,49 +270,72 @@ const PoliticianTradesSearchPage: React.FC = () => {
   };
   
   const totalPages = Math.ceil(totalFound / pageSize);
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      <Typography variant="h4" sx={{ color: '#ffffff', mb: 3, fontWeight: 600 }}>
-        Politician Trades Search
-      </Typography>
-      
-      {/* Search Form */}
-      <GlassCard sx={{ mb: 3 }}>
-        <Box sx={{ p: 3 }}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
+    <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
+      <Container maxWidth="xl">
+        {/* Header */}
+        <Box sx={{ mb: 4 }}>
+          <Typography
+            variant="h4"
+            sx={{
+              color: '#ffffff',
+              fontWeight: 700,
+              mb: 1,
+              textTransform: 'uppercase',
+              letterSpacing: '1px',
+            }}
+          >
+            Politician Trades Search
+          </Typography>
+          <Typography
+            variant="body1"
+            sx={{
+              color: '#9ca3af',
+              fontSize: '1rem',
+            }}
+          >
+            Search politician trades with advanced filters
+          </Typography>
+        </Box>
+
+        {/* Search Form */}
+        <GlassCard sx={{ p: 4, mb: 4 }}>
+          {/* Top Bar - Common Search Parameters */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 3 }}>
+            {/* Row 1: Politician Name, Position, Party */}
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
+              {/* Politician Name */}
               <TextField
-                fullWidth
                 label="Politician Name"
                 value={searchParams.politicianName || ''}
                 onChange={(e) => setSearchParams(prev => ({ ...prev, politicianName: e.target.value || undefined }))}
+                variant="outlined"
                 sx={{
                   '& .MuiOutlinedInput-root': {
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#6b7280' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
                     '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                   },
                   '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
                 }}
               />
-            </Grid>
-            
-            <Grid item xs={12} md={3}>
-              <FormControl fullWidth>
-                <InputLabel sx={{ color: '#9ca3af' }}>Position</InputLabel>
+
+              {/* Position */}
+              <FormControl variant="outlined">
+                <InputLabel id="position-label" sx={{ color: '#9ca3af' }}>Position</InputLabel>
                 <Select
+                  labelId="position-label"
                   value={searchParams.position || ''}
                   onChange={(e) => setSearchParams(prev => ({ ...prev, position: e.target.value || undefined }))}
                   label="Position"
                   sx={{
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#6b7280' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
                     '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                    '& .MuiSelect-select': { color: '#ffffff' },
                   }}
                 >
                   <MenuItem value="">All</MenuItem>
@@ -323,21 +344,20 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   ))}
                 </Select>
               </FormControl>
-            </Grid>
-            
-            <Grid item xs={12} md={3}>
-              <FormControl fullWidth>
-                <InputLabel sx={{ color: '#9ca3af' }}>Party</InputLabel>
+
+              {/* Party */}
+              <FormControl variant="outlined">
+                <InputLabel id="party-label" sx={{ color: '#9ca3af' }}>Party</InputLabel>
                 <Select
+                  labelId="party-label"
                   value={searchParams.party || ''}
                   onChange={(e) => setSearchParams(prev => ({ ...prev, party: e.target.value || undefined }))}
                   label="Party"
                   sx={{
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#6b7280' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
                     '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                    '& .MuiSelect-select': { color: '#ffffff' },
                   }}
                 >
                   <MenuItem value="">All</MenuItem>
@@ -346,59 +366,57 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   ))}
                 </Select>
               </FormControl>
-            </Grid>
-            
-            <Grid item xs={12} md={4}>
+            </Box>
+
+            {/* Row 2: Security Symbol, Security Name, Transaction Type */}
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
+              {/* Security Symbol */}
               <TextField
-                fullWidth
                 label="Security Symbol"
                 value={searchParams.securitySymbol || ''}
                 onChange={(e) => setSearchParams(prev => ({ ...prev, securitySymbol: e.target.value.toUpperCase() || undefined }))}
+                variant="outlined"
                 sx={{
                   '& .MuiOutlinedInput-root': {
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#6b7280' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
                     '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                   },
                   '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
                 }}
               />
-            </Grid>
-            
-            <Grid item xs={12} md={4}>
+
+              {/* Security Name */}
               <TextField
-                fullWidth
                 label="Security Name"
                 value={searchParams.securityName || ''}
                 onChange={(e) => setSearchParams(prev => ({ ...prev, securityName: e.target.value || undefined }))}
+                variant="outlined"
                 sx={{
                   '& .MuiOutlinedInput-root': {
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#6b7280' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
                     '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                   },
                   '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
                 }}
               />
-            </Grid>
-            
-            <Grid item xs={12} md={4}>
-              <FormControl fullWidth>
-                <InputLabel sx={{ color: '#9ca3af' }}>Transaction Type</InputLabel>
+
+              {/* Transaction Type */}
+              <FormControl variant="outlined">
+                <InputLabel id="transaction-type-label" sx={{ color: '#9ca3af' }}>Transaction Type</InputLabel>
                 <Select
+                  labelId="transaction-type-label"
                   value={searchParams.transactionType || ''}
                   onChange={(e) => setSearchParams(prev => ({ ...prev, transactionType: e.target.value || undefined }))}
                   label="Transaction Type"
                   sx={{
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#6b7280' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
                     '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                    '& .MuiSelect-select': { color: '#ffffff' },
                   }}
                 >
                   <MenuItem value="">All</MenuItem>
@@ -407,144 +425,166 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   ))}
                 </Select>
               </FormControl>
-            </Grid>
-            
-            <Grid item xs={12} md={3}>
+            </Box>
+
+            {/* Row 3: Date Range */}
+            <Box sx={{ display: 'flex', gap: 2 }}>
               <TextField
-                fullWidth
+                label="Transaction Date From"
                 type="date"
-                label="Date From"
                 value={searchParams.dateFrom || ''}
                 onChange={(e) => setSearchParams(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
                 InputLabelProps={{ shrink: true }}
+                inputProps={{
+                  min: '2001-01-01',
+                  max: new Date().toISOString().split('T')[0],
+                }}
+                variant="outlined"
                 sx={{
+                  flex: 1,
                   '& .MuiOutlinedInput-root': {
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#6b7280' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
                     '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                   },
                   '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
                 }}
               />
-            </Grid>
-            
-            <Grid item xs={12} md={3}>
               <TextField
-                fullWidth
+                label="Transaction Date To"
                 type="date"
-                label="Date To"
                 value={searchParams.dateTo || ''}
                 onChange={(e) => setSearchParams(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
                 InputLabelProps={{ shrink: true }}
+                inputProps={{
+                  min: '2001-01-01',
+                  max: new Date().toISOString().split('T')[0],
+                }}
+                variant="outlined"
                 sx={{
+                  flex: 1,
                   '& .MuiOutlinedInput-root': {
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#6b7280' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
                     '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                   },
                   '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
                 }}
               />
-            </Grid>
-            
-            <Grid item xs={12} md={3}>
+            </Box>
+          </Box>
+
+          {/* Advanced Filters Toggle */}
+          <Button
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            startIcon={showAdvanced ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            sx={{
+              color: '#9ca3af',
+              textTransform: 'none',
+              mb: showAdvanced ? 2 : 0,
+              '&:hover': { 
+                color: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              },
+            }}
+          >
+            {showAdvanced ? 'Hide' : 'Show'} Advanced Filters
+          </Button>
+
+          {/* Advanced Filters */}
+          <Collapse in={showAdvanced}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px', mt: 2 }}>
               <TextField
-                fullWidth
                 label="State/District"
                 value={searchParams.stateDistrict || ''}
                 onChange={(e) => setSearchParams(prev => ({ ...prev, stateDistrict: e.target.value || undefined }))}
                 placeholder="e.g., CA, TX31, IL"
+                variant="outlined"
+                size="small"
                 sx={{
                   '& .MuiOutlinedInput-root': {
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#6b7280' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
                     '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                   },
                   '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
                 }}
               />
-            </Grid>
-            
-            <Grid item xs={12} md={3}>
               <TextField
-                fullWidth
                 label="Form Type"
                 value={searchParams.formType || ''}
                 onChange={(e) => setSearchParams(prev => ({ ...prev, formType: e.target.value || undefined }))}
                 placeholder="e.g., PTR"
+                variant="outlined"
+                size="small"
                 sx={{
                   '& .MuiOutlinedInput-root': {
-                    backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                    color: '#ffffff',
                     '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#6b7280' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
                     '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                   },
                   '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
                 }}
               />
-            </Grid>
-            
-            <Grid item xs={12}>
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-                <Button
-                  variant="outlined"
-                  onClick={() => {
-                    setSearchParams({
-                      dateFrom: '2020-01-01',
-                      dateTo: new Date().toISOString().split('T')[0],
-                    });
-                    setSearchResults([]);
-                    setTotalFound(0);
-                    setSelectedTrades(new Set());
-                  }}
-                  sx={{
-                    color: '#9ca3af',
-                    borderColor: '#374151',
-                    '&:hover': { borderColor: '#6b7280', backgroundColor: 'rgba(55, 65, 81, 0.3)' },
-                  }}
-                >
-                  Clear
-                </Button>
-                <Button
-                  variant="contained"
-                  onClick={handleSearch}
-                  disabled={isSearching}
-                  startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
-                  sx={{
-                    backgroundColor: '#3b82f6',
-                    '&:hover': { backgroundColor: '#2563eb' },
-                    '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
-                  }}
-                >
-                  {isSearching ? 'Searching...' : 'Search'}
-                </Button>
-              </Box>
-            </Grid>
-          </Grid>
-        </Box>
-      </GlassCard>
+            </Box>
+          </Collapse>
+
+          {/* Search Button */}
+          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
+            <Button
+              variant="outlined"
+              onClick={() => {
+                setSearchParams({
+                  dateFrom: '2020-01-01',
+                  dateTo: new Date().toISOString().split('T')[0],
+                });
+                setSearchResults([]);
+                setTotalFound(0);
+                setSelectedTrades(new Set());
+              }}
+              sx={{
+                color: '#9ca3af',
+                borderColor: '#374151',
+                '&:hover': { borderColor: '#6b7280', backgroundColor: 'rgba(55, 65, 81, 0.3)' },
+              }}
+            >
+              Clear
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleSearch}
+              disabled={isSearching}
+              startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
+              sx={{
+                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                color: '#ffffff',
+                '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+                '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
+              }}
+            >
+              {isSearching ? 'Searching...' : 'Search'}
+            </Button>
+          </Box>
+        </GlassCard>
       
-      {/* Error Alert */}
-      {searchError && (
-        <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
-          {searchError}
-        </Alert>
-      )}
-      
-      {/* Results */}
-      {searchResults.length > 0 && (
-        <GlassCard>
-          <Box sx={{ p: 2, borderBottom: '1px solid #374151', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6" sx={{ color: '#ffffff' }}>
-              Results ({totalFound.toLocaleString()} found)
-            </Typography>
+        {/* Error Alert */}
+        {searchError && (
+          <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
+            {searchError}
+          </Alert>
+        )}
+        
+        {/* Results */}
+        {searchResults.length > 0 && (
+          <GlassCard>
+            <Box sx={{ p: 2, borderBottom: '1px solid #374151', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                Results ({totalFound.toLocaleString()} found)
+              </Typography>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               {selectedTrades.size > 0 && (
                 <>
@@ -600,7 +640,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
             <Table>
               <TableHead>
                 <TableRow sx={{ backgroundColor: 'rgba(31, 41, 55, 0.5)' }}>
-                  <TableCell padding="checkbox">
+                  <TableCell padding="checkbox" sx={{ py: 1 }}>
                     <Checkbox
                       checked={selectedTrades.size === searchResults.length && searchResults.length > 0}
                       indeterminate={selectedTrades.size > 0 && selectedTrades.size < searchResults.length}
@@ -612,16 +652,17 @@ const PoliticianTradesSearchPage: React.FC = () => {
                         }
                       }}
                       sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
+                      size="small"
                     />
                   </TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Politician</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Position</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Party</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Security</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Transaction</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Date</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Amount</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Confidence</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Politician</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Position</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Party</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Security</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Transaction</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Date</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Amount</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Confidence</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -634,45 +675,46 @@ const PoliticianTradesSearchPage: React.FC = () => {
                     }}
                     onClick={() => toggleTradeSelection(trade.tradeId)}
                   >
-                    <TableCell padding="checkbox">
+                    <TableCell padding="checkbox" sx={{ py: 1 }}>
                       <Checkbox
                         checked={selectedTrades.has(trade.tradeId)}
                         onChange={() => toggleTradeSelection(trade.tradeId)}
                         onClick={(e) => e.stopPropagation()}
                         sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
+                        size="small"
                       />
                     </TableCell>
-                    <TableCell sx={{ color: '#ffffff' }}>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {trade.politicianName || 'N/A'}
                     </TableCell>
-                    <TableCell sx={{ color: '#ffffff' }}>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {trade.position || 'N/A'}
                     </TableCell>
-                    <TableCell sx={{ color: '#ffffff' }}>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {trade.party || 'N/A'}
                     </TableCell>
-                    <TableCell sx={{ color: '#ffffff' }}>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       <Box>
-                        <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                        <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.875rem' }}>
                           {trade.securitySymbol || 'N/A'}
                         </Typography>
                         {trade.securityName && (
-                          <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                          <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
                             {trade.securityName}
                           </Typography>
                         )}
                       </Box>
                     </TableCell>
-                    <TableCell sx={{ color: '#ffffff' }}>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {trade.transactionType || 'N/A'}
                     </TableCell>
-                    <TableCell sx={{ color: '#ffffff' }}>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {formatDate(trade.transactionDate)}
                     </TableCell>
-                    <TableCell sx={{ color: '#ffffff' }}>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {formatAmountRange(trade)}
                     </TableCell>
-                    <TableCell sx={{ color: '#ffffff' }}>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {trade.matchConfidence ? `${(trade.matchConfidence * 100).toFixed(0)}%` : 'N/A'}
                     </TableCell>
                   </TableRow>
@@ -708,20 +750,21 @@ const PoliticianTradesSearchPage: React.FC = () => {
         </GlassCard>
       )}
       
-      {/* Empty State */}
-      {!isSearching && searchResults.length === 0 && totalFound === 0 && !searchError && (
-        <GlassCard>
-          <Box sx={{ p: 4, textAlign: 'center' }}>
-            <Typography variant="h6" sx={{ color: '#9ca3af', mb: 1 }}>
-              No results yet
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#6b7280' }}>
-              Enter search criteria and click "Search" to find politician trades
-            </Typography>
-          </Box>
-        </GlassCard>
-      )}
-    </Container>
+        {/* Empty State */}
+        {!isSearching && searchResults.length === 0 && totalFound === 0 && !searchError && (
+          <GlassCard>
+            <Box sx={{ p: 4, textAlign: 'center' }}>
+              <Typography variant="h6" sx={{ color: '#9ca3af', mb: 1 }}>
+                No results yet
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#6b7280' }}>
+                Enter search criteria and click "Search" to find politician trades
+              </Typography>
+            </Box>
+          </GlassCard>
+        )}
+      </Container>
+    </Box>
   );
 };
 

@@ -317,18 +317,36 @@ def lambda_handler(event, context):
     """
     Lambda handler for politician trades search
     
-    Expected event structure:
+    Expected event structure (API Gateway AWS_PROXY):
     {
         "httpMethod": "POST",
         "body": "{\"politicianName\": \"...\", \"dateFrom\": \"2024-01-01\", ...}"
     }
     """
+    # CORS headers
+    cors_headers = {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
+        'Access-Control-Allow-Methods': 'POST,OPTIONS,GET',
+        'Access-Control-Allow-Credentials': 'true'
+    }
+    
+    # Handle OPTIONS preflight request
+    if event.get('httpMethod') == 'OPTIONS':
+        return {
+            'statusCode': 200,
+            'headers': cors_headers,
+            'body': json.dumps({'message': 'CORS preflight successful'})
+        }
+    
     try:
-        # Parse request
-        if isinstance(event.get('body'), str):
-            body = json.loads(event['body'])
+        # Parse request body
+        body_str = event.get('body', '{}')
+        if isinstance(body_str, str):
+            body = json.loads(body_str) if body_str else {}
         else:
-            body = event.get('body', {})
+            body = body_str or {}
         
         # Extract query parameters
         filters = {
@@ -362,12 +380,7 @@ def lambda_handler(event, context):
         # Return response
         return {
             'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type',
-                'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
-            },
+            'headers': cors_headers,
             'body': json.dumps(result, cls=DecimalEncoder)
         }
     
@@ -377,12 +390,7 @@ def lambda_handler(event, context):
         logger.error(traceback.format_exc())
         return {
             'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type',
-                'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
-            },
+            'headers': cors_headers,
             'body': json.dumps({
                 'success': False,
                 'error': str(e)
