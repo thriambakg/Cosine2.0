@@ -1584,6 +1584,40 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
         if not filename.endswith(f'.{file_type}'):
             filename = f"{filename}.{file_type}"
         
+        # Decompress content if it's compressed (e.g., from web scraper tool)
+        # This handles compressed data from tools like fetch_web_content_tool
+        original_size = len(content)
+        is_compressed = False
+        
+        try:
+            import json
+            from compression_helper import CompressionHelper
+            
+            # Try to parse as JSON to check if it's compressed
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict) and CompressionHelper.is_compressed(parsed):
+                    # Decompress the content before storing
+                    logger.info(f"Detected compressed content ({len(content)} chars), decompressing before storage...")
+                    decompressed = CompressionHelper.decompress_data(parsed)
+                    
+                    if isinstance(decompressed, str):
+                        content = decompressed
+                        decompressed_size = len(content)
+                        compression_ratio = len(content) / original_size if original_size > 0 else 1.0
+                        logger.info(f"Decompressed content: {original_size} -> {decompressed_size} chars (expanded {compression_ratio:.1%})")
+                        is_compressed = True
+                        agent_logger.info(f"📦 Decompressed content before file generation")
+                    else:
+                        logger.warning(f"Decompressed content is not a string: {type(decompressed)}")
+            except (json.JSONDecodeError, ValueError):
+                # Not JSON, so not compressed - use as-is
+                pass
+        except ImportError:
+            logger.warning("CompressionHelper not available, skipping decompression check")
+        except Exception as decomp_error:
+            logger.warning(f"Decompression check failed, using content as-is: {str(decomp_error)}")
+        
         # Use unified file upload function
         try:
             from lambda_invocation import upload_file_and_notify
@@ -1595,7 +1629,10 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
                 session_id=session_id,
                 file_type=file_type,
                 folder="agent-files",
-                metadata={'generated_by': 'agent'}
+                metadata={
+                    'generated_by': 'agent',
+                    'was_compressed': 'true' if is_compressed else 'false'
+                }
             )
             
             logger.info(f"Generated agent file: {filename}")

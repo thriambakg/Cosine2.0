@@ -566,10 +566,43 @@ def fetch_web_content_tool(url: str) -> str:
         result_parts.append("=" * 80)
         result_parts.append(f"\nSource URL: {url}")
         
+        result_text = "\n".join(result_parts)
+        original_size = len(result_text)
+        
+        # Compress large output to reduce payload size for consuming tools
+        # Threshold: 5KB (5,000 characters) - compress if larger
+        COMPRESSION_THRESHOLD = 5000
+        
+        if original_size > COMPRESSION_THRESHOLD:
+            try:
+                from compression_helper import CompressionHelper
+                
+                logger.info(f"📦 Output size ({original_size} chars) exceeds threshold ({COMPRESSION_THRESHOLD}), compressing...")
+                
+                # Compress the result text
+                compressed_result = CompressionHelper.compress_data(result_text, compression_threshold=0)  # Force compression
+                
+                if CompressionHelper.is_compressed(compressed_result):
+                    compressed_size = compressed_result.get('_compressed_size', 0)
+                    compression_ratio = compressed_result.get('_compression_ratio', 0.0)
+                    
+                    logger.info(f"📦 Compressed output: {original_size} -> {compressed_size} chars ({compression_ratio:.1%} of original)")
+                    agent_logger.info(f"📦 Compressed web content output ({compression_ratio:.1%} of original size)")
+                    
+                    # Return compressed data structure as JSON string
+                    import json
+                    return json.dumps(compressed_result)
+                else:
+                    logger.warning("Compression did not occur, returning uncompressed")
+                    
+            except Exception as comp_error:
+                logger.warning(f"Compression failed, returning uncompressed: {str(comp_error)}")
+                # Continue with uncompressed content if compression fails
+        
         logger.info(f"Successfully extracted {extracted['content_length']} characters from {url}")
         agent_logger.info(f"✅ Successfully extracted article content ({extracted['content_length']} chars)")
         
-        return "\n".join(result_parts)
+        return result_text
         
     except Exception as e:
         error_msg = f"Error in fetch_web_content_tool: {str(e)}"
@@ -577,16 +610,6 @@ def fetch_web_content_tool(url: str) -> str:
         import traceback
         logger.error(traceback.format_exc())
         return error_msg
-
-# Import agent_logger for WebSocket streaming
-try:
-    import sys
-    import os
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-    from agent_logger import get_agent_logger
-    agent_logger = get_agent_logger()
-except:
-    agent_logger = logger
 
 # Import Strands types (available in Lambda layer)
 try:

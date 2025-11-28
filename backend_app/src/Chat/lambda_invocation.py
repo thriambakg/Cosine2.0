@@ -48,6 +48,32 @@ def upload_file_and_notify(
         if not bucket_name:
             return "Error: CHAT_FILES_BUCKET_NAME not configured"
         
+        # Check if content is compressed and decompress if needed
+        # This handles compression from generate_agent_file_tool for large content
+        if isinstance(content, str):
+            try:
+                import json
+                # Try to parse as JSON to check if it's compressed
+                parsed = json.loads(content)
+                if isinstance(parsed, dict) and parsed.get("_compressed") is True:
+                    # Decompress the content before storing
+                    from compression_helper import CompressionHelper
+                    logger.info("Detected compressed content, decompressing before storage...")
+                    decompressed = CompressionHelper.decompress_data(parsed)
+                    if isinstance(decompressed, dict) and "_file_content" in decompressed:
+                        # Extract the original file content
+                        content = decompressed["_file_content"]
+                        logger.info(f"Decompressed content: {len(content)} characters")
+                    else:
+                        # Fallback: use original_data if available
+                        if "original_data" in parsed:
+                            content = parsed["original_data"].get("_file_content", content)
+                            logger.info("Used original_data fallback for decompression")
+            except (json.JSONDecodeError, ImportError, Exception) as e:
+                # Not compressed JSON, or decompression failed - use as-is
+                logger.debug(f"Content is not compressed JSON or decompression skipped: {str(e)}")
+                pass
+        
         # Convert string content to bytes if needed
         if isinstance(content, str):
             file_content = content.encode('utf-8')
