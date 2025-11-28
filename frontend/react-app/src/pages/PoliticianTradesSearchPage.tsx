@@ -34,6 +34,8 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   Download as DownloadIcon,
+  OpenInNew as OpenInNewIcon,
+  VerifiedUser as VerifiedUserIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -312,30 +314,119 @@ const PoliticianTradesSearchPage: React.FC = () => {
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth="xl">
-        {/* Header */}
-        <Box sx={{ mb: 4 }}>
-          <Typography
-            variant="h4"
-            sx={{
-              color: '#ffffff',
-              fontWeight: 700,
-              mb: 1,
-              textTransform: 'uppercase',
-              letterSpacing: '1px',
-            }}
-          >
-            Politician Trades Search
-          </Typography>
-          <Typography
-            variant="body1"
-            sx={{
-              color: '#9ca3af',
-              fontSize: '1rem',
-            }}
-          >
-            Search politician trades with advanced filters
-          </Typography>
-        </Box>
+        <Box sx={{ display: 'flex', gap: 3 }}>
+          {/* Left Sidebar - Verification Links */}
+          <Box sx={{ width: '280px', flexShrink: 0 }}>
+            <GlassCard sx={{ p: 2, position: 'sticky', top: 20 }}>
+              <Typography
+                variant="h6"
+                sx={{
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  mb: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
+                <VerifiedUserIcon sx={{ fontSize: '1.5rem', color: '#3b82f6' }} />
+                Verify on Official Sources
+              </Typography>
+              <Typography
+                variant="body2"
+                sx={{
+                  color: '#9ca3af',
+                  mb: 2,
+                  fontSize: '0.875rem',
+                }}
+              >
+                Cross-reference findings with official government disclosure databases:
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <Button
+                  component="a"
+                  href="https://efdsearch.senate.gov/search/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  variant="outlined"
+                  startIcon={<OpenInNewIcon />}
+                  sx={{
+                    color: '#3b82f6',
+                    borderColor: '#3b82f6',
+                    '&:hover': {
+                      borderColor: '#2563eb',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                    justifyContent: 'flex-start',
+                    textTransform: 'none',
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  Senate EFD Search
+                </Button>
+                <Button
+                  component="a"
+                  href="https://disclosures-clerk.house.gov/FinancialDisclosure"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  variant="outlined"
+                  startIcon={<OpenInNewIcon />}
+                  sx={{
+                    color: '#3b82f6',
+                    borderColor: '#3b82f6',
+                    '&:hover': {
+                      borderColor: '#2563eb',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                    justifyContent: 'flex-start',
+                    textTransform: 'none',
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  House Clerk Financial Disclosure
+                </Button>
+              </Box>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#6b7280',
+                  mt: 2,
+                  display: 'block',
+                  fontSize: '0.75rem',
+                  lineHeight: 1.5,
+                }}
+              >
+                Note: These links open the official government websites where you can verify the accuracy of trade data.
+              </Typography>
+            </GlassCard>
+          </Box>
+
+          {/* Main Content */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            {/* Header */}
+            <Box sx={{ mb: 4 }}>
+              <Typography
+                variant="h4"
+                sx={{
+                  color: '#ffffff',
+                  fontWeight: 700,
+                  mb: 1,
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                }}
+              >
+                Politician Trades Search
+              </Typography>
+              <Typography
+                variant="body1"
+                sx={{
+                  color: '#9ca3af',
+                  fontSize: '1rem',
+                }}
+              >
+                Search politician trades with advanced filters
+              </Typography>
+            </Box>
 
         {/* Search Form */}
         <GlassCard sx={{ p: 4, mb: 4 }}>
@@ -806,19 +897,21 @@ const PoliticianTradesSearchPage: React.FC = () => {
         </GlassCard>
       )}
       
-        {/* Empty State */}
-        {!isSearching && searchResults.length === 0 && totalFound === 0 && !searchError && (
-          <GlassCard>
-            <Box sx={{ p: 4, textAlign: 'center' }}>
-              <Typography variant="h6" sx={{ color: '#9ca3af', mb: 1 }}>
-                No results yet
-              </Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>
-                Enter search criteria and click "Search" to find politician trades
-              </Typography>
-            </Box>
-          </GlassCard>
-        )}
+            {/* Empty State */}
+            {!isSearching && searchResults.length === 0 && totalFound === 0 && !searchError && (
+              <GlassCard>
+                <Box sx={{ p: 4, textAlign: 'center' }}>
+                  <Typography variant="h6" sx={{ color: '#9ca3af', mb: 1 }}>
+                    No results yet
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#6b7280' }}>
+                    Enter search criteria and click "Search" to find politician trades
+                  </Typography>
+                </Box>
+              </GlassCard>
+            )}
+          </Box>
+        </Box>
       </Container>
     </Box>
   );

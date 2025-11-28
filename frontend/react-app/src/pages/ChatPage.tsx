@@ -2089,7 +2089,7 @@ export default function ChatPage() {
             <Tooltip title="Upload files">
               <IconButton
                 onClick={() => fileInputRef.current?.click()}
-                sx={{
+              sx={{
                   color: '#9ca3af',
                   '&:hover': {
                     color: '#3b82f6',
@@ -2127,36 +2127,36 @@ export default function ChatPage() {
         sx={{ zIndex: 1300 }}
       >
         <Box sx={{ p: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #374151' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <ContextIcon sx={{ color: '#10b981', fontSize: '1rem' }} />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <ContextIcon sx={{ color: '#10b981', fontSize: '1rem' }} />
             <Typography variant="body2" sx={{ color: '#10b981', fontSize: '0.85rem', fontWeight: 600 }}>
               Context ({sessionContext.length})
-            </Typography>
-          </Box>
+                </Typography>
+              </Box>
           <IconButton size="small" onClick={() => setIsContextDrawerOpen(false)} sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}>
             <CloseIcon fontSize="small" />
           </IconButton>
-        </Box>
+            </Box>
         <Box sx={{ p: 1, overflow: 'auto', '&::-webkit-scrollbar': { width: '6px' }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' }, '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' } }}>
           {sessionContext.length > 0 ? (
             <List dense sx={{ py: 0, px: 1 }}>
-              {sessionContext.map((item, index) => (
+                {sessionContext.map((item, index) => (
                 <ListItem key={item.id || index} sx={{ py: 0.5, px: 1, borderRadius: '4px', display: 'flex', alignItems: 'center', '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', '& .remove-context-btn': { opacity: 1 } } }}>
                   <IconButton size="small" className="remove-context-btn" onClick={async () => {
-                    const newContext = sessionContext.filter((_, i) => i !== index);
-                    setSessionContext(newContext);
-                    if (currentSession?.session_id) {
+                        const newContext = sessionContext.filter((_, i) => i !== index);
+                        setSessionContext(newContext);
+                        if (currentSession?.session_id) {
                       const syncEvent = new CustomEvent('session-context-updated', { detail: { sessionId: currentSession.session_id, contextItems: newContext } });
-                      window.dispatchEvent(syncEvent);
-                    }
-                    if (currentSession?.session_id && user?.id) {
-                      try {
+                          window.dispatchEvent(syncEvent);
+                        }
+                        if (currentSession?.session_id && user?.id) {
+                          try {
                         await sessionManagementAPI.updateSession(currentSession.session_id, user.id, { session_variables: { context_items: newContext, context_added_at: Date.now() } });
                       } catch (error) { console.error('❌ Failed to update context in backend:', error); }
-                    }
+                        }
                   }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', mr: 1, '&:hover': { color: '#ef4444' } }}>
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
                   <Box sx={{ flex: 1 }}>
                     <ContextItemRow
                       item={item}
@@ -2165,9 +2165,9 @@ export default function ChatPage() {
                       onRemove={() => handleRemoveContextItem(index)}
                     />
                   </Box>
-                </ListItem>
-              ))}
-            </List>
+                  </ListItem>
+                ))}
+              </List>
           ) : (
             <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem', fontStyle: 'italic', p: 2, display: 'block' }}>
               No context items
@@ -2194,23 +2194,23 @@ export default function ChatPage() {
         sx={{ zIndex: 1300 }}
       >
         <Box sx={{ p: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #374151' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <FileIcon sx={{ color: '#3b82f6', fontSize: '1rem' }} />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <FileIcon sx={{ color: '#3b82f6', fontSize: '1rem' }} />
             <Typography variant="body2" sx={{ color: '#3b82f6', fontSize: '0.85rem', fontWeight: 600 }}>Files</Typography>
-          </Box>
+              </Box>
           <IconButton size="small" onClick={() => setIsFilesDrawerOpen(false)} sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}>
             <CloseIcon fontSize="small" />
           </IconButton>
-        </Box>
+            </Box>
         <Box sx={{ p: 1, overflow: 'auto', '&::-webkit-scrollbar': { width: '6px' }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' }, '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' } }}>
           {/* User Files */}
-          <Box sx={{ mb: 2 }}>
+                <Box sx={{ mb: 2 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#3b82f6', mb: 1, display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.8rem' }}>
-              <PersonIcon fontSize="small" />
-              User Files ({currentSession?.session_variables?.uploaded_files?.length || 0})
-            </Typography>
+                    <PersonIcon fontSize="small" />
+                    User Files ({currentSession?.session_variables?.uploaded_files?.length || 0})
+                  </Typography>
             {(currentSession?.session_variables?.uploaded_files?.length ?? 0) > 0 ? (
-              <List dense sx={{ py: 0 }}>
+                    <List dense sx={{ py: 0 }}>
                 {(currentSession?.session_variables?.uploaded_files ?? []).map((file: any, index: number) => (
                   <ListItem key={index} sx={{ py: 0.5, px: 1, '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)', '& .remove-file-btn': { opacity: 1 } } }}
                     secondaryAction={
@@ -2230,35 +2230,35 @@ export default function ChatPage() {
                         <IconButton edge="end" size="small" className="remove-file-btn" onClick={async () => {
                           const newFiles = (currentSession?.session_variables?.uploaded_files ?? []).filter((_: any, i: number) => i !== index);
                           if (currentSession?.session_id) {
-                            updateSessionFiles(currentSession.session_id, newFiles);
-                            if (currentSession?.session_id && user?.id) {
-                              try {
+                              updateSessionFiles(currentSession.session_id, newFiles);
+                              if (currentSession?.session_id && user?.id) {
+                                try {
                                 await sessionManagementAPI.updateSession(currentSession.session_id, user.id, { session_variables: { ...(currentSession?.session_variables || {}), uploaded_files: newFiles, files_added_at: Date.now() } });
                               } catch (error) { console.error('❌ Failed to update files in backend:', error); }
-                            }
-                          }
+                                }
+                              }
                         }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', '&:hover': { color: '#ef4444' } }}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
                       </Box>
                     }>
                     <ListItemText primary={file.filename} secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type}`} primaryTypographyProps={{ fontSize: '0.8rem', color: '#ffffff' }} secondaryTypographyProps={{ fontSize: '0.7rem', color: '#9ca3af' }} />
-                  </ListItem>
-                ))}
-              </List>
-            ) : (
+                        </ListItem>
+                      ))}
+                    </List>
+                  ) : (
               <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem', fontStyle: 'italic' }}>No user files uploaded</Typography>
-            )}
-          </Box>
+                  )}
+                </Box>
 
           {/* Agent Files */}
-          <Box sx={{ mb: 1 }}>
+                <Box sx={{ mb: 1 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#22c55e', mb: 1, display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.8rem' }}>
-              <SmartToyIcon fontSize="small" />
-              Agent Files ({currentSession?.session_variables?.agent_files?.length || 0})
-            </Typography>
+                    <SmartToyIcon fontSize="small" />
+                    Agent Files ({currentSession?.session_variables?.agent_files?.length || 0})
+                  </Typography>
             {(currentSession?.session_variables?.agent_files?.length ?? 0) > 0 ? (
-              <List dense sx={{ py: 0 }}>
+                    <List dense sx={{ py: 0 }}>
                 {(currentSession?.session_variables?.agent_files ?? []).map((file: any, index: number) => (
                   <ListItem key={index} sx={{ py: 0.5, px: 1, backgroundColor: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '4px', mb: 0.5, '&:hover': { backgroundColor: 'rgba(34, 197, 94, 0.15)', '& .remove-file-btn': { opacity: 1 } } }}
                     secondaryAction={
@@ -2266,15 +2266,15 @@ export default function ChatPage() {
                         <IconButton size="small" className="remove-file-btn" onClick={async () => {
                           if (!currentSession?.session_id || !user?.id) return;
                           try {
-                            const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                                const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
                             const response = await fetch(`${apiUrl}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: currentSession.session_id, filename: file.filename, s3_key: file.s3_key }) });
                             if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
-                            const { download_url } = await response.json();
+                                const { download_url } = await response.json();
                             const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
                           } catch (error) { console.error('❌ Agent file download failed:', error); }
                         }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#22c55e', '&:hover': { color: '#16a34a' } }}>
-                          <DownloadIcon fontSize="small" />
-                        </IconButton>
+                            <DownloadIcon fontSize="small" />
+                          </IconButton>
                         <IconButton edge="end" size="small" className="remove-file-btn" onClick={async () => {
                           const newFiles = (currentSession?.session_variables?.agent_files ?? []).filter((_: any, i: number) => i !== index);
                           if (currentSession?.session_id) updateSessionAgentFiles(currentSession.session_id, newFiles);
@@ -2289,14 +2289,14 @@ export default function ChatPage() {
                       </Box>
                     }>
                     <ListItemText primary={file.filename} secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type} • Generated`} primaryTypographyProps={{ fontSize: '0.8rem', color: '#ffffff' }} secondaryTypographyProps={{ fontSize: '0.7rem', color: '#9ca3af' }} />
-                  </ListItem>
-                ))}
-              </List>
-            ) : (
+                        </ListItem>
+                      ))}
+                    </List>
+                  ) : (
               <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem', fontStyle: 'italic' }}>No agent files generated</Typography>
-            )}
-          </Box>
-        </Box>
+                  )}
+                </Box>
+              </Box>
       </Drawer>
 
       {/* Session Context Menu */}

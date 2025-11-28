@@ -1025,8 +1025,8 @@ class UnifiedMessageHandlerService {
     // Only clear loading state if this is a real error (not a temporary status)
     // For file messages, we want to keep loading until we get an AI response
     if (!errorMessage.toLowerCase().includes('processing')) {
-      this.broadcastLoadingState(sessionId, false, 'chatpage');
-      this.broadcastLoadingState(sessionId, false, 'sidebar');
+    this.broadcastLoadingState(sessionId, false, 'chatpage');
+    this.broadcastLoadingState(sessionId, false, 'sidebar');
     }
   }
 

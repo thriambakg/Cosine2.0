@@ -76,10 +76,11 @@ export default function AppSidebar() {
     main: 'Main',
     portfolio: 'Portfolio',
     analysis: 'Analysis & Tools',
+    government_data: 'Government Data',
     other: 'Other',
   };
 
-  const categoryOrder = ['main', 'portfolio', 'analysis', 'other'];
+  const categoryOrder = ['main', 'government_data', 'portfolio', 'analysis', 'other'];
 
   const renderNavigationSection = (category: string, items: typeof navigationItems) => {
     // Define colors for each category

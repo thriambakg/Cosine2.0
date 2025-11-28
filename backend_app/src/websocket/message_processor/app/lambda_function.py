@@ -1424,7 +1424,7 @@ def handle_file_handler_message(event):
                                 }
                                 send_message_to_client(connection_id, user_message_display)
                                 logger.info(f"📨 Sent user message with files to connection {connection_id}")
-                                
+                
                                 # Send session variables update to frontend
                                 try:
                                     # Get updated session variables from database
@@ -1457,83 +1457,83 @@ def handle_file_handler_message(event):
                 elif ai_response:
                     # We have an actual response, send it immediately
                     logger.info(f"📨 Chat agent returned immediate response, sending to frontend")
-                    try:
-                        # Find active WebSocket connections for this user/session
-                        active_connections = get_active_connections_for_user_session(user_id, session_id)
+                try:
+                    # Find active WebSocket connections for this user/session
+                    active_connections = get_active_connections_for_user_session(user_id, session_id)
+                    
+                    if active_connections:
+                        ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
                         
-                        if active_connections:
-                            ai_message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+                        for connection_id in active_connections:
+                            # Send user message confirmation first
+                            user_message_confirmation = {
+                                'type': 'message_received',
+                                'message_id': message_id,
+                                'session_id': session_id,
+                                'timestamp': datetime.now().isoformat()
+                            }
                             
-                            for connection_id in active_connections:
-                                # Send user message confirmation first
-                                user_message_confirmation = {
-                                    'type': 'message_received',
-                                    'message_id': message_id,
-                                    'session_id': session_id,
-                                    'timestamp': datetime.now().isoformat()
-                                }
-                                
-                                send_message_to_client(connection_id, user_message_confirmation)
-                                logger.info(f"📨 Sent user message confirmation to connection {connection_id}")
-                                
-                                # Send user message with files for display
-                                user_message_display = {
-                                    'type': 'user_message_with_files',
-                                    'message_id': message_id,
-                                    'content': message_text,
-                                    'session_id': session_id,
-                                    'timestamp': datetime.now().isoformat(),
-                                    'files': file_metadata if file_metadata else []
-                                }
-                                
-                                send_message_to_client(connection_id, user_message_display)
-                                logger.info(f"📨 Sent user message with files to connection {connection_id}")
-                                
-                                # Send AI response
-                                ai_response_message = {
-                                    'type': 'ai_response',
-                                    'message_id': ai_message_id,
-                                    'content': ai_response,
-                                    'session_id': session_id,
-                                    'timestamp': datetime.now().isoformat()
-                                }
-                                
-                                send_message_to_client(connection_id, ai_response_message)
-                                logger.info(f"📨 Sent AI response to connection {connection_id}")
-                                
-                                # Send session variables update to frontend
-                                try:
-                                    # Get updated session variables from database
-                                    session_response = chat_sessions_table.get_item(
-                                        Key={
-                                            'user_id': user_id,
-                                            'session_id': session_id
-                                        }
-                                    )
-                                    
-                                    if 'Item' in session_response:
-                                        session_item = session_response['Item']
-                                        session_variables = session_item.get('session_variables', {})
-                                        
-                                        # Send session update message
-                                        session_update_message = {
-                                            'type': 'session_updated',
-                                            'session_id': session_id,
-                                            'session_variables': session_variables,
-                                            'timestamp': datetime.now().isoformat()
-                                        }
-                                        
-                                        send_message_to_client(connection_id, session_update_message)
-                                        logger.info(f"📁 Sent session variables update to connection {connection_id}")
-                                        
-                                except Exception as e:
-                                    logger.error(f"❌ Failed to send session variables update: {str(e)}")
-                                    
-                        else:
-                            logger.warning(f"⚠️ No active connections found for user {user_id}, session {session_id}")
+                            send_message_to_client(connection_id, user_message_confirmation)
+                            logger.info(f"📨 Sent user message confirmation to connection {connection_id}")
                             
-                    except Exception as e:
-                        logger.error(f"❌ Failed to send AI response via WebSocket: {str(e)}")
+                            # Send user message with files for display
+                            user_message_display = {
+                                'type': 'user_message_with_files',
+                                'message_id': message_id,
+                                'content': message_text,
+                                'session_id': session_id,
+                                'timestamp': datetime.now().isoformat(),
+                                'files': file_metadata if file_metadata else []
+                            }
+                            
+                            send_message_to_client(connection_id, user_message_display)
+                            logger.info(f"📨 Sent user message with files to connection {connection_id}")
+                            
+                            # Send AI response
+                            ai_response_message = {
+                                'type': 'ai_response',
+                                'message_id': ai_message_id,
+                                'content': ai_response,
+                                'session_id': session_id,
+                                'timestamp': datetime.now().isoformat()
+                            }
+                            
+                            send_message_to_client(connection_id, ai_response_message)
+                            logger.info(f"📨 Sent AI response to connection {connection_id}")
+                            
+                            # Send session variables update to frontend
+                            try:
+                                # Get updated session variables from database
+                                session_response = chat_sessions_table.get_item(
+                                    Key={
+                                        'user_id': user_id,
+                                        'session_id': session_id
+                                    }
+                                )
+                                
+                                if 'Item' in session_response:
+                                    session_item = session_response['Item']
+                                    session_variables = session_item.get('session_variables', {})
+                                    
+                                    # Send session update message
+                                    session_update_message = {
+                                        'type': 'session_updated',
+                                        'session_id': session_id,
+                                        'session_variables': session_variables,
+                                        'timestamp': datetime.now().isoformat()
+                                    }
+                                    
+                                    send_message_to_client(connection_id, session_update_message)
+                                    logger.info(f"📁 Sent session variables update to connection {connection_id}")
+                                    
+                            except Exception as e:
+                                logger.error(f"❌ Failed to send session variables update: {str(e)}")
+                                
+                    else:
+                        logger.warning(f"⚠️ No active connections found for user {user_id}, session {session_id}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Failed to send AI response via WebSocket: {str(e)}")
                 else:
                     # No response and not async - this is an actual error
                     logger.warning(f"⚠️ Chat agent returned 200 but no response content and not async delivery")
