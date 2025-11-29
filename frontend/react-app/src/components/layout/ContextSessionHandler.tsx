@@ -22,13 +22,28 @@ const ContextSessionHandler: React.FC = () => {
         messageLength: userMessage?.length,
         contextItemsCount: contextItems?.length,
         timestamp,
+        currentUser: user?.id,
+        userAuthenticated: !!user?.id,
       });
 
-      // Validate user
-      if (!user?.id || userId !== user.id) {
-        console.log('⚠️ Global Context Handler: User mismatch or no user, skipping');
+      // Validate user with more detailed logging
+      if (!user?.id) {
+        console.log('⚠️ Global Context Handler: No authenticated user, skipping context session creation');
+        console.log('🔍 Debug: User state:', { user, hasUser: !!user, hasUserId: !!user?.id });
         return;
       }
+      
+      if (userId !== user.id) {
+        console.log('⚠️ Global Context Handler: User ID mismatch, skipping context session creation');
+        console.log('🔍 Debug: User ID comparison:', { 
+          providedUserId: userId, 
+          currentUserId: user.id, 
+          match: userId === user.id 
+        });
+        return;
+      }
+      
+      console.log('✅ Global Context Handler: User validation passed, proceeding with context session creation');
 
       // Prevent duplicate processing
       if (processingRef.current) {

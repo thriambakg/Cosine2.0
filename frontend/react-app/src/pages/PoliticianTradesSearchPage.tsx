@@ -25,25 +25,29 @@ import {
   Collapse,
   Chip,
   Tooltip,
+  Autocomplete,
+  Link,
 } from '@mui/material';
 import {
   Search as SearchIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
   Dashboard as AddToContextIcon,
-  AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
   Download as DownloadIcon,
   OpenInNew as OpenInNewIcon,
   VerifiedUser as VerifiedUserIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
+  AddComment as NewChatIcon,
+  Launch as LaunchIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
+import { politicianSuggestionsService, Politician } from '../services/politicianSuggestions';
+import { securitySuggestionsService, Security } from '../services/securitySuggestions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
+import { addTradeToContext, addMultipleTradesToContext } from '../components/tiles/common';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -90,22 +94,79 @@ const PARTIES = [
   'Independent',
 ];
 
+// Standard amount ranges (matches Senate PTR ranges)
+const AMOUNT_RANGES = [
+  { value: '$0-$1,000', label: '$0 - $1,000' },
+  { value: '$1,001-$15,000', label: '$1,001 - $15,000' },
+  { value: '$15,001-$50,000', label: '$15,001 - $50,000' },
+  { value: '$50,001-$100,000', label: '$50,001 - $100,000' },
+  { value: '$100,001-$250,000', label: '$100,001 - $250,000' },
+  { value: '$250,001-$500,000', label: '$250,001 - $500,000' },
+  { value: '$500,001-$1,000,000', label: '$500,001 - $1,000,000' },
+  { value: '$1,000,001-$5,000,000', label: '$1,000,001 - $5,000,000' },
+  { value: '$5,000,001-$25,000,000', label: '$5,000,001 - $25,000,000' },
+  { value: '$25,000,001-$50,000,000', label: '$25,000,001 - $50,000,000' },
+  { value: '$50,000,001+', label: 'Over $50,000,000' },
+];
+
+// Filter expand state interface
+interface ExpandedFiltersState {
+  politician: boolean;
+  party: boolean;
+  position: boolean;
+  security: boolean;
+  transactionType: boolean;
+  stateDistrict: boolean;
+  amountRange: boolean;
+}
+
 const PoliticianTradesSearchPage: React.FC = () => {
   const { user } = useAuth();
-  const { activeSessionId, setIsVisible: setSidebarVisible } = useGlobalChat();
+  const { activeSessionId } = useGlobalChat();
+  
+  // Session persistence key
+  const SESSION_STORAGE_KEY = 'politician-trades-search-page-state';
+
+  // Helper function to load state from sessionStorage
+  const loadStateFromStorage = () => {
+    try {
+      const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (savedState) {
+        return JSON.parse(savedState);
+      }
+    } catch (error) {
+      console.error('❌ Error loading state from sessionStorage:', error);
+    }
+    return null;
+  };
+
+  // Initialize state from sessionStorage immediately (using function initializer)
+  const savedState = loadStateFromStorage();
   
   // Search state
-  const [searchParams, setSearchParams] = useState<PoliticianTradesSearchParams>({
-    dateFrom: '2020-01-01',
-    dateTo: new Date().toISOString().split('T')[0],
-  });
-  const [allSearchResults, setAllSearchResults] = useState<PoliticianTrade[]>([]);
+  const [searchParams, setSearchParams] = useState<PoliticianTradesSearchParams>(
+    savedState?.searchParams || {
+      dateFrom: '2020-01-01',
+      dateTo: new Date().toISOString().split('T')[0],
+    }
+  );
+  const [allSearchResults, setAllSearchResults] = useState<PoliticianTrade[]>(
+    savedState?.allSearchResults || []
+  );
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>([]);
-  const [totalFound, setTotalFound] = useState<number>(0);
-  const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
+  const [isSearching, setIsSearching] = useState<boolean>(savedState?.isSearching || false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(50);
+  const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
+  const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 50);
+  
+  // Politician suggestions state
+  const [politicianSuggestions, setPoliticianSuggestions] = useState<Politician[]>([]);
+  const [isPoliticianDataLoaded, setIsPoliticianDataLoaded] = useState<boolean>(false);
+  
+  // Security suggestions state
+  const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
+  const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState<boolean>(false);
   
   // Selection state
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
@@ -119,20 +180,20 @@ const PoliticianTradesSearchPage: React.FC = () => {
     security_filters?: Array<{ security: string; count: number }>;
     transaction_type_filters?: Array<{ transactionType: string; count: number }>;
     state_district_filters?: Array<{ stateDistrict: string; count: number }>;
-    form_type_filters?: Array<{ formType: string; count: number }>;
-    owner_filters?: Array<{ owner: string; count: number }>;
-  }>({});
+    amount_range_filters?: Array<{ amount_range: string; count: number }>;
+  }>(savedState?.availableFilters || {});
   
-  const [expandedFilters, setExpandedFilters] = useState({
-    politician: false,
-    party: false,
-    position: false,
-    security: false,
-    transactionType: false,
-    stateDistrict: false,
-    formType: false,
-    owner: false,
-  });
+  const [expandedFilters, setExpandedFilters] = useState<ExpandedFiltersState>(
+    savedState?.expandedFilters || {
+      politician: false,
+      party: false,
+      position: false,
+      security: false,
+      transactionType: false,
+      stateDistrict: false,
+      amountRange: false,
+    }
+  );
   
   const [selectedFilters, setSelectedFilters] = useState<{
     politicians: string[];
@@ -141,20 +202,99 @@ const PoliticianTradesSearchPage: React.FC = () => {
     securities: string[];
     transactionTypes: string[];
     stateDistricts: string[];
-    formTypes: string[];
-    owners: string[];
+    amountRanges: string[];
   }>({
-    politicians: [],
-    parties: [],
-    positions: [],
-    securities: [],
-    transactionTypes: [],
-    stateDistricts: [],
-    formTypes: [],
-    owners: [],
+    politicians: savedState?.selectedFilters?.politicians || [],
+    parties: savedState?.selectedFilters?.parties || [],
+    positions: savedState?.selectedFilters?.positions || [],
+    securities: savedState?.selectedFilters?.securities || [],
+    transactionTypes: savedState?.selectedFilters?.transactionTypes || [],
+    stateDistricts: savedState?.selectedFilters?.stateDistricts || [],
+    amountRanges: savedState?.selectedFilters?.amountRanges || [],
   });
   
-  const [isFiltered, setIsFiltered] = useState<boolean>(false);
+  const [isFiltered, setIsFiltered] = useState<boolean>(savedState?.isFiltered || false);
+  
+  // Log state restoration
+  useEffect(() => {
+    if (savedState) {
+      console.log('🔄 Restored politician trades search page state from sessionStorage:', {
+        hasSearchParams: !!savedState.searchParams,
+        allResultsCount: savedState.allSearchResults?.length || 0,
+        totalFound: savedState.totalFound || 0,
+        currentPage: savedState.currentPage || 1,
+        hasFilters: !!savedState.selectedFilters,
+      });
+    } else {
+      console.log('🆕 Starting fresh politician trades search page session');
+    }
+  }, []); // Only log once on mount
+
+  // Load politician data on component mount
+  useEffect(() => {
+    const loadPoliticianData = async () => {
+      try {
+        console.log('🏛️ Loading politician suggestions data...');
+        await politicianSuggestionsService.loadPoliticians();
+        setIsPoliticianDataLoaded(true);
+        console.log('✅ Politician suggestions data loaded successfully');
+      } catch (error) {
+        console.error('❌ Failed to load politician suggestions:', error);
+      }
+    };
+
+    loadPoliticianData();
+  }, []);
+
+  // Load security data on component mount
+  useEffect(() => {
+    const loadSecurityData = async () => {
+      try {
+        console.log('🏦 Loading security suggestions data...');
+        await securitySuggestionsService.loadSecurities();
+        setIsSecurityDataLoaded(true);
+        const counts = securitySuggestionsService.getCountByCategory();
+        console.log('✅ Security suggestions data loaded successfully:', counts);
+      } catch (error) {
+        console.error('❌ Failed to load security suggestions:', error);
+      }
+    };
+
+    loadSecurityData();
+  }, []);
+
+  // Save state to sessionStorage whenever relevant state changes
+  useEffect(() => {
+    try {
+      const stateToSave = {
+        searchParams,
+        allSearchResults,
+        totalFound,
+        currentPage,
+        pageSize,
+        isSearching,
+        selectedFilters,
+        availableFilters,
+        expandedFilters,
+        isFiltered,
+      };
+      
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
+    } catch (error) {
+      console.error('❌ Error saving politician trades search page state:', error);
+    }
+  }, [
+    searchParams,
+    allSearchResults,
+    totalFound,
+    currentPage,
+    pageSize,
+    isSearching,
+    selectedFilters,
+    availableFilters,
+    expandedFilters,
+    isFiltered,
+  ]);
   
   // Compute filters from search results
   const computeFiltersFromResults = (results: PoliticianTrade[]) => {
@@ -164,8 +304,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
     const securityMap = new Map<string, number>();
     const transactionTypeMap = new Map<string, number>();
     const stateDistrictMap = new Map<string, number>();
-    const formTypeMap = new Map<string, number>();
-    const ownerMap = new Map<string, number>();
+    const amountRangeMap = new Map<string, number>();
     
     results.forEach(trade => {
       if (trade.politicianName) {
@@ -177,8 +316,10 @@ const PoliticianTradesSearchPage: React.FC = () => {
       if (trade.position) {
         positionMap.set(trade.position, (positionMap.get(trade.position) || 0) + 1);
       }
-      if (trade.securitySymbol) {
-        securityMap.set(trade.securitySymbol, (securityMap.get(trade.securitySymbol) || 0) + 1);
+      // For security filters, prioritize symbol over name for cleaner filters
+      const securityValue = trade.securitySymbol || trade.securityName;
+      if (securityValue) {
+        securityMap.set(securityValue, (securityMap.get(securityValue) || 0) + 1);
       }
       if (trade.transactionType) {
         transactionTypeMap.set(trade.transactionType, (transactionTypeMap.get(trade.transactionType) || 0) + 1);
@@ -186,12 +327,10 @@ const PoliticianTradesSearchPage: React.FC = () => {
       if (trade.stateDistrict) {
         stateDistrictMap.set(trade.stateDistrict, (stateDistrictMap.get(trade.stateDistrict) || 0) + 1);
       }
-      if (trade.formType) {
-        formTypeMap.set(trade.formType, (formTypeMap.get(trade.formType) || 0) + 1);
-      }
-      if (trade.owner) {
-        ownerMap.set(trade.owner, (ownerMap.get(trade.owner) || 0) + 1);
-      }
+      
+      // Categorize by amount range
+      const amountCategory = getAmountRangeCategory(trade);
+      amountRangeMap.set(amountCategory, (amountRangeMap.get(amountCategory) || 0) + 1);
     });
     
     return {
@@ -213,11 +352,8 @@ const PoliticianTradesSearchPage: React.FC = () => {
       state_district_filters: Array.from(stateDistrictMap.entries())
         .map(([stateDistrict, count]) => ({ stateDistrict, count }))
         .sort((a, b) => b.count - a.count),
-      form_type_filters: Array.from(formTypeMap.entries())
-        .map(([formType, count]) => ({ formType, count }))
-        .sort((a, b) => b.count - a.count),
-      owner_filters: Array.from(ownerMap.entries())
-        .map(([owner, count]) => ({ owner, count }))
+      amount_range_filters: Array.from(amountRangeMap.entries())
+        .map(([amount_range, count]) => ({ amount_range, count }))
         .sort((a, b) => b.count - a.count),
     };
   };
@@ -370,61 +506,218 @@ const PoliticianTradesSearchPage: React.FC = () => {
     setSelectedTrades(new Set());
   };
   
-  // Handle add to context
-  const handleAddToContext = (target: 'current' | 'new') => {
+  // Handle context menu close
+  const handleContextMenuClose = () => {
+    setContextMenuAnchor(null);
+  };
+
+  // Handle add to context - mirroring SEC page approach
+  const handleAddToContext = (target: 'new' | 'sidebar') => {
     if (selectedTrades.size === 0) return;
     
-    const selectedTradeData = currentResults.filter(trade => selectedTrades.has(trade.tradeId));
+    // Get the selected trade objects from currentResults
+    const selectedTradeObjects = currentResults.filter(trade => selectedTrades.has(trade.tradeId));
     
-    if (target === 'new') {
-      // Create new context session
-      const contextItems = selectedTradeData.map(trade => ({
-        id: `politician_trade_${trade.tradeId}_${Date.now()}`,
-        type: 'politician_trade' as const,
-        title: `${trade.politicianName || 'Unknown'} - ${trade.securitySymbol || 'N/A'}`,
-        subtitle: `${trade.transactionType || 'N/A'} on ${trade.transactionDate ? new Date(trade.transactionDate * 1000).toLocaleDateString() : 'N/A'}`,
-        timestamp: Date.now(),
-        data: trade,
-      }));
+    console.log(`🏛️ Adding ${selectedTradeObjects.length} politician trade(s) to context (target: ${target})`);
+    
+    // Comprehensive logging of politician trade data structures
+    selectedTradeObjects.forEach((trade, idx) => {
+      console.group(`📊 Politician Trade ${idx + 1} - Complete Data Structure`);
       
-      // Dispatch event to create new context session
-      const event = new CustomEvent('create-context-session', {
-        detail: {
-          contextItems,
-          userMessage: `I want to analyze these ${contextItems.length} politician trade(s).`,
-        }
+      // Core trade identifiers
+      console.log('🔍 Core Identifiers:', {
+        tradeId: trade.tradeId,
+        politicianName: trade.politicianName,
+        securitySymbol: trade.securitySymbol,
       });
-      window.dispatchEvent(event);
-    } else {
-      // Add to current session
-      selectedTradeData.forEach(trade => {
-        const contextItem = {
-          id: `politician_trade_${trade.tradeId}_${Date.now()}`,
-          type: 'politician_trade' as const,
-          title: `${trade.politicianName || 'Unknown'} - ${trade.securitySymbol || 'N/A'}`,
-          subtitle: `${trade.transactionType || 'N/A'} on ${formatTransactionDate(trade.transactionDate)}`,
-          timestamp: Date.now(),
-          data: trade,
-        };
-        
-        if (activeSessionId) {
-          const event = new CustomEvent('add-to-sidebar-context', { detail: contextItem });
-          window.dispatchEvent(event);
-        } else {
-          // Open sidebar and add
-          setSidebarVisible(true);
-          setTimeout(() => {
-            const event = new CustomEvent('add-to-sidebar-context', { detail: contextItem });
-            window.dispatchEvent(event);
-          }, 100);
-        }
+      
+      // Transaction details
+      console.log('💰 Transaction Details:', {
+        transactionType: trade.transactionType,
+        transactionDate: trade.transactionDate,
+        transactionDateFormatted: trade.transactionDate ? new Date(trade.transactionDate * 1000).toLocaleDateString() : 'N/A',
+        amountRange: trade.amountRange,
+        amountMin: trade.amountMin,
+        amountMax: trade.amountMax,
       });
+      
+      // Politician information
+      console.log('👤 Politician Information:', {
+        politicianName: trade.politicianName,
+        party: trade.party,
+        position: trade.position,
+        stateDistrict: trade.stateDistrict,
+      });
+      
+      // Security information
+      console.log('📈 Security Information:', {
+        securitySymbol: trade.securitySymbol,
+        securityName: trade.securityName,
+        assetType: trade.assetType,
+      });
+      
+      // Filing information
+      console.log('📋 Filing Information:', {
+        filingDate: trade.filingDate,
+        formType: trade.formType,
+        owner: trade.owner,
+        formS3Key: trade.formS3Key,
+      });
+      
+      // Complete raw trade object
+      console.log('📋 Complete Trade Object:', trade);
+      
+      // Data structure analysis
+      const tradeKeys = Object.keys(trade);
+      console.log(`🔢 Total Properties: ${tradeKeys.length}`);
+      console.log('🗂️ All Property Keys:', tradeKeys);
+      
+      // Trade analysis
+      const hasDocumentAccess = !!trade.formS3Key;
+      const hasFinancialData = !!(trade.amountRange || trade.amountMin || trade.amountMax);
+      const hasCompleteInfo = !!(trade.politicianName && trade.securitySymbol && trade.transactionDate);
+      
+      console.log('📊 Trade Analysis:', {
+        hasDocumentAccess,
+        hasFinancialData,
+        hasCompleteTransactionInfo: hasCompleteInfo,
+        tradeValue: trade.amountRange || `${trade.amountMin || 'Unknown'} - ${trade.amountMax || 'Unknown'}`,
+        hasAmountData: hasFinancialData,
+      });
+      
+      // Context integration metadata
+      const contextMetadata = {
+        contextId: `politician_trade_${trade.tradeId}_${Date.now()}`,
+        contextType: 'custom',
+        contextTitle: `${trade.politicianName || 'Unknown'} - ${trade.securitySymbol || 'Unknown Security'}`,
+        contextSubtitle: `${trade.transactionType || 'Trade'} on ${trade.transactionDate ? new Date(trade.transactionDate * 1000).toLocaleDateString() : 'N/A'}`,
+        dataIntegrityCheck: {
+          hasRequiredFields: !!(trade.politicianName && trade.securitySymbol && trade.transactionDate),
+          hasPoliticianInfo: !!(trade.politicianName && trade.party && trade.position),
+          hasFinancialData: hasFinancialData,
+          hasDocumentAccess: hasDocumentAccess,
+        }
+      };
+      
+      console.log('🔗 Context Integration Metadata:', contextMetadata);
+      
+      console.groupEnd();
+    });
+    
+    // Summary logging for multiple trades
+    if (selectedTradeObjects.length > 1) {
+      console.group(`📊 Batch Context Addition Summary`);
+      
+      const summaryStats = {
+        totalTrades: selectedTradeObjects.length,
+        uniquePoliticians: [...new Set(selectedTradeObjects.map(t => t.politicianName))],
+        uniqueSecurities: [...new Set(selectedTradeObjects.map(t => t.securitySymbol))],
+        transactionTypes: [...new Set(selectedTradeObjects.map(t => t.transactionType))],
+        dateRange: {
+          earliest: Math.min(...selectedTradeObjects.map(t => t.transactionDate || 0)),
+          latest: Math.max(...selectedTradeObjects.map(t => t.transactionDate || 0)),
+        },
+        tradesWithDocuments: selectedTradeObjects.filter(t => t.formS3Key).length,
+      };
+      
+      console.log('📈 Batch Statistics:', summaryStats);
+      console.log('📋 Date Range:', {
+        earliest: summaryStats.dateRange.earliest ? new Date(summaryStats.dateRange.earliest * 1000).toLocaleDateString() : 'N/A',
+        latest: summaryStats.dateRange.latest ? new Date(summaryStats.dateRange.latest * 1000).toLocaleDateString() : 'N/A',
+      });
+      
+      console.groupEnd();
     }
     
-    setContextMenuAnchor(null);
+    // Add to context using the context manager functions
+    if (selectedTradeObjects.length > 1) {
+      console.log(`🚀 Politician Trades Search: Initiating batch context addition for ${selectedTradeObjects.length} trades (target: ${target})`);
+      addMultipleTradesToContext(selectedTradeObjects, target);
+      console.log(`✅ Added ${selectedTradeObjects.length} trades to context in batch (target: ${target})`);
+    } else if (selectedTradeObjects.length === 1) {
+      console.log(`🚀 Politician Trades Search: Initiating single trade context addition (target: ${target})`);
+      addTradeToContext(selectedTradeObjects[0], target);
+      console.log(`✅ Added trade to context: ${selectedTradeObjects[0].politicianName || 'Unknown'} - ${selectedTradeObjects[0].securitySymbol || 'Unknown'} (target: ${target})`);
+    }
+    
+    // Add user feedback for context operations
+    if (target === 'sidebar') {
+      // Listen for sidebar success/error events for user feedback
+      const handleSidebarSuccess = () => {
+        console.log('🎉 Politician Trades Search: Sidebar context addition successful');
+        window.removeEventListener('sidebar-context-success', handleSidebarSuccess);
+      };
+      
+      const handleSidebarError = () => {
+        console.log('⚠️ Politician Trades Search: Sidebar context failed, but fallback to new chat should work');
+        window.removeEventListener('sidebar-context-error', handleSidebarError);
+      };
+      
+      // Temporary listeners for feedback
+      window.addEventListener('sidebar-context-success', handleSidebarSuccess);
+      window.addEventListener('sidebar-context-error', handleSidebarError);
+      
+      // Cleanup listeners after 2 seconds
+      setTimeout(() => {
+        window.removeEventListener('sidebar-context-success', handleSidebarSuccess);
+        window.removeEventListener('sidebar-context-error', handleSidebarError);
+      }, 2000);
+    }
+    
+    // Clear selection and close menu
     setSelectedTrades(new Set());
+    handleContextMenuClose();
   };
   
+  // Determine which standard amount range a trade falls into
+  const getAmountRangeCategory = (trade: PoliticianTrade): string => {
+    const UNPARSED_AMOUNT_VALUE = 999999999999;
+    
+    // Check if this is an unparsed document
+    const isUnparsed = 
+      (trade.amountMin && trade.amountMin >= UNPARSED_AMOUNT_VALUE) ||
+      (trade.amountMax && trade.amountMax >= UNPARSED_AMOUNT_VALUE) ||
+      (Array.isArray(trade.amountRange) && trade.amountRange[0] >= UNPARSED_AMOUNT_VALUE);
+    
+    if (isUnparsed) {
+      return 'See filing document';
+    }
+
+    // Get the minimum amount for categorization
+    let minAmount = 0;
+    
+    if (trade.amountRange && Array.isArray(trade.amountRange) && trade.amountRange.length >= 2) {
+      minAmount = trade.amountRange[0];
+    } else if (trade.amountMin !== undefined) {
+      minAmount = trade.amountMin;
+    } else if (trade.amountMax !== undefined) {
+      // If we only have max, assume it's in the range [0, max]
+      minAmount = 0;
+    }
+
+    // Find the matching standard range
+    for (const range of AMOUNT_RANGES) {
+      const rangeStr = range.value;
+      
+      if (rangeStr === '$50,000,001+') {
+        if (minAmount >= 50000001) return rangeStr;
+      } else {
+        // Parse the range (e.g., "$1,001-$15,000")
+        const match = rangeStr.match(/\$([0-9,]+)-\$([0-9,]+)/);
+        if (match) {
+          const rangeMin = parseInt(match[1].replace(/,/g, ''));
+          const rangeMax = parseInt(match[2].replace(/,/g, ''));
+          if (minAmount >= rangeMin && minAmount <= rangeMax) {
+            return rangeStr;
+          }
+        }
+      }
+    }
+    
+    // Default to first range if no match
+    return AMOUNT_RANGES[0].value;
+  };
+
   // Format amount range
   const formatAmountRange = (trade: PoliticianTrade): string => {
     const UNPARSED_AMOUNT_VALUE = 999999999999; // High value indicating unparsed/unreadable document
@@ -499,8 +792,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
          selectedFilters.securities.length === 0 &&
          selectedFilters.transactionTypes.length === 0 &&
          selectedFilters.stateDistricts.length === 0 &&
-         selectedFilters.formTypes.length === 0 &&
-         selectedFilters.owners.length === 0)) {
+         selectedFilters.amountRanges.length === 0)) {
       return allSearchResults;
     }
     
@@ -517,9 +809,12 @@ const PoliticianTradesSearchPage: React.FC = () => {
           !selectedFilters.positions.includes(trade.position || '')) {
         return false;
       }
-      if (selectedFilters.securities.length > 0 && 
-          !selectedFilters.securities.includes(trade.securitySymbol || '')) {
-        return false;
+      // For security filtering, check both symbol and name
+      if (selectedFilters.securities.length > 0) {
+        const securityValue = trade.securitySymbol || trade.securityName;
+        if (!securityValue || !selectedFilters.securities.includes(securityValue)) {
+          return false;
+        }
       }
       if (selectedFilters.transactionTypes.length > 0 && 
           !selectedFilters.transactionTypes.includes(trade.transactionType || '')) {
@@ -529,13 +824,11 @@ const PoliticianTradesSearchPage: React.FC = () => {
           !selectedFilters.stateDistricts.includes(trade.stateDistrict || '')) {
         return false;
       }
-      if (selectedFilters.formTypes.length > 0 && 
-          !selectedFilters.formTypes.includes(trade.formType || '')) {
-        return false;
-      }
-      if (selectedFilters.owners.length > 0 && 
-          !selectedFilters.owners.includes(trade.owner || '')) {
-        return false;
+      if (selectedFilters.amountRanges.length > 0) {
+        const tradeAmountRange = getAmountRangeCategory(trade);
+        if (!selectedFilters.amountRanges.includes(tradeAmountRange)) {
+          return false;
+        }
       }
       return true;
     });
@@ -558,8 +851,6 @@ const PoliticianTradesSearchPage: React.FC = () => {
       setTotalFound(0);
     }
   }, [filteredResults, currentPage, pageSize, allSearchResults]);
-  
-  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
@@ -598,20 +889,136 @@ const PoliticianTradesSearchPage: React.FC = () => {
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 3 }}>
             {/* Row 1: Politician Name, Position, Party */}
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
-              {/* Politician Name */}
-              <TextField
-                label="Politician Name"
+              {/* Politician Name with Autocomplete */}
+              <Autocomplete
+                options={politicianSuggestions}
+                getOptionLabel={(option) => typeof option === 'string' ? option : option.fullName}
+                filterOptions={(options, { inputValue }) => {
+                  if (!inputValue || inputValue.length < 2) return [];
+                  return politicianSuggestionsService.getSuggestions(inputValue, 10);
+                }}
+                freeSolo
                 value={searchParams.politicianName || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, politicianName: e.target.value || undefined }))}
-                variant="outlined"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                onInputChange={(_, newValue) => {
+                  setSearchParams(prev => ({ ...prev, politicianName: newValue || undefined }));
+                }}
+                onChange={(_, newValue) => {
+                  const selectedName = typeof newValue === 'string' ? newValue : newValue?.fullName || '';
+                  setSearchParams(prev => ({ ...prev, politicianName: selectedName || undefined }));
+                }}
+                onFocus={() => {
+                  // Update suggestions when focused
+                  if (isPoliticianDataLoaded && searchParams.politicianName) {
+                    const suggestions = politicianSuggestionsService.getSuggestions(searchParams.politicianName, 10);
+                    setPoliticianSuggestions(suggestions);
+                  }
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Politician Name"
+                    variant="outlined"
+                    placeholder={isPoliticianDataLoaded ? "e.g., Nancy Pelosi, Ted Cruz..." : "Loading politicians..."}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        '& fieldset': { borderColor: '#374151' },
+                        '&:hover fieldset': { borderColor: '#3b82f6' },
+                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                      },
+                      '& .MuiInputLabel-root': { color: '#9ca3af' },
+                      '& .MuiInputBase-input': { color: '#ffffff' },
+                      '& .MuiAutocomplete-input': { color: '#ffffff !important' },
+                    }}
+                  />
+                )}
+                renderOption={(props, option) => {
+                  const { key, ...otherProps } = props;
+                  return (
+                    <Box 
+                      component="li" 
+                      key={key}
+                      {...otherProps} 
+                      sx={{ 
+                        color: '#ffffff',
+                        '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' }
+                      }}
+                    >
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {option.fullName}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                          {option.party} • {option.state} • {option.type === 'sen' ? 'Senator' : 'Representative'}
+                          {option.district && ` (District ${option.district})`}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  );
+                }}
+                componentsProps={{
+                  paper: {
+                    sx: {
+                      backgroundColor: '#1e293b',
+                      border: '1px solid #374151',
+                      '& .MuiAutocomplete-listbox': {
+                        backgroundColor: '#1e293b',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                        },
+                      },
+                    },
                   },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
+                  popper: {
+                    sx: {
+                      '& .MuiAutocomplete-listbox': {
+                        backgroundColor: '#1e293b',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                        },
+                      },
+                    },
+                  },
+                }}
+                sx={{
+                  // Global styles that should be applied to the dropdown
+                  '& .MuiAutocomplete-popper': {
+                    '& .MuiAutocomplete-listbox': {
+                      backgroundColor: '#1e293b !important',
+                      '&::-webkit-scrollbar': {
+                        width: '6px !important',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3) !important',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5) !important',
+                        borderRadius: '3px !important',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7) !important',
+                      },
+                    },
+                  },
                 }}
               />
 
@@ -660,39 +1067,150 @@ const PoliticianTradesSearchPage: React.FC = () => {
               </FormControl>
             </Box>
 
-            {/* Row 2: Security Symbol, Security Name, Transaction Type */}
+            {/* Row 2: Security (Symbol/Name), Transaction Type, Amount Range */}
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
-              {/* Security Symbol */}
-              <TextField
-                label="Security Symbol"
-                value={searchParams.securitySymbol || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, securitySymbol: e.target.value.toUpperCase() || undefined }))}
-                variant="outlined"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
+              {/* Security Search with Autocomplete */}
+              <Autocomplete
+                options={securitySuggestions}
+                getOptionLabel={(option) => typeof option === 'string' ? option : `${option.symbol} - ${option.name}`}
+                getOptionKey={(option) => typeof option === 'string' ? option : `${option.symbol}-${option.name}-${option.category}`}
+                filterOptions={(_, { inputValue }) => {
+                  if (!inputValue || inputValue.length < 2) return [];
+                  return securitySuggestionsService.getSuggestions(inputValue, 10);
                 }}
-              />
-
-              {/* Security Name */}
-              <TextField
-                label="Security Name"
-                value={searchParams.securityName || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, securityName: e.target.value || undefined }))}
-                variant="outlined"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                freeSolo
+                value={searchParams.security || ''}
+                onInputChange={(_, newValue) => {
+                  setSearchParams(prev => ({ ...prev, security: newValue || undefined }));
+                }}
+                onChange={(_, newValue) => {
+                  if (typeof newValue === 'string') {
+                    setSearchParams(prev => ({ ...prev, security: newValue || undefined }));
+                  } else if (newValue) {
+                    // User selected from suggestions - format for lambda search
+                    const formatted = securitySuggestionsService.formatForSearch(newValue);
+                    setSearchParams(prev => ({ 
+                      ...prev, 
+                      security: formatted.securitySymbol || formatted.securityName || undefined
+                    }));
+                  } else {
+                    setSearchParams(prev => ({ ...prev, security: undefined }));
+                  }
+                }}
+                onFocus={() => {
+                  // Update suggestions when focused
+                  if (isSecurityDataLoaded && searchParams.security) {
+                    const suggestions = securitySuggestionsService.getSuggestions(searchParams.security, 10);
+                    setSecuritySuggestions(suggestions);
+                  }
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Security (Symbol or Name)"
+                    variant="outlined"
+                    placeholder={isSecurityDataLoaded ? "e.g., AAPL, Apple Inc, Tesla..." : "Loading securities..."}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        '& fieldset': { borderColor: '#374151' },
+                        '&:hover fieldset': { borderColor: '#3b82f6' },
+                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                      },
+                      '& .MuiInputLabel-root': { color: '#9ca3af' },
+                      '& .MuiInputBase-input': { color: '#ffffff' },
+                      '& .MuiAutocomplete-input': { color: '#ffffff !important' },
+                    }}
+                  />
+                )}
+                renderOption={(props, option) => {
+                  const { key, ...otherProps } = props;
+                  // Create a unique key to avoid duplicate key warnings
+                  const uniqueKey = `${option.symbol}-${option.name}-${option.category}`;
+                  return (
+                    <Box 
+                      component="li" 
+                      key={uniqueKey}
+                      {...otherProps} 
+                      sx={{ 
+                        color: '#ffffff',
+                        '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' }
+                      }}
+                    >
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {option.symbol}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                          {option.name} • {option.category === 'other' ? 'Other Securities' : option.category.replace('-', ' ').toUpperCase()}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  );
+                }}
+                componentsProps={{
+                  paper: {
+                    sx: {
+                      backgroundColor: '#1e293b',
+                      border: '1px solid #374151',
+                      '& .MuiAutocomplete-listbox': {
+                        backgroundColor: '#1e293b',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                        },
+                      },
+                    },
                   },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
+                  popper: {
+                    sx: {
+                      '& .MuiAutocomplete-listbox': {
+                        backgroundColor: '#1e293b',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                        },
+                      },
+                    },
+                  },
+                }}
+                sx={{
+                  // Global styles that should be applied to the dropdown
+                  '& .MuiAutocomplete-popper': {
+                    '& .MuiAutocomplete-listbox': {
+                      backgroundColor: '#1e293b !important',
+                      '&::-webkit-scrollbar': {
+                        width: '6px !important',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3) !important',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5) !important',
+                        borderRadius: '3px !important',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7) !important',
+                      },
+                    },
+                  },
                 }}
               />
 
@@ -717,9 +1235,52 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   ))}
                 </Select>
               </FormControl>
+
+              {/* Amount Range */}
+              <FormControl variant="outlined">
+                <InputLabel id="amount-range-label" sx={{ color: '#9ca3af' }}>Amount Range</InputLabel>
+                <Select
+                  labelId="amount-range-label"
+                  value={searchParams.amountRange || ''}
+                  onChange={(e) => setSearchParams(prev => ({ ...prev, amountRange: e.target.value || undefined }))}
+                  label="Amount Range"
+                  sx={{
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                    '& .MuiSelect-select': { color: '#ffffff' },
+                  }}
+                >
+                  <MenuItem value="">All Ranges</MenuItem>
+                  {AMOUNT_RANGES.map(range => (
+                    <MenuItem key={range.value} value={range.value}>{range.label}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Box>
 
-            {/* Row 3: Date Range */}
+            {/* Row 3: State/District */}
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 2fr' }, gap: 2 }}>
+              <TextField
+                label="State/District"
+                value={searchParams.stateDistrict || ''}
+                onChange={(e) => setSearchParams(prev => ({ ...prev, stateDistrict: e.target.value || undefined }))}
+                placeholder="e.g., CA, TX31, IL"
+                variant="outlined"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: '#374151' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
+                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                  },
+                  '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
+                }}
+              />
+              <Box /> {/* Empty box to maintain grid layout */}
+            </Box>
+
+            {/* Row 4: Transaction Date Range */}
             <Box sx={{ display: 'flex', gap: 2 }}>
               <TextField
                 label="Transaction Date From"
@@ -766,36 +1327,22 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 }}
               />
             </Box>
-          </Box>
 
-          {/* Advanced Filters Toggle */}
-          <Button
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            startIcon={showAdvanced ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            sx={{
-              color: '#9ca3af',
-              textTransform: 'none',
-              mb: showAdvanced ? 2 : 0,
-              '&:hover': { 
-                color: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-              },
-            }}
-          >
-            {showAdvanced ? 'Hide' : 'Show'} Advanced Filters
-          </Button>
-
-          {/* Advanced Filters */}
-          <Collapse in={showAdvanced}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px', mt: 2 }}>
+            {/* Row 5: Filing Date Range */}
+            <Box sx={{ display: 'flex', gap: 2 }}>
               <TextField
-                label="State/District"
-                value={searchParams.stateDistrict || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, stateDistrict: e.target.value || undefined }))}
-                placeholder="e.g., CA, TX31, IL"
+                label="Filing Date From"
+                type="date"
+                value={searchParams.filingDateFrom || ''}
+                onChange={(e) => setSearchParams(prev => ({ ...prev, filingDateFrom: e.target.value || undefined }))}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{
+                  min: '2001-01-01',
+                  max: new Date().toISOString().split('T')[0],
+                }}
                 variant="outlined"
-                size="small"
                 sx={{
+                  flex: 1,
                   '& .MuiOutlinedInput-root': {
                     '& fieldset': { borderColor: '#374151' },
                     '&:hover fieldset': { borderColor: '#3b82f6' },
@@ -806,13 +1353,18 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 }}
               />
               <TextField
-                label="Form Type"
-                value={searchParams.formType || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, formType: e.target.value || undefined }))}
-                placeholder="e.g., PTR"
+                label="Filing Date To"
+                type="date"
+                value={searchParams.filingDateTo || ''}
+                onChange={(e) => setSearchParams(prev => ({ ...prev, filingDateTo: e.target.value || undefined }))}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{
+                  min: '2001-01-01',
+                  max: new Date().toISOString().split('T')[0],
+                }}
                 variant="outlined"
-                size="small"
                 sx={{
+                  flex: 1,
                   '& .MuiOutlinedInput-root': {
                     '& fieldset': { borderColor: '#374151' },
                     '&:hover fieldset': { borderColor: '#3b82f6' },
@@ -823,7 +1375,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 }}
               />
             </Box>
-          </Collapse>
+          </Box>
 
           {/* Search Button */}
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
@@ -924,8 +1476,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 selectedFilters.securities.length > 0 ||
                 selectedFilters.transactionTypes.length > 0 ||
                 selectedFilters.stateDistricts.length > 0 ||
-                selectedFilters.formTypes.length > 0 ||
-                selectedFilters.owners.length > 0) && (
+                selectedFilters.amountRanges.length > 0) && (
                 <Box sx={{ 
                   mb: 2, 
                   p: 2, 
@@ -1075,37 +1626,15 @@ const PoliticianTradesSearchPage: React.FC = () => {
                         }}
                       />
                     ))}
-                    {selectedFilters.formTypes.map((formType, idx) => (
+
+                    {selectedFilters.amountRanges.map((range, idx) => (
                       <Chip
-                        key={`form-${idx}`}
-                        label={formType}
+                        key={`amount-${idx}`}
+                        label={range}
                         onDelete={() => {
                           setSelectedFilters(prev => ({
                             ...prev,
-                            formTypes: prev.formTypes.filter((_, i) => i !== idx),
-                          }));
-                          setIsFiltered(true);
-                        }}
-                        size="small"
-                        sx={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#93c5fd',
-                          border: '1px solid #3b82f6',
-                          '& .MuiChip-deleteIcon': {
-                            color: '#93c5fd',
-                            '&:hover': { color: '#ffffff' },
-                          },
-                        }}
-                      />
-                    ))}
-                    {selectedFilters.owners.map((owner, idx) => (
-                      <Chip
-                        key={`owner-${idx}`}
-                        label={owner}
-                        onDelete={() => {
-                          setSelectedFilters(prev => ({
-                            ...prev,
-                            owners: prev.owners.filter((_, i) => i !== idx),
+                            amountRanges: prev.amountRanges.filter((_, i) => i !== idx),
                           }));
                           setIsFiltered(true);
                         }}
@@ -1132,8 +1661,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                         securities: [],
                         transactionTypes: [],
                         stateDistricts: [],
-                        formTypes: [],
-                        owners: [],
+                        amountRanges: [],
                       });
                       setIsFiltered(false);
                     }}
@@ -1817,122 +2345,14 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 </Box>
               )}
 
-              {/* Form Type Filter */}
-              {availableFilters.form_type_filters && availableFilters.form_type_filters.length > 0 && (
-                <Box sx={{ mb: 2 }}>
-                  <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, formType: !prev.formType }))}
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer',
-                      p: 1.5,
-                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      borderRadius: '4px',
-                      '&:hover': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
-                      },
-                    }}
-                  >
-                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                      Form Type
-                    </Typography>
-                    {expandedFilters.formType ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
-                  </Box>
-                  <Collapse in={expandedFilters.formType}>
-                    <Box sx={{ 
-                      mt: 1, 
-                      maxHeight: 300, 
-                      overflowY: 'auto',
-                      '&::-webkit-scrollbar': {
-                        width: '6px',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                        borderRadius: '3px',
-                      },
-                      '&::-webkit-scrollbar-thumb:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                      },
-                    }}>
-                      {availableFilters.form_type_filters.map((filter, idx) => {
-                        const isSelected = selectedFilters.formTypes.includes(filter.formType);
-                        return (
-                          <Box
-                            key={idx}
-                            onClick={() => {
-                              setSelectedFilters(prev => {
-                                const exists = prev.formTypes.includes(filter.formType);
-                                if (exists) {
-                                  return {
-                                    ...prev,
-                                    formTypes: prev.formTypes.filter(f => f !== filter.formType),
-                                  };
-                                } else {
-                                  return {
-                                    ...prev,
-                                    formTypes: [...prev.formTypes, filter.formType],
-                                  };
-                                }
-                              });
-                              setIsFiltered(true);
-                            }}
-                            sx={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              p: 1,
-                              cursor: 'pointer',
-                              borderRadius: '4px',
-                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
-                              '&:hover': {
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(59, 130, 246, 0.1)',
-                              },
-                            }}
-                          >
-                            <Typography variant="body2" sx={{ 
-                              color: isSelected ? '#93c5fd' : '#ffffff', 
-                              fontSize: '0.875rem', 
-                              flex: 1,
-                              fontWeight: isSelected ? 600 : 400,
-                            }}>
-                              {filter.formType}
-                            </Typography>
-                            <Chip
-                              label={filter.count}
-                              size="small"
-                              sx={{
-                                height: 20,
-                                fontSize: '0.7rem',
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(107, 114, 128, 0.3)',
-                                color: isSelected ? '#93c5fd' : '#9ca3af',
-                                border: isSelected 
-                                  ? '1px solid #3b82f6' 
-                                  : '1px solid #6b7280',
-                              }}
-                            />
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  </Collapse>
-                </Box>
-              )}
 
-              {/* Owner Filter */}
-              {availableFilters.owner_filters && availableFilters.owner_filters.length > 0 && (
+
+
+              {/* Amount Range Filter */}
+              {availableFilters.amount_range_filters && availableFilters.amount_range_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
-                    onClick={() => setExpandedFilters(prev => ({ ...prev, owner: !prev.owner }))}
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, amountRange: !prev.amountRange }))}
                     sx={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -1947,11 +2367,11 @@ const PoliticianTradesSearchPage: React.FC = () => {
                     }}
                   >
                     <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                      Owner
+                      Amount Range
                     </Typography>
-                    {expandedFilters.owner ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                    {expandedFilters.amountRange ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
                   </Box>
-                  <Collapse in={expandedFilters.owner}>
+                  <Collapse in={expandedFilters.amountRange}>
                     <Box sx={{ 
                       mt: 1, 
                       maxHeight: 300, 
@@ -1970,23 +2390,23 @@ const PoliticianTradesSearchPage: React.FC = () => {
                         backgroundColor: 'rgba(59, 130, 246, 0.7)',
                       },
                     }}>
-                      {availableFilters.owner_filters.map((filter, idx) => {
-                        const isSelected = selectedFilters.owners.includes(filter.owner);
+                      {availableFilters.amount_range_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.amountRanges.includes(filter.amount_range);
                         return (
                           <Box
                             key={idx}
                             onClick={() => {
                               setSelectedFilters(prev => {
-                                const exists = prev.owners.includes(filter.owner);
+                                const exists = prev.amountRanges.includes(filter.amount_range);
                                 if (exists) {
                                   return {
                                     ...prev,
-                                    owners: prev.owners.filter(o => o !== filter.owner),
+                                    amountRanges: prev.amountRanges.filter(a => a !== filter.amount_range),
                                   };
                                 } else {
                                   return {
                                     ...prev,
-                                    owners: [...prev.owners, filter.owner],
+                                    amountRanges: [...prev.amountRanges, filter.amount_range],
                                   };
                                 }
                               });
@@ -2000,23 +2420,23 @@ const PoliticianTradesSearchPage: React.FC = () => {
                               cursor: 'pointer',
                               borderRadius: '4px',
                               backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
                               '&:hover': {
                                 backgroundColor: isSelected 
                                   ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(59, 130, 246, 0.1)',
+                                  : 'rgba(55, 65, 81, 0.2)',
                               },
                             }}
                           >
-                            <Typography variant="body2" sx={{ 
-                              color: isSelected ? '#93c5fd' : '#ffffff', 
-                              fontSize: '0.875rem', 
-                              flex: 1,
-                              fontWeight: isSelected ? 600 : 400,
-                            }}>
-                              {filter.owner}
+                            <Typography 
+                              variant="body2" 
+                              sx={{ 
+                                color: isSelected ? '#93c5fd' : '#e5e7eb',
+                                fontWeight: isSelected ? 600 : 400,
+                              }}
+                            >
+                              {filter.amount_range}
                             </Typography>
-                            <Chip
+                            <Chip 
                               label={filter.count}
                               size="small"
                               sx={{
@@ -2159,18 +2579,18 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 }}
               >
                 <MenuItem
-                  onClick={() => handleAddToContext('current')}
-                  sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-                >
-                  <SidebarChatIcon sx={{ mr: 1, fontSize: '1rem' }} />
-                  Add to Current Chat
-                </MenuItem>
-                <MenuItem
                   onClick={() => handleAddToContext('new')}
                   sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
                 >
-                  <NewChatIcon sx={{ mr: 1, fontSize: '1rem' }} />
-                  New Chat Session
+                  <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
+                  Add to New Chat
+                </MenuItem>
+                <MenuItem
+                  onClick={() => handleAddToContext('sidebar')}
+                  sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+                >
+                  <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+                  Add to Current Sidebar Chat
                 </MenuItem>
               </Menu>
           
@@ -2241,7 +2661,38 @@ const PoliticianTradesSearchPage: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {trade.politicianName || 'N/A'}
+                      {trade.websiteUrl ? (
+                        <Tooltip title="Click to visit politician's website" arrow>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Link
+                              href={trade.websiteUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              sx={{
+                                color: '#3b82f6',
+                                textDecoration: 'none',
+                                fontWeight: 500,
+                                fontSize: '0.875rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 0.5,
+                                '&:hover': {
+                                  color: '#60a5fa',
+                                  textDecoration: 'underline',
+                                },
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {trade.politicianName || 'N/A'}
+                              <LaunchIcon sx={{ fontSize: '0.75rem' }} />
+                            </Link>
+                          </Box>
+                        </Tooltip>
+                      ) : (
+                        <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                          {trade.politicianName || 'N/A'}
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {trade.position || 'N/A'}

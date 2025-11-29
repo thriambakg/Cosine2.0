@@ -1609,18 +1609,146 @@ const SECSearchPage: React.FC = () => {
     
     console.log(`📦 Adding ${selectedFilingObjects.length} filing(s) to context (target: ${target})`);
     
-    // Log all filing data for debugging
+    // Comprehensive logging of SEC filing data structures
     selectedFilingObjects.forEach((filing, idx) => {
-      console.log(`📄 Filing ${idx + 1}:`, filing);
+      console.group(`📄 SEC Filing ${idx + 1} - Complete Data Structure`);
+      
+      // Core filing identifiers
+      console.log('🔍 Core Identifiers:', {
+        accession: filing.accession,
+        adsh: filing.adsh,
+        cik: filing.cik,
+        form: filing.form,
+      });
+      
+      // Filing metadata
+      console.log('📅 Filing Metadata:', {
+        filingDate: filing.filingDate,
+        fileNumber: filing.fileNumber,
+        filmNumber: filing.filmNumber,
+      });
+      
+      // Entity information
+      console.log('🏢 Entity Information:', {
+        reportingFor: filing.reportingFor,
+        filingEntity: filing.filingEntity,
+        located: filing.located,
+        incorporated: filing.incorporated,
+      });
+      
+      // Document access URLs
+      console.log('🌐 Document URLs:', {
+        filingPageUrl: filing.filingPageUrl,
+        documentUrls: filing.documentUrls,
+        dataFileUrls: filing.dataFileUrls,
+      });
+      
+      // S3 storage keys for authenticated access
+      console.log('☁️ S3 Storage Keys:', {
+        filingPageS3Key: filing.filingPageS3Key,
+        documentS3Keys: filing.documentS3Keys,
+        dataFileS3Keys: filing.dataFileS3Keys,
+      });
+      
+      // Complete raw filing object
+      console.log('📋 Complete Filing Object:', filing);
+      
+      // Data structure analysis
+      const filingKeys = Object.keys(filing);
+      console.log(`🔢 Total Properties: ${filingKeys.length}`);
+      console.log('🗂️ All Property Keys:', filingKeys);
+      
+      // Document availability analysis
+      const hasDocuments = filing.documentUrls && filing.documentUrls.length > 0;
+      const hasDataFiles = filing.dataFileUrls && filing.dataFileUrls.length > 0;
+      const hasS3Access = filing.filingPageS3Key || (filing.documentS3Keys && Object.keys(filing.documentS3Keys).length > 0);
+      
+      console.log('📊 Document Availability:', {
+        hasPublicDocuments: hasDocuments,
+        publicDocumentCount: hasDocuments ? filing.documentUrls.length : 0,
+        hasDataFiles: hasDataFiles,
+        dataFileCount: hasDataFiles ? filing.dataFileUrls.length : 0,
+        hasAuthenticatedS3Access: hasS3Access,
+        s3DocumentCount: filing.documentS3Keys ? Object.keys(filing.documentS3Keys).length : 0,
+      });
+      
+      // Context integration metadata
+      const contextMetadata = {
+        contextId: `sec_filing_${filing.accession || filing.adsh}_${Date.now()}`,
+        contextType: 'sec_filing',
+        contextTitle: `${filing.form} - ${filing.filingEntity || filing.reportingFor}`,
+        contextSubtitle: `Filed: ${filing.filingDate} • CIK: ${filing.cik}`,
+        dataIntegrityCheck: {
+          hasRequiredFields: !!(filing.form && filing.filingDate && filing.cik),
+          hasEntityInfo: !!(filing.reportingFor || filing.filingEntity),
+          hasDocumentAccess: hasDocuments || hasS3Access,
+        }
+      };
+      
+      console.log('🔗 Context Integration Metadata:', contextMetadata);
+      
+      console.groupEnd();
     });
+    
+    // Summary logging for multiple filings
+    if (selectedFilingObjects.length > 1) {
+      console.group(`📊 Batch Context Addition Summary`);
+      
+      const summaryStats = {
+        totalFilings: selectedFilingObjects.length,
+        formTypes: [...new Set(selectedFilingObjects.map(f => f.form))],
+        uniqueEntities: [...new Set(selectedFilingObjects.map(f => f.reportingFor || f.filingEntity))],
+        dateRange: {
+          earliest: Math.min(...selectedFilingObjects.map(f => new Date(f.filingDate).getTime())),
+          latest: Math.max(...selectedFilingObjects.map(f => new Date(f.filingDate).getTime())),
+        },
+        documentsAvailable: selectedFilingObjects.filter(f => 
+          (f.documentUrls && f.documentUrls.length > 0) || f.filingPageS3Key
+        ).length,
+      };
+      
+      console.log('📈 Batch Statistics:', summaryStats);
+      console.log('📋 Date Range:', {
+        earliest: new Date(summaryStats.dateRange.earliest).toISOString().split('T')[0],
+        latest: new Date(summaryStats.dateRange.latest).toISOString().split('T')[0],
+      });
+      
+      console.groupEnd();
+    }
     
     // Add to context using the context manager functions
     if (selectedFilingObjects.length > 1) {
+      console.log(`🚀 SEC Search: Initiating batch context addition for ${selectedFilingObjects.length} filings (target: ${target})`);
       addMultipleFilingsToContext(selectedFilingObjects, target);
-      console.log(`✅ Added ${selectedFilingObjects.length} filings to context in batch`);
+      console.log(`✅ Added ${selectedFilingObjects.length} filings to context in batch (target: ${target})`);
     } else if (selectedFilingObjects.length === 1) {
+      console.log(`🚀 SEC Search: Initiating single filing context addition (target: ${target})`);
       addFilingToContext(selectedFilingObjects[0], target);
-      console.log(`✅ Added filing to context: ${selectedFilingObjects[0].form || 'SEC Filing'}`);
+      console.log(`✅ Added filing to context: ${selectedFilingObjects[0].form || 'SEC Filing'} (target: ${target})`);
+    }
+    
+    // Add user feedback for context operations
+    if (target === 'sidebar') {
+      // Listen for sidebar success/error events for user feedback
+      const handleSidebarSuccess = () => {
+        console.log('🎉 SEC Search: Sidebar context addition successful');
+        window.removeEventListener('sidebar-context-success', handleSidebarSuccess);
+      };
+      
+      const handleSidebarError = () => {
+        console.log('⚠️ SEC Search: Sidebar context failed, but fallback to new chat should work');
+        window.removeEventListener('sidebar-context-error', handleSidebarError);
+      };
+      
+      // Temporary listeners for feedback
+      window.addEventListener('sidebar-context-success', handleSidebarSuccess);
+      window.addEventListener('sidebar-context-error', handleSidebarError);
+      
+      // Cleanup listeners after 2 seconds
+      setTimeout(() => {
+        window.removeEventListener('sidebar-context-success', handleSidebarSuccess);
+        window.removeEventListener('sidebar-context-error', handleSidebarError);
+      }, 2000);
     }
     
     // Clear selection and close menu

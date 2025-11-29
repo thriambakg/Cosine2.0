@@ -453,14 +453,44 @@ export const addFilingToContext = (
     timestamp: Date.now(),
   };
   
+  console.log('📄 Context Manager: Adding SEC filing to context', {
+    target,
+    filingId,
+    title,
+    subtitle,
+    contextItemId: contextItem.id
+  });
+  
   if (target === 'sidebar') {
+    // Check if we have access to user and session state for better error handling
+    console.log('📌 Context Manager: Attempting to add to sidebar context...');
+    
     // Add to current sidebar session's context
     const event = new CustomEvent('add-to-sidebar-context', {
       detail: contextItem
     });
     window.dispatchEvent(event);
+    
+    // Listen for potential error response (if sidebar can't handle it)
+    const handleSidebarError = () => {
+      console.log('⚠️ Context Manager: Sidebar context failed, falling back to new chat');
+      // Fallback to new chat if sidebar fails
+      addToContext(contextItem);
+      // Remove the listener after use
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    // Set up temporary listener for error fallback
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    
+    // Remove the listener after 1 second if no error occurs
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+    
   } else {
     // Add to new chat (existing behavior)
+    console.log('🆕 Context Manager: Adding to new chat context');
     addToContext(contextItem);
   }
 };
@@ -492,14 +522,174 @@ export const addMultipleFilingsToContext = (
     };
   });
   
+  console.log('📄 Context Manager: Adding multiple SEC filings to context', {
+    target,
+    count: filings.length,
+    contextItemIds: contextItems.map(item => item.id)
+  });
+  
   if (target === 'sidebar') {
+    // Check if we have access to user and session state for better error handling
+    console.log('📌 Context Manager: Attempting to add multiple filings to sidebar context...');
+    
     // Add multiple items to current sidebar session's context
     const event = new CustomEvent('add-multiple-to-sidebar-context', {
       detail: contextItems
     });
     window.dispatchEvent(event);
+    
+    // Listen for potential error response (if sidebar can't handle it)
+    const handleSidebarError = () => {
+      console.log('⚠️ Context Manager: Sidebar context failed, falling back to new chat for all filings');
+      // Fallback to new chat if sidebar fails - dispatch each item separately
+      contextItems.forEach(item => addToContext(item));
+      // Remove the listener after use
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    // Set up temporary listener for error fallback
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    
+    // Remove the listener after 1 second if no error occurs
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+    
   } else {
     // Add to new chat (existing behavior) - dispatch each item separately
+    console.log('🆕 Context Manager: Adding multiple filings to new chat context');
+    contextItems.forEach(item => addToContext(item));
+  }
+};
+
+/**
+ * Add a politician trade to the context window
+ * Used for adding individual trades from the politician trades search page
+ */
+export const addTradeToContext = (
+  trade: any,
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  // Use tradeId as the primary unique identifier, fallback to other fields
+  const tradeId = trade.tradeId || trade.id || 
+                  `${trade.politicianName || 'unknown'}_${trade.securitySymbol || 'trade'}_${trade.transactionDate || Date.now()}`;
+  const title = `${trade.politicianName || 'Unknown Politician'} - ${trade.securitySymbol || 'Unknown Security'}`;
+  const subtitle = trade.transactionDate 
+    ? `${trade.transactionType || 'Trade'} on ${new Date(trade.transactionDate * 1000).toLocaleDateString()}${trade.amountRange ? ` • ${trade.amountRange}` : ''}`
+    : trade.transactionType ? `${trade.transactionType}` : 'Politician Trade';
+  
+  const contextItem: ContextItem = {
+    id: `politician_trade_${tradeId}_${Date.now()}`,
+    type: 'custom', // Using custom type for politician trades
+    title,
+    subtitle,
+    data: trade, // Include all trade data
+    timestamp: Date.now(),
+  };
+  
+  console.log('🏛️ Context Manager: Adding politician trade to context', {
+    target,
+    tradeId,
+    title,
+    subtitle,
+    contextItemId: contextItem.id
+  });
+  
+  if (target === 'sidebar') {
+    console.log('📌 Context Manager: Attempting to add to sidebar context...');
+    
+    // Add to current sidebar session's context
+    const event = new CustomEvent('add-to-sidebar-context', {
+      detail: contextItem
+    });
+    window.dispatchEvent(event);
+    
+    // Listen for potential error response (if sidebar can't handle it)
+    const handleSidebarError = () => {
+      console.log('⚠️ Context Manager: Sidebar context failed, falling back to new chat');
+      // Fallback to new chat if sidebar fails
+      addToContext(contextItem);
+      // Remove the listener after use
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    // Set up temporary listener for error fallback
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    
+    // Remove the listener after 1 second if no error occurs
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+    
+  } else {
+    // Add to new chat (existing behavior)
+    console.log('🆕 Context Manager: Adding to new chat context');
+    addToContext(contextItem);
+  }
+};
+
+/**
+ * Add multiple politician trades to the context window
+ * Used for adding multiple selected trades from the politician trades search page
+ */
+export const addMultipleTradesToContext = (
+  trades: any[],
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  const contextItems: ContextItem[] = trades.map(trade => {
+    // Use tradeId as the primary unique identifier, fallback to other fields
+    const tradeId = trade.tradeId || trade.id || 
+                    `${trade.politicianName || 'unknown'}_${trade.securitySymbol || 'trade'}_${trade.transactionDate || Date.now()}`;
+    const title = `${trade.politicianName || 'Unknown Politician'} - ${trade.securitySymbol || 'Unknown Security'}`;
+    const subtitle = trade.transactionDate 
+      ? `${trade.transactionType || 'Trade'} on ${new Date(trade.transactionDate * 1000).toLocaleDateString()}${trade.amountRange ? ` • ${trade.amountRange}` : ''}`
+      : trade.transactionType ? `${trade.transactionType}` : 'Politician Trade';
+    
+    return {
+      id: `politician_trade_${tradeId}_${Date.now()}-batch-${Math.random()}`,
+      type: 'custom' as const, // Using custom type for politician trades
+      title,
+      subtitle,
+      data: trade, // Include all trade data
+      timestamp: Date.now(),
+    };
+  });
+  
+  console.log('🏛️ Context Manager: Adding multiple politician trades to context', {
+    target,
+    count: trades.length,
+    contextItemIds: contextItems.map(item => item.id)
+  });
+  
+  if (target === 'sidebar') {
+    console.log('📌 Context Manager: Attempting to add multiple trades to sidebar context...');
+    
+    // Add multiple items to current sidebar session's context
+    const event = new CustomEvent('add-multiple-to-sidebar-context', {
+      detail: contextItems
+    });
+    window.dispatchEvent(event);
+    
+    // Listen for potential error response (if sidebar can't handle it)
+    const handleSidebarError = () => {
+      console.log('⚠️ Context Manager: Sidebar context failed, falling back to new chat for all trades');
+      // Fallback to new chat if sidebar fails - dispatch each item separately
+      contextItems.forEach(item => addToContext(item));
+      // Remove the listener after use
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    // Set up temporary listener for error fallback
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    
+    // Remove the listener after 1 second if no error occurs
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+    
+  } else {
+    // Add to new chat (existing behavior) - dispatch each item separately
+    console.log('🆕 Context Manager: Adding multiple trades to new chat context');
     contextItems.forEach(item => addToContext(item));
   }
 };

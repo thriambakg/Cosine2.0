@@ -901,16 +901,14 @@ export interface PoliticianTradesSearchParams {
   politicianName?: string;
   position?: string;
   party?: string;
-  securitySymbol?: string;
-  securityName?: string;
-  formType?: string;
+  security?: string; // Combined security symbol and name search
   transactionType?: string;
-  owner?: string;
   stateDistrict?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  amountMin?: number;
-  amountMax?: number;
+  dateFrom?: string; // Transaction date from
+  dateTo?: string; // Transaction date to
+  filingDateFrom?: string; // Filing date from
+  filingDateTo?: string; // Filing date to
+  amountRange?: string; // Standard amount range selection (e.g., "$1,001-$15,000")
   requiresManualReview?: boolean;
   isUnparsed?: boolean;
   matchConfidence?: number;

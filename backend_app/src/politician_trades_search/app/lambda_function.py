@@ -8,6 +8,7 @@ import json
 import os
 import logging
 import boto3
+import re
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from decimal import Decimal
@@ -30,11 +31,67 @@ GSI_NAMES = {
     'position': 'PositionTradeDateIndex',
     'party': 'PartyTradeDateIndex',
     'securitySymbol': 'SecurityTradeDateIndex',
-    'formType': 'FormTypeTradeDateIndex',
     'transactionType': 'TransactionTypeTradeDateIndex',
     'amountMin': 'AmountRangeTradeDateIndex',
     'stateDistrict': 'StateDistrictTradeDateIndex',
 }
+
+# Standard Senate PTR ranges (as tuples of (min, max)) - matches Senate lambda
+STANDARD_PTR_RANGES = [
+    (0, 1000),        # $0 - $1,000
+    (1001, 15000),    # $1,001 - $15,000
+    (15001, 50000),   # $15,001 - $50,000
+    (50001, 100000),  # $50,001 - $100,000
+    (100001, 250000), # $100,001 - $250,000
+    (250001, 500000), # $250,001 - $500,000
+    (500001, 1000000), # $500,001 - $1,000,000
+    (1000001, 5000000), # $1,000,001 - $5,000,000
+    (5000001, 25000000), # $5,000,001 - $25,000,000
+    (25000001, 50000000), # $25,000,001 - $50,000,000
+    (50000001, None)  # Over $50,000,000
+]
+
+def parse_amount_range_filter(amount_range: str) -> tuple:
+    """
+    Parse amount range string like "$1,001-$15,000" into (min, max) tuple
+    
+    Args:
+        amount_range: Amount range string (e.g., "$1,001-$15,000", "$50,000,001+")
+        
+    Returns:
+        (min, max) tuple or None if parsing fails
+    """
+    if not amount_range:
+        return None
+    
+    try:
+        # Remove currency symbols and whitespace
+        range_str = re.sub(r'[\$,\s]', '', amount_range)
+        
+        # Handle "Over $50,000,000" case (no upper bound)
+        if '+' in range_str or 'over' in amount_range.lower():
+            # Extract the minimum value
+            min_match = re.search(r'(\d+)', range_str)
+            if min_match:
+                return (int(min_match.group(1)), None)
+        
+        # Handle range format: "1001-15000"
+        range_match = re.search(r'(\d+)\s*[-–—]\s*(\d+)', range_str)
+        if range_match:
+            min_val = int(range_match.group(1))
+            max_val = int(range_match.group(2))
+            return (min_val, max_val)
+        
+        # Handle single number (use as exact match)
+        single_match = re.search(r'^(\d+)$', range_str)
+        if single_match:
+            val = int(single_match.group(1))
+            return (val, val)
+        
+        return None
+    except (ValueError, AttributeError) as e:
+        logger.warning(f"⚠️ Error parsing amount range '{amount_range}': {e}")
+        return None
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -98,6 +155,9 @@ def build_query_params(
     filter_conditions = []
     
     # Check for GSI hash key filters
+    # Priority order: politicianName > position > party > transactionType > amountMin > stateDistrict
+    # Note: Security search is handled as a filter condition since it searches multiple fields
+    
     if filters.get('politicianName'):
         index_name = GSI_NAMES['politicianName']
         politician_name_value = filters['politicianName']
@@ -115,29 +175,43 @@ def build_query_params(
         key_condition = Key('party').eq(party_value)
         logger.info(f"✅ Selected GSI: {index_name} for party: '{party_value}'")
         logger.info(f"🔍 Party value type: {type(party_value)}, value: {repr(party_value)}")
-    elif filters.get('securitySymbol'):
-        index_name = GSI_NAMES['securitySymbol']
-        key_condition = Key('securitySymbol').eq(filters['securitySymbol'])
-    elif filters.get('formType'):
-        index_name = GSI_NAMES['formType']
-        key_condition = Key('formType').eq(filters['formType'])
     elif filters.get('transactionType'):
         index_name = GSI_NAMES['transactionType']
         key_condition = Key('transactionType').eq(filters['transactionType'])
-    elif filters.get('amountMin'):
-        # For amount range, we need to handle range queries
-        index_name = GSI_NAMES['amountMin']
-        amount_min = filters.get('amountMin')
-        amount_max = filters.get('amountMax')
-        if amount_min is not None and amount_max is not None:
-            key_condition = Key('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
-        elif amount_min is not None:
-            key_condition = Key('amountMin').gte(Decimal(str(amount_min)))
-        else:
-            key_condition = Key('amountMin').lte(Decimal(str(amount_max)))
+        logger.info(f"✅ Selected GSI: {index_name} for transactionType: '{filters['transactionType']}'")
+    elif filters.get('amountRange'):
+        # Parse the amount range filter (e.g., "$1,001-$15,000")
+        amount_range_tuple = parse_amount_range_filter(filters['amountRange'])
+        if amount_range_tuple:
+            index_name = GSI_NAMES['amountMin']
+            amount_min, amount_max = amount_range_tuple
+            
+            if amount_max is None:
+                # "Over X" case - no upper bound
+                key_condition = Key('amountMin').gte(Decimal(str(amount_min)))
+            else:
+                # Standard range
+                key_condition = Key('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
+            
+            logger.info(f"✅ Selected GSI: {index_name} for amount range: {filters['amountRange']} -> ({amount_min}, {amount_max})")
     elif filters.get('stateDistrict'):
         index_name = GSI_NAMES['stateDistrict']
         key_condition = Key('stateDistrict').eq(filters['stateDistrict'])
+        logger.info(f"✅ Selected GSI: {index_name} for stateDistrict: '{filters['stateDistrict']}'")
+    
+    # If we have a security search but no other GSI key, try to use SecuritySymbol GSI for better performance
+    elif filters.get('security'):
+        security_value = filters['security'].strip()
+        # Use GSI if it looks like an exact stock symbol match
+        # Criteria: short (2-6 chars), mostly uppercase, and alphanumeric
+        if (2 <= len(security_value) <= 6 and 
+            security_value.replace('.', '').replace('-', '').isalnum() and
+            security_value.isupper()):
+            index_name = GSI_NAMES['securitySymbol']
+            key_condition = Key('securitySymbol').eq(security_value.upper())
+            logger.info(f"✅ Selected GSI: {index_name} for exact security symbol: '{security_value}'")
+        else:
+            logger.info(f"🔍 Security search '{security_value}' will use scan with filter (likely company name or partial match)")
     
     # Add transactionDate range filter if using a GSI (all GSIs have transactionDate as range key)
     # IMPORTANT: transactionDate is stored as YYYYMMDD integer (e.g., 20251021), NOT Unix timestamp
@@ -176,11 +250,48 @@ def build_query_params(
                 logger.warning(f"⚠️ Invalid date format: {date_to}, error: {e}")
     
     # Build filter expression for non-key attributes
-    if filters.get('owner'):
-        filter_conditions.append(Attr('owner').contains(filters['owner']))
     
-    if filters.get('securityName'):
-        filter_conditions.append(Attr('securityName').contains(filters['securityName']))
+    # Enhanced security search - searches both securitySymbol and securityName with improved logic
+    if filters.get('security'):
+        security_value = filters['security'].strip()
+        # If we're not already using SecurityTradeDateIndex, add as filter condition
+        if index_name != GSI_NAMES.get('securitySymbol'):
+            # Create comprehensive security filter that searches:
+            # 1. Exact symbol match (case-insensitive)
+            # 2. Symbol contains search (for partial symbols)
+            # 3. Security name contains search (case-insensitive)
+            # 4. Security name begins_with search (for better matching)
+            security_upper = security_value.upper()
+            security_lower = security_value.lower()
+            
+            security_filter = (
+                Attr('securitySymbol').eq(security_upper) |                    # Exact symbol match
+                Attr('securitySymbol').contains(security_upper) |             # Partial symbol match
+                Attr('securityName').contains(security_value) |               # Name contains (original case)
+                Attr('securityName').contains(security_lower) |               # Name contains (lowercase)
+                Attr('securityName').contains(security_upper) |               # Name contains (uppercase)
+                Attr('securityName').begins_with(security_value) |            # Name begins with (original case)
+                Attr('securityName').begins_with(security_value.title())      # Name begins with (title case)
+            )
+            filter_conditions.append(security_filter)
+            logger.info(f"🔍 Added enhanced security filter for: '{security_value}' (symbol/name search)")
+    
+    # Filing date range filter (filingDate is stored as YYYY-MM-DD string)
+    if filters.get('filingDateFrom') or filters.get('filingDateTo'):
+        filing_date_from = filters.get('filingDateFrom')
+        filing_date_to = filters.get('filingDateTo')
+        
+        logger.info(f"📅 Processing filing date range - from: {filing_date_from}, to: {filing_date_to}")
+        
+        if filing_date_from and filing_date_to:
+            filter_conditions.append(Attr('filingDate').between(filing_date_from, filing_date_to))
+            logger.info(f"📅 Added filing date range filter: {filing_date_from} to {filing_date_to}")
+        elif filing_date_from:
+            filter_conditions.append(Attr('filingDate').gte(filing_date_from))
+            logger.info(f"📅 Added filing date from filter: >= {filing_date_from}")
+        elif filing_date_to:
+            filter_conditions.append(Attr('filingDate').lte(filing_date_to))
+            logger.info(f"📅 Added filing date to filter: <= {filing_date_to}")
     
     if filters.get('requiresManualReview') is not None:
         filter_conditions.append(Attr('requiresManualReview').eq(filters['requiresManualReview']))
@@ -238,10 +349,17 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -
                 scan_kwargs['FilterExpression'] = (scan_kwargs.get('FilterExpression', Attr('tradeId').exists()) & 
                                                    Attr('politicianName').contains(filters['politicianName']))
             
-            if filters.get('securitySymbol'):
+            # Combined security search
+            if filters.get('security'):
+                security_value = filters['security'].strip()
                 existing_filter = scan_kwargs.get('FilterExpression', Attr('tradeId').exists())
-                scan_kwargs['FilterExpression'] = existing_filter & Attr('securitySymbol').eq(filters['securitySymbol'])
+                security_filter = (
+                    Attr('securitySymbol').eq(security_value.upper()) | 
+                    Attr('securityName').contains(security_value)
+                )
+                scan_kwargs['FilterExpression'] = existing_filter & security_filter
             
+            # Transaction date range filter
             if filters.get('dateFrom') or filters.get('dateTo'):
                 date_from = filters.get('dateFrom')
                 date_to = filters.get('dateTo')
@@ -271,6 +389,20 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -
                         scan_kwargs['FilterExpression'] = existing_filter & Attr('transactionDate').lte(date_to_num)
                     except ValueError as e:
                         logger.warning(f"⚠️ Invalid date format in scan: {e}")
+            
+            # Filing date range filter  
+            if filters.get('filingDateFrom') or filters.get('filingDateTo'):
+                filing_date_from = filters.get('filingDateFrom')
+                filing_date_to = filters.get('filingDateTo')
+                existing_filter = scan_kwargs.get('FilterExpression', Attr('tradeId').exists())
+                
+                # filingDate is stored as YYYY-MM-DD string
+                if filing_date_from and filing_date_to:
+                    scan_kwargs['FilterExpression'] = existing_filter & Attr('filingDate').between(filing_date_from, filing_date_to)
+                elif filing_date_from:
+                    scan_kwargs['FilterExpression'] = existing_filter & Attr('filingDate').gte(filing_date_from)
+                elif filing_date_to:
+                    scan_kwargs['FilterExpression'] = existing_filter & Attr('filingDate').lte(filing_date_to)
             
             # Execute scan
             logger.info(f"🔍 Executing scan with kwargs: {json.dumps({k: str(v) for k, v in scan_kwargs.items() if k != 'FilterExpression'}, default=str)}")
@@ -463,16 +595,14 @@ def lambda_handler(event, context):
             'politicianName': body.get('politicianName'),
             'position': body.get('position'),
             'party': body.get('party'),
-            'securitySymbol': body.get('securitySymbol'),
-            'securityName': body.get('securityName'),
-            'formType': body.get('formType'),
+            'security': body.get('security'),  # Combined security symbol and name search
             'transactionType': body.get('transactionType'),
-            'owner': body.get('owner'),
             'stateDistrict': body.get('stateDistrict'),
-            'dateFrom': body.get('dateFrom'),
+            'dateFrom': body.get('dateFrom'),  # Transaction date range
             'dateTo': body.get('dateTo'),
-            'amountMin': body.get('amountMin'),
-            'amountMax': body.get('amountMax'),
+            'filingDateFrom': body.get('filingDateFrom'),  # Filing date range
+            'filingDateTo': body.get('filingDateTo'),
+            'amountRange': body.get('amountRange'),  # Standard amount range selection
             'requiresManualReview': body.get('requiresManualReview'),
             'isUnparsed': body.get('isUnparsed'),
             'matchConfidence': body.get('matchConfidence'),

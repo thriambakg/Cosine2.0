@@ -1012,6 +1012,11 @@ const GlobalChatSidebar: React.FC = () => {
       
       if (!activeSessionId) {
         console.warn('⚠️ No active sidebar session, cannot add context');
+        // Dispatch error event for fallback handling
+        const errorEvent = new CustomEvent('sidebar-context-error', {
+          detail: { reason: 'no-active-session', contextItem }
+        });
+        window.dispatchEvent(errorEvent);
         return;
       }
       
@@ -1033,6 +1038,12 @@ const GlobalChatSidebar: React.FC = () => {
       
       console.log('✅ Added to sidebar context');
       console.log('📌 Context item data:', JSON.stringify(contextItem, null, 2));
+      
+      // Dispatch success event for feedback
+      const successEvent = new CustomEvent('sidebar-context-success', {
+        detail: { contextItem }
+      });
+      window.dispatchEvent(successEvent);
       
       // Notify ChatPage of context change AFTER change detection is set up
       const syncEvent = new CustomEvent('session-context-updated', {
@@ -1062,6 +1073,11 @@ const GlobalChatSidebar: React.FC = () => {
       
       if (!activeSessionId) {
         console.warn('⚠️ No active sidebar session, cannot add context');
+        // Dispatch error event for fallback handling
+        const errorEvent = new CustomEvent('sidebar-context-error', {
+          detail: { reason: 'no-active-session', contextItems }
+        });
+        window.dispatchEvent(errorEvent);
         return;
       }
       
@@ -1069,6 +1085,12 @@ const GlobalChatSidebar: React.FC = () => {
       const newContext = [...sessionContext, ...contextItems];
       setSessionContext(newContext);
       console.log(`✅ Added ${contextItems.length} items to sidebar context`);
+      
+      // Dispatch success event for feedback
+      const successEvent = new CustomEvent('sidebar-context-success', {
+        detail: { contextItems }
+      });
+      window.dispatchEvent(successEvent);
       
       // Notify ChatPage of context change
       const syncEvent = new CustomEvent('session-context-updated', {
