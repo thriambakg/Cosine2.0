@@ -170,10 +170,9 @@ def build_query_params(
                 key_condition = Key('politicianName').eq(politician_name_value)
                 logger.info(f"✅ Selected GSI: {index_name} for single politicianName: '{politician_name_value}'")
             else:
-                # Multiple politicians - cannot use GSI efficiently, fall back to scan
-                logger.info(f"⚠️ Multiple politicians provided {politician_name_value}, falling back to scan")
-                index_name = None
-                key_condition = None
+                # Multiple politicians - return None to indicate special handling needed
+                logger.info(f"✅ Multiple politicians provided {politician_name_value}, will use multiple GSI queries")
+                return None, None, None  # Signal that multi-politician search is needed
         else:
             # Single string value
             key_condition = Key('politicianName').eq(politician_name_value)
@@ -181,9 +180,24 @@ def build_query_params(
     elif filters.get('position'):
         index_name = GSI_NAMES['position']
         position_value = filters['position']
-        key_condition = Key('position').eq(position_value)
-        logger.info(f"✅ Selected GSI: {index_name} for position: '{position_value}'")
         logger.info(f"🔍 Position value type: {type(position_value)}, value: {repr(position_value)}")
+        
+        # Handle both single string and array formats
+        if isinstance(position_value, list):
+            if len(position_value) == 1:
+                # Single position in array - use GSI
+                position_value = position_value[0]
+                key_condition = Key('position').eq(position_value)
+                logger.info(f"✅ Selected GSI: {index_name} for single position: '{position_value}'")
+            else:
+                # Multiple positions - cannot use GSI efficiently, fall back to scan
+                logger.info(f"⚠️ Multiple positions provided {position_value}, falling back to scan")
+                index_name = None
+                key_condition = None
+        else:
+            # Single string value
+            key_condition = Key('position').eq(position_value)
+            logger.info(f"✅ Selected GSI: {index_name} for position: '{position_value}'")
     elif filters.get('party'):
         index_name = GSI_NAMES['party']
         party_value = filters['party']
@@ -227,6 +241,8 @@ def build_query_params(
     elif filters.get('amountRange'):
         # Handle amount range filter(s)
         amount_ranges = filters['amountRange']
+        logger.info(f"🔍 Processing amountRange: {amount_ranges}, type: {type(amount_ranges)}")
+        
         if isinstance(amount_ranges, list):
             if len(amount_ranges) == 1:
                 # Single amount range - can use GSI
@@ -243,11 +259,14 @@ def build_query_params(
                         key_condition = Key('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
                     
                     logger.info(f"✅ Selected GSI: {index_name} for single amount range: {amount_ranges[0]} -> ({amount_min}, {amount_max})")
+                else:
+                    logger.warning(f"⚠️ Failed to parse amount range: {amount_ranges[0]}")
             else:
                 # Multiple amount ranges - use scan with filter
                 logger.info(f"🔍 Multiple amount ranges ({len(amount_ranges)} items) will use scan with filter")
         else:
             # Single string - parse the amount range filter (e.g., "$1,001-$15,000")
+            logger.info(f"🔍 Processing single amount range string: '{amount_ranges}'")
             amount_range_tuple = parse_amount_range_filter(amount_ranges)
             if amount_range_tuple:
                 index_name = GSI_NAMES['amountMin']
@@ -256,11 +275,13 @@ def build_query_params(
                 if amount_max is None:
                     # "Over X" case - no upper bound
                     key_condition = Key('amountMin').gte(Decimal(str(amount_min)))
+                    logger.info(f"✅ Selected GSI: {index_name} for amount range >= {amount_min}")
                 else:
                     # Standard range
                     key_condition = Key('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
-                
-                logger.info(f"✅ Selected GSI: {index_name} for amount range: {amount_ranges} -> ({amount_min}, {amount_max})")
+                    logger.info(f"✅ Selected GSI: {index_name} for amount range: {amount_min} - {amount_max}")
+            else:
+                logger.warning(f"⚠️ Failed to parse amount range: '{amount_ranges}'")
     elif filters.get('stateDistrict'):
         index_name = GSI_NAMES['stateDistrict']
         state_district_value = filters['stateDistrict']
@@ -574,12 +595,117 @@ def build_query_params(
     if filters.get('matchConfidence'):
         filter_conditions.append(Attr('matchConfidence').gte(Decimal(str(filters['matchConfidence']))))
     
+    # Add transactionDate range filter when not using GSI (for scan operations)
+    # IMPORTANT: transactionDate is stored as YYYYMMDD integer (e.g., 20251021), NOT Unix timestamp
+    if not index_name and (filters.get('dateFrom') or filters.get('dateTo')):
+        date_from = filters.get('dateFrom')
+        date_to = filters.get('dateTo')
+        
+        logger.info(f"📅 Processing transaction date range for scan - dateFrom: {date_from}, dateTo: {date_to}")
+        
+        if date_from and date_to:
+            # Convert date strings to YYYYMMDD integer format
+            try:
+                date_from_obj = datetime.strptime(date_from, '%Y-%m-%d').date()
+                date_to_obj = datetime.strptime(date_to, '%Y-%m-%d').date()
+                date_from_num = int(date_from_obj.strftime('%Y%m%d'))
+                date_to_num = int(date_to_obj.strftime('%Y%m%d'))
+                logger.info(f"📅 Transaction date range numeric for scan - from: {date_from_num} ({date_from}), to: {date_to_num} ({date_to})")
+                filter_conditions.append(Attr('transactionDate').between(date_from_num, date_to_num))
+            except ValueError as e:
+                logger.warning(f"⚠️ Invalid date format for scan: {date_from} or {date_to}, error: {e}")
+        elif date_from:
+            try:
+                date_from_obj = datetime.strptime(date_from, '%Y-%m-%d').date()
+                date_from_num = int(date_from_obj.strftime('%Y%m%d'))
+                logger.info(f"📅 Transaction date from numeric for scan: {date_from_num} ({date_from})")
+                filter_conditions.append(Attr('transactionDate').gte(date_from_num))
+            except ValueError as e:
+                logger.warning(f"⚠️ Invalid date format for scan: {date_from}, error: {e}")
+        elif date_to:
+            try:
+                date_to_obj = datetime.strptime(date_to, '%Y-%m-%d').date()
+                date_to_num = int(date_to_obj.strftime('%Y%m%d'))
+                logger.info(f"📅 Transaction date to numeric for scan: {date_to_num} ({date_to})")
+                filter_conditions.append(Attr('transactionDate').lte(date_to_num))
+            except ValueError as e:
+                logger.warning(f"⚠️ Invalid date format for scan: {date_to}, error: {e}")
+    
     if filter_conditions:
         filter_expression = filter_conditions[0]
         for condition in filter_conditions[1:]:
             filter_expression = filter_expression & condition
     
     return index_name, key_condition, filter_expression
+
+
+def search_multiple_politicians(table, politician_names: List[str], filters: Dict[str, Any], max_results: int = 1000) -> List[Dict[str, Any]]:
+    """
+    Search for trades across multiple politicians using individual GSI queries and union results
+    
+    Args:
+        table: DynamoDB table resource
+        politician_names: List of politician names to search for
+        filters: Additional filters to apply (dateFrom, dateTo, etc.)
+        max_results: Maximum number of results to return across all politicians
+    
+    Returns:
+        List of deduplicated trade records
+    """
+    all_results = []
+    seen_trade_ids = set()
+    
+    logger.info(f"🔄 Starting multi-politician search for {len(politician_names)} politicians")
+    
+    for politician_name in politician_names:
+        logger.info(f"🔍 Querying GSI for politician: {politician_name}")
+        
+        # Create individual filters for this politician
+        individual_filters = filters.copy()
+        individual_filters['politicianName'] = politician_name
+        
+        # Build query parameters for this individual politician
+        index_name, key_condition, filter_expression = build_query_params(table, individual_filters, 1, max_results)
+        
+        if not index_name or not key_condition:
+            logger.warning(f"⚠️ Could not build query for politician: {politician_name}")
+            continue
+            
+        try:
+            query_kwargs = {
+                'IndexName': index_name,
+                'KeyConditionExpression': key_condition,
+                'Limit': max_results,
+                'ScanIndexForward': False  # Most recent first
+            }
+            
+            if filter_expression:
+                query_kwargs['FilterExpression'] = filter_expression
+            
+            logger.info(f"🚀 Executing GSI query for {politician_name}")
+            response = table.query(**query_kwargs)
+            
+            politician_results = response.get('Items', [])
+            logger.info(f"📊 Found {len(politician_results)} results for {politician_name}")
+            
+            # Deduplicate by tradeId and add to results
+            for item in politician_results:
+                trade_id = item.get('tradeId')
+                if trade_id and trade_id not in seen_trade_ids:
+                    seen_trade_ids.add(trade_id)
+                    all_results.append(item)
+                    
+            # Stop if we've reached the maximum results
+            if len(all_results) >= max_results:
+                logger.info(f"🛑 Reached maximum results limit: {max_results}")
+                break
+                
+        except Exception as e:
+            logger.error(f"❌ Error querying for politician {politician_name}: {str(e)}")
+            continue
+    
+    logger.info(f"✅ Multi-politician search complete: {len(all_results)} total deduplicated results")
+    return all_results
 
 
 def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -> Dict[str, Any]:
@@ -600,7 +726,37 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -
         
         table = dynamodb.Table(DYNAMODB_TABLE_NAME)
         
-        # Build query parameters
+        # Check if we need to handle multiple politicians
+        politician_names = filters.get('politicianName')
+        if isinstance(politician_names, list) and len(politician_names) > 1:
+            logger.info(f"🔄 Detected multiple politicians: {politician_names}")
+            logger.info("✅ Using multiple GSI queries approach instead of scan")
+            
+            # Use the new multi-politician search approach
+            all_items = search_multiple_politicians(table, politician_names, filters, max_results=1000)
+            
+            # Sort by transactionDate descending (most recent first)
+            all_items.sort(key=lambda x: x.get('transactionDate', 0), reverse=True)
+            
+            # Apply pagination
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            paginated_items = all_items[start_idx:end_idx]
+            
+            # Convert from DynamoDB format
+            converted_items = [convert_from_dynamodb_format(item) for item in paginated_items]
+            
+            logger.info(f"✅ Multi-politician search complete - success: True, results_count: {len(converted_items)}, total_found: {len(all_items)}")
+            return {
+                'success': True,
+                'results': converted_items,
+                'total_found': len(all_items),
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (len(all_items) + page_size - 1) // page_size
+            }
+        
+        # Build query parameters for single politician or other GSI filters
         index_name, key_condition, filter_expression = build_query_params(table, filters, page, page_size)
         logger.info(f"🔧 Query params - index_name: {index_name}, has_key_condition: {key_condition is not None}, has_filter_expression: {filter_expression is not None}")
         

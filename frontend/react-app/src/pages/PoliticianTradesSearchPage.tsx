@@ -43,7 +43,7 @@ import {
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
 import { politicianSuggestionsService } from '../services/politicianSuggestions';
-import { securitySuggestionsService } from '../services/securitySuggestions';
+import { securitySuggestionsServiceV2 } from '../services/securitySuggestionsV2';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addTradeToContext, addMultipleTradesToContext } from '../components/tiles/common';
@@ -87,6 +87,11 @@ const PARTIES = [
   'Democratic',
   'Independent',
 ];
+
+
+
+// Position options - Database stores "House" and "Senate" directly
+const POSITION_OPTIONS = ['House', 'Senate'];
 
 // Standard amount ranges (matches Senate PTR ranges)
 const AMOUNT_RANGES = [
@@ -142,6 +147,14 @@ const PoliticianTradesSearchPage: React.FC = () => {
     savedState?.searchParams || {
       dateFrom: '2020-01-01',
       dateTo: new Date().toISOString().split('T')[0],
+      // Initialize all search parameter arrays as empty
+      politicianName: [],
+      party: [],
+      position: [],
+      security: [],
+      transactionType: [],
+      stateDistrict: [],
+      // amountRange is a single string, not array
     }
   );
   
@@ -241,10 +254,10 @@ const PoliticianTradesSearchPage: React.FC = () => {
   useEffect(() => {
     const loadSecurityData = async () => {
       try {
-        console.log('🏦 Loading security suggestions data...');
-        await securitySuggestionsService.loadSecurities();
+        console.log('🏦 Loading security suggestions data from StockList...');
+        await securitySuggestionsServiceV2.loadSecurities();
         setIsSecurityDataLoaded(true);
-        const counts = securitySuggestionsService.getCountByCategory();
+        const counts = securitySuggestionsServiceV2.getCountByMarketCap();
         console.log('✅ Security suggestions data loaded successfully:', counts);
       } catch (error) {
         console.error('❌ Failed to load security suggestions:', error);
@@ -414,19 +427,18 @@ const PoliticianTradesSearchPage: React.FC = () => {
       const fetchPageSize = 100; // Use large page size to minimize API calls
       
       while (hasMore) {
-        // Build search parameters including multi-select filters
+        // Build search parameters using ONLY searchParams (never include filters)
         const searchRequest = {
           ...searchParams,
           page: currentPageNum,
           pageSize: fetchPageSize,
-          // Add multi-select filters (arrays for OR logic)
-          ...(selectedFilters.politicians.length > 0 && { 
-            politicianName: selectedFilters.politicians 
-          }),
-          ...(selectedFilters.securities.length > 0 && { 
-            security: selectedFilters.securities 
-          }),
         };
+        
+        console.log('🔍 Search Request:', {
+          searchParams,
+          note: 'Filters will be applied client-side after receiving results',
+          finalRequest: searchRequest
+        });
         
         const response = await politicianTradesSearchAPI.search(searchRequest);
         
@@ -798,6 +810,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
     }
     
     return allSearchResults.filter(trade => {
+      // Filter by politicians (separate from search parameters)
       if (selectedFilters.politicians.length > 0 && 
           !selectedFilters.politicians.includes(trade.politicianName || '')) {
         return false;
@@ -984,106 +997,239 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 }}
               />
             </Box>
-          </Box>
-
-          {/* Multi-Select Filters Section */}
-          <Box sx={{ mt: 4, mb: 3, borderTop: '1px solid #374151', pt: 3 }}>
-            <Typography variant="h6" sx={{ color: '#ffffff', mb: 2, fontSize: '1.1rem' }}>
-              Advanced Multi-Select Filters (OR Logic)
-            </Typography>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-              {/* Multi-Select Politicians */}
-              {/* Multi-Select Politicians */}
-              <MultiSelectField<string>
-                label="Politicians"
-                selectedItems={selectedFilters.politicians}
-                onItemsChange={(politicians) => 
-                  setSelectedFilters(prev => ({ ...prev, politicians }))
-                }
-                suggestions={isPoliticianDataLoaded ? 
-                  politicianSuggestionsService.getAllPoliticians().map(p => p.fullName) : 
-                  []
-                }
-                onSearch={(query) => {
-                  if (!isPoliticianDataLoaded || !query || query.length < 2) {
-                    return [];
+            
+            {/* Advanced Search Parameters */}
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="h6" sx={{ color: '#ffffff', mb: 2, fontWeight: 'bold' }}>
+                Advanced Search Parameters
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
+                These parameters will be sent to the backend to search for trades. Click "Search" to apply them.
+              </Typography>
+              
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
+                {/* Politicians Search Parameter - Top Priority */}
+                <MultiSelectField<string>
+                  label="Politicians (Search Parameter)"
+                  selectedItems={(() => {
+                    const names = Array.isArray(searchParams.politicianName) ? searchParams.politicianName : (searchParams.politicianName ? [searchParams.politicianName] : []);
+                    if (!isPoliticianDataLoaded) return names;
+                    
+                    // Convert actual names to display format
+                    return names.map(name => {
+                      const politician = politicianSuggestionsService.getAllPoliticians().find(p => p.fullName === name);
+                      return politician ? politician.displayText : name;
+                    });
+                  })()}
+                  onItemsChange={(politicians) => {
+                    // Extract actual names from display text
+                    const actualNames = politicians.map(politicianDisplay => {
+                      const nameMatch = politicianDisplay.match(/^([^(]+)/);
+                      return nameMatch ? nameMatch[1].trim() : politicianDisplay;
+                    });
+                    setSearchParams(prev => ({ ...prev, politicianName: actualNames }));
+                  }}
+                  suggestions={isPoliticianDataLoaded ? 
+                    politicianSuggestionsService.getAllPoliticians().map(p => p.fullName) : 
+                    []
                   }
-                  return politicianSuggestionsService.getSuggestions(query, 20).map(p => p.fullName);
-                }}
-                placeholder="e.g., Nancy Pelosi, Ted Cruz, AOC..."
-                helperText="Select multiple politicians to find trades by any of them"
-                allowCustomInput={true}
-              />
+                  onSearch={(query) => {
+                    if (!isPoliticianDataLoaded) {
+                      return [];
+                    }
+                    // If empty query, return top politicians
+                    if (!query || query.length === 0) {
+                      return politicianSuggestionsService.getAllPoliticians().slice(0, 20).map(p => p.displayText);
+                    }
+                    if (query.length < 2) {
+                      return [];
+                    }
+                    return politicianSuggestionsService.getSuggestions(query, 20).map(p => p.displayText);
+                  }}
+                  renderItem={(politicianDisplay) => politicianDisplay}
+                  renderOptionCustom={(politicianDisplay) => {
+                    // Extract the name part for display while keeping full display text
+                    const nameMatch = politicianDisplay.match(/^([^(]+)/);
+                    const name = nameMatch ? nameMatch[1].trim() : politicianDisplay;
+                    const details = politicianDisplay.replace(name, '').trim();
+                    return (
+                      <Box sx={{ width: '100%' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#ffffff', fontSize: '0.9rem' }}>
+                          {name}
+                        </Typography>
+                        {details && (
+                          <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                            {details}
+                          </Typography>
+                        )}
+                      </Box>
+                    );
+                  }}
+                  getItemKey={(politician) => politician}
+                  placeholder="Search politicians to include in search..."
+                  helperText="Politicians to search for in the backend database (shows party, jurisdiction, position)"
+                  allowCustomInput={false}
+                  isLoading={!isPoliticianDataLoaded}
+                />
 
-              {/* Multi-Select Securities */}
-              <MultiSelectField<string>
-                label="Securities"
-                selectedItems={selectedFilters.securities}
-                onItemsChange={(securities) => 
-                  setSelectedFilters(prev => ({ ...prev, securities }))
-                }
-                suggestions={isSecurityDataLoaded ? 
-                  ['AAPL - Apple Inc', 'TSLA - Tesla Inc', 'MSFT - Microsoft Corp', 'GOOGL - Alphabet Inc', 'AMZN - Amazon.com Inc', 'NVDA - NVIDIA Corp', 'META - Meta Platforms Inc', 'NFLX - Netflix Inc', 'JPM - JPMorgan Chase & Co', 'V - Visa Inc', 'JNJ - Johnson & Johnson', 'WMT - Walmart Inc'] : 
-                  []
-                }
-                placeholder="e.g., AAPL - Apple Inc, TSLA - Tesla Inc..."
-                helperText="Select multiple securities to find trades in any of them"
-                allowCustomInput={true}
-              />
+                {/* Securities Search Parameter - Top Priority */}
+                <MultiSelectField<string>
+                  label="Securities (Search Parameter)"
+                  selectedItems={(() => {
+                    const symbols = Array.isArray(searchParams.security) ? searchParams.security : (searchParams.security ? [searchParams.security] : []);
+                    if (!isSecurityDataLoaded) return symbols;
+                    
+                    // Convert actual symbols to display format
+                    return symbols.map(symbol => {
+                      const security = securitySuggestionsServiceV2.findBySymbol(symbol);
+                      return security ? security.displayText : symbol;
+                    });
+                  })()}
+                  onItemsChange={(securities) => {
+                    // Extract actual symbols from display text
+                    const actualSymbols = securities.map(securityDisplay => {
+                      const match = securityDisplay.match(/^([A-Z.]+)\s*-/);
+                      return match ? match[1] : securityDisplay;
+                    });
+                    setSearchParams(prev => ({ ...prev, security: actualSymbols }));
+                  }}
+                  suggestions={isSecurityDataLoaded ? 
+                    securitySuggestionsServiceV2.getAllSecurities().slice(0, 50).map(s => s.displayText) : 
+                    []
+                  }
+                  onSearch={(query) => {
+                    if (!isSecurityDataLoaded) {
+                      return [];
+                    }
+                    // If empty query or short query, return top securities
+                    if (!query || query.length < 1) {
+                      return securitySuggestionsServiceV2.getAllSecurities().slice(0, 20).map(s => s.displayText);
+                    }
+                    return securitySuggestionsServiceV2.getSuggestions(query, 20).map(s => s.displayText);
+                  }}
+                  renderItem={(securityDisplay) => securityDisplay}
+                  renderOptionCustom={(securityDisplay) => {
+                    // Parse the display format: "AAPL - Apple Inc. (High Cap)"
+                    const match = securityDisplay.match(/^([A-Z.]+)\s*-\s*(.+?)\s*\((.+?)\)$/);
+                    if (match) {
+                      const [, symbol, name, marketCap] = match;
+                      const capColor = marketCap === 'High Cap' ? '#10b981' : marketCap === 'Mid Cap' ? '#f59e0b' : '#ef4444';
+                      return (
+                        <Box sx={{ width: '100%', py: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'space-between' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0 }}>
+                              <Typography 
+                                variant="body2" 
+                                sx={{ 
+                                  fontWeight: 700, 
+                                  color: '#3b82f6',
+                                  fontSize: '0.85rem',
+                                  fontFamily: 'monospace',
+                                  minWidth: 'fit-content'
+                                }}
+                              >
+                                {symbol}
+                              </Typography>
+                              <Typography 
+                                variant="body2" 
+                                sx={{ 
+                                  color: '#ffffff', 
+                                  fontSize: '0.85rem',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                {name}
+                              </Typography>
+                            </Box>
+                            <Typography 
+                              variant="caption" 
+                              sx={{ 
+                                color: capColor, 
+                                fontSize: '0.7rem', 
+                                fontWeight: 600,
+                                backgroundColor: `${capColor}20`,
+                                px: 0.5,
+                                py: 0.1,
+                                borderRadius: 0.5,
+                                minWidth: 'fit-content'
+                              }}
+                            >
+                              {marketCap}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      );
+                    }
+                    return (
+                      <Typography variant="body2" sx={{ color: '#ffffff', py: 0.5 }}>
+                        {securityDisplay}
+                      </Typography>
+                    );
+                  }}
+                  getItemKey={(security) => security}
+                  placeholder="Search for stocks by ticker or company name..."
+                  helperText="Securities from StockList database (High/Mid/Low cap classification)"
+                  allowCustomInput={false}
+                />
 
-              {/* Political Parties */}
-              <MultiSelectField<string>
-                label="Political Parties"
-                selectedItems={selectedFilters.parties}
-                onItemsChange={(parties) => 
-                  setSelectedFilters(prev => ({ ...prev, parties }))
-                }
-                suggestions={PARTIES}
-                placeholder="e.g., Republican, Democratic..."
-                helperText="Select political parties to filter by"
-                allowCustomInput={false}
-              />
+                {/* Positions Search Parameter - Fixed Dropdown Only */}
+                <MultiSelectField<string>
+                  label="Positions (Search Parameter)"
+                  selectedItems={Array.isArray(searchParams.position) ? searchParams.position : (searchParams.position ? [searchParams.position] : [])}
+                  onItemsChange={(positions) => {
+                    setSearchParams(prev => ({ ...prev, position: positions }));
+                  }}
+                  suggestions={POSITION_OPTIONS}
+                  placeholder="Select positions to search for..."
+                  helperText="Political positions to search for in the backend database"
+                  allowCustomInput={false}
+                />
 
-              {/* Transaction Types */}
-              <MultiSelectField<string>
-                label="Transaction Types"
-                selectedItems={selectedFilters.transactionTypes}
-                onItemsChange={(transactionTypes) => 
-                  setSelectedFilters(prev => ({ ...prev, transactionTypes }))
-                }
-                suggestions={TRANSACTION_TYPES}
-                placeholder="e.g., Purchase, Sale..."
-                helperText="Select transaction types to filter by"
-                allowCustomInput={false}
-              />
+                {/* Political Parties Search Parameter - Fixed Dropdown Only */}
+                <MultiSelectField<string>
+                  label="Political Parties (Search Parameter)"
+                  selectedItems={Array.isArray(searchParams.party) ? searchParams.party : (searchParams.party ? [searchParams.party] : [])}
+                  onItemsChange={(parties) => 
+                    setSearchParams(prev => ({ ...prev, party: parties }))
+                  }
+                  suggestions={PARTIES}
+                  placeholder="Select parties to search for..."
+                  helperText="Political parties to search for in the backend database"
+                  allowCustomInput={false}
+                />
 
-              {/* Amount Ranges */}
-              <MultiSelectField<string>
-                label="Amount Ranges"
-                selectedItems={selectedFilters.amountRanges}
-                onItemsChange={(amountRanges) => 
-                  setSelectedFilters(prev => ({ ...prev, amountRanges }))
-                }
-                suggestions={AMOUNT_RANGES.map(range => range.value)}
-                placeholder="e.g., $15,001-$50,000..."
-                helperText="Select amount ranges to filter by"
-                allowCustomInput={false}
-              />
+                {/* Transaction Types Search Parameter - Fixed Dropdown Only */}
+                <MultiSelectField<string>
+                  label="Transaction Types (Search Parameter)"
+                  selectedItems={Array.isArray(searchParams.transactionType) ? searchParams.transactionType : (searchParams.transactionType ? [searchParams.transactionType] : [])}
+                  onItemsChange={(types) => 
+                    setSearchParams(prev => ({ ...prev, transactionType: types }))
+                  }
+                  suggestions={TRANSACTION_TYPES}
+                  placeholder="Select transaction types to search for..."
+                  helperText="Transaction types to search for in the backend database"
+                  allowCustomInput={false}
+                />
 
-              {/* State/District */}
-              <MultiSelectField<string>
-                label="State/District"
-                selectedItems={selectedFilters.stateDistricts}
-                onItemsChange={(stateDistricts) => 
-                  setSelectedFilters(prev => ({ ...prev, stateDistricts }))
-                }
-                suggestions={['CA', 'TX', 'NY', 'FL', 'PA', 'IL', 'OH', 'GA', 'NC', 'MI', 'NJ', 'VA', 'WA', 'AZ', 'MA', 'TN', 'IN', 'MO', 'MD', 'WI', 'CO', 'MN', 'SC', 'AL', 'LA', 'KY', 'OR', 'OK', 'CT', 'IA', 'UT', 'AR', 'MS', 'KS', 'NV', 'NM', 'NE', 'WV', 'ID', 'HI', 'NH', 'ME', 'MT', 'RI', 'DE', 'SD', 'ND', 'AK', 'VT', 'WY', 'TX01', 'TX02', 'CA12', 'NY14', 'FL27']}
-                placeholder="e.g., CA, TX, NY14..."
-                helperText="Select states or districts to filter by"
-                allowCustomInput={true}
-              />
+                {/* Amount Ranges Search Parameter - Fixed Dropdown Only */}
+                <MultiSelectField<string>
+                  label="Amount Ranges (Search Parameter)"
+                  selectedItems={searchParams.amountRange ? [searchParams.amountRange] : []}
+                  onItemsChange={(ranges) => 
+                    setSearchParams(prev => ({ ...prev, amountRange: ranges.length > 0 ? ranges[0] : undefined }))
+                  }
+                  suggestions={AMOUNT_RANGES.map(range => range.value)}
+                  placeholder="Select amount ranges to search for..."
+                  helperText="Amount ranges to search for in the backend database"
+                  allowCustomInput={false}
+                />
+              </Box>
             </Box>
           </Box>
+
+
 
           {/* Search Button */}
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
@@ -1093,6 +1239,12 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 setSearchParams({
                   dateFrom: '2020-01-01',
                   dateTo: new Date().toISOString().split('T')[0],
+                  politicianName: [],
+                  party: [],
+                  position: [],
+                  security: [],
+                  transactionType: [],
+                  stateDistrict: [],
                 });
                 setSelectedFilters({
                   politicians: [],
@@ -1187,9 +1339,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
               </Typography>
 
               {/* Selected Filters Box */}
-              {(selectedFilters.politicians.length > 0 || 
-                selectedFilters.parties.length > 0 || 
-                selectedFilters.positions.length > 0 || 
+              {(selectedFilters.politicians.length > 0 ||
+                selectedFilters.parties.length > 0 ||
+                selectedFilters.positions.length > 0 ||
                 selectedFilters.securities.length > 0 ||
                 selectedFilters.transactionTypes.length > 0 ||
                 selectedFilters.stateDistricts.length > 0 ||
@@ -1396,7 +1548,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 </Box>
               )}
 
-              {/* Politician Filter */}
+              {/* Politician Filter (for filtering search results) */}
               {availableFilters.politician_filters && availableFilters.politician_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box

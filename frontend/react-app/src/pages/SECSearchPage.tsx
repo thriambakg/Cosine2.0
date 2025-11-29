@@ -709,13 +709,25 @@ const SECSearchPage: React.FC = () => {
   // Initialize state from sessionStorage immediately (using function initializer)
   const savedState = loadStateFromStorage();
   
+  // Separate search parameters (applied on Search button click) from filters (applied immediately)
   const [searchParams, setSearchParams] = useState<SECSearchParams>(
     savedState?.searchParams || {
       dateFrom: '2001-01-01',
       dateTo: new Date().toISOString().split('T')[0],
+      // Include filers, keywords, and form types in search params
+      cik: savedState?.searchParams?.cik || undefined,
+      entityName: savedState?.searchParams?.entityName || undefined,
+      keywords: savedState?.searchParams?.keywords || undefined,
+      formTypes: savedState?.searchParams?.formTypes || undefined,
+      reportingFor: savedState?.searchParams?.reportingFor || undefined,
+      located: savedState?.searchParams?.located || undefined,
+      incorporated: savedState?.searchParams?.incorporated || undefined,
+      fileNumber: savedState?.searchParams?.fileNumber || undefined,
+      filmNumber: savedState?.searchParams?.filmNumber || undefined,
     }
   );
-  // Multi-select state for filers and keywords
+  
+  // Multi-select state for filers and keywords (part of search parameters)
   const [selectedFilers, setSelectedFilers] = useState<SECAutocompleteSuggestion[]>(
     savedState?.selectedFilers || []
   );
@@ -760,7 +772,7 @@ const SECSearchPage: React.FC = () => {
     }
   );
   
-  // Selected filters (not yet applied to search)
+  // Selected filters (applied immediately to current search results, separate from search parameters)
   const [selectedFilters, setSelectedFilters] = useState<{
     entities: Array<{ entity: string; cik?: string }>;
     forms: string[];
@@ -990,24 +1002,11 @@ const SECSearchPage: React.FC = () => {
     return companySuggestions;
   };
 
-  // Update search params when filers or keywords are selected
-  useEffect(() => {
-    setSearchParams(prev => ({
-      ...prev,
-      cik: selectedFilers.length > 0 ? selectedFilers.map(f => f.cik) : undefined,
-      entityName: selectedFilers.length > 0 ? selectedFilers.map(f => f.name) : undefined,
-      keywords: selectedKeywords.length > 0 ? selectedKeywords : undefined,
-    }));
-    // Reset to page 1 when search params change
-    setCurrentPage(1);
-  }, [selectedFilers, selectedKeywords]);
+  // Note: Search params are only updated when the Search button is clicked (in handleSearch)
+  // This decouples search parameters from immediate UI changes
 
-  // Reset page when search params change (except page itself)
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchParams.keywords, searchParams.formTypes, searchParams.dateFrom, searchParams.dateTo, 
-      searchParams.reportingFor, searchParams.located, searchParams.incorporated, 
-      searchParams.fileNumber, searchParams.filmNumber, searchParams.cik, searchParams.entityName]);
+  // Note: Page is reset to 1 only when the Search button is clicked (in handleSearch)
+  // This prevents automatic page resets when search parameters are modified in the UI
 
   // Compute filters from results
   const computeFiltersFromResults = (results: SECSearchResult[]) => {
@@ -1479,7 +1478,7 @@ const SECSearchPage: React.FC = () => {
       return;
     }
     
-    // Build search parameters from multi-select fields and form data
+    // Build search parameters from multi-select fields and form data when Search button is clicked
     const params: SECSearchParams = {
       ...searchParams,
       page: 1, // Always start from page 1 for new searches
@@ -1490,6 +1489,15 @@ const SECSearchPage: React.FC = () => {
       // Add multi-select keywords
       keywords: selectedKeywords.length > 0 ? selectedKeywords : undefined,
     };
+
+    // Update searchParams state to reflect what we're actually searching for
+    setSearchParams({
+      ...searchParams,
+      cik: params.cik,
+      entityName: params.entityName,
+      keywords: params.keywords,
+      formTypes: params.formTypes,
+    });
 
     // Remove empty strings
     Object.keys(params).forEach(key => {
@@ -1514,10 +1522,7 @@ const SECSearchPage: React.FC = () => {
     await fetchAllResults(params);
   };
 
-  const handleApplyFilters = () => {
-    // Filtering is handled by useEffect - just reset to page 1
-    setCurrentPage(1);
-  };
+  // Note: Filters are applied immediately via useEffect, no separate apply function needed
 
   const handlePageChange = async (newPage: number) => {
     if (newPage < 1) return;
@@ -1817,7 +1822,12 @@ const SECSearchPage: React.FC = () => {
 
         {/* Search Form */}
         <GlassCard sx={{ p: 4, mb: 4 }}>
-          {/* Top Bar - Common Search Parameters */}
+          {/* Search Parameters Section Header */}
+          <Typography variant="h6" sx={{ color: '#ffffff', mb: 3, fontSize: '1.1rem', fontWeight: 600 }}>
+            Search Parameters (Applied when you click Search)
+          </Typography>
+          
+          {/* Search Parameters */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 3 }}>
             {/* Row 1: Filers and Keywords - Multi-Select */}
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
@@ -1830,7 +1840,7 @@ const SECSearchPage: React.FC = () => {
                 renderItem={(filer) => `${filer.name} (${filer.ticker || 'N/A'}) - CIK: ${filer.cik}`}
                 getItemKey={(filer) => filer.cik}
                 placeholder="Add company, CIK, or individual name..."
-                helperText="Search for companies, CIKs, or individuals to include in your search"
+                helperText="Select filers to search for (applied when you click Search)"
                 allowCustomInput={false}
                 isLoading={autocompleteLoading}
                 onSearch={handleFilerSearch}
@@ -1845,7 +1855,7 @@ const SECSearchPage: React.FC = () => {
                 renderItem={(keyword) => keyword}
                 getItemKey={(keyword) => keyword}
                 placeholder="Type keyword and press Enter to add..."
-                helperText="Press Enter to add each keyword. Multiple keywords will use OR logic"
+                helperText="Add keywords for search (applied when you click Search)"
                 allowCustomInput={true}
                 isLoading={false}
               />
@@ -2365,12 +2375,10 @@ const SECSearchPage: React.FC = () => {
                   color: '#ffffff',
                   fontWeight: 600,
                   mb: 2,
-                  fontSize: '1rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
+                  fontSize: '1.1rem',
                 }}
               >
-                Refine search results by:
+                Result Filters (Applied Immediately)
               </Typography>
               
               <Typography
@@ -2382,7 +2390,7 @@ const SECSearchPage: React.FC = () => {
                   fontSize: '0.75rem',
                 }}
               >
-                Click headings to show top filters.
+                Filter current search results without re-running the search.
                 <br />
                 Document counts shown in <Chip label="#" size="small" sx={{ 
                   height: 18, 
@@ -2503,13 +2511,18 @@ const SECSearchPage: React.FC = () => {
                     ))}
                   </Box>
                   <Button
-                    variant="contained"
-                    onClick={handleApplyFilters}
-                    disabled={searchLoading}
-                    startIcon={searchLoading ? <CircularProgress size={16} /> : <SearchIcon />}
+                    variant="outlined"
+                    onClick={() => {
+                      setSelectedFilters({
+                        entities: [],
+                        forms: [],
+                        locations: [],
+                        incorporationStates: [],
+                      });
+                    }}
                     sx={{
-                      background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                      color: '#ffffff',
+                      color: '#9ca3af',
+                      borderColor: '#374151',
                       fontWeight: 600,
                       textTransform: 'uppercase',
                       letterSpacing: '0.5px',
@@ -2517,15 +2530,13 @@ const SECSearchPage: React.FC = () => {
                       px: 2,
                       fontSize: '0.75rem',
                       width: '100%',
-                      '&:hover': {
-                        background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
-                      },
-                      '&:disabled': {
-                        background: 'rgba(59, 130, 246, 0.3)',
+                      '&:hover': { 
+                        borderColor: '#6b7280', 
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)' 
                       },
                     }}
                   >
-                    {searchLoading ? 'Applying...' : 'Apply Filters'}
+                    Clear All Filters
                   </Button>
                 </Box>
               )}

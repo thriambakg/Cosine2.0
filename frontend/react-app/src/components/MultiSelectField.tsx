@@ -10,6 +10,8 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon,
+  KeyboardArrowDown as ArrowDropDownIcon,
+  KeyboardArrowUp as ArrowDropUpIcon,
 } from '@mui/icons-material';
 
 interface MultiSelectFieldProps<T> {
@@ -18,6 +20,7 @@ interface MultiSelectFieldProps<T> {
   onItemsChange: (items: T[]) => void;
   suggestions?: T[];
   renderItem?: (item: T) => string;
+  renderOptionCustom?: (item: T) => React.ReactNode; // Custom rich rendering for dropdown options
   getItemKey?: (item: T) => string;
   placeholder?: string;
   helperText?: string;
@@ -33,6 +36,7 @@ function MultiSelectField<T = string>({
   onItemsChange,
   suggestions = [],
   renderItem = (item: T) => String(item),
+  renderOptionCustom,
   getItemKey = (item: T) => String(item),
   placeholder = `Add ${label.toLowerCase()}...`,
   helperText,
@@ -43,10 +47,23 @@ function MultiSelectField<T = string>({
 }: MultiSelectFieldProps<T>) {
   const [inputValue, setInputValue] = useState('');
   const [dynamicSuggestions, setDynamicSuggestions] = useState<T[]>([]);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   // Debounced search effect - prevent excessive API calls
   useEffect(() => {
-    if (!onSearch || !inputValue || inputValue.length < 2) {
+    if (!onSearch) {
+      setDynamicSuggestions([]);
+      return;
+    }
+
+    // Show default suggestions when dropdown is opened but no search input
+    if (isDropdownOpen && (!inputValue || inputValue.length === 0)) {
+      const searchResults = onSearch('');
+      setDynamicSuggestions(searchResults);
+      return;
+    }
+
+    if (!inputValue || inputValue.length < 2) {
       setDynamicSuggestions([]);
       return;
     }
@@ -58,7 +75,7 @@ function MultiSelectField<T = string>({
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timeoutId);
-  }, [inputValue, onSearch]);
+  }, [inputValue, onSearch, isDropdownOpen]);
 
   const handleAddItem = (newItem: T | string) => {
     if (!newItem) return;
@@ -101,6 +118,8 @@ function MultiSelectField<T = string>({
             handleAddItem(value);
             // Clear input after selection
             setInputValue('');
+            // Close dropdown after selection
+            setIsDropdownOpen(false);
           }
         }}
         options={availableOptions}
@@ -113,16 +132,24 @@ function MultiSelectField<T = string>({
         freeSolo={false}
         loading={isLoading}
         clearOnBlur={false}
-        open={inputValue.length > 0 && availableOptions.length > 0}
+        open={isDropdownOpen && availableOptions.length > 0}
+        onOpen={() => setIsDropdownOpen(true)}
+        onClose={() => setIsDropdownOpen(false)}
         PaperComponent={(props) => (
           <Paper 
             {...props} 
             sx={{
-              backgroundColor: '#1f2937',
-              border: '1px solid #374151',
+              backgroundColor: 'rgba(15, 23, 42, 0.98)',
+              border: '2px solid #374151',
+              borderRadius: '12px',
               color: '#ffffff',
+              backdropFilter: 'blur(16px)',
+              boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
+              maxHeight: '320px',
               // Blue scrollbar styling
               '& .MuiAutocomplete-listbox': {
+                padding: 0,
+                maxHeight: '280px',
                 '&::-webkit-scrollbar': {
                   width: '8px',
                 },
@@ -153,27 +180,55 @@ function MultiSelectField<T = string>({
               endAdornment: (
                 <>
                   {params.InputProps.endAdornment}
+                  {/* Dropdown Toggle Button */}
                   <IconButton
-                    onClick={() => handleAddItem(inputValue)}
-                    disabled={!inputValue.trim()}
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                     size="small"
                     sx={{ 
-                      color: inputValue.trim() ? '#3b82f6' : '#6b7280',
-                      '&:hover': { color: '#2563eb' }
+                      color: '#9ca3af',
+                      '&:hover': { 
+                        color: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)'
+                      },
+                      transition: 'all 0.2s ease-in-out'
                     }}
                   >
-                    <AddIcon fontSize="small" />
+                    {isDropdownOpen ? (
+                      <ArrowDropUpIcon fontSize="small" />
+                    ) : (
+                      <ArrowDropDownIcon fontSize="small" />
+                    )}
                   </IconButton>
+                  {/* Add Item Button - only show when user has typed something */}
+                  {allowCustomInput && inputValue.trim() && (
+                    <IconButton
+                      onClick={() => handleAddItem(inputValue)}
+                      disabled={!inputValue.trim()}
+                      size="small"
+                      sx={{ 
+                        color: inputValue.trim() ? '#3b82f6' : '#6b7280',
+                        '&:hover': { color: '#2563eb' },
+                        ml: 0.5
+                      }}
+                    >
+                      <AddIcon fontSize="small" />
+                    </IconButton>
+                  )}
                 </>
               ),
             }}
             sx={{
               '& .MuiOutlinedInput-root': {
-                '& fieldset': { borderColor: '#374151' },
+                '& fieldset': { 
+                  borderColor: isDropdownOpen ? '#3b82f6' : '#374151',
+                  borderWidth: isDropdownOpen ? '2px' : '1px'
+                },
                 '&:hover fieldset': { borderColor: '#3b82f6' },
-                '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                '&.Mui-focused fieldset': { borderColor: '#3b82f6', borderWidth: '2px' },
               },
-              '& .MuiInputLabel-root': { color: '#9ca3af' },
+              '& .MuiInputLabel-root': { 
+                color: isDropdownOpen ? '#3b82f6' : '#9ca3af'
+              },
               '& .MuiInputBase-input': { color: '#ffffff' },
             }}
             onKeyDown={(e) => {
@@ -194,18 +249,26 @@ function MultiSelectField<T = string>({
               sx={{
                 backgroundColor: 'transparent',
                 color: '#ffffff',
+                py: 1.5,
+                px: 2,
+                borderBottom: '1px solid rgba(55, 65, 81, 0.3)',
                 '&:hover': { 
-                  backgroundColor: 'rgba(59, 130, 246, 0.1)' 
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  borderColor: 'rgba(59, 130, 246, 0.3)'
                 },
                 '&[aria-selected="true"]': {
                   backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                  borderColor: 'rgba(59, 130, 246, 0.5)',
                   '&:hover': {
                     backgroundColor: 'rgba(59, 130, 246, 0.3)',
                   },
                 },
+                '&:last-child': {
+                  borderBottom: 'none'
+                }
               }}
             >
-              {renderItem(option)}
+              {renderOptionCustom ? renderOptionCustom(option) : renderItem(option)}
             </Box>
           );
         }}

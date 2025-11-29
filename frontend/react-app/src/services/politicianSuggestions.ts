@@ -13,6 +13,8 @@ export interface Politician {
   district?: string;
   type: 'sen' | 'rep'; // Senator or Representative
   searchText: string; // Combined text for searching
+  displayText: string; // Enhanced display format: "John Doe (R-TX, House)"
+  jurisdiction: string; // "TX-01" or "TX" for senators
 }
 
 class PoliticianSuggestionsService {
@@ -94,6 +96,12 @@ class PoliticianSuggestionsService {
             middleName ? `${firstName} ${middleName} ${lastName}` : '',
           ].filter(Boolean).join(' ').toLowerCase();
 
+          // Create display text with party, state, and position
+          const position = type === 'sen' ? 'Senate' : 'House';
+          const partyAbbrev = party === 'Republican' ? 'R' : party === 'Democratic' ? 'D' : party === 'Independent' ? 'I' : party;
+          const jurisdiction = type === 'sen' ? state : (district ? `${state}-${district}` : state);
+          const displayText = `${fullName} (${partyAbbrev}-${jurisdiction}, ${position})`;
+
           politicians.push({
             firstName,
             lastName,
@@ -104,6 +112,8 @@ class PoliticianSuggestionsService {
             district,
             type,
             searchText,
+            displayText,
+            jurisdiction,
           });
         } catch (error) {
           console.warn(`⚠️ Error parsing line ${i + 1}:`, error);
