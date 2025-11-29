@@ -161,8 +161,23 @@ def build_query_params(
     if filters.get('politicianName'):
         index_name = GSI_NAMES['politicianName']
         politician_name_value = filters['politicianName']
-        key_condition = Key('politicianName').eq(politician_name_value)
-        logger.info(f"✅ Selected GSI: {index_name} for politicianName: '{politician_name_value}'")
+        
+        # Handle both single string and array formats
+        if isinstance(politician_name_value, list):
+            if len(politician_name_value) == 1:
+                # Single politician in array - use GSI
+                politician_name_value = politician_name_value[0]
+                key_condition = Key('politicianName').eq(politician_name_value)
+                logger.info(f"✅ Selected GSI: {index_name} for single politicianName: '{politician_name_value}'")
+            else:
+                # Multiple politicians - cannot use GSI efficiently, fall back to scan
+                logger.info(f"⚠️ Multiple politicians provided {politician_name_value}, falling back to scan")
+                index_name = None
+                key_condition = None
+        else:
+            # Single string value
+            key_condition = Key('politicianName').eq(politician_name_value)
+            logger.info(f"✅ Selected GSI: {index_name} for politicianName: '{politician_name_value}'")
     elif filters.get('position'):
         index_name = GSI_NAMES['position']
         position_value = filters['position']
@@ -172,46 +187,132 @@ def build_query_params(
     elif filters.get('party'):
         index_name = GSI_NAMES['party']
         party_value = filters['party']
-        key_condition = Key('party').eq(party_value)
-        logger.info(f"✅ Selected GSI: {index_name} for party: '{party_value}'")
-        logger.info(f"🔍 Party value type: {type(party_value)}, value: {repr(party_value)}")
+        
+        # Handle both single string and array formats
+        if isinstance(party_value, list):
+            if len(party_value) == 1:
+                # Single party in array - use GSI
+                party_value = party_value[0]
+                key_condition = Key('party').eq(party_value)
+                logger.info(f"✅ Selected GSI: {index_name} for single party: '{party_value}'")
+            else:
+                # Multiple parties - cannot use GSI efficiently, fall back to scan
+                logger.info(f"⚠️ Multiple parties provided {party_value}, falling back to scan")
+                index_name = None
+                key_condition = None
+        else:
+            # Single string value
+            key_condition = Key('party').eq(party_value)
+            logger.info(f"✅ Selected GSI: {index_name} for party: '{party_value}'")
     elif filters.get('transactionType'):
         index_name = GSI_NAMES['transactionType']
-        key_condition = Key('transactionType').eq(filters['transactionType'])
-        logger.info(f"✅ Selected GSI: {index_name} for transactionType: '{filters['transactionType']}'")
-    elif filters.get('amountRange'):
-        # Parse the amount range filter (e.g., "$1,001-$15,000")
-        amount_range_tuple = parse_amount_range_filter(filters['amountRange'])
-        if amount_range_tuple:
-            index_name = GSI_NAMES['amountMin']
-            amount_min, amount_max = amount_range_tuple
-            
-            if amount_max is None:
-                # "Over X" case - no upper bound
-                key_condition = Key('amountMin').gte(Decimal(str(amount_min)))
+        transaction_type_value = filters['transactionType']
+        
+        # Handle both single string and array formats
+        if isinstance(transaction_type_value, list):
+            if len(transaction_type_value) == 1:
+                # Single transaction type in array - use GSI
+                transaction_type_value = transaction_type_value[0]
+                key_condition = Key('transactionType').eq(transaction_type_value)
+                logger.info(f"✅ Selected GSI: {index_name} for single transactionType: '{transaction_type_value}'")
             else:
-                # Standard range
-                key_condition = Key('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
-            
-            logger.info(f"✅ Selected GSI: {index_name} for amount range: {filters['amountRange']} -> ({amount_min}, {amount_max})")
+                # Multiple transaction types - cannot use GSI efficiently, fall back to scan
+                logger.info(f"⚠️ Multiple transaction types provided {transaction_type_value}, falling back to scan")
+                index_name = None
+                key_condition = None
+        else:
+            # Single string value
+            key_condition = Key('transactionType').eq(transaction_type_value)
+            logger.info(f"✅ Selected GSI: {index_name} for transactionType: '{transaction_type_value}'")
+    elif filters.get('amountRange'):
+        # Handle amount range filter(s)
+        amount_ranges = filters['amountRange']
+        if isinstance(amount_ranges, list):
+            if len(amount_ranges) == 1:
+                # Single amount range - can use GSI
+                amount_range_tuple = parse_amount_range_filter(amount_ranges[0])
+                if amount_range_tuple:
+                    index_name = GSI_NAMES['amountMin']
+                    amount_min, amount_max = amount_range_tuple
+                    
+                    if amount_max is None:
+                        # "Over X" case - no upper bound
+                        key_condition = Key('amountMin').gte(Decimal(str(amount_min)))
+                    else:
+                        # Standard range
+                        key_condition = Key('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
+                    
+                    logger.info(f"✅ Selected GSI: {index_name} for single amount range: {amount_ranges[0]} -> ({amount_min}, {amount_max})")
+            else:
+                # Multiple amount ranges - use scan with filter
+                logger.info(f"🔍 Multiple amount ranges ({len(amount_ranges)} items) will use scan with filter")
+        else:
+            # Single string - parse the amount range filter (e.g., "$1,001-$15,000")
+            amount_range_tuple = parse_amount_range_filter(amount_ranges)
+            if amount_range_tuple:
+                index_name = GSI_NAMES['amountMin']
+                amount_min, amount_max = amount_range_tuple
+                
+                if amount_max is None:
+                    # "Over X" case - no upper bound
+                    key_condition = Key('amountMin').gte(Decimal(str(amount_min)))
+                else:
+                    # Standard range
+                    key_condition = Key('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
+                
+                logger.info(f"✅ Selected GSI: {index_name} for amount range: {amount_ranges} -> ({amount_min}, {amount_max})")
     elif filters.get('stateDistrict'):
         index_name = GSI_NAMES['stateDistrict']
-        key_condition = Key('stateDistrict').eq(filters['stateDistrict'])
-        logger.info(f"✅ Selected GSI: {index_name} for stateDistrict: '{filters['stateDistrict']}'")
+        state_district_value = filters['stateDistrict']
+        
+        # Handle both single string and array formats
+        if isinstance(state_district_value, list):
+            if len(state_district_value) == 1:
+                # Single state/district in array - use GSI
+                state_district_value = state_district_value[0]
+                key_condition = Key('stateDistrict').eq(state_district_value)
+                logger.info(f"✅ Selected GSI: {index_name} for single stateDistrict: '{state_district_value}'")
+            else:
+                # Multiple states/districts - cannot use GSI efficiently, fall back to scan
+                logger.info(f"⚠️ Multiple states/districts provided {state_district_value}, falling back to scan")
+                index_name = None
+                key_condition = None
+        else:
+            # Single string value
+            key_condition = Key('stateDistrict').eq(state_district_value)
+            logger.info(f"✅ Selected GSI: {index_name} for stateDistrict: '{state_district_value}'")
     
     # If we have a security search but no other GSI key, try to use SecuritySymbol GSI for better performance
     elif filters.get('security'):
-        security_value = filters['security'].strip()
-        # Use GSI if it looks like an exact stock symbol match
-        # Criteria: short (2-6 chars), mostly uppercase, and alphanumeric
-        if (2 <= len(security_value) <= 6 and 
-            security_value.replace('.', '').replace('-', '').isalnum() and
-            security_value.isupper()):
-            index_name = GSI_NAMES['securitySymbol']
-            key_condition = Key('securitySymbol').eq(security_value.upper())
-            logger.info(f"✅ Selected GSI: {index_name} for exact security symbol: '{security_value}'")
+        securities = filters['security']
+        if isinstance(securities, list):
+            if len(securities) == 1:
+                # Single security - check if it's a good GSI candidate
+                security_value = securities[0].strip()
+                if (2 <= len(security_value) <= 6 and 
+                    security_value.replace('.', '').replace('-', '').isalnum() and
+                    security_value.isupper()):
+                    index_name = GSI_NAMES['securitySymbol']
+                    key_condition = Key('securitySymbol').eq(security_value.upper())
+                    logger.info(f"✅ Selected GSI: {index_name} for single security symbol: '{security_value}'")
+                else:
+                    logger.info(f"🔍 Single security search '{security_value}' will use scan with filter")
+            else:
+                # Multiple securities - always use scan with filter
+                logger.info(f"🔍 Multiple securities search ({len(securities)} items) will use scan with filter")
         else:
-            logger.info(f"🔍 Security search '{security_value}' will use scan with filter (likely company name or partial match)")
+            # Single string
+            security_value = securities.strip()
+            # Use GSI if it looks like an exact stock symbol match
+            # Criteria: short (2-6 chars), mostly uppercase, and alphanumeric
+            if (2 <= len(security_value) <= 6 and 
+                security_value.replace('.', '').replace('-', '').isalnum() and
+                security_value.isupper()):
+                index_name = GSI_NAMES['securitySymbol']
+                key_condition = Key('securitySymbol').eq(security_value.upper())
+                logger.info(f"✅ Selected GSI: {index_name} for exact security symbol: '{security_value}'")
+            else:
+                logger.info(f"🔍 Security search '{security_value}' will use scan with filter (likely company name or partial match)")
     
     # Add transactionDate range filter if using a GSI (all GSIs have transactionDate as range key)
     # IMPORTANT: transactionDate is stored as YYYYMMDD integer (e.g., 20251021), NOT Unix timestamp
@@ -252,20 +353,16 @@ def build_query_params(
     # Build filter expression for non-key attributes
     
     # Enhanced security search - searches both securitySymbol and securityName with improved logic
-    if filters.get('security'):
-        security_value = filters['security'].strip()
-        # If we're not already using SecurityTradeDateIndex, add as filter condition
-        if index_name != GSI_NAMES.get('securitySymbol'):
-            # Create comprehensive security filter that searches:
-            # 1. Exact symbol match (case-insensitive) 
-            # 2. Symbol contains search (for partial symbols)
-            # 3. Security name contains search (case-insensitive)
-            # 4. Security name begins_with search (for better matching)
-            # 5. Handle securities with missing/empty symbols (bonds, funds, etc.)
+    if filters.get('security') and index_name != GSI_NAMES.get('securitySymbol'):
+        securities = filters['security']
+        
+        def create_security_filter(security_value):
+            """Create a comprehensive security filter for a single security value"""
+            security_value = security_value.strip()
             security_upper = security_value.upper()
             security_lower = security_value.lower()
             
-            security_filter = (
+            return (
                 Attr('securitySymbol').eq(security_upper) |                    # Exact symbol match
                 Attr('securitySymbol').contains(security_upper) |             # Partial symbol match
                 Attr('securityName').contains(security_value) |               # Name contains (original case)
@@ -278,8 +375,178 @@ def build_query_params(
                 (Attr('securitySymbol').eq('') & Attr('securityName').contains(security_value)) |
                 (Attr('securitySymbol').eq('--') & Attr('securityName').contains(security_value))
             )
+        
+        if isinstance(securities, list):
+            if len(securities) == 1:
+                # Single security
+                security_filter = create_security_filter(securities[0])
+                filter_conditions.append(security_filter)
+                logger.info(f"🔍 Added security filter for: '{securities[0]}' (symbol/name/other search)")
+            elif len(securities) > 1:
+                # Multiple securities - use OR condition
+                combined_filter = None
+                for security_value in securities:
+                    security_filter = create_security_filter(security_value)
+                    if combined_filter is None:
+                        combined_filter = security_filter
+                    else:
+                        combined_filter = combined_filter | security_filter
+                filter_conditions.append(combined_filter)
+                logger.info(f"🔍 Added multiple securities filter: {securities} (symbol/name/other search)")
+        else:
+            # Single string
+            security_filter = create_security_filter(securities)
             filter_conditions.append(security_filter)
-            logger.info(f"🔍 Added enhanced security filter for: '{security_value}' (symbol/name/other search)")
+            logger.info(f"🔍 Added security filter for: '{securities}' (symbol/name/other search)")
+    
+    # Politician name filter (when not using GSI)
+    if filters.get('politicianName') and index_name != GSI_NAMES.get('politicianName'):
+        politician_names = filters['politicianName']
+        if isinstance(politician_names, list):
+            if len(politician_names) == 1:
+                # Single politician
+                filter_conditions.append(Attr('politicianName').eq(politician_names[0]))
+                logger.info(f"🔍 Added politician name filter: '{politician_names[0]}'")
+            elif len(politician_names) > 1:
+                # Multiple politicians - use OR condition
+                politician_filter = None
+                for name in politician_names:
+                    name_condition = Attr('politicianName').eq(name)
+                    if politician_filter is None:
+                        politician_filter = name_condition
+                    else:
+                        politician_filter = politician_filter | name_condition
+                filter_conditions.append(politician_filter)
+                logger.info(f"🔍 Added multiple politician names filter: {politician_names}")
+        else:
+            # Single string
+            filter_conditions.append(Attr('politicianName').eq(politician_names))
+            logger.info(f"🔍 Added politician name filter: '{politician_names}'")
+    
+    # Party filter (when not using GSI)
+    if filters.get('party') and index_name != GSI_NAMES.get('party'):
+        parties = filters['party']
+        if isinstance(parties, list):
+            if len(parties) == 1:
+                # Single party
+                filter_conditions.append(Attr('party').eq(parties[0]))
+                logger.info(f"🔍 Added party filter: '{parties[0]}'")
+            elif len(parties) > 1:
+                # Multiple parties - use OR condition
+                party_filter = None
+                for party in parties:
+                    party_condition = Attr('party').eq(party)
+                    if party_filter is None:
+                        party_filter = party_condition
+                    else:
+                        party_filter = party_filter | party_condition
+                filter_conditions.append(party_filter)
+                logger.info(f"🔍 Added multiple parties filter: {parties}")
+        else:
+            # Single string
+            filter_conditions.append(Attr('party').eq(parties))
+            logger.info(f"🔍 Added party filter: '{parties}'")
+    
+    # Transaction type filter (when not using GSI)
+    if filters.get('transactionType') and index_name != GSI_NAMES.get('transactionType'):
+        transaction_types = filters['transactionType']
+        if isinstance(transaction_types, list):
+            if len(transaction_types) == 1:
+                # Single transaction type
+                filter_conditions.append(Attr('transactionType').eq(transaction_types[0]))
+                logger.info(f"🔍 Added transaction type filter: '{transaction_types[0]}'")
+            elif len(transaction_types) > 1:
+                # Multiple transaction types - use OR condition
+                type_filter = None
+                for trans_type in transaction_types:
+                    type_condition = Attr('transactionType').eq(trans_type)
+                    if type_filter is None:
+                        type_filter = type_condition
+                    else:
+                        type_filter = type_filter | type_condition
+                filter_conditions.append(type_filter)
+                logger.info(f"🔍 Added multiple transaction types filter: {transaction_types}")
+        else:
+            # Single string
+            filter_conditions.append(Attr('transactionType').eq(transaction_types))
+            logger.info(f"🔍 Added transaction type filter: '{transaction_types}'")
+    
+    # State/District filter (when not using GSI)
+    if filters.get('stateDistrict') and index_name != GSI_NAMES.get('stateDistrict'):
+        state_districts = filters['stateDistrict']
+        if isinstance(state_districts, list):
+            if len(state_districts) == 1:
+                # Single state/district
+                filter_conditions.append(Attr('stateDistrict').eq(state_districts[0]))
+                logger.info(f"🔍 Added state/district filter: '{state_districts[0]}'")
+            elif len(state_districts) > 1:
+                # Multiple state/districts - use OR condition
+                district_filter = None
+                for district in state_districts:
+                    district_condition = Attr('stateDistrict').eq(district)
+                    if district_filter is None:
+                        district_filter = district_condition
+                    else:
+                        district_filter = district_filter | district_condition
+                filter_conditions.append(district_filter)
+                logger.info(f"🔍 Added multiple state/districts filter: {state_districts}")
+        else:
+            # Single string
+            filter_conditions.append(Attr('stateDistrict').eq(state_districts))
+            logger.info(f"🔍 Added state/district filter: '{state_districts}'")
+    
+    # Amount range filter (when not using GSI)
+    if filters.get('amountRange') and index_name != GSI_NAMES.get('amountMin'):
+        amount_ranges = filters['amountRange']
+        if isinstance(amount_ranges, list):
+            if len(amount_ranges) == 1:
+                # Single amount range
+                amount_range_tuple = parse_amount_range_filter(amount_ranges[0])
+                if amount_range_tuple:
+                    amount_min, amount_max = amount_range_tuple
+                    if amount_max is None:
+                        # "Over X" case
+                        filter_conditions.append(Attr('amountMin').gte(Decimal(str(amount_min))))
+                        logger.info(f"🔍 Added amount range filter: >= {amount_min}")
+                    else:
+                        # Standard range
+                        filter_conditions.append(Attr('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max))))
+                        logger.info(f"🔍 Added amount range filter: {amount_min} - {amount_max}")
+            elif len(amount_ranges) > 1:
+                # Multiple amount ranges - use OR condition
+                range_filter = None
+                for amount_range in amount_ranges:
+                    amount_range_tuple = parse_amount_range_filter(amount_range)
+                    if amount_range_tuple:
+                        amount_min, amount_max = amount_range_tuple
+                        if amount_max is None:
+                            # "Over X" case
+                            range_condition = Attr('amountMin').gte(Decimal(str(amount_min)))
+                        else:
+                            # Standard range
+                            range_condition = Attr('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
+                        
+                        if range_filter is None:
+                            range_filter = range_condition
+                        else:
+                            range_filter = range_filter | range_condition
+                
+                if range_filter is not None:
+                    filter_conditions.append(range_filter)
+                    logger.info(f"🔍 Added multiple amount ranges filter: {amount_ranges}")
+        else:
+            # Single string
+            amount_range_tuple = parse_amount_range_filter(amount_ranges)
+            if amount_range_tuple:
+                amount_min, amount_max = amount_range_tuple
+                if amount_max is None:
+                    # "Over X" case
+                    filter_conditions.append(Attr('amountMin').gte(Decimal(str(amount_min))))
+                    logger.info(f"🔍 Added amount range filter: >= {amount_min}")
+                else:
+                    # Standard range
+                    filter_conditions.append(Attr('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max))))
+                    logger.info(f"🔍 Added amount range filter: {amount_min} - {amount_max}")
     
     # Filing date range filter (filingDate is stored as YYYY-MM-DD string)
     if filters.get('filingDateFrom') or filters.get('filingDateTo'):

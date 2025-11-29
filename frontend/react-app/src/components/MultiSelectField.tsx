@@ -1,21 +1,14 @@
 import { useState, useEffect } from 'react';
 import {
-  TextField,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  IconButton,
   Box,
   Typography,
   Chip,
   Autocomplete,
   Paper,
+  TextField,
+  IconButton,
 } from '@mui/material';
 import {
-  ExpandMore as ExpandMoreIcon,
-  Close as CloseIcon,
   Add as AddIcon,
 } from '@mui/icons-material';
 
@@ -31,7 +24,7 @@ interface MultiSelectFieldProps<T> {
   maxChipsShown?: number;
   allowCustomInput?: boolean;
   isLoading?: boolean;
-  onSearch?: (query: string) => void; // Callback for dynamic search
+  onSearch?: (query: string) => T[]; // Callback for dynamic search that returns results
 }
 
 function MultiSelectField<T = string>({
@@ -48,17 +41,23 @@ function MultiSelectField<T = string>({
   isLoading = false,
   onSearch,
 }: MultiSelectFieldProps<T>) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [dynamicSuggestions, setDynamicSuggestions] = useState<T[]>([]);
 
-  // Real-time search effect - trigger on every character, handle race conditions
+  // Debounced search effect - prevent excessive API calls
   useEffect(() => {
     if (!onSearch || !inputValue || inputValue.length < 2) {
+      setDynamicSuggestions([]);
       return;
     }
 
-    // Immediate API call for fluid experience
-    onSearch(inputValue);
+    // Debounce the search to avoid excessive API calls
+    const timeoutId = setTimeout(() => {
+      const searchResults = onSearch(inputValue);
+      setDynamicSuggestions(searchResults);
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
   }, [inputValue, onSearch]);
 
   const handleAddItem = (newItem: T | string) => {
@@ -68,8 +67,15 @@ function MultiSelectField<T = string>({
       ? newItem as T 
       : newItem as T;
     
-    if (!selectedItems.some(item => getItemKey(item) === getItemKey(itemToAdd))) {
+    console.log('MultiSelectField - Adding item:', itemToAdd);
+    
+    const keyExists = selectedItems.some(item => getItemKey(item) === getItemKey(itemToAdd));
+    
+    if (!keyExists) {
+      console.log('MultiSelectField - Item added successfully');
       onItemsChange([...selectedItems, itemToAdd]);
+    } else {
+      console.log('MultiSelectField - Item already exists, not adding');
     }
     setInputValue('');
   };
@@ -78,264 +84,170 @@ function MultiSelectField<T = string>({
     onItemsChange(selectedItems.filter(item => getItemKey(item) !== getItemKey(itemToRemove)));
   };
 
-  const handleClearAll = () => {
-    onItemsChange([]);
-  };
-
-  const displayValue = selectedItems.length > 0
-    ? `${selectedItems.length} ${label.toLowerCase()}${selectedItems.length > 1 ? 's' : ''} selected`
-    : `Select ${label.toLowerCase()}...`;
+  const availableOptions = dynamicSuggestions.length > 0 ? dynamicSuggestions : (suggestions || []);
 
   return (
-    <>
-      {/* Main Field */}
-      <Box>
-        <TextField
-          label={label}
-          value={displayValue}
-          onClick={() => setIsModalOpen(true)}
-          InputProps={{
-            readOnly: true,
-            endAdornment: <ExpandMoreIcon sx={{ color: '#9ca3af' }} />,
-          }}
-          variant="outlined"
-          fullWidth
-          sx={{
-            cursor: 'pointer',
-            '& .MuiOutlinedInput-root': {
-              '& fieldset': { borderColor: '#374151' },
-              '&:hover fieldset': { borderColor: '#3b82f6' },
-              '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-            },
-            '& .MuiInputLabel-root': { color: '#9ca3af' },
-            '& .MuiInputBase-input': { color: '#ffffff', cursor: 'pointer' },
-          }}
-        />
-        
-        {/* Selected items chips */}
-        {selectedItems.length > 0 && (
-          <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-            {selectedItems.slice(0, maxChipsShown).map((item) => (
-              <Chip
-                key={getItemKey(item)}
-                label={renderItem(item)}
-                size="small"
-                onDelete={() => handleRemoveItem(item)}
-                sx={{
-                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                  color: '#93c5fd',
-                  border: '1px solid #3b82f6',
-                  '& .MuiChip-deleteIcon': { color: '#93c5fd' },
-                }}
-              />
-            ))}
-            {selectedItems.length > maxChipsShown && (
-              <Chip
-                label={`+${selectedItems.length - maxChipsShown} more`}
-                size="small"
-                sx={{
-                  backgroundColor: 'rgba(107, 114, 128, 0.2)',
-                  color: '#9ca3af',
-                  border: '1px solid #6b7280',
-                }}
-              />
-            )}
-          </Box>
-        )}
-        
-        {helperText && (
-          <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5, fontSize: '0.75rem' }}>
-            {helperText}
-          </Typography>
-        )}
-      </Box>
-
-      {/* Selection Modal */}
-      <Dialog
-        open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{
-          sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '2px solid #374151',
-            borderRadius: '0px',
-            color: '#ffffff',
-          },
+    <Box>
+      {/* Inline Autocomplete */}
+      <Autocomplete
+        value={null}
+        inputValue={inputValue}
+        onInputChange={(_, value) => {
+          setInputValue(value);
         }}
-      >
-        <DialogTitle sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          borderBottom: '1px solid #374151',
-          pb: 2,
-        }}>
-          <Box>
-            <Typography variant="h6" sx={{ color: '#ffffff', mb: 1 }}>
-              Select {label}
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#9ca3af' }}>
-              {helperText || `Choose multiple ${label.toLowerCase()} to search with OR logic`}
-            </Typography>
-          </Box>
-          <IconButton
-            onClick={() => setIsModalOpen(false)}
-            sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}
-          >
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        
-        <DialogContent sx={{ mt: 2 }}>
-          {/* Add new item */}
-          <Box sx={{ mb: 3 }}>
-            <Autocomplete
-              value={null}
-              inputValue={inputValue}
-              onInputChange={(_, value) => setInputValue(value)}
-              onChange={(_, value) => {
-                if (value) {
-                  handleAddItem(value);
-                }
-              }}
-              options={suggestions}
-              getOptionLabel={(option) => renderItem(option as T)}
-              freeSolo={allowCustomInput}
-              loading={isLoading}
-              PaperComponent={(props) => (
-                <Paper 
-                  {...props} 
-                  sx={{
-                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                    border: '1px solid #374151',
-                    // Blue scrollbar styling
-                    '& .MuiAutocomplete-listbox': {
-                      '&::-webkit-scrollbar': {
-                        width: '8px',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                        borderRadius: '4px',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: '#3b82f6',
-                        borderRadius: '4px',
-                        '&:hover': {
-                          backgroundColor: '#2563eb',
-                        },
-                      },
-                    },
-                  }}
-                />
-              )}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  placeholder={placeholder}
-                  variant="outlined"
-                  InputProps={{
-                    ...params.InputProps,
-                    endAdornment: (
-                      <>
-                        {params.InputProps.endAdornment}
-                        <IconButton
-                          onClick={() => handleAddItem(inputValue)}
-                          disabled={!inputValue.trim()}
-                          sx={{ color: '#3b82f6' }}
-                        >
-                          <AddIcon />
-                        </IconButton>
-                      </>
-                    ),
-                  }}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      '& fieldset': { borderColor: '#374151' },
-                      '&:hover fieldset': { borderColor: '#3b82f6' },
-                      '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                    },
-                    '& .MuiInputBase-input': { color: '#ffffff' },
-                  }}
-                />
-              )}
-              renderOption={(props, option) => (
-                <Paper
-                  component="li"
-                  {...props}
-                  sx={{
-                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                    color: '#ffffff',
-                    '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' },
-                  }}
-                >
-                  {renderItem(option)}
-                </Paper>
-              )}
-            />
-          </Box>
-
-          {/* Selected items */}
-          {selectedItems.length > 0 && (
-            <Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="subtitle1" sx={{ color: '#ffffff' }}>
-                  Selected {label} ({selectedItems.length})
-                </Typography>
-                <Button
-                  onClick={handleClearAll}
-                  size="small"
-                  sx={{ color: '#ef4444' }}
-                >
-                  Clear All
-                </Button>
-              </Box>
-              
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {selectedItems.map((item) => (
-                  <Chip
-                    key={getItemKey(item)}
-                    label={renderItem(item)}
-                    onDelete={() => handleRemoveItem(item)}
-                    sx={{
-                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                      color: '#93c5fd',
-                      border: '1px solid #3b82f6',
-                      '& .MuiChip-deleteIcon': { color: '#93c5fd' },
-                    }}
-                  />
-                ))}
-              </Box>
-            </Box>
-          )}
-        </DialogContent>
-        
-        <DialogActions sx={{ borderTop: '1px solid #374151', pt: 2 }}>
-          <Button
-            onClick={() => setIsModalOpen(false)}
+        onChange={(_, value, reason) => {
+          console.log('MultiSelectField - Autocomplete onChange called with value:', value, 'reason:', reason);
+          if (value && reason === 'selectOption') {
+            handleAddItem(value);
+            // Clear input after selection
+            setInputValue('');
+          }
+        }}
+        options={availableOptions}
+        getOptionLabel={(option) => renderItem(option as T)}
+        isOptionEqualToValue={(option, value) => getItemKey(option as T) === getItemKey(value as T)}
+        filterOptions={(options) => {
+          // Don't filter options - we handle this via the search
+          return options;
+        }}
+        freeSolo={false}
+        loading={isLoading}
+        clearOnBlur={false}
+        open={inputValue.length > 0 && availableOptions.length > 0}
+        PaperComponent={(props) => (
+          <Paper 
+            {...props} 
+            sx={{
+              backgroundColor: '#1f2937',
+              border: '1px solid #374151',
+              color: '#ffffff',
+              // Blue scrollbar styling
+              '& .MuiAutocomplete-listbox': {
+                '&::-webkit-scrollbar': {
+                  width: '8px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                  borderRadius: '4px',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  backgroundColor: '#3b82f6',
+                  borderRadius: '4px',
+                  '&:hover': {
+                    backgroundColor: '#2563eb',
+                  },
+                },
+              },
+            }}
+          />
+        )}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label={label}
+            placeholder={placeholder}
             variant="outlined"
-            sx={{
-              borderColor: '#374151',
-              color: '#9ca3af',
-              '&:hover': { borderColor: '#3b82f6', color: '#ffffff' },
+            fullWidth
+            InputProps={{
+              ...params.InputProps,
+              endAdornment: (
+                <>
+                  {params.InputProps.endAdornment}
+                  <IconButton
+                    onClick={() => handleAddItem(inputValue)}
+                    disabled={!inputValue.trim()}
+                    size="small"
+                    sx={{ 
+                      color: inputValue.trim() ? '#3b82f6' : '#6b7280',
+                      '&:hover': { color: '#2563eb' }
+                    }}
+                  >
+                    <AddIcon fontSize="small" />
+                  </IconButton>
+                </>
+              ),
             }}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={() => setIsModalOpen(false)}
-            variant="contained"
             sx={{
-              backgroundColor: '#3b82f6',
-              '&:hover': { backgroundColor: '#2563eb' },
+              '& .MuiOutlinedInput-root': {
+                '& fieldset': { borderColor: '#374151' },
+                '&:hover fieldset': { borderColor: '#3b82f6' },
+                '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+              },
+              '& .MuiInputLabel-root': { color: '#9ca3af' },
+              '& .MuiInputBase-input': { color: '#ffffff' },
             }}
-          >
-            Done
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </>
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && inputValue.trim()) {
+                e.preventDefault();
+                handleAddItem(inputValue.trim());
+              }
+            }}
+          />
+        )}
+        renderOption={(props, option) => {
+          const { key, ...otherProps } = props;
+          return (
+            <Box
+              key={key}
+              component="li"
+              {...otherProps}
+              sx={{
+                backgroundColor: 'transparent',
+                color: '#ffffff',
+                '&:hover': { 
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)' 
+                },
+                '&[aria-selected="true"]': {
+                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                  '&:hover': {
+                    backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                  },
+                },
+              }}
+            >
+              {renderItem(option)}
+            </Box>
+          );
+        }}
+      />
+      
+      {/* Selected items chips */}
+      {selectedItems.length > 0 && (
+        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+          {selectedItems.slice(0, maxChipsShown).map((item) => (
+            <Chip
+              key={getItemKey(item)}
+              label={renderItem(item)}
+              size="small"
+              onDelete={() => handleRemoveItem(item)}
+              sx={{
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                color: '#93c5fd',
+                border: '1px solid #3b82f6',
+                '& .MuiChip-deleteIcon': { color: '#93c5fd' },
+              }}
+            />
+          ))}
+          {selectedItems.length > maxChipsShown && (
+            <Chip
+              label={`+${selectedItems.length - maxChipsShown} more`}
+              size="small"
+              sx={{
+                backgroundColor: 'rgba(107, 114, 128, 0.2)',
+                color: '#9ca3af',
+                border: '1px solid #6b7280',
+              }}
+            />
+          )}
+        </Box>
+      )}
+      
+      {helperText && (
+        <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5, fontSize: '0.75rem' }}>
+          {helperText}
+        </Typography>
+      )}
+    </Box>
   );
 }
 

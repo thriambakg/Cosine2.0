@@ -43,7 +43,6 @@ import {
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
   ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
   Close as CloseIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
@@ -727,7 +726,7 @@ const SECSearchPage: React.FC = () => {
   const [selectedColumns, setSelectedColumns] = useState<string[]>(
     savedState?.selectedColumns || DEFAULT_COLUMNS
   );
-  const [showAdvanced, setShowAdvanced] = useState<boolean>(savedState?.showAdvanced || false);
+
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
   const [currentResults, setCurrentResults] = useState<SECSearchResult[]>([]);
   const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
@@ -915,7 +914,6 @@ const SECSearchPage: React.FC = () => {
         expandedFilters,
         selectedCategoryFilter,
         selectedColumns,
-        showAdvanced,
         isFiltered,
         // Save search state in legacy format for compatibility
         isFetchingAll: searchState.isSearching,
@@ -942,7 +940,6 @@ const SECSearchPage: React.FC = () => {
     expandedFilters,
     selectedCategoryFilter,
     selectedColumns,
-    showAdvanced,
     isFiltered,
     searchState,
     searchStartTime,
@@ -970,26 +967,27 @@ const SECSearchPage: React.FC = () => {
   const latestSearchTimestampRef = useRef<number>(0);
 
   // Handle filer search with real-time API calls and race condition protection
-  const handleFilerSearch = async (query: string) => {
-    // Create unique timestamp for this search to handle race conditions
+  const handleFilerSearch = (query: string): SECAutocompleteSuggestion[] => {
+    // For inline autocomplete, we'll trigger the API call but return existing suggestions
+    // This ensures immediate responsiveness while updating suggestions in the background
     const searchTimestamp = Date.now();
     latestSearchTimestampRef.current = searchTimestamp;
     
-    try {
-      const result = await executeAutocomplete(query);
-      
+    // Trigger async search in background
+    executeAutocomplete(query).then(result => {
       // Only update suggestions if this is still the most recent search
-      // This prevents stale results from slower API calls overwriting newer ones
       if (latestSearchTimestampRef.current === searchTimestamp && result?.suggestions) {
         setCompanySuggestions(result.suggestions);
       }
-    } catch (error) {
-      // Only handle error if this is still the most recent search
+    }).catch(error => {
       if (latestSearchTimestampRef.current === searchTimestamp) {
         console.error('Filer search error:', error);
         setCompanySuggestions([]);
       }
-    }
+    });
+    
+    // Return current suggestions for immediate display
+    return companySuggestions;
   };
 
   // Update search params when filers or keywords are selected
@@ -1853,8 +1851,8 @@ const SECSearchPage: React.FC = () => {
               />
             </Box>
 
-            {/* Row 2: Filing Category and Date Range */}
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+            {/* Row 2: Filing Category, Location, and Date Range */}
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
               {/* Form Types - Button to open modal */}
               <Box>
                 <TextField
@@ -1912,80 +1910,10 @@ const SECSearchPage: React.FC = () => {
                 )}
               </Box>
 
-              {/* Date Range */}
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <TextField
-                  label="Filed from"
-                  type="date"
-                  value={searchParams.dateFrom || ''}
-                  onChange={(e) => setSearchParams(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
-                  InputLabelProps={{ shrink: true }}
-                  inputProps={{
-                    min: '2001-01-01',
-                    max: new Date().toISOString().split('T')[0],
-                  }}
-                  variant="outlined"
-                  sx={{
-                    flex: 1,
-                    '& .MuiOutlinedInput-root': {
-                      '& fieldset': { borderColor: '#374151' },
-                      '&:hover fieldset': { borderColor: '#3b82f6' },
-                      '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                    },
-                    '& .MuiInputLabel-root': { color: '#9ca3af' },
-                    '& .MuiInputBase-input': { color: '#ffffff' },
-                  }}
-                />
-                <TextField
-                  label="Filed to"
-                  type="date"
-                  value={searchParams.dateTo || ''}
-                  onChange={(e) => setSearchParams(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
-                  InputLabelProps={{ shrink: true }}
-                  inputProps={{
-                    min: '2001-01-01',
-                    max: new Date().toISOString().split('T')[0],
-                  }}
-                  variant="outlined"
-                  sx={{
-                    flex: 1,
-                    '& .MuiOutlinedInput-root': {
-                      '& fieldset': { borderColor: '#374151' },
-                      '&:hover fieldset': { borderColor: '#3b82f6' },
-                      '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                    },
-                    '& .MuiInputLabel-root': { color: '#9ca3af' },
-                    '& .MuiInputBase-input': { color: '#ffffff' },
-                  }}
-                />
-              </Box>
-            </Box>
-          </Box>
-
-          {/* Advanced Filters Toggle */}
-          <Button
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            startIcon={showAdvanced ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            sx={{
-              color: '#9ca3af',
-              textTransform: 'none',
-              mb: showAdvanced ? 2 : 0,
-              '&:hover': { 
-                color: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-              },
-            }}
-          >
-            {showAdvanced ? 'Hide' : 'Show'} Advanced Filters
-          </Button>
-
-          {/* Advanced Filters */}
-          <Collapse in={showAdvanced}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px', mt: 2 }}>
-              {/* Located - Dropdown */}
+              {/* Location Filter */}
               <FormControl 
                 variant="outlined" 
-                size="small"
+                size="medium"
                 sx={{
                   '& .MuiOutlinedInput-root': {
                     '& fieldset': { borderColor: '#374151' },
@@ -2050,8 +1978,58 @@ const SECSearchPage: React.FC = () => {
                   ))}
                 </Select>
               </FormControl>
+
+              {/* Date Range */}
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField
+                  label="Filed from"
+                  type="date"
+                  value={searchParams.dateFrom || ''}
+                  onChange={(e) => setSearchParams(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{
+                    min: '2001-01-01',
+                    max: new Date().toISOString().split('T')[0],
+                  }}
+                  variant="outlined"
+                  sx={{
+                    flex: 1,
+                    '& .MuiOutlinedInput-root': {
+                      '& fieldset': { borderColor: '#374151' },
+                      '&:hover fieldset': { borderColor: '#3b82f6' },
+                      '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#9ca3af' },
+                    '& .MuiInputBase-input': { color: '#ffffff' },
+                  }}
+                />
+                <TextField
+                  label="Filed to"
+                  type="date"
+                  value={searchParams.dateTo || ''}
+                  onChange={(e) => setSearchParams(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{
+                    min: '2001-01-01',
+                    max: new Date().toISOString().split('T')[0],
+                  }}
+                  variant="outlined"
+                  sx={{
+                    flex: 1,
+                    '& .MuiOutlinedInput-root': {
+                      '& fieldset': { borderColor: '#374151' },
+                      '&:hover fieldset': { borderColor: '#3b82f6' },
+                      '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                    },
+                    '& .MuiInputLabel-root': { color: '#9ca3af' },
+                    '& .MuiInputBase-input': { color: '#ffffff' },
+                  }}
+                />
+              </Box>
             </Box>
-          </Collapse>
+          </Box>
+
+
 
           {/* Search Button and Stop Button */}
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>

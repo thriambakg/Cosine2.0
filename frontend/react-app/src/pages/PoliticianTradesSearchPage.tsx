@@ -1001,9 +1001,15 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   setSelectedFilters(prev => ({ ...prev, politicians }))
                 }
                 suggestions={isPoliticianDataLoaded ? 
-                  politicianSuggestionsService.getAllPoliticians().slice(0, 100).map(p => p.fullName) : 
+                  politicianSuggestionsService.getAllPoliticians().map(p => p.fullName) : 
                   []
                 }
+                onSearch={(query) => {
+                  if (!isPoliticianDataLoaded || !query || query.length < 2) {
+                    return [];
+                  }
+                  return politicianSuggestionsService.getSuggestions(query, 20).map(p => p.fullName);
+                }}
                 placeholder="e.g., Nancy Pelosi, Ted Cruz, AOC..."
                 helperText="Select multiple politicians to find trades by any of them"
                 allowCustomInput={true}
