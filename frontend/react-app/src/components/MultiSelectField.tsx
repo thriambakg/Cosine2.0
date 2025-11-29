@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   TextField,
   Dialog,
@@ -31,6 +31,7 @@ interface MultiSelectFieldProps<T> {
   maxChipsShown?: number;
   allowCustomInput?: boolean;
   isLoading?: boolean;
+  onSearch?: (query: string) => void; // Callback for dynamic search
 }
 
 function MultiSelectField<T = string>({
@@ -45,9 +46,20 @@ function MultiSelectField<T = string>({
   maxChipsShown = 3,
   allowCustomInput = true,
   isLoading = false,
+  onSearch,
 }: MultiSelectFieldProps<T>) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
+
+  // Real-time search effect - trigger on every character, handle race conditions
+  useEffect(() => {
+    if (!onSearch || !inputValue || inputValue.length < 2) {
+      return;
+    }
+
+    // Immediate API call for fluid experience
+    onSearch(inputValue);
+  }, [inputValue, onSearch]);
 
   const handleAddItem = (newItem: T | string) => {
     if (!newItem) return;
@@ -192,6 +204,32 @@ function MultiSelectField<T = string>({
               getOptionLabel={(option) => renderItem(option as T)}
               freeSolo={allowCustomInput}
               loading={isLoading}
+              PaperComponent={(props) => (
+                <Paper 
+                  {...props} 
+                  sx={{
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    border: '1px solid #374151',
+                    // Blue scrollbar styling
+                    '& .MuiAutocomplete-listbox': {
+                      '&::-webkit-scrollbar': {
+                        width: '8px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                        borderRadius: '4px',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: '#3b82f6',
+                        borderRadius: '4px',
+                        '&:hover': {
+                          backgroundColor: '#2563eb',
+                        },
+                      },
+                    },
+                  }}
+                />
+              )}
               renderInput={(params) => (
                 <TextField
                   {...params}

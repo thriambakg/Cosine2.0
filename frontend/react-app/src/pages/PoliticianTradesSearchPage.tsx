@@ -2266,6 +2266,40 @@ const PoliticianTradesSearchPage: React.FC = () => {
                             '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
                             '& .MuiSelect-icon': { color: '#9ca3af' },
                           }}
+                          MenuProps={{
+                            PaperProps: {
+                              sx: {
+                                bgcolor: '#1f2937',
+                                border: '1px solid #374151',
+                                '& .MuiMenuItem-root': {
+                                  color: '#ffffff',
+                                  '&:hover': {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                  '&.Mui-selected': {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                                    },
+                                  },
+                                },
+                                '&::-webkit-scrollbar': {
+                                  width: '8px',
+                                },
+                                '&::-webkit-scrollbar-track': {
+                                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb': {
+                                  backgroundColor: '#3b82f6',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb:hover': {
+                                  backgroundColor: '#2563eb',
+                                },
+                              },
+                            },
+                          }}
                         >
                           <MenuItem value={10}>10</MenuItem>
                           <MenuItem value={25}>25</MenuItem>

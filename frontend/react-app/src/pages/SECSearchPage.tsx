@@ -966,6 +966,32 @@ const SECSearchPage: React.FC = () => {
     loadInitialSuggestions();
   }, [executeAutocomplete]);
 
+  // Ref to track the most recent search timestamp for race condition handling
+  const latestSearchTimestampRef = useRef<number>(0);
+
+  // Handle filer search with real-time API calls and race condition protection
+  const handleFilerSearch = async (query: string) => {
+    // Create unique timestamp for this search to handle race conditions
+    const searchTimestamp = Date.now();
+    latestSearchTimestampRef.current = searchTimestamp;
+    
+    try {
+      const result = await executeAutocomplete(query);
+      
+      // Only update suggestions if this is still the most recent search
+      // This prevents stale results from slower API calls overwriting newer ones
+      if (latestSearchTimestampRef.current === searchTimestamp && result?.suggestions) {
+        setCompanySuggestions(result.suggestions);
+      }
+    } catch (error) {
+      // Only handle error if this is still the most recent search
+      if (latestSearchTimestampRef.current === searchTimestamp) {
+        console.error('Filer search error:', error);
+        setCompanySuggestions([]);
+      }
+    }
+  };
+
   // Update search params when filers or keywords are selected
   useEffect(() => {
     setSearchParams(prev => ({
@@ -1809,6 +1835,7 @@ const SECSearchPage: React.FC = () => {
                 helperText="Search for companies, CIKs, or individuals to include in your search"
                 allowCustomInput={false}
                 isLoading={autocompleteLoading}
+                onSearch={handleFilerSearch}
               />
 
               {/* Multi-Select Keywords */}
@@ -1981,6 +2008,40 @@ const SECSearchPage: React.FC = () => {
                     }));
                   }}
                   label="Located"
+                  MenuProps={{
+                    PaperProps: {
+                      sx: {
+                        bgcolor: '#1f2937',
+                        border: '1px solid #374151',
+                        '& .MuiMenuItem-root': {
+                          color: '#ffffff',
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          },
+                          '&.Mui-selected': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                            },
+                          },
+                        },
+                        '&::-webkit-scrollbar': {
+                          width: '8px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '4px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          backgroundColor: '#2563eb',
+                        },
+                      },
+                    },
+                  }}
                 >
                   {LOCATION_OPTIONS.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
@@ -2147,6 +2208,40 @@ const SECSearchPage: React.FC = () => {
                   value={selectedCategoryFilter}
                   onChange={(e) => setSelectedCategoryFilter(e.target.value)}
                   label="Category Filter"
+                  MenuProps={{
+                    PaperProps: {
+                      sx: {
+                        bgcolor: '#1f2937',
+                        border: '1px solid #374151',
+                        '& .MuiMenuItem-root': {
+                          color: '#ffffff',
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          },
+                          '&.Mui-selected': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                            },
+                          },
+                        },
+                        '&::-webkit-scrollbar': {
+                          width: '8px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '4px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          backgroundColor: '#2563eb',
+                        },
+                      },
+                    },
+                  }}
                 >
                   {SEC_FORM_CATEGORIES.map((category) => (
                     <MenuItem key={category.id} value={category.id}>
@@ -3055,6 +3150,40 @@ const SECSearchPage: React.FC = () => {
                               '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
                               '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
                               '& .MuiSelect-icon': { color: '#9ca3af' },
+                            }}
+                            MenuProps={{
+                              PaperProps: {
+                                sx: {
+                                  bgcolor: '#1f2937',
+                                  border: '1px solid #374151',
+                                  '& .MuiMenuItem-root': {
+                                    color: '#ffffff',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                    },
+                                    '&.Mui-selected': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                      '&:hover': {
+                                        backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                                      },
+                                    },
+                                  },
+                                  '&::-webkit-scrollbar': {
+                                    width: '8px',
+                                  },
+                                  '&::-webkit-scrollbar-track': {
+                                    backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb': {
+                                    backgroundColor: '#3b82f6',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb:hover': {
+                                    backgroundColor: '#2563eb',
+                                  },
+                                },
+                              },
                             }}
                           >
                             <MenuItem value={10}>10</MenuItem>
