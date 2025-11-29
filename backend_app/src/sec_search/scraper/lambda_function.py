@@ -1443,8 +1443,19 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             base_params['fileNumber'] = search_params['fileNumber']
         if search_params.get('filmNumber'):
             base_params['filmNumber'] = search_params['filmNumber']
+        # Add keywords - support both single keyword and multiple keywords
         if search_params.get('keywords'):
-            base_params['q'] = search_params['keywords']
+            keywords_value = search_params['keywords']
+            if isinstance(keywords_value, list):
+                # Multiple keywords - join with OR operator for broader search
+                # This allows any document containing any of the keywords to match
+                keywords_list = [str(keyword).strip() for keyword in keywords_value if keyword and str(keyword).strip()]
+                if keywords_list:
+                    # Use OR logic: "(keyword1 OR keyword2 OR keyword3)"
+                    base_params['q'] = '(' + ' OR '.join([f'"{kw}"' for kw in keywords_list]) + ')'
+            else:
+                # Single keyword
+                base_params['q'] = str(keywords_value).strip()
         if search_params.get('formTypes'):
             base_params['forms'] = ','.join(search_params['formTypes'])
         

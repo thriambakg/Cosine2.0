@@ -25,7 +25,6 @@ import {
   Collapse,
   Chip,
   Tooltip,
-  Autocomplete,
   Link,
 } from '@mui/material';
 import {
@@ -43,11 +42,12 @@ import {
   Launch as LaunchIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
-import { politicianSuggestionsService, Politician } from '../services/politicianSuggestions';
-import { securitySuggestionsService, Security } from '../services/securitySuggestions';
+import { politicianSuggestionsService } from '../services/politicianSuggestions';
+import { securitySuggestionsService } from '../services/securitySuggestions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addTradeToContext, addMultipleTradesToContext } from '../components/tiles/common';
+import MultiSelectField from '../components/MultiSelectField';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -79,12 +79,6 @@ const TRANSACTION_TYPES = [
   'Exchange',
   'Gift',
   'Other',
-];
-
-// Positions
-const POSITIONS = [
-  'Senate',
-  'House',
 ];
 
 // Parties
@@ -150,6 +144,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
       dateTo: new Date().toISOString().split('T')[0],
     }
   );
+  
   const [allSearchResults, setAllSearchResults] = useState<PoliticianTrade[]>(
     savedState?.allSearchResults || []
   );
@@ -160,12 +155,8 @@ const PoliticianTradesSearchPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
   const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 50);
   
-  // Politician suggestions state
-  const [politicianSuggestions, setPoliticianSuggestions] = useState<Politician[]>([]);
+  // Data loading state for suggestions
   const [isPoliticianDataLoaded, setIsPoliticianDataLoaded] = useState<boolean>(false);
-  
-  // Security suggestions state
-  const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
   const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState<boolean>(false);
   
   // Selection state
@@ -423,11 +414,21 @@ const PoliticianTradesSearchPage: React.FC = () => {
       const fetchPageSize = 100; // Use large page size to minimize API calls
       
       while (hasMore) {
-        const response = await politicianTradesSearchAPI.search({
+        // Build search parameters including multi-select filters
+        const searchRequest = {
           ...searchParams,
           page: currentPageNum,
           pageSize: fetchPageSize,
-        });
+          // Add multi-select filters (arrays for OR logic)
+          ...(selectedFilters.politicians.length > 0 && { 
+            politicianName: selectedFilters.politicians 
+          }),
+          ...(selectedFilters.securities.length > 0 && { 
+            security: selectedFilters.securities 
+          }),
+        };
+        
+        const response = await politicianTradesSearchAPI.search(searchRequest);
         
         if (response.success && response.results) {
           allResults = [...allResults, ...response.results];
@@ -885,402 +886,10 @@ const PoliticianTradesSearchPage: React.FC = () => {
 
         {/* Search Form */}
         <GlassCard sx={{ p: 4, mb: 4 }}>
-          {/* Top Bar - Common Search Parameters */}
+          {/* Date Range Parameters */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 3 }}>
-            {/* Row 1: Politician Name, Position, Party */}
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
-              {/* Politician Name with Autocomplete */}
-              <Autocomplete
-                options={politicianSuggestions}
-                getOptionLabel={(option) => typeof option === 'string' ? option : option.fullName}
-                filterOptions={(options, { inputValue }) => {
-                  if (!inputValue || inputValue.length < 2) return [];
-                  return politicianSuggestionsService.getSuggestions(inputValue, 10);
-                }}
-                freeSolo
-                value={searchParams.politicianName || ''}
-                onInputChange={(_, newValue) => {
-                  setSearchParams(prev => ({ ...prev, politicianName: newValue || undefined }));
-                }}
-                onChange={(_, newValue) => {
-                  const selectedName = typeof newValue === 'string' ? newValue : newValue?.fullName || '';
-                  setSearchParams(prev => ({ ...prev, politicianName: selectedName || undefined }));
-                }}
-                onFocus={() => {
-                  // Update suggestions when focused
-                  if (isPoliticianDataLoaded && searchParams.politicianName) {
-                    const suggestions = politicianSuggestionsService.getSuggestions(searchParams.politicianName, 10);
-                    setPoliticianSuggestions(suggestions);
-                  }
-                }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Politician Name"
-                    variant="outlined"
-                    placeholder={isPoliticianDataLoaded ? "e.g., Nancy Pelosi, Ted Cruz..." : "Loading politicians..."}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        '& fieldset': { borderColor: '#374151' },
-                        '&:hover fieldset': { borderColor: '#3b82f6' },
-                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                      },
-                      '& .MuiInputLabel-root': { color: '#9ca3af' },
-                      '& .MuiInputBase-input': { color: '#ffffff' },
-                      '& .MuiAutocomplete-input': { color: '#ffffff !important' },
-                    }}
-                  />
-                )}
-                renderOption={(props, option) => {
-                  const { key, ...otherProps } = props;
-                  return (
-                    <Box 
-                      component="li" 
-                      key={key}
-                      {...otherProps} 
-                      sx={{ 
-                        color: '#ffffff',
-                        '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' }
-                      }}
-                    >
-                      <Box>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {option.fullName}
-                        </Typography>
-                        <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                          {option.party} • {option.state} • {option.type === 'sen' ? 'Senator' : 'Representative'}
-                          {option.district && ` (District ${option.district})`}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  );
-                }}
-                componentsProps={{
-                  paper: {
-                    sx: {
-                      backgroundColor: '#1e293b',
-                      border: '1px solid #374151',
-                      '& .MuiAutocomplete-listbox': {
-                        backgroundColor: '#1e293b',
-                        '&::-webkit-scrollbar': {
-                          width: '6px',
-                        },
-                        '&::-webkit-scrollbar-track': {
-                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                        },
-                        '&::-webkit-scrollbar-thumb': {
-                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                          borderRadius: '3px',
-                        },
-                        '&::-webkit-scrollbar-thumb:hover': {
-                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                        },
-                      },
-                    },
-                  },
-                  popper: {
-                    sx: {
-                      '& .MuiAutocomplete-listbox': {
-                        backgroundColor: '#1e293b',
-                        '&::-webkit-scrollbar': {
-                          width: '6px',
-                        },
-                        '&::-webkit-scrollbar-track': {
-                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                        },
-                        '&::-webkit-scrollbar-thumb': {
-                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                          borderRadius: '3px',
-                        },
-                        '&::-webkit-scrollbar-thumb:hover': {
-                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                        },
-                      },
-                    },
-                  },
-                }}
-                sx={{
-                  // Global styles that should be applied to the dropdown
-                  '& .MuiAutocomplete-popper': {
-                    '& .MuiAutocomplete-listbox': {
-                      backgroundColor: '#1e293b !important',
-                      '&::-webkit-scrollbar': {
-                        width: '6px !important',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3) !important',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.5) !important',
-                        borderRadius: '3px !important',
-                      },
-                      '&::-webkit-scrollbar-thumb:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.7) !important',
-                      },
-                    },
-                  },
-                }}
-              />
-
-              {/* Position */}
-              <FormControl variant="outlined">
-                <InputLabel id="position-label" sx={{ color: '#9ca3af' }}>Position</InputLabel>
-                <Select
-                  labelId="position-label"
-                  value={searchParams.position || ''}
-                  onChange={(e) => setSearchParams(prev => ({ ...prev, position: e.target.value || undefined }))}
-                  label="Position"
-                  sx={{
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                    '& .MuiSelect-select': { color: '#ffffff' },
-                  }}
-                >
-                  <MenuItem value="">All</MenuItem>
-                  {POSITIONS.map(pos => (
-                    <MenuItem key={pos} value={pos}>{pos}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              {/* Party */}
-              <FormControl variant="outlined">
-                <InputLabel id="party-label" sx={{ color: '#9ca3af' }}>Party</InputLabel>
-                <Select
-                  labelId="party-label"
-                  value={searchParams.party || ''}
-                  onChange={(e) => setSearchParams(prev => ({ ...prev, party: e.target.value || undefined }))}
-                  label="Party"
-                  sx={{
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                    '& .MuiSelect-select': { color: '#ffffff' },
-                  }}
-                >
-                  <MenuItem value="">All</MenuItem>
-                  {PARTIES.map(party => (
-                    <MenuItem key={party} value={party}>{party}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
-
-            {/* Row 2: Security (Symbol/Name), Transaction Type, Amount Range */}
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
-              {/* Security Search with Autocomplete */}
-              <Autocomplete
-                options={securitySuggestions}
-                getOptionLabel={(option) => typeof option === 'string' ? option : `${option.symbol} - ${option.name}`}
-                getOptionKey={(option) => typeof option === 'string' ? option : `${option.symbol}-${option.name}-${option.category}`}
-                filterOptions={(_, { inputValue }) => {
-                  if (!inputValue || inputValue.length < 2) return [];
-                  return securitySuggestionsService.getSuggestions(inputValue, 10);
-                }}
-                freeSolo
-                value={searchParams.security || ''}
-                onInputChange={(_, newValue) => {
-                  setSearchParams(prev => ({ ...prev, security: newValue || undefined }));
-                }}
-                onChange={(_, newValue) => {
-                  if (typeof newValue === 'string') {
-                    setSearchParams(prev => ({ ...prev, security: newValue || undefined }));
-                  } else if (newValue) {
-                    // User selected from suggestions - format for lambda search
-                    const formatted = securitySuggestionsService.formatForSearch(newValue);
-                    setSearchParams(prev => ({ 
-                      ...prev, 
-                      security: formatted.securitySymbol || formatted.securityName || undefined
-                    }));
-                  } else {
-                    setSearchParams(prev => ({ ...prev, security: undefined }));
-                  }
-                }}
-                onFocus={() => {
-                  // Update suggestions when focused
-                  if (isSecurityDataLoaded && searchParams.security) {
-                    const suggestions = securitySuggestionsService.getSuggestions(searchParams.security, 10);
-                    setSecuritySuggestions(suggestions);
-                  }
-                }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Security (Symbol or Name)"
-                    variant="outlined"
-                    placeholder={isSecurityDataLoaded ? "e.g., AAPL, Apple Inc, Tesla..." : "Loading securities..."}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        '& fieldset': { borderColor: '#374151' },
-                        '&:hover fieldset': { borderColor: '#3b82f6' },
-                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                      },
-                      '& .MuiInputLabel-root': { color: '#9ca3af' },
-                      '& .MuiInputBase-input': { color: '#ffffff' },
-                      '& .MuiAutocomplete-input': { color: '#ffffff !important' },
-                    }}
-                  />
-                )}
-                renderOption={(props, option) => {
-                  const { key, ...otherProps } = props;
-                  // Create a unique key to avoid duplicate key warnings
-                  const uniqueKey = `${option.symbol}-${option.name}-${option.category}`;
-                  return (
-                    <Box 
-                      component="li" 
-                      key={uniqueKey}
-                      {...otherProps} 
-                      sx={{ 
-                        color: '#ffffff',
-                        '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' }
-                      }}
-                    >
-                      <Box>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {option.symbol}
-                        </Typography>
-                        <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                          {option.name} • {option.category === 'other' ? 'Other Securities' : option.category.replace('-', ' ').toUpperCase()}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  );
-                }}
-                componentsProps={{
-                  paper: {
-                    sx: {
-                      backgroundColor: '#1e293b',
-                      border: '1px solid #374151',
-                      '& .MuiAutocomplete-listbox': {
-                        backgroundColor: '#1e293b',
-                        '&::-webkit-scrollbar': {
-                          width: '6px',
-                        },
-                        '&::-webkit-scrollbar-track': {
-                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                        },
-                        '&::-webkit-scrollbar-thumb': {
-                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                          borderRadius: '3px',
-                        },
-                        '&::-webkit-scrollbar-thumb:hover': {
-                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                        },
-                      },
-                    },
-                  },
-                  popper: {
-                    sx: {
-                      '& .MuiAutocomplete-listbox': {
-                        backgroundColor: '#1e293b',
-                        '&::-webkit-scrollbar': {
-                          width: '6px',
-                        },
-                        '&::-webkit-scrollbar-track': {
-                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                        },
-                        '&::-webkit-scrollbar-thumb': {
-                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                          borderRadius: '3px',
-                        },
-                        '&::-webkit-scrollbar-thumb:hover': {
-                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                        },
-                      },
-                    },
-                  },
-                }}
-                sx={{
-                  // Global styles that should be applied to the dropdown
-                  '& .MuiAutocomplete-popper': {
-                    '& .MuiAutocomplete-listbox': {
-                      backgroundColor: '#1e293b !important',
-                      '&::-webkit-scrollbar': {
-                        width: '6px !important',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3) !important',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.5) !important',
-                        borderRadius: '3px !important',
-                      },
-                      '&::-webkit-scrollbar-thumb:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.7) !important',
-                      },
-                    },
-                  },
-                }}
-              />
-
-              {/* Transaction Type */}
-              <FormControl variant="outlined">
-                <InputLabel id="transaction-type-label" sx={{ color: '#9ca3af' }}>Transaction Type</InputLabel>
-                <Select
-                  labelId="transaction-type-label"
-                  value={searchParams.transactionType || ''}
-                  onChange={(e) => setSearchParams(prev => ({ ...prev, transactionType: e.target.value || undefined }))}
-                  label="Transaction Type"
-                  sx={{
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                    '& .MuiSelect-select': { color: '#ffffff' },
-                  }}
-                >
-                  <MenuItem value="">All</MenuItem>
-                  {TRANSACTION_TYPES.map(type => (
-                    <MenuItem key={type} value={type}>{type}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              {/* Amount Range */}
-              <FormControl variant="outlined">
-                <InputLabel id="amount-range-label" sx={{ color: '#9ca3af' }}>Amount Range</InputLabel>
-                <Select
-                  labelId="amount-range-label"
-                  value={searchParams.amountRange || ''}
-                  onChange={(e) => setSearchParams(prev => ({ ...prev, amountRange: e.target.value || undefined }))}
-                  label="Amount Range"
-                  sx={{
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                    '& .MuiSelect-select': { color: '#ffffff' },
-                  }}
-                >
-                  <MenuItem value="">All Ranges</MenuItem>
-                  {AMOUNT_RANGES.map(range => (
-                    <MenuItem key={range.value} value={range.value}>{range.label}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
-
-            {/* Row 3: State/District */}
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 2fr' }, gap: 2 }}>
-              <TextField
-                label="State/District"
-                value={searchParams.stateDistrict || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, stateDistrict: e.target.value || undefined }))}
-                placeholder="e.g., CA, TX31, IL"
-                variant="outlined"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
-              />
-              <Box /> {/* Empty box to maintain grid layout */}
-            </Box>
-
-            {/* Row 4: Transaction Date Range */}
+            {/* Date Range Fields */}
+            {/* Transaction Date Range */}
             <Box sx={{ display: 'flex', gap: 2 }}>
               <TextField
                 label="Transaction Date From"
@@ -1328,7 +937,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
               />
             </Box>
 
-            {/* Row 5: Filing Date Range */}
+            {/* Filing Date Range */}
             <Box sx={{ display: 'flex', gap: 2 }}>
               <TextField
                 label="Filing Date From"
@@ -1377,6 +986,99 @@ const PoliticianTradesSearchPage: React.FC = () => {
             </Box>
           </Box>
 
+          {/* Multi-Select Filters Section */}
+          <Box sx={{ mt: 4, mb: 3, borderTop: '1px solid #374151', pt: 3 }}>
+            <Typography variant="h6" sx={{ color: '#ffffff', mb: 2, fontSize: '1.1rem' }}>
+              Advanced Multi-Select Filters (OR Logic)
+            </Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+              {/* Multi-Select Politicians */}
+              {/* Multi-Select Politicians */}
+              <MultiSelectField<string>
+                label="Politicians"
+                selectedItems={selectedFilters.politicians}
+                onItemsChange={(politicians) => 
+                  setSelectedFilters(prev => ({ ...prev, politicians }))
+                }
+                suggestions={isPoliticianDataLoaded ? 
+                  politicianSuggestionsService.getAllPoliticians().slice(0, 100).map(p => p.fullName) : 
+                  []
+                }
+                placeholder="e.g., Nancy Pelosi, Ted Cruz, AOC..."
+                helperText="Select multiple politicians to find trades by any of them"
+                allowCustomInput={true}
+              />
+
+              {/* Multi-Select Securities */}
+              <MultiSelectField<string>
+                label="Securities"
+                selectedItems={selectedFilters.securities}
+                onItemsChange={(securities) => 
+                  setSelectedFilters(prev => ({ ...prev, securities }))
+                }
+                suggestions={isSecurityDataLoaded ? 
+                  ['AAPL - Apple Inc', 'TSLA - Tesla Inc', 'MSFT - Microsoft Corp', 'GOOGL - Alphabet Inc', 'AMZN - Amazon.com Inc', 'NVDA - NVIDIA Corp', 'META - Meta Platforms Inc', 'NFLX - Netflix Inc', 'JPM - JPMorgan Chase & Co', 'V - Visa Inc', 'JNJ - Johnson & Johnson', 'WMT - Walmart Inc'] : 
+                  []
+                }
+                placeholder="e.g., AAPL - Apple Inc, TSLA - Tesla Inc..."
+                helperText="Select multiple securities to find trades in any of them"
+                allowCustomInput={true}
+              />
+
+              {/* Political Parties */}
+              <MultiSelectField<string>
+                label="Political Parties"
+                selectedItems={selectedFilters.parties}
+                onItemsChange={(parties) => 
+                  setSelectedFilters(prev => ({ ...prev, parties }))
+                }
+                suggestions={PARTIES}
+                placeholder="e.g., Republican, Democratic..."
+                helperText="Select political parties to filter by"
+                allowCustomInput={false}
+              />
+
+              {/* Transaction Types */}
+              <MultiSelectField<string>
+                label="Transaction Types"
+                selectedItems={selectedFilters.transactionTypes}
+                onItemsChange={(transactionTypes) => 
+                  setSelectedFilters(prev => ({ ...prev, transactionTypes }))
+                }
+                suggestions={TRANSACTION_TYPES}
+                placeholder="e.g., Purchase, Sale..."
+                helperText="Select transaction types to filter by"
+                allowCustomInput={false}
+              />
+
+              {/* Amount Ranges */}
+              <MultiSelectField<string>
+                label="Amount Ranges"
+                selectedItems={selectedFilters.amountRanges}
+                onItemsChange={(amountRanges) => 
+                  setSelectedFilters(prev => ({ ...prev, amountRanges }))
+                }
+                suggestions={AMOUNT_RANGES.map(range => range.value)}
+                placeholder="e.g., $15,001-$50,000..."
+                helperText="Select amount ranges to filter by"
+                allowCustomInput={false}
+              />
+
+              {/* State/District */}
+              <MultiSelectField<string>
+                label="State/District"
+                selectedItems={selectedFilters.stateDistricts}
+                onItemsChange={(stateDistricts) => 
+                  setSelectedFilters(prev => ({ ...prev, stateDistricts }))
+                }
+                suggestions={['CA', 'TX', 'NY', 'FL', 'PA', 'IL', 'OH', 'GA', 'NC', 'MI', 'NJ', 'VA', 'WA', 'AZ', 'MA', 'TN', 'IN', 'MO', 'MD', 'WI', 'CO', 'MN', 'SC', 'AL', 'LA', 'KY', 'OR', 'OK', 'CT', 'IA', 'UT', 'AR', 'MS', 'KS', 'NV', 'NM', 'NE', 'WV', 'ID', 'HI', 'NH', 'ME', 'MT', 'RI', 'DE', 'SD', 'ND', 'AK', 'VT', 'WY', 'TX01', 'TX02', 'CA12', 'NY14', 'FL27']}
+                placeholder="e.g., CA, TX, NY14..."
+                helperText="Select states or districts to filter by"
+                allowCustomInput={true}
+              />
+            </Box>
+          </Box>
+
           {/* Search Button */}
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
             <Button
@@ -1385,6 +1087,15 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 setSearchParams({
                   dateFrom: '2020-01-01',
                   dateTo: new Date().toISOString().split('T')[0],
+                });
+                setSelectedFilters({
+                  politicians: [],
+                  parties: [],
+                  positions: [],
+                  securities: [],
+                  transactionTypes: [],
+                  stateDistricts: [],
+                  amountRanges: [],
                 });
                 setAllSearchResults([]);
                 setTotalFound(0);

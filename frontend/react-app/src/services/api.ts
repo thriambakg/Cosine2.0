@@ -747,7 +747,7 @@ export const dashboardAPI = {
 export interface SECSearchParams {
   cik?: string | string[];  // Support both single CIK and multiple CIKs
   entityName?: string | string[];  // Support both single and multiple entity names
-  keywords?: string;
+  keywords?: string | string[]; // Support multiple keywords
   formTypes?: string[];
   dateFrom?: string;
   dateTo?: string;
@@ -898,12 +898,13 @@ export const secSearchAPI = {
 
 // Politician Trades Search API
 export interface PoliticianTradesSearchParams {
-  politicianName?: string;
-  position?: string;
-  party?: string;
-  security?: string; // Combined security symbol and name search
-  transactionType?: string;
-  stateDistrict?: string;
+  politicianName?: string | string[]; // Support multiple politicians
+  position?: string | string[]; // Support multiple positions
+  party?: string | string[]; // Support multiple parties
+  security?: string | string[]; // Support multiple securities (symbol and name search)
+  transactionType?: string | string[]; // Support multiple transaction types
+  stateDistrict?: string | string[]; // Support multiple state/districts
+  keywords?: string | string[]; // Support multiple keywords for free-text search
   dateFrom?: string; // Transaction date from
   dateTo?: string; // Transaction date to
   filingDateFrom?: string; // Filing date from

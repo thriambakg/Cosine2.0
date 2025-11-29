@@ -10,29 +10,7 @@ class SecuritySuggestionsService {
   private securities: Security[] = [];
   private isLoaded = false;
 
-  // Common "other" securities (bonds, funds, etc.) that don't appear in stock exchanges
-  private otherSecurities: Security[] = [
-    { symbol: 'BOND', name: 'Corporate Bond', category: 'other' },
-    { symbol: 'TBOND', name: 'Treasury Bond', category: 'other' },
-    { symbol: 'MUNI', name: 'Municipal Bond', category: 'other' },
-    { symbol: 'CD', name: 'Certificate of Deposit', category: 'other' },
-    { symbol: 'CASH', name: 'Cash Equivalent', category: 'other' },
-    { symbol: 'FUND', name: 'Mutual Fund', category: 'other' },
-    { symbol: 'HEDGE', name: 'Hedge Fund', category: 'other' },
-    { symbol: 'PRIV', name: 'Private Equity', category: 'other' },
-    { symbol: 'REIT', name: 'Real Estate Investment Trust', category: 'other' },
-    { symbol: 'COMM', name: 'Commodity', category: 'other' },
-    { symbol: 'CRYPTO', name: 'Cryptocurrency', category: 'other' },
-    { symbol: 'OPTION', name: 'Options Contract', category: 'other' },
-    { symbol: 'FUTURE', name: 'Futures Contract', category: 'other' },
-    { symbol: 'DERIV', name: 'Financial Derivative', category: 'other' },
-    { symbol: 'WARRANT', name: 'Stock Warrant', category: 'other' },
-    { symbol: 'CONVERT', name: 'Convertible Security', category: 'other' },
-    { symbol: 'PREF', name: 'Preferred Stock', category: 'other' },
-    { symbol: 'NOTE', name: 'Promissory Note', category: 'other' },
-    { symbol: 'ANNUITY', name: 'Annuity Contract', category: 'other' },
-    { symbol: 'INSURE', name: 'Insurance Policy', category: 'other' },
-  ];
+
 
   async loadSecurities(): Promise<void> {
     if (this.isLoaded) return;
@@ -78,18 +56,10 @@ class SecuritySuggestionsService {
         }
       }
 
-      // Add other securities (bonds, funds, etc.) to the final list
-      for (const otherSecurity of this.otherSecurities) {
-        const key = `${otherSecurity.symbol}|${otherSecurity.name}`;
-        if (!globalSeen.has(key)) {
-          globalSeen.set(key, otherSecurity);
-        }
-      }
-
       this.securities = Array.from(globalSeen.values());
       this.isLoaded = true;
       
-      console.log(`🏦 Security suggestions service loaded with ${this.securities.length} total unique securities (including ${this.otherSecurities.length} 'other' securities)`);
+      console.log(`🏦 Security suggestions service loaded with ${this.securities.length} total unique securities from stock lists`);
     } catch (error) {
       console.error('❌ Failed to load security data:', error);
       this.securities = [];
@@ -258,9 +228,11 @@ class SecuritySuggestionsService {
   }
 
   getCountByCategory(): Record<string, number> {
-    const counts = { 'high-cap': 0, 'mid-cap': 0, 'low-cap': 0, 'other': 0 };
+    const counts: Record<string, number> = { 'high-cap': 0, 'mid-cap': 0, 'low-cap': 0 };
     for (const security of this.securities) {
-      counts[security.category]++;
+      if (security.category in counts) {
+        counts[security.category]++;
+      }
     }
     return counts;
   }

@@ -257,10 +257,11 @@ def build_query_params(
         # If we're not already using SecurityTradeDateIndex, add as filter condition
         if index_name != GSI_NAMES.get('securitySymbol'):
             # Create comprehensive security filter that searches:
-            # 1. Exact symbol match (case-insensitive)
+            # 1. Exact symbol match (case-insensitive) 
             # 2. Symbol contains search (for partial symbols)
             # 3. Security name contains search (case-insensitive)
             # 4. Security name begins_with search (for better matching)
+            # 5. Handle securities with missing/empty symbols (bonds, funds, etc.)
             security_upper = security_value.upper()
             security_lower = security_value.lower()
             
@@ -271,10 +272,14 @@ def build_query_params(
                 Attr('securityName').contains(security_lower) |               # Name contains (lowercase)
                 Attr('securityName').contains(security_upper) |               # Name contains (uppercase)
                 Attr('securityName').begins_with(security_value) |            # Name begins with (original case)
-                Attr('securityName').begins_with(security_value.title())      # Name begins with (title case)
+                Attr('securityName').begins_with(security_value.title()) |    # Name begins with (title case)
+                # Also search securities with missing/empty symbols (other securities like bonds)
+                (Attr('securitySymbol').not_exists() & Attr('securityName').contains(security_value)) |
+                (Attr('securitySymbol').eq('') & Attr('securityName').contains(security_value)) |
+                (Attr('securitySymbol').eq('--') & Attr('securityName').contains(security_value))
             )
             filter_conditions.append(security_filter)
-            logger.info(f"🔍 Added enhanced security filter for: '{security_value}' (symbol/name search)")
+            logger.info(f"🔍 Added enhanced security filter for: '{security_value}' (symbol/name/other search)")
     
     # Filing date range filter (filingDate is stored as YYYY-MM-DD string)
     if filters.get('filingDateFrom') or filters.get('filingDateTo'):

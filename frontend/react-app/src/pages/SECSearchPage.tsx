@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import MultiSelectField from '../components/MultiSelectField';
 import {
   TextField,
-  Autocomplete,
   Typography,
   Box,
   Card,
@@ -716,11 +716,14 @@ const SECSearchPage: React.FC = () => {
       dateTo: new Date().toISOString().split('T')[0],
     }
   );
-  const [companyInput, setCompanyInput] = useState<string>(savedState?.companyInput || '');
-  const [companySuggestions, setCompanySuggestions] = useState<SECAutocompleteSuggestion[]>([]);
-  const [selectedCompany, setSelectedCompany] = useState<SECAutocompleteSuggestion | null>(
-    savedState?.selectedCompany || null
+  // Multi-select state for filers and keywords
+  const [selectedFilers, setSelectedFilers] = useState<SECAutocompleteSuggestion[]>(
+    savedState?.selectedFilers || []
   );
+  const [selectedKeywords, setSelectedKeywords] = useState<string[]>(
+    savedState?.selectedKeywords || []
+  );
+  const [companySuggestions, setCompanySuggestions] = useState<SECAutocompleteSuggestion[]>([]);
   const [selectedColumns, setSelectedColumns] = useState<string[]>(
     savedState?.selectedColumns || DEFAULT_COLUMNS
   );
@@ -902,8 +905,8 @@ const SECSearchPage: React.FC = () => {
     try {
       const stateToSave = {
         searchParams,
-        selectedCompany,
-        companyInput,
+        selectedFilers,
+        selectedKeywords,
         allSearchResults,
         totalFound,
         currentPage,
@@ -929,8 +932,8 @@ const SECSearchPage: React.FC = () => {
     }
   }, [
     searchParams,
-    selectedCompany,
-    companyInput,
+    selectedFilers,
+    selectedKeywords,
     allSearchResults,
     totalFound,
     currentPage,
@@ -946,39 +949,34 @@ const SECSearchPage: React.FC = () => {
     isRestoringState,
   ]);
 
-  // Debounced autocomplete
+  // Load initial company suggestions for popular companies
   useEffect(() => {
-    if (!companyInput || companyInput.length < 2) {
-      setCompanySuggestions([]);
-      return;
-    }
-
-    const timeoutId = setTimeout(async () => {
+    const loadInitialSuggestions = async () => {
       try {
-        const result = await executeAutocomplete(companyInput);
+        // Load suggestions for common search terms to provide initial options
+        const result = await executeAutocomplete('Apple');
         if (result?.suggestions) {
-          setCompanySuggestions(result.suggestions);
+          setCompanySuggestions(result.suggestions.slice(0, 10)); // Limit to top 10
         }
       } catch (error) {
-        console.error('Autocomplete error:', error);
+        console.error('Error loading initial company suggestions:', error);
       }
-    }, 300);
+    };
+    
+    loadInitialSuggestions();
+  }, [executeAutocomplete]);
 
-    return () => clearTimeout(timeoutId);
-  }, [companyInput, executeAutocomplete]);
-
-  // Update search params when company is selected
+  // Update search params when filers or keywords are selected
   useEffect(() => {
-    if (selectedCompany) {
-      setSearchParams(prev => ({
-        ...prev,
-        cik: selectedCompany.cik,
-        entityName: selectedCompany.name,
-      }));
-      // Reset to page 1 when search params change
-      setCurrentPage(1);
-    }
-  }, [selectedCompany]);
+    setSearchParams(prev => ({
+      ...prev,
+      cik: selectedFilers.length > 0 ? selectedFilers.map(f => f.cik) : undefined,
+      entityName: selectedFilers.length > 0 ? selectedFilers.map(f => f.name) : undefined,
+      keywords: selectedKeywords.length > 0 ? selectedKeywords : undefined,
+    }));
+    // Reset to page 1 when search params change
+    setCurrentPage(1);
+  }, [selectedFilers, selectedKeywords]);
 
   // Reset page when search params change (except page itself)
   useEffect(() => {
@@ -1457,10 +1455,16 @@ const SECSearchPage: React.FC = () => {
       return;
     }
     
+    // Build search parameters from multi-select fields and form data
     const params: SECSearchParams = {
       ...searchParams,
       page: 1, // Always start from page 1 for new searches
       columns: selectedColumns.length === DEFAULT_COLUMNS.length ? [] : selectedColumns,
+      // Add multi-select filers (convert to CIKs and entity names)
+      cik: selectedFilers.length > 0 ? selectedFilers.map(f => f.cik) : undefined,
+      entityName: selectedFilers.length > 0 ? selectedFilers.map(f => f.name) : undefined,
+      // Add multi-select keywords
+      keywords: selectedKeywords.length > 0 ? selectedKeywords : undefined,
     };
 
     // Remove empty strings
@@ -1791,66 +1795,34 @@ const SECSearchPage: React.FC = () => {
         <GlassCard sx={{ p: 4, mb: 4 }}>
           {/* Top Bar - Common Search Parameters */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 3 }}>
-            {/* Row 1: Company Name and Keywords */}
+            {/* Row 1: Filers and Keywords - Multi-Select */}
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-              {/* Company Name with Autocomplete */}
-              <Autocomplete
-                freeSolo
-                options={companySuggestions}
-                getOptionLabel={(option) => typeof option === 'string' ? option : `${option.name} (${option.ticker || 'N/A'}) - CIK: ${option.cik}`}
-                filterOptions={(x) => x} // Disable filtering since API already filters
-                loading={autocompleteLoading}
-                value={selectedCompany}
-                onChange={(_, newValue) => {
-                  if (typeof newValue === 'string') {
-                    setCompanyInput(newValue);
-                    setSelectedCompany(null);
-                  } else {
-                    setSelectedCompany(newValue);
-                    setCompanyInput(newValue?.name || '');
-                  }
-                }}
-                inputValue={companyInput}
-                onInputChange={(_, newInputValue) => {
-                  setCompanyInput(newInputValue);
-                  if (!newInputValue) {
-                    setSelectedCompany(null);
-                    setSearchParams(prev => ({ ...prev, cik: undefined, entityName: undefined }));
-                  }
-                }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Company name, ticker, CIK number or individual's name"
-                    variant="outlined"
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        '& fieldset': { borderColor: '#374151' },
-                        '&:hover fieldset': { borderColor: '#3b82f6' },
-                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                      },
-                      '& .MuiInputLabel-root': { color: '#9ca3af' },
-                      '& .MuiInputBase-input': { color: '#ffffff' },
-                    }}
-                  />
-                )}
+              {/* Multi-Select Filers */}
+              <MultiSelectField<SECAutocompleteSuggestion>
+                label="Filers (Companies/Individuals)"
+                selectedItems={selectedFilers}
+                onItemsChange={setSelectedFilers}
+                suggestions={companySuggestions}
+                renderItem={(filer) => `${filer.name} (${filer.ticker || 'N/A'}) - CIK: ${filer.cik}`}
+                getItemKey={(filer) => filer.cik}
+                placeholder="Add company, CIK, or individual name..."
+                helperText="Search for companies, CIKs, or individuals to include in your search"
+                allowCustomInput={false}
+                isLoading={autocompleteLoading}
               />
 
-              {/* Keywords */}
-              <TextField
-                label="Document word or phrase (Keywords)"
-                value={searchParams.keywords || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, keywords: e.target.value || undefined }))}
-                variant="outlined"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
+              {/* Multi-Select Keywords */}
+              <MultiSelectField<string>
+                label="Keywords"
+                selectedItems={selectedKeywords}
+                onItemsChange={setSelectedKeywords}
+                suggestions={[]}
+                renderItem={(keyword) => keyword}
+                getItemKey={(keyword) => keyword}
+                placeholder="Type keyword and press Enter to add..."
+                helperText="Press Enter to add each keyword. Multiple keywords will use OR logic"
+                allowCustomInput={true}
+                isLoading={false}
               />
             </Box>
 
