@@ -773,7 +773,8 @@ const SECSearchPage: React.FC = () => {
     }
   );
   
-  const RESULTS_PER_PAGE = 10;
+  const [resultsPerPage, setResultsPerPage] = useState<number>(10);
+  const RESULTS_PER_PAGE = resultsPerPage; // Keep for backward compatibility
 
   const { data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
   const { execute: executeAutocomplete, loading: autocompleteLoading } = useSECAutocomplete();
@@ -1631,75 +1632,10 @@ const SECSearchPage: React.FC = () => {
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth="xl">
         <Box sx={{ display: 'flex', gap: 3 }}>
-          {/* Left Sidebar - Verification Links */}
-          <Box sx={{ width: '280px', flexShrink: 0 }}>
-            <GlassCard sx={{ p: 2, position: 'sticky', top: 20 }}>
-              <Typography
-                variant="h6"
-                sx={{
-                  color: '#ffffff',
-                  fontWeight: 600,
-                  mb: 2,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                }}
-              >
-                <VerifiedUserIcon sx={{ fontSize: '1.5rem', color: '#3b82f6' }} />
-                Verify on Official Source
-              </Typography>
-              <Typography
-                variant="body2"
-                sx={{
-                  color: '#9ca3af',
-                  mb: 2,
-                  fontSize: '0.875rem',
-                }}
-              >
-                Cross-reference findings with the official SEC EDGAR database:
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                <Button
-                  component="a"
-                  href="https://www.sec.gov/edgar/search/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  variant="outlined"
-                  startIcon={<OpenInNewIcon />}
-                  sx={{
-                    color: '#3b82f6',
-                    borderColor: '#3b82f6',
-                    '&:hover': {
-                      borderColor: '#2563eb',
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                    justifyContent: 'flex-start',
-                    textTransform: 'none',
-                    fontSize: '0.875rem',
-                  }}
-                >
-                  SEC EDGAR Search
-                </Button>
-              </Box>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: '#6b7280',
-                  mt: 2,
-                  display: 'block',
-                  fontSize: '0.75rem',
-                  lineHeight: 1.5,
-                }}
-              >
-                Note: This link opens the official SEC website where you can verify the accuracy of filing data.
-              </Typography>
-            </GlassCard>
-          </Box>
-
           {/* Main Content */}
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            {/* Header */}
-            <Box sx={{ mb: 4 }}>
+        {/* Header */}
+        <Box sx={{ mb: 4 }}>
           <Typography
             variant="h4"
             sx={{
@@ -2999,6 +2935,35 @@ const SECSearchPage: React.FC = () => {
                           }}
                         />
                       ) : null}
+                      {/* Results per page selector */}
+                      {totalFound > 0 && (
+                        <FormControl size="small" sx={{ minWidth: 120 }}>
+                          <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+                          <Select
+                            labelId="results-per-page-label"
+                            value={resultsPerPage}
+                            label="Per Page"
+                            onChange={(e) => {
+                              const newPageSize = Number(e.target.value);
+                              setResultsPerPage(newPageSize);
+                              setCurrentPage(1);
+                              // Recalculate pagination with new page size
+                            }}
+                            sx={{
+                              color: '#ffffff',
+                              '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '& .MuiSelect-icon': { color: '#9ca3af' },
+                            }}
+                          >
+                            <MenuItem value={10}>10</MenuItem>
+                            <MenuItem value={25}>25</MenuItem>
+                            <MenuItem value={50}>50</MenuItem>
+                            <MenuItem value={100}>100</MenuItem>
+                          </Select>
+                        </FormControl>
+                      )}
                     </Box>
                   ) : null}
                 </Box>
@@ -3251,6 +3216,71 @@ const SECSearchPage: React.FC = () => {
             </Box>
           </Box>
         )}
+          </Box>
+
+          {/* Right Sidebar - Verification Links */}
+          <Box sx={{ width: '280px', flexShrink: 0 }}>
+            <GlassCard sx={{ p: 2, position: 'sticky', top: 20 }}>
+              <Typography
+                variant="h6"
+                sx={{
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  mb: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
+                <VerifiedUserIcon sx={{ fontSize: '1.5rem', color: '#3b82f6' }} />
+                Verify on Official Sources
+              </Typography>
+              <Typography
+                variant="body2"
+                sx={{
+                  color: '#9ca3af',
+                  mb: 2,
+                  fontSize: '0.875rem',
+                }}
+              >
+                Cross-reference findings with the official SEC EDGAR database:
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <Button
+                  component="a"
+                  href="https://www.sec.gov/edgar/search/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  variant="outlined"
+                  startIcon={<OpenInNewIcon />}
+                  sx={{
+                    color: '#3b82f6',
+                    borderColor: '#3b82f6',
+                    '&:hover': {
+                      borderColor: '#2563eb',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                    justifyContent: 'flex-start',
+                    textTransform: 'none',
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  SEC EDGAR Search
+                </Button>
+              </Box>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#6b7280',
+                  mt: 2,
+                  display: 'block',
+                  fontSize: '0.75rem',
+                  lineHeight: 1.5,
+                }}
+              >
+                Note: This link opens the official SEC website where you can verify the accuracy of filing data.
+              </Typography>
+            </GlassCard>
           </Box>
         </Box>
       </Container>
