@@ -30,6 +30,11 @@ export interface TileContextData {
   filters?: any;
   criteria?: any;
   
+  // Search and filter properties (for politician_trades and sec_search tiles)
+  searchParams?: any;
+  filterSettings?: any;
+  filers?: any; // Full filer objects for SEC tile (includes CIK and ticker)
+  
   // Portfolio-specific data
   portfolioData?: {
     entries: Array<{ stock: string; shares: number }>;
@@ -817,6 +822,16 @@ export const extractTileData = (tile: any): TileContextData => {
     return {
       ...baseData,
       portfolioData: tile.portfolioData, // Include portfolio analysis results, stocks, shares, etc.
+    };
+  }
+
+  // Add search params and filter settings for politician trades and SEC tiles
+  if (tile.type === 'politician_trades' || tile.type === 'sec_search') {
+    return {
+      ...baseData,
+      searchParams: tile.searchParams, // Search parameters (politicians, securities, dates, etc.)
+      filterSettings: tile.filterSettings, // Client-side filter settings (entities, forms, etc.)
+      filers: tile.filers, // Full filer objects for SEC tile (includes CIK and ticker)
     };
   }
 
