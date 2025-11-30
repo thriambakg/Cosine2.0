@@ -230,11 +230,8 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     return localStorage.getItem(`politicianTrades_pageSize_${id}`) !== null;
   });
   const tileRef = useRef<HTMLDivElement>(null);
-  const lastClickTimeRef = useRef<number>(0);
 
   // Suggestion states
-  const [politicianSuggestions, setPoliticianSuggestions] = useState<string[]>([]);
-  const [securitySuggestions, setSecuritySuggestions] = useState<string[]>([]);
   const [isPoliticianDataLoaded, setIsPoliticianDataLoaded] = useState<boolean>(false);
   const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState<boolean>(false);
 

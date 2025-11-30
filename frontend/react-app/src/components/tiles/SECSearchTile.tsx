@@ -40,7 +40,6 @@ import {
   Close as CloseIcon,
   Search as SearchIcon,
   Description as DocumentIcon,
-  Download as DownloadIcon,
   Refresh as RefreshIcon,
   FilterList as FilterIcon,
   ExpandMore as ExpandMoreIcon,
@@ -398,82 +397,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   // Auto refresh functionality
   const autoRefreshRef = useRef<NodeJS.Timeout>();
 
-
-
-  // Handle file download
-  const handleDownload = async (result: SECSearchResult) => {
-    if (!result.filingPageS3Key && !result.documentS3Keys && !result.dataFileS3Keys) {
-      console.error('No S3 key available for download');
-      return;
-    }
-    
-    if (!user?.id) {
-      console.error('Missing user ID for file download', { 
-        user,
-        userExists: !!user,
-        userId: user?.id 
-      });
-      return;
-    }
-    
-    // Generate a session ID if one doesn't exist (fallback for tiles)
-    const sessionId = activeSessionId || `tile-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    console.log('📥 Downloading with session ID:', sessionId);
-    
-    try {
-      console.log('📥 Downloading SEC filing:', result.accession);
       
-      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-      
-      // Try downloading the filing page first, then documents
-      const s3Key = result.filingPageS3Key || 
-                   (result.documentS3Keys ? Object.values(result.documentS3Keys)[0] : '') ||
-                   (result.dataFileS3Keys ? Object.values(result.dataFileS3Keys)[0] : '');
-      
-      if (!s3Key) {
-        console.error('No downloadable files found');
-        return;
-      }
-      
-      const response = await fetch(`${apiUrl}/file-download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user.id,
-          session_id: sessionId,
-          s3_key: s3Key,
-          filename: `${result.accession}-${result.form}`,
-          bucket: 'SEC_FILINGS', // Indicate this is an SEC filing
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Download request failed: ${response.status}`);
-      }
-      
-      const { download_url } = await response.json();
-      
-      // Create download link and trigger download
-      const link = document.createElement('a');
-      link.href = download_url;
-      link.download = `${result.accession}-${result.form}`;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      console.log('✅ File download started');
-    } catch (error) {
-      console.error('❌ Download failed:', error);
-      console.error('Download context:', {
-        userId: user.id,
-        sessionId: sessionId,
-        s3Key: result.filingPageS3Key,
-        accession: result.accession
-      });
-    }
-  };
 
   const performSearch = useCallback(async () => {
     if (!currentSearchParams) return;
@@ -1336,15 +1260,18 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                   <Checkbox
                     checked={column.value}
                     onChange={(e) => {
-                      setVisibleColumns(prev => ({
+                      setVisibleColumns((prev: typeof visibleColumns) => ({
                         ...prev,
                         [column.key]: e.target.checked
                       }));
-                      // Update local display options to persist
-                      setLocalDisplayOptions(prev => ({
-                        ...prev,
-                        [`show${column.key.charAt(0).toUpperCase() + column.key.slice(1)}`]: e.target.checked
-                      }));
+                      // Update display options via onSettingsChange to persist
+                      const displayOptionKey = `show${column.key.charAt(0).toUpperCase() + column.key.slice(1)}` as keyof typeof localDisplayOptions;
+                      onSettingsChange(id, {
+                        displayOptions: {
+                          ...localDisplayOptions,
+                          [displayOptionKey]: e.target.checked
+                        }
+                      });
                     }}
                     sx={{ 
                       color: '#64748b', 
@@ -1463,7 +1390,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                     onDelete={() => {
                       setSelectedFilters(prev => ({
                         ...prev,
-                        entities: prev.entities.filter((e, i) => i !== idx)
+                        entities: prev.entities.filter((_, i) => i !== idx)
                       }));
                     }}
                     size="small"
