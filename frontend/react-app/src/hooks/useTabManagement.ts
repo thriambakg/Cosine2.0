@@ -78,13 +78,18 @@ export const useTabManagement = ({
       
       // Convert TabManagementState to format expected by existing dashboardAPI
       // The existing API expects the new format with tabs/dashboards
+      // Filter out results and lastUpdated from tiles - these should only be in session storage
       const dashboardConfig = {
         tabs: tabState.tabs.map(tab => ({
           id: tab.id,
           name: tab.name,
           color: tab.color || '#3b82f6',
           isPinned: tab.isPinned || false,
-          tiles: tab.tiles || [],
+          tiles: (tab.tiles || []).map((tile: any) => {
+            // Remove results and lastUpdated from tile data before saving to database
+            const { results, lastUpdated, ...tileConfig } = tile;
+            return tileConfig;
+          }),
           layout: tab.layout || 'grid',
           created_at: tab.created_at || new Date().toISOString(),
           updated_at: tab.updated_at || new Date().toISOString()

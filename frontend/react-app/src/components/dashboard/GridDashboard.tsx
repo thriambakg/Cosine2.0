@@ -6,6 +6,8 @@ import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
 import NewsTile from '../tiles/NewsTile';
 import PortfolioTile from '../tiles/PortfolioTile';
+import PoliticianTradesSearchTile from '../tiles/PoliticianTradesSearchTile';
+import SECSearchTile from '../tiles/SECSearchTile';
 import PlaceholderTile from '../tiles/PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../tiles/tileConfig';
@@ -924,6 +926,48 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       isPinned: tile.isPinned,
     };
 
+    const politicianTradesProps = {
+      ...commonProps,
+      searchParams: tile.searchParams,
+      results: tile.trades,
+      displayOptions: (tile.displayOptions as any) || {
+        showPolitician: true,
+        showParty: true,
+        showPosition: true,
+        showSecurity: true,
+        showTransactionType: true,
+        showAmount: true,
+        showDate: true,
+        showResultsTable: true,
+        maxResults: 50,
+        compactView: false,
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+    };
+
+    const secSearchProps = {
+      ...commonProps,
+      onSelectionChange: (isSelected: boolean) => handleTileSelection(tile.id, isSelected),
+      searchParams: tile.searchParams,
+      displayOptions: {
+        showEntity: true,
+        showForm: true,
+        showFilingDate: true,
+        showLocation: true,
+        showIncorporation: true,
+        showCIK: true,
+        showFile: true,
+        showResultsTable: true,
+        maxResults: 50,
+        compactView: false,
+        results: tile.results, // Pass session results from tile data
+        ...((tile.displayOptions as any) || {}),
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+    };
+
 
     return (
       <Box
@@ -947,6 +991,10 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           <NewsTile key={tile.id} {...newsProps} />
         ) : tile.type === 'portfolio' ? (
           <PortfolioTile key={tile.id} {...portfolioProps} />
+        ) : tile.type === 'politician_trades' ? (
+          <PoliticianTradesSearchTile key={tile.id} {...politicianTradesProps} />
+        ) : tile.type === 'sec_search' ? (
+          <SECSearchTile key={tile.id} {...secSearchProps} />
         ) : (
           <PlaceholderTile
             key={tile.id}

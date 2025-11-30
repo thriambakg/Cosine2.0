@@ -57,7 +57,7 @@ export interface TileSizeConstraints {
 
 export interface UnifiedTile {
   id: string;
-  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news';
+  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search';
   title: string;
   symbol?: string; // For crypto/stock tiles
   timeframe?: string; // For crypto/stock tiles
@@ -68,6 +68,8 @@ export interface UnifiedTile {
   results?: StockResult[]; // For stock_screener tiles
   filters?: NewsFilters; // For news tiles
   articles?: NewsArticle[]; // For news tiles
+  searchParams?: any; // For politician_trades tiles - keeping flexible for now
+  trades?: any[]; // For politician_trades tiles - keeping flexible for now
   portfolioData?: { // For portfolio tiles
     entries: Array<{ stock: string; shares: number }>;
     results: any;

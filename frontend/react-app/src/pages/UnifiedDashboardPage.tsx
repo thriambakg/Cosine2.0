@@ -28,7 +28,8 @@ import {
   Chat as ChatIcon,
   Settings as SettingsIcon,
   Article as ArticleIcon,
-  Assessment as AssessmentIcon
+  Assessment as AssessmentIcon,
+  Description as DescriptionIcon
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
@@ -277,6 +278,46 @@ const tileCategories: TileCategory[] = [
             subcategory: 'financial',
             icon: <ArticleIcon />,
             color: '#dc2626',
+            isAvailable: true,
+            placeholder: false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'government',
+    name: 'Government Data',
+    description: 'Access and analyze government financial disclosure data',
+    icon: <AccountBalanceIcon />,
+    color: '#3b82f6',
+    subcategories: [
+      {
+        id: 'trades',
+        name: 'Trading Disclosures',
+        description: 'Politician trading and financial disclosures',
+        icon: <AccountBalanceIcon />,
+        color: '#3b82f6',
+        tiles: [
+          {
+            id: 'politician_trades',
+            name: 'Politician Trades',
+            description: 'Search and analyze politician trading disclosures with advanced filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <AccountBalanceIcon />,
+            color: '#3b82f6',
+            isAvailable: true,
+            placeholder: false
+          },
+          {
+            id: 'sec_search',
+            name: 'SEC Filings',
+            description: 'Search and analyze SEC filing documents with entity and form filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <DescriptionIcon />,
+            color: '#2563eb',
             isAvailable: true,
             placeholder: false
           }
@@ -744,6 +785,12 @@ const UnifiedDashboardPage: React.FC = () => {
     } else if (tileType.id === 'portfolio') {
       // Handle portfolio tile creation
       handleCreatePortfolioTile();
+    } else if (tileType.id === 'politician_trades') {
+      // Handle politician trades tile creation
+      handleCreatePoliticianTradesTile();
+    } else if (tileType.id === 'sec_search') {
+      // Handle SEC search tile creation
+      handleCreateSECSearchTile();
     } else if (tileType.placeholder) {
       // For placeholder tiles, show a message
       alert(`${tileType.name} tiles are coming soon!`);
@@ -881,6 +928,88 @@ const UnifiedDashboardPage: React.FC = () => {
       gridPosition: findNextAvailablePosition({ width: 6, height: 8 }),
       gridSize: { width: 6, height: 8 },
       dashboard_id: currentDashboardId,
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
+  };
+
+  // Politician trades tile creation handler
+  const handleCreatePoliticianTradesTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `politician_trades_${Date.now()}`,
+      type: 'politician_trades',
+      title: 'Politician Trades',
+      displayOptions: {
+        showPolitician: true,
+        showParty: true,
+        showPosition: true,
+        showSecurity: true,
+        showTransactionType: true,
+        showAmount: true,
+        showDate: true,
+        maxResults: 50,
+        compactView: false,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 600, height: 600 },
+      gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
+      gridSize: { width: 6, height: 6 },
+      dashboard_id: currentDashboardId,
+      searchParams: {
+        dateFrom: '2020-01-01',
+        dateTo: new Date().toISOString().split('T')[0],
+        politicianName: [],
+        party: [],
+        position: [],
+        security: [],
+        transactionType: [],
+      },
+      trades: [],
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
+  };
+
+  // SEC search tile creation handler
+  const handleCreateSECSearchTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `sec_search_${Date.now()}`,
+      type: 'sec_search',
+      title: 'SEC Filings Search',
+      displayOptions: {
+        showEntity: true,
+        showForm: true,
+        showFilingDate: true,
+        showLocation: true,
+        showIncorporation: true,
+        showCIK: true,
+        showFile: true,
+        showResultsTable: true,
+        maxResults: 50,
+        compactView: false,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 600, height: 600 },
+      gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
+      gridSize: { width: 6, height: 6 },
+      dashboard_id: currentDashboardId,
+      searchParams: {
+        entityName: [],
+        formTypes: [],
+        dateFrom: '',
+        dateTo: '',
+        cik: '',
+      },
     };
 
     const updatedTiles = [...(activeTab.tiles || []), newTile];
@@ -1081,14 +1210,29 @@ const UnifiedDashboardPage: React.FC = () => {
       return;
     }
 
-    // Use functional update to get current tiles
-    updateTabTiles(activeTabId, (currentTiles) => {
-      const updatedTiles = currentTiles.map((tile: any) => 
-        tile.id === id ? { ...tile, ...data } : tile
-      );
-      
-      return updatedTiles;
-    });
+    // Filter out results and lastUpdated - these should only be in session storage, not database
+    // onUpdate is for session-only data (results), onSettingsChange is for database persistence (config)
+    const { results, lastUpdated, ...configData } = data;
+    
+    // Store results in sessionStorage only (not in tile state that gets saved to database)
+    if (results !== undefined) {
+      try {
+        sessionStorage.setItem(`tile_results_${id}`, JSON.stringify({ results, lastUpdated }));
+      } catch (error) {
+        console.error('Failed to store results in sessionStorage:', error);
+      }
+    }
+
+    // Only update tile state with non-result data (if any config data remains)
+    if (Object.keys(configData).length > 0) {
+      updateTabTiles(activeTabId, (currentTiles) => {
+        const updatedTiles = currentTiles.map((tile: any) => 
+          tile.id === id ? { ...tile, ...configData } : tile
+        );
+        
+        return updatedTiles;
+      });
+    }
   };
 
   const handleSettingsChange = (id: string, settings: any) => {

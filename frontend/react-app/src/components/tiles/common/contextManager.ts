@@ -7,7 +7,7 @@
 
 export interface ContextItem {
   id: string;
-  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'custom';
+  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'custom';
   title: string;
   subtitle?: string;
   data: any;
@@ -573,14 +573,51 @@ export const addTradeToContext = (
   // Use tradeId as the primary unique identifier, fallback to other fields
   const tradeId = trade.tradeId || trade.id || 
                   `${trade.politicianName || 'unknown'}_${trade.securitySymbol || 'trade'}_${trade.transactionDate || Date.now()}`;
-  const title = `${trade.politicianName || 'Unknown Politician'} - ${trade.securitySymbol || 'Unknown Security'}`;
+  // Format transaction date from YYYYMMDD format
+  const formatTransactionDate = (transactionDate?: number): string => {
+    if (!transactionDate) return '';
+    const dateStr = transactionDate.toString();
+    if (dateStr.length !== 8) return '';
+    const year = dateStr.substring(0, 4);
+    const month = dateStr.substring(4, 6);
+    const day = dateStr.substring(6, 8);
+    try {
+      return new Date(`${year}-${month}-${day}`).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return '';
+    }
+  };
+
+  // Format amount range
+  const formatAmountRange = (trade: any): string => {
+    if (trade.amountRange && Array.isArray(trade.amountRange) && trade.amountRange.length === 2) {
+      const [min, max] = trade.amountRange;
+      if (min === max) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(min);
+      }
+      return `${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(min)} - ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(max)}`;
+    }
+    if (trade.amountMin && trade.amountMax) {
+      if (trade.amountMin === trade.amountMax) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(trade.amountMin);
+      }
+      return `${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(trade.amountMin)} - ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(trade.amountMax)}`;
+    }
+    return '';
+  };
+
+  const title = `${trade.politicianName || 'Unknown Politician'} - ${trade.securitySymbol || trade.securityName || 'Unknown Security'}`;
   const subtitle = trade.transactionDate 
-    ? `${trade.transactionType || 'Trade'} on ${new Date(trade.transactionDate * 1000).toLocaleDateString()}${trade.amountRange ? ` • ${trade.amountRange}` : ''}`
+    ? `${trade.transactionType || 'Trade'} on ${formatTransactionDate(trade.transactionDate)}${formatAmountRange(trade) ? ` • ${formatAmountRange(trade)}` : ''}`
     : trade.transactionType ? `${trade.transactionType}` : 'Politician Trade';
   
   const contextItem: ContextItem = {
     id: `politician_trade_${tradeId}_${Date.now()}`,
-    type: 'custom', // Using custom type for politician trades
+    type: 'politician_trade',
     title,
     subtitle,
     data: trade, // Include all trade data
@@ -640,14 +677,51 @@ export const addMultipleTradesToContext = (
     // Use tradeId as the primary unique identifier, fallback to other fields
     const tradeId = trade.tradeId || trade.id || 
                     `${trade.politicianName || 'unknown'}_${trade.securitySymbol || 'trade'}_${trade.transactionDate || Date.now()}`;
-    const title = `${trade.politicianName || 'Unknown Politician'} - ${trade.securitySymbol || 'Unknown Security'}`;
+    // Format transaction date from YYYYMMDD format
+    const formatTransactionDate = (transactionDate?: number): string => {
+      if (!transactionDate) return '';
+      const dateStr = transactionDate.toString();
+      if (dateStr.length !== 8) return '';
+      const year = dateStr.substring(0, 4);
+      const month = dateStr.substring(4, 6);
+      const day = dateStr.substring(6, 8);
+      try {
+        return new Date(`${year}-${month}-${day}`).toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric' 
+        });
+      } catch {
+        return '';
+      }
+    };
+
+    // Format amount range
+    const formatAmountRange = (trade: any): string => {
+      if (trade.amountRange && Array.isArray(trade.amountRange) && trade.amountRange.length === 2) {
+        const [min, max] = trade.amountRange;
+        if (min === max) {
+          return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(min);
+        }
+        return `${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(min)} - ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(max)}`;
+      }
+      if (trade.amountMin && trade.amountMax) {
+        if (trade.amountMin === trade.amountMax) {
+          return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(trade.amountMin);
+        }
+        return `${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(trade.amountMin)} - ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(trade.amountMax)}`;
+      }
+      return '';
+    };
+
+    const title = `${trade.politicianName || 'Unknown Politician'} - ${trade.securitySymbol || trade.securityName || 'Unknown Security'}`;
     const subtitle = trade.transactionDate 
-      ? `${trade.transactionType || 'Trade'} on ${new Date(trade.transactionDate * 1000).toLocaleDateString()}${trade.amountRange ? ` • ${trade.amountRange}` : ''}`
+      ? `${trade.transactionType || 'Trade'} on ${formatTransactionDate(trade.transactionDate)}${formatAmountRange(trade) ? ` • ${formatAmountRange(trade)}` : ''}`
       : trade.transactionType ? `${trade.transactionType}` : 'Politician Trade';
     
     return {
       id: `politician_trade_${tradeId}_${Date.now()}-batch-${Math.random()}`,
-      type: 'custom' as const, // Using custom type for politician trades
+      type: 'politician_trade' as const,
       title,
       subtitle,
       data: trade, // Include all trade data

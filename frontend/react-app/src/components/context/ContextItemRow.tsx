@@ -55,6 +55,9 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
   const isSecFiling =
     item.type === 'sec_filing' ||
     Boolean(data?.filingId || data?.form || data?.documentUrls || data?.documentS3Keys);
+  const isPoliticianTrade =
+    item.type === 'politician_trade' ||
+    Boolean(data?.tradeId || data?.politicianName || data?.transactionType);
 
   const secDocuments = useMemo(() => {
     const urls: string[] = data.documentUrls || [];
@@ -159,6 +162,167 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
             {renderGenericDetails(val, depth + 1)}
           </Box>
         ))}
+      </Box>
+    );
+  };
+
+  const formatTransactionDate = (transactionDate?: number): string => {
+    if (!transactionDate) return 'N/A';
+    const dateStr = transactionDate.toString();
+    if (dateStr.length !== 8) return 'N/A';
+    const year = dateStr.substring(0, 4);
+    const month = dateStr.substring(4, 6);
+    const day = dateStr.substring(6, 8);
+    try {
+      return new Date(`${year}-${month}-${day}`).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  const formatAmountRange = (trade: any): string => {
+    if (trade.amountRange && Array.isArray(trade.amountRange) && trade.amountRange.length === 2) {
+      const [min, max] = trade.amountRange;
+      if (min === max) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(min);
+      }
+      return `${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(min)} - ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(max)}`;
+    }
+    if (trade.amountMin && trade.amountMax) {
+      if (trade.amountMin === trade.amountMax) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(trade.amountMin);
+      }
+      return `${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(trade.amountMin)} - ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(trade.amountMax)}`;
+    }
+    return 'N/A';
+  };
+
+  const handlePoliticianTradeDownload = async (formS3Key?: string) => {
+    if (!formS3Key || !sessionId || !userId) return;
+    try {
+      setDownloadingKey(formS3Key);
+      const response = await fetch(`${API_BASE_URL}/file-download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          session_id: sessionId,
+          bucket: 'POLITICIAN_TRADES',
+          s3_key: formS3Key,
+          filename: formS3Key.split('/').pop() || 'filing',
+        }),
+      });
+      if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
+      const { download_url } = await response.json();
+      const link = document.createElement('a');
+      link.href = download_url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.click();
+    } catch (error) {
+      console.error('Politician trade download failed:', error);
+    } finally {
+      setDownloadingKey(null);
+    }
+  };
+
+  const renderPoliticianTradeDetails = () => {
+    const infoFields = [
+      { label: 'Politician', value: data.politicianName },
+      { label: 'Position', value: data.position },
+      { label: 'Party', value: data.party },
+      { label: 'State/District', value: data.stateDistrict },
+      { label: 'Security Symbol', value: data.securitySymbol },
+      { label: 'Security Name', value: data.securityName },
+      { label: 'Asset Type', value: data.assetType },
+      { label: 'Transaction Type', value: data.transactionType },
+      { label: 'Transaction Date', value: formatTransactionDate(data.transactionDate) },
+      { label: 'Filing Date', value: data.filingDate },
+      { label: 'Amount Range', value: formatAmountRange(data) },
+      { label: 'Owner', value: data.owner },
+      { label: 'Source', value: data.source },
+      { label: 'Form Type', value: data.formType },
+    ];
+
+    // Add metadata fields if they exist
+    if (data.metadata && typeof data.metadata === 'object') {
+      Object.entries(data.metadata).forEach(([key, value]) => {
+        infoFields.push({ label: key, value: String(value) });
+      });
+    }
+
+    return (
+      <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1 }}>
+          {infoFields
+            .filter((field) => field.value && field.value !== 'N/A')
+            .map((field) => (
+              <Box key={field.label} sx={{ backgroundColor: 'rgba(16, 185, 129, 0.08)', borderRadius: 1, p: 1 }}>
+                <Typography variant="caption" sx={{ color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  {field.label}
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'white', wordBreak: 'break-word' }}>
+                  {field.value}
+                </Typography>
+              </Box>
+            ))}
+        </Box>
+
+        {data.websiteUrl && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Chip
+              label="Politician Website"
+              size="small"
+              sx={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', fontWeight: 600 }}
+              icon={<OpenInNewIcon sx={{ fontSize: 16 }} />}
+              component={MuiLink}
+              href={data.websiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              clickable
+            />
+          </Box>
+        )}
+
+        {data.formS3Key && (
+          <Box>
+            <Typography variant="subtitle2" sx={{ color: '#f8fafc', mb: 0.5 }}>
+              Filing Document
+            </Typography>
+            <Table size="small" sx={{ backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 1 }}>
+              <TableBody>
+                <TableRow>
+                  <TableCell>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      Filing Document
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: 'white', wordBreak: 'break-word' }}>
+                      {data.formS3Key.split('/').pop() || data.formS3Key}
+                    </Typography>
+                  </TableCell>
+                  <TableCell align="right" sx={{ width: 80 }}>
+                    <Tooltip title={data.formS3Key ? 'Download via Cosine (presigned link)' : 'Download unavailable'}>
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={!data.formS3Key || !sessionId || !userId || downloadingKey === data.formS3Key}
+                          onClick={() => handlePoliticianTradeDownload(data.formS3Key)}
+                          sx={{ color: data.formS3Key ? '#fbbf24' : '#475569' }}
+                        >
+                          <DownloadIcon fontSize="inherit" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </Box>
+        )}
       </Box>
     );
   };
@@ -364,7 +528,7 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
 
       <Collapse in={expanded} timeout="auto" unmountOnExit>
         <Divider sx={{ my: 1, borderColor: 'rgba(148, 163, 184, 0.2)' }} />
-        {isSecFiling ? renderSecDetails() : renderGenericDetails(item.data || {})}
+        {isSecFiling ? renderSecDetails() : isPoliticianTrade ? renderPoliticianTradeDetails() : renderGenericDetails(item.data || {})}
       </Collapse>
     </Box>
   );

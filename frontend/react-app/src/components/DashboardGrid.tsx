@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Typography } from '@mui/material';
 import CryptoTile from './tiles/CryptoTile';
 import StockTile from './tiles/StockTile';
+import SECSearchTile from './tiles/SECSearchTile';
 import PlaceholderTile from './tiles/PlaceholderTile';
 import { UnifiedTile } from '../types/dashboardTypes';
 
@@ -80,6 +81,21 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
             onUpdate={onUpdateTile}
             onSettingsChange={onSettingsChange}
             onResize={onResizeTile}
+          />
+        );
+      case 'sec_search':
+        return (
+          <SECSearchTile
+            key={tile.id}
+            id={tile.id}
+            size={tile.size}
+            onRemove={onRemoveTile}
+            onUpdate={onUpdateTile}
+            onSettingsChange={onSettingsChange}
+            searchParams={tile.searchParams}
+            displayOptions={tile.displayOptions}
+            autoRefresh={tile.autoRefresh}
+            isPinned={tile.isPinned}
           />
         );
       default:
