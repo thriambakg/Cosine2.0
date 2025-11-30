@@ -258,10 +258,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     
     try {
       await politicianSuggestionsService.loadPoliticians();
-      // Get top politician suggestions for initial list
-      const allPoliticians = politicianSuggestionsService.getAllPoliticians();
-      const suggestionsList = allPoliticians.slice(0, 20).map(p => p.displayText);
-      setPoliticianSuggestions(suggestionsList);
       setIsPoliticianDataLoaded(true);
     } catch (error) {
       console.error('Failed to load politician suggestions:', error);
@@ -274,10 +270,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     
     try {
       await securitySuggestionsServiceV2.loadSecurities();
-      // Get top security suggestions for initial list
-      const allSecurities = securitySuggestionsServiceV2.getAllSecurities();
-      const suggestionsList = allSecurities.slice(0, 20).map(s => s.displayText);
-      setSecuritySuggestions(suggestionsList);
       setIsSecurityDataLoaded(true);
     } catch (error) {
       console.error('Failed to load security suggestions:', error);
