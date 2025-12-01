@@ -875,7 +875,32 @@ resource "aws_iam_policy" "usaspending_indexing_dynamodb_policy" {
   tags = var.common_tags
 }
 
-# Note: Using S3 policy from base infrastructure instead of creating a duplicate
+# IAM Policy for USAspending Indexing Lambda to access S3 bucket
+resource "aws_iam_policy" "usaspending_indexing_s3_policy" {
+  name        = "${var.project_name}-usaspending-indexing-s3-policy-${var.environment}"
+  description = "Policy for USAspending Indexing Lambda to access S3 bucket for award details"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::cosine-usaspending-data-${var.environment}",
+          "arn:aws:s3:::cosine-usaspending-data-${var.environment}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
 
 # IAM Policy for Lambda functions to publish to SNS (restricted to specific topic)
 resource "aws_iam_policy" "lambda_sns_publish_policy_restricted" {
@@ -2341,7 +2366,7 @@ module "usaspending_indexing_lambda" {
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.usaspending_indexing_dynamodb_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.lambda_usaspending_data_s3_policy_arn,
+    aws_iam_policy.usaspending_indexing_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
 
