@@ -176,6 +176,12 @@ module "api_gateway" {
     politician_trades_search = {
       path_part = "politician-trades-search"
     }
+    usaspending_autocomplete = {
+      path_part = "usaspending-autocomplete"
+    }
+    usaspending_indexing = {
+      path_part = "usaspending-indexing"
+    }
   }
 
   # Methods configuration
@@ -444,6 +450,23 @@ module "api_gateway" {
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
+    # POST method for USAspending autocomplete
+    usaspending_autocomplete_post = {
+      resource_key            = "usaspending_autocomplete"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.usaspending_autocomplete_lambda.function_arn
+      request_parameters      = {}
+    }
+    usaspending_indexing_post = {
+      resource_key            = "usaspending_indexing"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.usaspending_indexing_lambda.function_arn
+      request_parameters      = {}
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -599,6 +622,16 @@ module "api_gateway" {
       function_arn  = module.politician_trades_search_lambda.function_arn
       http_method   = "POST"
       resource_path = "politician-trades-search"
+    }
+    usaspending_autocomplete_post = {
+      function_arn  = module.usaspending_autocomplete_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "usaspending-autocomplete"
+    }
+    usaspending_indexing_post = {
+      function_arn  = module.usaspending_indexing_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "usaspending-indexing"
     }
   }
 
@@ -811,6 +844,38 @@ resource "aws_iam_policy" "politician_trades_search_dynamodb_policy" {
 
   tags = var.common_tags
 }
+
+# IAM Policy for USAspending Indexing Lambda to access DynamoDB awards table
+resource "aws_iam_policy" "usaspending_indexing_dynamodb_policy" {
+  name        = "${var.project_name}-usaspending-indexing-dynamodb-policy-${var.environment}"
+  description = "Policy for USAspending Indexing Lambda to access DynamoDB awards table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Note: Using S3 policy from base infrastructure instead of creating a duplicate
 
 # IAM Policy for Lambda functions to publish to SNS (restricted to specific topic)
 resource "aws_iam_policy" "lambda_sns_publish_policy_restricted" {
@@ -2201,6 +2266,84 @@ module "politician_trades_search_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.politician_trades_search_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# USAspending Autocomplete Lambda Function
+module "usaspending_autocomplete_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-usaspending-autocomplete-${var.environment}"
+  description   = "Lambda function for USAspending API autocomplete endpoints"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/govt_contracts/autocomplete"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT            = var.environment
+    LOG_LEVEL              = var.environment == "development" ? "DEBUG" : "INFO"
+    USASPENDING_BASE_URL   = "https://api.usaspending.gov"
+    USASPENDING_USER_AGENT = "Cosine Financial Platform (contact@cosine.financial)"
+    REQUEST_TIMEOUT        = "30"
+  }
+
+  # Attach core layer (includes requests library)
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# USAspending Indexing Lambda Function
+module "usaspending_indexing_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-usaspending-indexing-${var.environment}"
+  description   = "Lambda function for indexing USAspending awards, transactions, and subawards"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 900  # 15 minutes for large indexing operations
+  memory_size   = 1024 # Increased memory for processing large transactions/subawards
+
+  # Source directory
+  source_dir = "../backend_app/src/govt_contracts/indexing"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT            = var.environment
+    LOG_LEVEL              = var.environment == "development" ? "DEBUG" : "INFO"
+    USASPENDING_BASE_URL   = "https://api.usaspending.gov"
+    USASPENDING_USER_AGENT = "Cosine Financial Platform (contact@cosine.financial)"
+    REQUEST_TIMEOUT        = "30"
+    AWARDS_TABLE_NAME      = "usaspending-awards-index"
+    S3_BUCKET_NAME         = "cosine-usaspending-data-${var.environment}"
+  }
+
+  # Attach core layer (includes requests library)
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies - DynamoDB access for awards table, S3 access for award details
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.usaspending_indexing_dynamodb_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.lambda_usaspending_data_s3_policy_arn,
+    aws_iam_policy.lambda_kms_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_policy_arn
   ]
 
   tags = var.common_tags

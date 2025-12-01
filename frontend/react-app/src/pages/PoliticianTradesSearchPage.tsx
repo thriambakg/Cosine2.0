@@ -2103,7 +2103,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 </Box>
               )}
 
-              {/* State/District Filter */}
+              {/* Jurisdiction Filter */}
               {availableFilters.state_district_filters && availableFilters.state_district_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
@@ -2122,7 +2122,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                     }}
                   >
                     <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                      State/District
+                      Jurisdiction
                     </Typography>
                     {expandedFilters.stateDistrict ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
                   </Box>
@@ -2536,6 +2536,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Politician</TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Position</TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Party</TableCell>
+                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Jurisdiction</TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Security</TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Transaction</TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Transaction Date</TableCell>
@@ -2602,6 +2603,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
                     </TableCell>
                     <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       {trade.party || 'N/A'}
+                    </TableCell>
+                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
+                      {trade.stateDistrict || 'N/A'}
                     </TableCell>
                     <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                       <Box>

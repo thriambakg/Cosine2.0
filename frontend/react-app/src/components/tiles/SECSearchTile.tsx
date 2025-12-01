@@ -244,6 +244,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fetchProgress, setFetchProgress] = useState<{ currentPage: number; totalPages: number | null } | null>(null);
   
   // Multi-select state - we'll read/write directly from currentSearchParams like PoliticianTradesSearchTile
   // Store full filer information for persistence (name, CIK, ticker)
@@ -405,6 +406,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     console.log('🏛️ SECSearchTile: Starting search with params:', currentSearchParams);
     setIsLoading(true);
     setError(null);
+    setFetchProgress({ currentPage: 0, totalPages: null }); // Initialize progress
     
     try {
       // Build search request - entityName and keywords are already arrays in currentSearchParams
@@ -503,6 +505,14 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
             return;
           }
           
+          // Update progress from backend
+          if (jobStatus.progress) {
+            setFetchProgress({
+              currentPage: jobStatus.progress.current_page || 0,
+              totalPages: jobStatus.progress.total_pages || null,
+            });
+          }
+          
           // Check if job is complete
           if (jobStatus.status === 'COMPLETED') {
             console.log('SECSearchTile: Job completed, jobStatus:', jobStatus);
@@ -551,12 +561,14 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
             
             console.log(`✅ SECSearchTile: Found ${results.length} results - State updated`);
             setIsLoading(false);
+            setFetchProgress(null); // Clear progress when complete
           } else if (jobStatus.status === 'FAILED') {
             console.error('❌ SECSearchTile: Search job failed:', jobStatus.error);
             setError(jobStatus.error || 'Search failed');
             setAllResults([]);
             setHasPerformedInitialSearch(true);
             setIsLoading(false);
+            setFetchProgress(null); // Clear progress on failure
           } else {
             // Still in progress, poll again
             setTimeout(pollForResults, 2000); // Poll every 2 seconds
@@ -567,6 +579,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           setAllResults([]);
           setHasPerformedInitialSearch(true);
           setIsLoading(false);
+          setFetchProgress(null); // Clear progress on error
         }
       };
       
@@ -579,6 +592,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       setAllResults([]);
       setHasPerformedInitialSearch(true);
       setIsLoading(false);
+      setFetchProgress(null); // Clear progress on error
     }
   }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate]);
 
@@ -2219,14 +2233,25 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           </Typography>
           
           {isLoading && (
-            <CircularProgress size={16} sx={{ color: '#3b82f6', ml: 1 }} />
+            <>
+              <CircularProgress size={16} sx={{ color: '#3b82f6', ml: 1 }} />
+              {fetchProgress && (
+                <Typography variant="caption" sx={{ color: '#3b82f6', ml: 1, fontWeight: 500 }}>
+                  {fetchProgress.totalPages 
+                    ? `Fetching page ${fetchProgress.currentPage} of ${fetchProgress.totalPages}...`
+                    : `Fetching page ${fetchProgress.currentPage}...`}
+                </Typography>
+              )}
+            </>
           )}
           
-          <Typography variant="caption" sx={{ color: '#9ca3b8', ml: 1 }}>
-            {allResults.length > 0 && currentResults.length !== allResults.length 
-              ? `${currentResults.length} of ${allResults.length} results`
-              : `${allResults.length} results`}
-          </Typography>
+          {!isLoading && (
+            <Typography variant="caption" sx={{ color: '#9ca3b8', ml: 1 }}>
+              {allResults.length > 0 && currentResults.length !== allResults.length 
+                ? `${currentResults.length} of ${allResults.length} results`
+                : `${allResults.length} results`}
+            </Typography>
+          )}
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

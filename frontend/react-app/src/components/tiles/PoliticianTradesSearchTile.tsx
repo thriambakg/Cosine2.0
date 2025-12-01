@@ -86,6 +86,7 @@ interface PoliticianTradesSearchTileProps {
     showPolitician: boolean;
     showParty: boolean;
     showPosition: boolean;
+    showStateDistrict: boolean;
     showSecurity: boolean;
     showTransactionType: boolean;
     showAmount: boolean;
@@ -124,6 +125,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     showPolitician: true,
     showParty: true,
     showPosition: true,
+    showStateDistrict: true,
     showSecurity: true,
     showTransactionType: true,
     showAmount: true,
@@ -180,6 +182,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     showPolitician: true,
     showParty: true,
     showPosition: true,
+    showStateDistrict: true,
     showSecurity: true,
     showTransactionType: true,
     showAmount: true,
@@ -201,6 +204,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     politician: boolean;
     party: boolean;
     position: boolean;
+    stateDistrict: boolean;
     security: boolean;
     transactionType: boolean;
     amount: boolean;
@@ -211,6 +215,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     politician: localDisplayOptions.showPolitician,
     party: localDisplayOptions.showParty,
     position: localDisplayOptions.showPosition,
+    stateDistrict: localDisplayOptions.showStateDistrict ?? true,
     security: localDisplayOptions.showSecurity,
     transactionType: localDisplayOptions.showTransactionType,
     amount: localDisplayOptions.showAmount,
@@ -608,6 +613,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       politician: localDisplayOptions.showPolitician,
       party: localDisplayOptions.showParty,
       position: localDisplayOptions.showPosition,
+      stateDistrict: localDisplayOptions.showStateDistrict ?? true,
       security: localDisplayOptions.showSecurity,
       transactionType: localDisplayOptions.showTransactionType,
       amount: localDisplayOptions.showAmount,
@@ -746,6 +752,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       politician: 120,
       position: 80,
       party: 90,
+      stateDistrict: 100,
       security: 150,
       transactionType: 90,
       amount: 100,
@@ -768,6 +775,11 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     
     if (visibleColumns.party) {
       widths.party = minWidths.party; // Fixed size for chips
+    }
+    
+    if (visibleColumns.stateDistrict) {
+      const maxLength = Math.max(...sampleResults.map(t => (t.stateDistrict || '').length));
+      widths.stateDistrict = Math.max(minWidths.stateDistrict, Math.min(maxLength * 8 + 32, 120));
     }
     
     if (visibleColumns.security) {
@@ -1452,6 +1464,15 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.party,
                     }}>Party</TableCell>
                   )}
+                  {visibleColumns.stateDistrict && (
+                    <TableCell sx={{ 
+                      color: '#9ca3af', 
+                      fontWeight: 600, 
+                      fontSize: '0.875rem',
+                      width: columnWidths.stateDistrict,
+                      minWidth: columnWidths.stateDistrict,
+                    }}>Jurisdiction</TableCell>
+                  )}
                   {visibleColumns.security && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
@@ -1609,13 +1630,24 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                           label={trade.party || 'N/A'}
                           size="small"
                           sx={{
-                            backgroundColor: 
-                              trade.party === 'Republican' ? '#dc2626' :
-                              trade.party === 'Democratic' ? '#2563eb' : '#6b7280',
+                            backgroundColor: '#6b7280',
                             color: '#ffffff',
                             fontSize: '0.75rem',
                           }}
                         />
+                      </TableCell>
+                    )}
+                    {visibleColumns.stateDistrict && (
+                      <TableCell sx={{ 
+                        color: '#ffffff', 
+                        fontSize: '0.875rem',
+                        width: columnWidths.stateDistrict,
+                        minWidth: columnWidths.stateDistrict,
+                        padding: '8px 12px',
+                      }}>
+                        <Typography variant="body2" noWrap title={trade.stateDistrict || 'N/A'}>
+                          {trade.stateDistrict || 'N/A'}
+                        </Typography>
                       </TableCell>
                     )}
                     {visibleColumns.security && (
@@ -2009,6 +2041,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                 { key: 'politician', label: 'Politician', value: visibleColumns.politician },
                 { key: 'party', label: 'Party', value: visibleColumns.party },
                 { key: 'position', label: 'Position', value: visibleColumns.position },
+                { key: 'stateDistrict', label: 'Jurisdiction', value: visibleColumns.stateDistrict },
                 { key: 'security', label: 'Security', value: visibleColumns.security },
                 { key: 'transactionType', label: 'Transaction', value: visibleColumns.transactionType },
                 { key: 'amount', label: 'Amount', value: visibleColumns.amount },
@@ -2653,6 +2686,16 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
             <FormControlLabel
               control={
                 <Checkbox
+                  checked={localDisplayOptions.showStateDistrict ?? true}
+                  onChange={() => handleDisplayOptionsChange('showStateDistrict')}
+                  sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
+                />
+              }
+              label="Show Jurisdiction"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
                   checked={localDisplayOptions.showSecurity}
                   onChange={() => handleDisplayOptionsChange('showSecurity')}
                   sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
@@ -2730,6 +2773,7 @@ const PoliticianTradesSearchTileMemo = memo(PoliticianTradesSearchTile, (prevPro
     if (prevDisplay.showPolitician !== nextDisplay.showPolitician ||
         prevDisplay.showParty !== nextDisplay.showParty ||
         prevDisplay.showPosition !== nextDisplay.showPosition ||
+        prevDisplay.showStateDistrict !== nextDisplay.showStateDistrict ||
         prevDisplay.showSecurity !== nextDisplay.showSecurity ||
         prevDisplay.showTransactionType !== nextDisplay.showTransactionType ||
         prevDisplay.showAmount !== nextDisplay.showAmount ||
