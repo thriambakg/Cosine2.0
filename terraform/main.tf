@@ -865,8 +865,8 @@ resource "aws_iam_policy" "usaspending_indexing_dynamodb_policy" {
           "dynamodb:BatchWriteItem"
         ]
         Resource = [
-          data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*"
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/usaspending-awards-index",
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/usaspending-awards-index/index/*"
         ]
       }
     ]
@@ -2342,8 +2342,7 @@ module "usaspending_indexing_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.usaspending_indexing_dynamodb_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_usaspending_data_s3_policy_arn,
-    aws_iam_policy.lambda_kms_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_policy_arn
+    aws_iam_policy.lambda_kms_policy.arn
   ]
 
   tags = var.common_tags
