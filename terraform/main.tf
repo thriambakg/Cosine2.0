@@ -865,8 +865,8 @@ resource "aws_iam_policy" "usaspending_indexing_dynamodb_policy" {
           "dynamodb:BatchWriteItem"
         ]
         Resource = [
-          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/usaspending-awards-index",
-          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/usaspending-awards-index/index/*"
+          data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*"
         ]
       }
     ]
