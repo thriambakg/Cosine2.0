@@ -2357,6 +2357,7 @@ module "usaspending_indexing_lambda" {
     S3_BUCKET_NAME         = data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_name
   }
 
+
   # Attach core layer (includes requests library)
   layers = [
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
