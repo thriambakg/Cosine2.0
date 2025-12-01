@@ -182,6 +182,9 @@ module "api_gateway" {
     usaspending_indexing = {
       path_part = "usaspending-indexing"
     }
+    usaspending_award = {
+      path_part = "usaspending-award"
+    }
   }
 
   # Methods configuration
@@ -467,6 +470,14 @@ module "api_gateway" {
       lambda_arn              = module.usaspending_indexing_lambda.function_arn
       request_parameters      = {}
     }
+    usaspending_award_get = {
+      resource_key            = "usaspending_award"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.usaspending_getter_lambda.function_arn
+      request_parameters      = {}
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -632,6 +643,11 @@ module "api_gateway" {
       function_arn  = module.usaspending_indexing_lambda.function_arn
       http_method   = "POST"
       resource_path = "usaspending-indexing"
+    }
+    usaspending_award_get = {
+      function_arn  = module.usaspending_getter_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "usaspending-award"
     }
   }
 
@@ -2332,6 +2348,57 @@ module "usaspending_autocomplete_lambda" {
   tags = var.common_tags
 }
 
+# IAM Policy for USAspending Getter Lambda to access DynamoDB awards table (read-only)
+resource "aws_iam_policy" "usaspending_getter_dynamodb_policy" {
+  name        = "${var.project_name}-usaspending-getter-dynamodb-policy-${var.environment}"
+  description = "Policy for USAspending Getter Lambda to read from DynamoDB awards table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for USAspending Getter Lambda to access S3 bucket (read-only)
+resource "aws_iam_policy" "usaspending_getter_s3_policy" {
+  name        = "${var.project_name}-usaspending-getter-s3-policy-${var.environment}"
+  description = "Policy for USAspending Getter Lambda to read from S3 bucket for award details"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
 # USAspending Indexing Lambda Function
 module "usaspending_indexing_lambda" {
   source = "./modules/lambda"
@@ -2368,6 +2435,44 @@ module "usaspending_indexing_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.usaspending_indexing_dynamodb_policy.arn,
     aws_iam_policy.usaspending_indexing_s3_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# USAspending Getter Lambda Function
+module "usaspending_getter_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-usaspending-getter-${var.environment}"
+  description   = "Lambda function for retrieving USAspending award details, transactions, and subawards"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60  # 1 minute should be enough for fetching and decompressing
+  memory_size   = 512 # Moderate memory for S3 fetch and decompression
+
+  # Source directory
+  source_dir = "../backend_app/src/govt_contracts/getter"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT       = var.environment
+    LOG_LEVEL         = var.environment == "development" ? "DEBUG" : "INFO"
+    AWARDS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_name
+    S3_BUCKET_NAME    = data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_name
+  }
+
+  # Attach core layer
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies - Read-only access to DynamoDB and S3
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.usaspending_getter_dynamodb_policy.arn,
+    aws_iam_policy.usaspending_getter_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
 

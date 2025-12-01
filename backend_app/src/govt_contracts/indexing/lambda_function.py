@@ -205,26 +205,26 @@ def flatten_award_data(award_data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Agency information
         'awarding_agency_id': awarding_agency.get('id') if awarding_agency else None,
-        'awarding_agency_code': awarding_agency.get('toptier_agency', {}).get('toptier_code') if awarding_agency else None,
+        # Only include awarding_agency_code if it has a value (for sparse GSI)
         'awarding_agency_name': awarding_agency.get('toptier_agency', {}).get('name') if awarding_agency else None,
         'funding_agency_id': funding_agency.get('id') if funding_agency else None,
-        'funding_agency_code': funding_agency.get('toptier_agency', {}).get('toptier_code') if funding_agency else None,
+        # Only include funding_agency_code if it has a value (for sparse GSI)
         'funding_agency_name': funding_agency.get('toptier_agency', {}).get('name') if funding_agency else None,
         
         # Recipient information
-        'recipient_id': recipient.get('recipient_id') if recipient else None,
+        # Only include recipient_id if it has a value (for sparse GSI)
         'recipient_name': recipient_name,
         'recipient_name_normalized': recipient_name_normalized,
         'recipient_unique_id': recipient.get('recipient_unique_id') if recipient else None,
-        'recipient_location_state': recipient_location.get('state_code') if recipient_location else None,
+        # Only include recipient_location_state if it has a value (for sparse GSI)
         'recipient_location_country': recipient_location.get('country_code') if recipient_location else None,
         
         # Reference codes
-        'naics_code': naics_code,
+        # Only include naics_code if it has a value (for sparse GSI)
         'naics_description': naics_hierarchy.get('base_code', {}).get('description') if naics_hierarchy else None,
-        'psc_code': psc_code,
+        # Only include psc_code if it has a value (for sparse GSI)
         'psc_description': psc_hierarchy.get('base_code', {}).get('description') if psc_hierarchy else None,
-        'cfda_number': cfda_number,
+        # Only include cfda_number if it has a value (for sparse GSI - contracts don't have CFDA numbers)
         'def_codes': def_codes,
         
         # Full response (store complete award object)
@@ -244,6 +244,31 @@ def flatten_award_data(award_data: Dict[str, Any]) -> Dict[str, Any]:
         # TTL for cache expiration (90 days)
         'ttl': int((datetime.now(timezone.utc).timestamp() + (90 * 24 * 60 * 60)))
     }
+    
+    # Conditionally add GSI key attributes only if they have values (for sparse GSIs)
+    # DynamoDB doesn't allow NULL values for GSI key attributes
+    # Items without these attributes won't be indexed in the corresponding GSIs
+    
+    if awarding_agency and awarding_agency.get('toptier_agency', {}).get('toptier_code'):
+        flattened['awarding_agency_code'] = awarding_agency.get('toptier_agency', {}).get('toptier_code')
+    
+    if funding_agency and funding_agency.get('toptier_agency', {}).get('toptier_code'):
+        flattened['funding_agency_code'] = funding_agency.get('toptier_agency', {}).get('toptier_code')
+    
+    if recipient and recipient.get('recipient_id'):
+        flattened['recipient_id'] = recipient.get('recipient_id')
+    
+    if recipient_location and recipient_location.get('state_code'):
+        flattened['recipient_location_state'] = recipient_location.get('state_code')
+    
+    if naics_code:
+        flattened['naics_code'] = naics_code
+    
+    if psc_code:
+        flattened['psc_code'] = psc_code
+    
+    if cfda_number is not None:
+        flattened['cfda_number'] = cfda_number
     
     # Convert all floats to Decimal in the entire flattened structure for DynamoDB compatibility
     return convert_floats_to_decimal(flattened)
@@ -422,14 +447,18 @@ def index_award(award_id: str, force_reindex: bool = False) -> Dict[str, Any]:
         if not force_reindex and awards_table:
             try:
                 existing_award = awards_table.get_item(Key={'award_id': award_id})
-                if existing_award.get('Item') and existing_award['Item'].get('full_indexing_complete'):
-                    logger.info(f"Award {award_id} already fully indexed, skipping")
-                    return {
-                        'success': True,
-                        'award_id': award_id,
-                        'skipped': True,
-                        'message': 'Award already indexed'
-                    }
+                item = existing_award.get('Item')
+                if item:
+                    # Check if fully indexed (either flag is set OR S3 key exists)
+                    if item.get('full_indexing_complete') or item.get('award_details_s3_key'):
+                        logger.info(f"Award {award_id} already fully indexed (S3 key: {item.get('award_details_s3_key', 'N/A')}), skipping")
+                        return {
+                            'success': True,
+                            'award_id': award_id,
+                            'skipped': True,
+                            'message': 'Award already indexed',
+                            's3_key': item.get('award_details_s3_key')
+                        }
             except Exception as e:
                 logger.warning(f"Error checking existing award: {str(e)}")
         
@@ -492,29 +521,27 @@ def index_award(award_id: str, force_reindex: bool = False) -> Dict[str, Any]:
             }
         
         # Step 6: Update DynamoDB with S3 key and completion flags
+        # Use put_item to ensure S3 key is always stored (more reliable than update_item)
         if awards_table:
             try:
-                awards_table.update_item(
-                    Key={'award_id': award_id},
-                    UpdateExpression='SET award_details_s3_key = :key, award_details_indexed = :true, '
-                                   'transaction_count = :tx_count, subaward_count = :sub_count, '
-                                   'full_indexing_complete = :complete, last_updated = :updated',
-                    ExpressionAttributeValues={
-                        ':key': s3_key,
-                        ':true': True,
-                        ':tx_count': len(transactions),
-                        ':sub_count': len(subawards),
-                        ':complete': True,
-                        ':updated': datetime.now(timezone.utc).isoformat()
-                    }
-                )
-                logger.info(f"Updated award {award_id} with S3 key and completion flags")
+                # Get the existing item and merge with S3 key and completion flags
+                existing_item = flattened_award.copy()
+                existing_item['award_details_s3_key'] = s3_key
+                existing_item['award_details_indexed'] = True
+                existing_item['transaction_count'] = len(transactions)
+                existing_item['subaward_count'] = len(subawards)
+                existing_item['full_indexing_complete'] = True
+                existing_item['last_updated'] = datetime.now(timezone.utc).isoformat()
+                
+                # Use put_item to ensure all fields including S3 key are stored
+                awards_table.put_item(Item=existing_item)
+                logger.info(f"Updated award {award_id} in DynamoDB with S3 key ({s3_key}) and completion flags")
             except Exception as e:
                 logger.error(f"Error updating award in DynamoDB: {str(e)}", exc_info=True)
                 return {
                     'success': False,
                     'award_id': award_id,
-                    'error': f'Error updating DynamoDB: {str(e)}'
+                    'error': f'Error updating DynamoDB with S3 key: {str(e)}'
                 }
         
         return {
