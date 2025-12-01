@@ -2353,8 +2353,8 @@ module "usaspending_indexing_lambda" {
     USASPENDING_BASE_URL   = "https://api.usaspending.gov"
     USASPENDING_USER_AGENT = "Cosine Financial Platform (contact@cosine.financial)"
     REQUEST_TIMEOUT        = "30"
-    AWARDS_TABLE_NAME      = "usaspending-awards-index"
-    S3_BUCKET_NAME         = "cosine-usaspending-data-${var.environment}"
+    AWARDS_TABLE_NAME      = data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_name
+    S3_BUCKET_NAME         = data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_name
   }
 
   # Attach core layer (includes requests library)

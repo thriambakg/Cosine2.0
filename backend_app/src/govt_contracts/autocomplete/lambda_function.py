@@ -53,8 +53,11 @@ AUTOCOMPLETE_ENDPOINTS = {
 AUTOCOMPLETE_ALIASES = {
     'tas_availability_type': 'accounts_a',
     'tas_agency_id': 'accounts_aid',
+    'tas_allocation_transfer_agency': 'accounts_ata',
     'tas_ata': 'accounts_ata',
+    'tas_beginning_period_of_availability': 'accounts_bpoa',
     'tas_bpoa': 'accounts_bpoa',
+    'tas_ending_period_of_availability': 'accounts_epoa',
     'tas_epoa': 'accounts_epoa',
     'tas_main_account': 'accounts_main',
     'tas_sub_account': 'accounts_sub',
@@ -204,23 +207,39 @@ def handle_city_autocomplete(request_body: Dict[str, Any]) -> Dict[str, Any]:
     Handle city autocomplete endpoint
     
     Args:
-        request_body: Request body with search_text and optional filters
+        request_body: Request body with search_text, limit, and optional filter object
     
     Returns:
         Autocomplete results
     """
     endpoint = AUTOCOMPLETE_ENDPOINTS['city']
     
-    # City autocomplete uses POST with search_text, limit, and optional filter
+    # City autocomplete uses POST with search_text, limit, and optional filter object
+    # API structure: { "search_text": "...", "limit": 10, "filter": { "country_code": "USA", "scope": "..." } }
     body = {
         'search_text': request_body.get('search_text', ''),
+        'limit': request_body.get('limit', 10)
     }
     
-    if 'limit' in request_body:
-        body['limit'] = request_body['limit']
-    
-    if 'filter' in request_body:
+    # Build filter object if provided or if country_code/scope are provided
+    if 'filter' in request_body and isinstance(request_body['filter'], dict):
+        # Use provided filter object
         body['filter'] = request_body['filter']
+    else:
+        # Build filter object from individual fields or defaults
+        filter_obj = {}
+        
+        # country_code is required in filter - default to "USA" if not provided
+        filter_obj['country_code'] = request_body.get('country_code', 'USA')
+        
+        # scope is required in filter - default to "recipient_location" if not provided
+        filter_obj['scope'] = request_body.get('scope', 'recipient_location')
+        
+        # state_code is optional
+        if 'state_code' in request_body:
+            filter_obj['state_code'] = request_body['state_code']
+        
+        body['filter'] = filter_obj
     
     return call_usaspending_api(endpoint, method='POST', body=body)
 
@@ -374,7 +393,7 @@ def route_autocomplete_request(autocomplete_type: str, request_body: Dict[str, A
     Returns:
         Autocomplete results
     """
-    # Check if it's an alias
+    # Check if it's an alias (must be done BEFORE validation)
     if autocomplete_type in AUTOCOMPLETE_ALIASES:
         autocomplete_type = AUTOCOMPLETE_ALIASES[autocomplete_type]
     
@@ -434,7 +453,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Parse request - handle both API Gateway and direct invocation
         if 'httpMethod' in event:
             # API Gateway event
-            autocomplete_type = event.get('pathParameters', {}).get('type') or event.get('pathParameters', {}).get('proxy', '').split('/')[-1]
+            path_params = event.get('pathParameters') or {}
+            autocomplete_type = path_params.get('type') or (path_params.get('proxy', '').split('/')[-1] if path_params.get('proxy') else None)
             
             # Parse body
             if isinstance(event.get('body'), str):
@@ -444,6 +464,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     request_body = {}
             else:
                 request_body = event.get('body', {})
+            
+            # If autocomplete_type not in path, get it from body
+            if not autocomplete_type:
+                autocomplete_type = request_body.get('autocomplete_type')
         else:
             # Direct invocation
             autocomplete_type = event.get('autocomplete_type') or event.get('type')
@@ -485,6 +509,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Route request
         results = route_autocomplete_request(autocomplete_type, request_body)
         
+        # Ensure results is a dictionary
+        if results is None:
+            results = {'results': [], 'messages': []}
+        
         # Return success response
         return {
             'statusCode': 200,
@@ -495,8 +523,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'body': json.dumps({
                 'success': True,
                 'autocomplete_type': autocomplete_type,
-                'results': results.get('results', []),
-                'messages': results.get('messages', []),
+                'results': results.get('results', []) if isinstance(results, dict) else [],
+                'messages': results.get('messages', []) if isinstance(results, dict) else [],
                 'metadata': {
                     'timestamp': datetime.utcnow().isoformat(),
                     'endpoint': AUTOCOMPLETE_ENDPOINTS.get(autocomplete_type, 'unknown')

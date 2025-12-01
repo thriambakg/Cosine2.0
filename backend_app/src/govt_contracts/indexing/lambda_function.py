@@ -77,7 +77,13 @@ def call_usaspending_api(endpoint: str, method: str = 'GET', body: Optional[Dict
         logger.error(f"HTTP error calling USAspending API: {url}, Status: {e.response.status_code}")
         if e.response.status_code == 404:
             return None  # Award not found
-        raise Exception(f"API error: {e.response.status_code} - {e.response.text}")
+        # Try to extract error message from response
+        try:
+            error_data = e.response.json()
+            error_msg = error_data.get('detail') or error_data.get('message') or str(error_data)
+        except:
+            error_msg = e.response.text[:500] if e.response.text else "Unknown error"
+        raise Exception(f"API error: {e.response.status_code} - {error_msg}")
     
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error calling USAspending API: {url}, Error: {str(e)}")
@@ -104,6 +110,21 @@ def extract_fiscal_year(date_str: Optional[str]) -> Optional[int]:
         return date_obj.year
     except:
         return None
+
+
+def convert_floats_to_decimal(obj: Any) -> Any:
+    """
+    Recursively convert all float values to Decimal for DynamoDB compatibility.
+    DynamoDB doesn't support float types, only Decimal.
+    """
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    elif isinstance(obj, dict):
+        return {key: convert_floats_to_decimal(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_floats_to_decimal(item) for item in obj]
+    else:
+        return obj
 
 
 def flatten_award_data(award_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -151,7 +172,13 @@ def flatten_award_data(award_data: Dict[str, Any]) -> Dict[str, Any]:
     # Extract DEF codes
     def_codes = []
     if 'account_obligations_by_defc' in award_data:
-        def_codes = list(award_data['account_obligations_by_defc'].keys())
+        account_obligations = award_data['account_obligations_by_defc']
+        if isinstance(account_obligations, dict):
+            # If it's a dict, keys are DEF codes
+            def_codes = list(account_obligations.keys())
+        elif isinstance(account_obligations, list):
+            # If it's a list, extract 'code' from each item
+            def_codes = [item.get('code') for item in account_obligations if isinstance(item, dict) and item.get('code')]
     
     # Determine award type
     category = award_data.get('category', 'contract')
@@ -201,7 +228,8 @@ def flatten_award_data(award_data: Dict[str, Any]) -> Dict[str, Any]:
         'def_codes': def_codes,
         
         # Full response (store complete award object)
-        'full_response': award_data,
+        # Convert all floats to Decimal for DynamoDB compatibility
+        'full_response': convert_floats_to_decimal(award_data),
         
         # Metadata
         'indexed_at': datetime.now(timezone.utc).isoformat(),
@@ -217,7 +245,8 @@ def flatten_award_data(award_data: Dict[str, Any]) -> Dict[str, Any]:
         'ttl': int((datetime.now(timezone.utc).timestamp() + (90 * 24 * 60 * 60)))
     }
     
-    return flattened
+    # Convert all floats to Decimal in the entire flattened structure for DynamoDB compatibility
+    return convert_floats_to_decimal(flattened)
 
 
 def fetch_all_transactions(award_id: str) -> List[Dict[str, Any]]:
@@ -416,7 +445,15 @@ def index_award(award_id: str, force_reindex: bool = False) -> Dict[str, Any]:
             }
         
         # Step 2: Flatten award data
-        flattened_award = flatten_award_data(award_data)
+        try:
+            flattened_award = flatten_award_data(award_data)
+        except Exception as e:
+            logger.error(f"Error flattening award data for {award_id}: {str(e)}", exc_info=True)
+            return {
+                'success': False,
+                'award_id': award_id,
+                'error': f'Error processing award data: {str(e)}'
+            }
         
         # Step 3: Store award in DynamoDB (before fetching transactions/subawards)
         if awards_table:
@@ -424,15 +461,35 @@ def index_award(award_id: str, force_reindex: bool = False) -> Dict[str, Any]:
                 awards_table.put_item(Item=flattened_award)
                 logger.info(f"Stored award {award_id} in DynamoDB")
             except Exception as e:
-                logger.error(f"Error storing award in DynamoDB: {str(e)}")
-                raise
+                logger.error(f"Error storing award in DynamoDB: {str(e)}", exc_info=True)
+                return {
+                    'success': False,
+                    'award_id': award_id,
+                    'error': f'Error storing award in DynamoDB: {str(e)}'
+                }
         
         # Step 4: Fetch transactions and subawards
-        transactions = fetch_all_transactions(award_id)
-        subawards = fetch_all_subawards(award_id)
+        try:
+            transactions = fetch_all_transactions(award_id)
+            subawards = fetch_all_subawards(award_id)
+        except Exception as e:
+            logger.error(f"Error fetching transactions/subawards for {award_id}: {str(e)}", exc_info=True)
+            return {
+                'success': False,
+                'award_id': award_id,
+                'error': f'Error fetching transactions/subawards: {str(e)}'
+            }
         
         # Step 5: Upload combined file to S3
-        s3_key = upload_award_details_to_s3(award_id, transactions, subawards)
+        try:
+            s3_key = upload_award_details_to_s3(award_id, transactions, subawards)
+        except Exception as e:
+            logger.error(f"Error uploading award details to S3 for {award_id}: {str(e)}", exc_info=True)
+            return {
+                'success': False,
+                'award_id': award_id,
+                'error': f'Error uploading to S3: {str(e)}'
+            }
         
         # Step 6: Update DynamoDB with S3 key and completion flags
         if awards_table:
@@ -453,8 +510,12 @@ def index_award(award_id: str, force_reindex: bool = False) -> Dict[str, Any]:
                 )
                 logger.info(f"Updated award {award_id} with S3 key and completion flags")
             except Exception as e:
-                logger.error(f"Error updating award in DynamoDB: {str(e)}")
-                raise
+                logger.error(f"Error updating award in DynamoDB: {str(e)}", exc_info=True)
+                return {
+                    'success': False,
+                    'award_id': award_id,
+                    'error': f'Error updating DynamoDB: {str(e)}'
+                }
         
         return {
             'success': True,
@@ -517,7 +578,9 @@ def build_search_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Formatted filters dictionary for USAspending API
     """
+    # Remove non-filter fields (limit, force_reindex, etc.)
     api_filters = {}
+    non_filter_fields = ['limit', 'force_reindex', 'action']
     
     # General search fields
     if filters.get('recipient_search_text'):
@@ -554,34 +617,56 @@ def build_search_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
         api_filters['time_period'] = time_period
     
     # Agencies
+    # Note: spending_by_transaction endpoint only accepts 'name', not 'toptier_code'
     if filters.get('agencies'):
-        api_filters['agencies'] = filters['agencies']
+        # If agencies are provided, ensure they use 'name' not 'toptier_code'
+        agencies_list = filters['agencies'] if isinstance(filters['agencies'], list) else [filters['agencies']]
+        cleaned_agencies = []
+        for agency in agencies_list:
+            cleaned_agency = agency.copy()
+            # Remove toptier_code if present (not supported by spending_by_transaction)
+            if 'toptier_code' in cleaned_agency:
+                # If we have toptier_code but no name, we can't convert it - raise error
+                if 'name' not in cleaned_agency:
+                    raise ValueError(
+                        f"Agency filter has 'toptier_code' ({cleaned_agency.get('toptier_code')}) but 'name' is required for spending_by_transaction endpoint. "
+                        f"Please provide 'name' instead of or in addition to 'toptier_code'. "
+                        f"Example: {{'type': 'awarding', 'tier': 'toptier', 'name': 'Department of Defense'}}"
+                    )
+                # Remove toptier_code since it's not supported (name is present, so we can use that)
+                del cleaned_agency['toptier_code']
+            cleaned_agencies.append(cleaned_agency)
+        if cleaned_agencies:
+            api_filters['agencies'] = cleaned_agencies
     elif filters.get('awarding_agency_code') or filters.get('awarding_agency_name'):
         agencies = []
-        if filters.get('awarding_agency_code'):
-            agencies.append({
-                'type': 'awarding',
-                'tier': 'toptier',
-                'toptier_code': filters['awarding_agency_code']
-            })
-        elif filters.get('awarding_agency_name'):
+        # For spending_by_transaction, we need 'name', not 'toptier_code'
+        if filters.get('awarding_agency_name'):
             agencies.append({
                 'type': 'awarding',
                 'tier': 'toptier',
                 'name': filters['awarding_agency_name']
             })
-        if filters.get('funding_agency_code'):
-            agencies.append({
-                'type': 'funding',
-                'tier': 'toptier',
-                'toptier_code': filters['funding_agency_code']
-            })
-        elif filters.get('funding_agency_name'):
+        elif filters.get('awarding_agency_code'):
+            # Can't use code directly - need name
+            raise ValueError(
+                f"Cannot use 'awarding_agency_code' ({filters['awarding_agency_code']}) - 'awarding_agency_name' is required for spending_by_transaction endpoint. "
+                f"Please provide 'awarding_agency_name' instead."
+            )
+        
+        if filters.get('funding_agency_name'):
             agencies.append({
                 'type': 'funding',
                 'tier': 'toptier',
                 'name': filters['funding_agency_name']
             })
+        elif filters.get('funding_agency_code'):
+            # Can't use code directly - need name
+            raise ValueError(
+                f"Cannot use 'funding_agency_code' ({filters['funding_agency_code']}) - 'funding_agency_name' is required for spending_by_transaction endpoint. "
+                f"Please provide 'funding_agency_name' instead."
+            )
+        
         if agencies:
             api_filters['agencies'] = agencies
     
@@ -667,10 +752,11 @@ def search_and_index_awards(filters: Dict[str, Any], limit: int = 100, force_rei
     Returns:
         Dictionary with search and indexing results
     """
-    logger.info(f"Searching for awards with filters: {json.dumps(filters)}")
+    logger.info(f"Searching for awards with filters: {json.dumps(filters, default=str)}")
     
     # Build API filters
     api_filters = build_search_filters(filters)
+    logger.info(f"Built API filters: {json.dumps(api_filters, default=str)}")
     
     # Search for awards
     all_award_ids = []
@@ -679,33 +765,58 @@ def search_and_index_awards(filters: Dict[str, Any], limit: int = 100, force_rei
     
     while len(all_award_ids) < limit:
         try:
+            # Use spending_by_transaction endpoint (more reliable based on test script)
+            # Note: sort field must be included in fields array
             search_body = {
                 'filters': api_filters,
-                'fields': ['Award ID', 'generated_unique_award_id'],
+                'fields': [
+                    'Award ID',
+                    'generated_internal_id',
+                    'internal_id',
+                    'Recipient Name',
+                    'Awarding Agency',
+                    'Transaction Amount',  # Required for sorting
+                    'Action Date',
+                    'Award Type'
+                ],
                 'limit': page_limit,
                 'page': page,
-                'sort': 'Award Amount',
+                'sort': 'Transaction Amount',
                 'order': 'desc'
             }
             
-            response = call_usaspending_api('/api/v2/search/spending_by_award/', method='POST', body=search_body)
+            logger.info(f"Searching page {page} with filters: {json.dumps(api_filters, default=str)}")
+            response = call_usaspending_api('/api/v2/search/spending_by_transaction/', method='POST', body=search_body)
             
             if not response:
+                logger.warning(f"No response from API on page {page}")
                 break
+            
+            # Log API messages if present (often contains useful info about why no results)
+            if response.get('messages'):
+                logger.warning(f"API messages: {response.get('messages')}")
             
             results = response.get('results', [])
             if not results:
+                logger.warning(f"No results found on page {page}")
+                # Log full response structure for debugging
+                logger.info(f"Response structure: {json.dumps({k: type(v).__name__ for k, v in response.items()}, default=str)}")
+                if response.get('page_metadata'):
+                    logger.info(f"Page metadata: {response.get('page_metadata')}")
                 break
             
-            # Extract award IDs
+            logger.info(f"Found {len(results)} transactions on page {page}")
+            
+            # Extract award IDs from transactions
             for result in results:
-                award_id = result.get('generated_unique_award_id') or result.get('Award ID')
+                # Try multiple fields for award ID (based on test script)
+                award_id = result.get('generated_internal_id') or result.get('internal_id') or result.get('Award ID')
                 if award_id and award_id not in all_award_ids:
                     all_award_ids.append(award_id)
                     if len(all_award_ids) >= limit:
                         break
             
-            logger.info(f"Found {len(all_award_ids)} unique awards (page {page})")
+            logger.info(f"Found {len(all_award_ids)} unique awards so far (page {page})")
             
             # Check if there are more pages
             page_metadata = response.get('page_metadata', {})
@@ -715,7 +826,12 @@ def search_and_index_awards(filters: Dict[str, Any], limit: int = 100, force_rei
             page += 1
         
         except Exception as e:
-            logger.error(f"Error searching for awards on page {page}: {str(e)}")
+            logger.error(f"Error searching for awards on page {page}: {str(e)}", exc_info=True)
+            # If it's an API error (400, 422, etc.), we should return error instead of empty results
+            error_msg = str(e)
+            if 'API error:' in error_msg or '400' in error_msg or '422' in error_msg:
+                # Re-raise to be caught by lambda_handler
+                raise Exception(f"Search API error: {error_msg}")
             break
     
     logger.info(f"Total unique awards found: {len(all_award_ids)}")
@@ -838,6 +954,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         elif action == 'search_and_index':
             filters = body.get('filters', {})
+            # Remove limit from filters if it's accidentally included there
+            if 'limit' in filters:
+                logger.warning("Found 'limit' in filters object, removing it (should be top-level)")
+                filters = {k: v for k, v in filters.items() if k != 'limit'}
             limit = body.get('limit', 100)
             
             if not filters:
@@ -850,13 +970,69 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     })
                 }
             
-            results = search_and_index_awards(filters, limit=limit, force_reindex=force_reindex)
-            
-            return {
-                'statusCode': 200,
-                'headers': headers,
-                'body': json.dumps(results)
-            }
+            try:
+                results = search_and_index_awards(filters, limit=limit, force_reindex=force_reindex)
+                
+                return {
+                    'statusCode': 200,
+                    'headers': headers,
+                    'body': json.dumps(results)
+                }
+            except ValueError as e:
+                # Validation errors (e.g., missing required fields, invalid filter format)
+                error_msg = str(e)
+                logger.error(f"Validation error in search_and_index: {error_msg}")
+                return {
+                    'statusCode': 400,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'Invalid request',
+                        'message': error_msg,
+                        'search_results': {
+                            'total_found': 0,
+                            'award_ids': []
+                        },
+                        'indexing_results': {
+                            'total': 0,
+                            'successful': 0,
+                            'failed': 0,
+                            'skipped': 0,
+                            'results': []
+                        }
+                    })
+                }
+            except Exception as e:
+                error_msg = str(e)
+                # Determine status code based on error type
+                if 'API error: 400' in error_msg or '400' in error_msg:
+                    status_code = 400
+                elif 'API error: 422' in error_msg or '422' in error_msg:
+                    status_code = 422
+                elif 'API error: 404' in error_msg or '404' in error_msg:
+                    status_code = 404
+                else:
+                    status_code = 500
+                
+                logger.error(f"Error in search_and_index: {error_msg}", exc_info=True)
+                return {
+                    'statusCode': status_code,
+                    'headers': headers,
+                    'body': json.dumps({
+                        'error': 'Search failed',
+                        'message': error_msg,
+                        'search_results': {
+                            'total_found': 0,
+                            'award_ids': []
+                        },
+                        'indexing_results': {
+                            'total': 0,
+                            'successful': 0,
+                            'failed': 0,
+                            'skipped': 0,
+                            'results': []
+                        }
+                    })
+                }
         
         else:
             return {
