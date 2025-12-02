@@ -6,6 +6,7 @@ import {
   Menu,
   MenuItem,
   FormControl,
+  InputLabel,
   Select,
   TextField,
   Button,
@@ -28,6 +29,8 @@ import {
 import {
   Settings as SettingsIcon,
   Close as CloseIcon,
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
   PushPin as PinIcon,
   AutoAwesome as AutoRefreshIcon,
   Search as SearchIcon,
@@ -42,6 +45,7 @@ import {
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest } from '../../services/api';
 import { useTilePinning, PinButton, addArticleToContext, addMultipleArticlesToContext, confirmDialog } from './common';
+import { newsCache } from '../../utils/newsCache';
 
 interface NewsTileProps {
   id: string;
@@ -146,7 +150,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
   const [currentPage, setCurrentPage] = useState(1);
   const [newsArticles, setNewsArticles] = useState<NewsArticle[]>(articles);
-  const [selectedArticles, setSelectedArticles] = useState<string[]>([]);
+  const [totalFound, setTotalFound] = useState<number>(0);
+  const [isLoadingPage, setIsLoadingPage] = useState<boolean>(false);
+  const [fetchedPages, setFetchedPages] = useState<Map<number, NewsArticle[]>>(new Map());
+  const [currentResults, setCurrentResults] = useState<NewsArticle[]>([]);
+  const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [keywordInputValue, setKeywordInputValue] = useState('');
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
@@ -174,77 +182,17 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const tileRef = useRef<HTMLDivElement>(null);
   const localFiltersRef = useRef(localFilters);
   const initialLoadDone = useRef(false);
-  const CACHE_KEY = `news_tile_${id}_cache`;
-  const CACHE_TIMESTAMP_KEY = `news_tile_${id}_timestamp`;
-  const CACHE_DURATION_MS = 8 * 60 * 1000; // 8 minutes in milliseconds
+  // Cache is now handled by newsCache utility with tile ID
 
-  // Update ref when localFilters changes
-  useEffect(() => {
-    localFiltersRef.current = localFilters;
-  }, [localFilters]);
-
-  // Load cached data on mount
-  useEffect(() => {
-    try {
-      const cachedTimestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY);
-      const cachedArticles = sessionStorage.getItem(CACHE_KEY);
-      
-      if (cachedTimestamp && cachedArticles) {
-        const cacheAge = Date.now() - parseInt(cachedTimestamp, 10);
-        
-        // If cache is still fresh (less than 8 minutes old)
-        if (cacheAge < CACHE_DURATION_MS) {
-          const parsedArticles = JSON.parse(cachedArticles);
-          setNewsArticles(parsedArticles);
-          initialLoadDone.current = true;
-          console.log(`📰 NewsTile ${id}: Loaded ${parsedArticles.length} articles from cache (${Math.round(cacheAge / 1000 / 60)} minutes old)`);
-          return; // Don't do a fresh search
-        } else {
-          // Cache expired, clear it
-          sessionStorage.removeItem(CACHE_KEY);
-          sessionStorage.removeItem(CACHE_TIMESTAMP_KEY);
-          console.log(`📰 NewsTile ${id}: Cache expired, will fetch fresh data`);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading cached news data:', error);
+  // Helper function to ensure articles have a valid ID
+  const ensureArticleId = (article: NewsArticle): NewsArticle => {
+    if (article.id) {
+      return article;
     }
-  }, [id]); // Only run on mount
-
-  // Save articles to cache whenever articles change
-  useEffect(() => {
-    if (newsArticles.length > 0 && initialLoadDone.current) {
-      try {
-        sessionStorage.setItem(CACHE_KEY, JSON.stringify(newsArticles));
-        sessionStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
-        console.log(`📰 NewsTile ${id}: Cached ${newsArticles.length} articles`);
-      } catch (error) {
-        console.error('Error caching news data:', error);
-      }
-    }
-  }, [newsArticles, id]);
-
-  // Helper function to clean up trailing operators from expressions
-  const cleanupTrailingOperators = (expression: any[]) => {
-    if (!expression || expression.length === 0) return expression;
-    
-    // Remove trailing operators
-    let cleaned = [...expression];
-    while (cleaned.length > 0 && cleaned[cleaned.length - 1]?.type === 'operator') {
-      cleaned.pop();
-    }
-    
-    return cleaned;
-  };
-
-  // Helper function to clean up all filter expressions
-  const cleanupAllExpressions = (filters: any) => {
+    // Use source_url as fallback ID, or generate one from title + source_url
     return {
-      ...filters,
-      keywordExpression: cleanupTrailingOperators(filters.keywordExpression || []),
-      sourceExpression: cleanupTrailingOperators(filters.sourceExpression || []),
-      categoryExpression: cleanupTrailingOperators(filters.categoryExpression || []),
-      countryExpression: cleanupTrailingOperators(filters.countryExpression || []),
+      ...article,
+      id: article.source_url || `${article.title}-${article.source_name || 'unknown'}`,
     };
   };
 
@@ -310,7 +258,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   };
 
   // Helper function to build API payload from filters
-  const buildApiPayload = (filters: any): NewsSearchRequest => {
+  const buildApiPayload = (filters: any, limit?: number): NewsSearchRequest => {
     const payload: NewsSearchRequest = {
       query: {
         keywords: convertExpressionToQuery(filters.keywordExpression || []),
@@ -319,11 +267,72 @@ const NewsTile: React.FC<NewsTileProps> = ({
         countries: convertExpressionToQuery(filters.countryExpression || [])
       },
       dateRange: filters.dateRange || '12h',
-      limit: 10000,  // Large limit to get all results
+      limit: limit || displayOptions.maxResults || 20,  // Use provided limit or maxResults from display options
       offset: 0
     };
     
     return payload;
+  };
+
+  // Update ref when localFilters changes
+  useEffect(() => {
+    localFiltersRef.current = localFilters;
+  }, [localFilters]);
+
+  // Load cached data on mount
+  useEffect(() => {
+    try {
+      // Check cache using the new cache utility
+      // For tiles, we fetch page 1 with a reasonable page size (using maxResults)
+      const pageSize = displayOptions.maxResults || 20;
+      const basePayload = buildApiPayload(localFilters, pageSize);
+      
+      // Check if we have cached data for page 1
+      const cached = newsCache.getCachedPage(basePayload, 1, pageSize, id);
+      if (cached && cached.articles.length > 0) {
+        setNewsArticles(cached.articles);
+        initialLoadDone.current = true;
+        console.log(`📰 NewsTile ${id}: Loaded ${cached.articles.length} articles from cache`);
+        return; // Don't do a fresh search
+      }
+    } catch (error) {
+      console.error('Error loading cached news data:', error);
+    }
+  }, [id, localFilters, displayOptions.maxResults, buildApiPayload]); // Run when filters or maxResults change
+
+  // Save articles to cache whenever articles change
+  useEffect(() => {
+    if (newsArticles.length > 0 && initialLoadDone.current) {
+      try {
+        // Cache is now handled by newsCache utility in runNewsSearch
+      } catch (error) {
+        console.error('Error caching news data:', error);
+      }
+    }
+  }, [newsArticles, id]);
+
+  // Helper function to clean up trailing operators from expressions
+  const cleanupTrailingOperators = (expression: any[]) => {
+    if (!expression || expression.length === 0) return expression;
+    
+    // Remove trailing operators
+    let cleaned = [...expression];
+    while (cleaned.length > 0 && cleaned[cleaned.length - 1]?.type === 'operator') {
+      cleaned.pop();
+    }
+    
+    return cleaned;
+  };
+
+  // Helper function to clean up all filter expressions
+  const cleanupAllExpressions = (filters: any) => {
+    return {
+      ...filters,
+      keywordExpression: cleanupTrailingOperators(filters.keywordExpression || []),
+      sourceExpression: cleanupTrailingOperators(filters.sourceExpression || []),
+      categoryExpression: cleanupTrailingOperators(filters.categoryExpression || []),
+      countryExpression: cleanupTrailingOperators(filters.countryExpression || []),
+    };
   };
 
   // Helper function to clean up group after deletion
@@ -1199,110 +1208,120 @@ const NewsTile: React.FC<NewsTileProps> = ({
     });
   }, []);
 
-  // Run news search
-  const runNewsSearch = useCallback(async (forceRefresh: boolean = false) => {
-    // Check cache age if not forcing refresh
-    if (!forceRefresh) {
-      const cachedTimestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY);
-      if (cachedTimestamp) {
-        const cacheAge = Date.now() - parseInt(cachedTimestamp, 10);
-        if (cacheAge < CACHE_DURATION_MS) {
-          console.log(`📰 NewsTile ${id}: Cache still fresh (${Math.round(cacheAge / 1000 / 60)} minutes old), skipping search`);
-          return; // Don't search if cache is still fresh
-        }
+  // Fetch a specific page of results
+  const fetchPage = useCallback(async (page: number, size: number, basePayload: NewsSearchRequest) => {
+    const offset = (page - 1) * size;
+    const searchRequest: NewsSearchRequest = {
+      ...basePayload,
+      limit: size,
+      offset: offset,
+    };
+    
+    // Check cache first
+    const cached = newsCache.getCachedPage(basePayload, page, size, id);
+    if (cached) {
+      // Ensure all cached articles have IDs
+      const articlesWithIds = cached.articles.map(ensureArticleId);
+      
+      // Update local fetchedPages cache
+      setFetchedPages(prev => {
+        const newMap = new Map(prev);
+        newMap.set(page, articlesWithIds);
+        return newMap;
+      });
+      
+      // Update total found from cached data
+      if (page === 1) {
+        setTotalFound(cached.total);
       }
+      
+      return articlesWithIds;
     }
+    
+    // Not in cache, fetch from API
+    const response = await newsSearchAPI.searchNews(searchRequest);
+    
+    if (response.articles && response.articles.length > 0) {
+      // Ensure all articles have IDs
+      const articlesWithIds = response.articles.map(ensureArticleId);
+      
+      // Update total found from first page
+      if (page === 1) {
+        setTotalFound(response.total || 0);
+      }
+      
+      // Store in cache
+      newsCache.setCachedPage(basePayload, page, size, articlesWithIds, response.total || 0, id);
+      
+      // Cache this page in local state
+      setFetchedPages(prev => {
+        const newMap = new Map(prev);
+        newMap.set(page, articlesWithIds);
+        return newMap;
+      });
+      
+      return articlesWithIds;
+    }
+    
+    return [];
+  }, [id]);
 
+  // Run news search - fetch first page only
+  const runNewsSearch = useCallback(async (forceRefresh: boolean = false) => {
     setIsLoading(true);
     setError(null);
+    setCurrentPage(1);
+    setFetchedPages(new Map()); // Clear local cache on new search
+    setCurrentResults([]);
     
     // Clear selected articles when running a new search
-    setSelectedArticles([]);
-    
-    // Clear cache when forcing refresh
-    if (forceRefresh) {
-      sessionStorage.removeItem(CACHE_KEY);
-      sessionStorage.removeItem(CACHE_TIMESTAMP_KEY);
-    }
+    setSelectedArticles(new Set());
     
     try {
       // Get current filters at the time of execution
       const currentFilters = localFiltersRef.current;
       
-      // Build API payload from filters
-      const apiPayload = buildApiPayload(currentFilters);
+      // Build API payload from filters with the correct limit
+      const pageSize = localDisplayOptions.maxResults || 20;
+      const basePayload = buildApiPayload(currentFilters, pageSize);
       
-      // Log the API payload to console for debugging
-      console.log('🔍 News API Call Payload:', {
-        timestamp: new Date().toISOString(),
-        tileId: id,
-        payload: apiPayload,
-        forceRefresh
-      });
-      
-      // Also log a formatted version for better readability
-      console.log('📋 Formatted API Payload:');
-      console.log(JSON.stringify(apiPayload, null, 2));
-      
-      try {
-        // Make actual API call to news search endpoint
-        const response = await newsSearchAPI.searchNews(apiPayload);
-        
-        // Log successful response
-        console.log('✅ News API Response:', {
-          timestamp: new Date().toISOString(),
-          tileId: id,
-          articleCount: response.articles.length,
-          total: response.total,
-          sampleArticles: response.articles.slice(0, 2).map((article: any) => ({
-            url: article.source_url,
-            title: article.title,
-            source: article.source_name
-          }))
-        });
-        
-        // Log article URL uniqueness (using source_url as ID)
-        const articleUrls = response.articles.map((a: any) => a.source_url);
-        const uniqueUrls = new Set(articleUrls);
-        console.log('📊 Article URL Analysis:', {
-          totalArticles: articleUrls.length,
-          uniqueUrls: uniqueUrls.size,
-          hasDuplicates: articleUrls.length !== uniqueUrls.size,
-          sampleUrls: articleUrls.slice(0, 3)
-        });
-        
-        setNewsArticles(response.articles);
-        initialLoadDone.current = true;
-        
-        // Note: Not calling onUpdate to avoid triggering dashboard persistence issues
-        // The tile state is managed internally and doesn't need to update the dashboard
-        
-      } catch (apiError) {
-        console.error('❌ News API Error:', {
-          timestamp: new Date().toISOString(),
-          tileId: id,
-          error: apiError,
-          filters: currentFilters
-        });
-        
-        // Fallback to mock data for development
-        console.log('🔄 Falling back to mock data for development');
-        const filteredArticles = filterArticles(mockNewsData, currentFilters);
-        setNewsArticles(filteredArticles);
-        setError(null); // Clear error since we have fallback data
-        initialLoadDone.current = true;
-        
-        // Note: Not calling onUpdate to avoid triggering dashboard persistence issues
-        // The tile state is managed internally and doesn't need to update the dashboard
+      // Clear cache when forcing refresh
+      if (forceRefresh) {
+        newsCache.clearCache(basePayload, id);
       }
+      
+      // Try to load first page from cache if available
+      const cached = newsCache.getCachedPage(basePayload, 1, pageSize, id);
+      if (cached && cached.articles.length > 0 && !forceRefresh) {
+        console.log(`📦 Found cached page 1, restoring to local cache`);
+        setFetchedPages(new Map([[1, cached.articles.map(ensureArticleId)]]));
+        setTotalFound(cached.total);
+      }
+      
+      // Fetch first page (will use cache if available)
+      const firstPageArticles = await fetchPage(1, pageSize, basePayload);
+      
+      if (firstPageArticles.length > 0) {
+        setCurrentResults(firstPageArticles);
+        setNewsArticles(firstPageArticles); // Keep for backward compatibility
+      } else {
+        setCurrentResults([]);
+        setNewsArticles([]);
+        setTotalFound(0);
+      }
+      
+      initialLoadDone.current = true;
       
     } catch (err) {
       setError('Failed to fetch news articles');
       console.error('News search error:', err);
+      setCurrentResults([]);
+      setNewsArticles([]);
+      setTotalFound(0);
     } finally {
       setIsLoading(false);
     }
-  }, [filterArticles, id, buildApiPayload]);
+  }, [id, buildApiPayload, fetchPage, localDisplayOptions.maxResults]);
 
   // Auto-refresh functionality - refresh every 8 minutes
   useEffect(() => {
@@ -1311,7 +1330,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     const interval = setInterval(() => {
       console.log(`📰 NewsTile ${id}: Auto-refresh triggered`);
       runNewsSearch(true); // Force refresh on auto-refresh
-    }, CACHE_DURATION_MS); // 8 minutes
+    }, 8 * 60 * 1000); // 8 minutes
 
     return () => clearInterval(interval);
   }, [autoRefresh, runNewsSearch, id]);
@@ -1322,13 +1341,15 @@ const NewsTile: React.FC<NewsTileProps> = ({
       initialLoadDone.current = true;
       // Check if we have fresh cached data (this check happens in the cache loading effect above)
       // If no cache exists or cache is expired, run search
-      const cachedTimestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY);
-      if (!cachedTimestamp) {
+      const pageSize = displayOptions.maxResults || 20;
+      const basePayload = buildApiPayload(localFilters, pageSize);
+      const cached = newsCache.getCachedPage(basePayload, 1, pageSize, id);
+      if (!cached || cached.articles.length === 0) {
         console.log(`📰 NewsTile ${id}: No cache found, running initial search`);
         runNewsSearch();
       }
     }
-  }, [id]); // Only run on mount or when id changes
+  }, [id, localFilters, displayOptions.maxResults, buildApiPayload, runNewsSearch]); // Run when dependencies change
 
   const handleSettingsOpen = (event: React.MouseEvent<HTMLElement>) => {
     setSettingsAnchor(event.currentTarget);
@@ -1338,6 +1359,103 @@ const NewsTile: React.FC<NewsTileProps> = ({
     setSettingsAnchor(null);
   };
 
+  // Fetch page if not cached, then compute current page results
+  useEffect(() => {
+    const loadCurrentPage = async () => {
+      // Check if current page is already cached
+      if (fetchedPages.has(currentPage)) {
+        const cachedArticles = fetchedPages.get(currentPage) || [];
+        setCurrentResults(cachedArticles);
+        setNewsArticles(cachedArticles); // Keep for backward compatibility
+        setIsLoadingPage(false);
+        return;
+      }
+      
+      // Only fetch if we have filters or totalFound indicates there are results
+      if (totalFound > 0 || currentPage === 1) {
+        // Use isLoadingPage for page navigation, isLoading only for initial search
+        if (currentPage === 1) {
+          setIsLoading(true);
+        } else {
+          setIsLoadingPage(true);
+        }
+        
+        try {
+          const currentFilters = localFiltersRef.current;
+          const pageSize = localDisplayOptions.maxResults || 20;
+          const basePayload = buildApiPayload(currentFilters, pageSize);
+          const pageArticles = await fetchPage(currentPage, pageSize, basePayload);
+          
+          // Only update results once we have the new page data
+          setCurrentResults(pageArticles);
+          setNewsArticles(pageArticles); // Keep for backward compatibility
+        } catch (err) {
+          console.error('Error fetching page:', err);
+          if (currentPage === 1) {
+            setCurrentResults([]);
+            setNewsArticles([]);
+          }
+          // For other pages, keep current results on error
+        } finally {
+          setIsLoading(false);
+          setIsLoadingPage(false);
+        }
+      } else {
+        // No results, clear display
+        if (currentPage === 1) {
+          setCurrentResults([]);
+          setNewsArticles([]);
+        }
+      }
+    };
+    
+    if (totalFound > 0 || currentPage === 1) {
+      loadCurrentPage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, localDisplayOptions.maxResults]);
+  
+  // Update current results when page is cached
+  useEffect(() => {
+    if (fetchedPages.has(currentPage)) {
+      const cachedArticles = fetchedPages.get(currentPage) || [];
+      setCurrentResults(cachedArticles);
+      setNewsArticles(cachedArticles); // Keep for backward compatibility
+    }
+  }, [currentPage, fetchedPages]);
+
+  // Handle page change
+  const handlePageChange = async (newPage: number) => {
+    const pageSize = localDisplayOptions.maxResults || 20;
+    const maxPages = totalFound > 0 ? Math.ceil(totalFound / pageSize) : 0;
+    
+    if (newPage < 1 || (maxPages > 0 && newPage > maxPages)) {
+      return;
+    }
+    
+    // If page is cached, just switch to it immediately
+    if (fetchedPages.has(newPage)) {
+      setCurrentPage(newPage);
+      return;
+    }
+    
+    // Otherwise, set loading state and fetch
+    setIsLoadingPage(true);
+    setCurrentPage(newPage);
+    
+    // Fetch page if not cached
+    if (!fetchedPages.has(newPage)) {
+      try {
+        const currentFilters = localFiltersRef.current;
+        const basePayload = buildApiPayload(currentFilters, pageSize);
+        await fetchPage(newPage, pageSize, basePayload);
+      } catch (err) {
+        console.error('Error fetching page:', err);
+      } finally {
+        setIsLoadingPage(false);
+      }
+    }
+  };
 
   const handleDisplayOptionsChange = (option: keyof typeof displayOptions) => {
     const newOptions = {
@@ -1375,12 +1493,17 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
   };
 
+  // Toggle article selection
   const handleArticleSelect = (articleId: string) => {
-    setSelectedArticles(prev => 
-      prev.includes(articleId) 
-        ? prev.filter(id => id !== articleId)
-        : [...prev, articleId]
-    );
+    setSelectedArticles(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(articleId)) {
+        newSet.delete(articleId);
+      } else {
+        newSet.add(articleId);
+      }
+      return newSet;
+    });
   };
 
   const handleArticleClick = (article: NewsArticle) => {
@@ -1388,7 +1511,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   };
 
   const handleAddToContextClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    if (selectedArticles.length === 0) {
+    if (selectedArticles.size === 0) {
       alert('Please select at least one article to add to context');
       return;
     }
@@ -1400,12 +1523,13 @@ const NewsTile: React.FC<NewsTileProps> = ({
   };
 
   const handleAddToContext = (target: 'new' | 'sidebar') => {
-    if (selectedArticles.length === 0) return;
+    if (selectedArticles.size === 0) return;
     
     // Get the selected article objects from newsArticles state
-    const selectedArticleObjects = newsArticles.filter(article => 
-      selectedArticles.includes(article.source_url)
-    );
+    const selectedArticleObjects = newsArticles.filter(article => {
+      const articleWithId = ensureArticleId(article);
+      return selectedArticles.has(articleWithId.id);
+    });
     
     console.log(`📦 Adding ${selectedArticleObjects.length} article(s) to context (target: ${target})`);
     
@@ -1443,7 +1567,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
     
     // Clear selection and close menu
-    setSelectedArticles([]);
+    setSelectedArticles(new Set());
     handleContextMenuClose();
   };
 
@@ -1509,10 +1633,14 @@ const NewsTile: React.FC<NewsTileProps> = ({
     };
   }, [calculateResultsPerPage]);
 
-  const totalPages = Math.ceil(newsArticles.length / resultsPerPage);
-  const startIndex = (currentPage - 1) * resultsPerPage;
-  const endIndex = startIndex + resultsPerPage;
-  const currentArticles = newsArticles.slice(startIndex, endIndex);
+  // Use currentResults for display (page-based fetching)
+  // Fallback to sliced newsArticles for backward compatibility
+  const displayArticles = currentResults.length > 0 ? currentResults : newsArticles;
+  const pageSize = localDisplayOptions.maxResults || 20;
+  const totalPages = totalFound > 0 ? Math.ceil(totalFound / pageSize) : Math.ceil(displayArticles.length / resultsPerPage);
+  const currentArticles = currentResults.length > 0 ? currentResults : displayArticles.slice((currentPage - 1) * resultsPerPage, currentPage * resultsPerPage);
+  const startIndex = totalFound > 0 ? ((currentPage - 1) * pageSize) + 1 : ((currentPage - 1) * resultsPerPage) + 1;
+  const endIndex = totalFound > 0 ? Math.min(currentPage * pageSize, totalFound) : Math.min(currentPage * resultsPerPage, displayArticles.length);
 
   // Scroll to top when page changes
   const listRef = useRef<HTMLUListElement>(null);
@@ -1603,9 +1731,9 @@ const NewsTile: React.FC<NewsTileProps> = ({
             }}
           />
           
-          {selectedArticles.length > 0 && (
+          {selectedArticles.size > 0 && (
             <Chip
-              label={`${selectedArticles.length} selected`}
+              label={`${selectedArticles.size} selected`}
               size="small"
               sx={{
                 backgroundColor: 'rgba(34, 197, 94, 0.2)',
@@ -1630,8 +1758,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
             onTogglePin={togglePin}
           />
 
-          {selectedArticles.length > 0 && (
-            <Tooltip title={`Add ${selectedArticles.length} article${selectedArticles.length > 1 ? 's' : ''} to Context`}>
+          {selectedArticles.size > 0 && (
+            <Tooltip title={`Add ${selectedArticles.size} article${selectedArticles.size > 1 ? 's' : ''} to Context`}>
               <IconButton
                 size="small"
                 onClick={handleAddToContextClick}
@@ -1727,21 +1855,22 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 backgroundColor: 'rgba(59, 130, 246, 0.7)',
               },
             }}>
-            {currentArticles.map((article) => {
-              // Use source_url as the unique ID for each article
-              const articleId = article.source_url;
+            {currentArticles.map((article, index) => {
+              // Ensure article has an ID
+              const articleWithId = ensureArticleId(article);
+              const articleId = articleWithId.id;
               
               return (
               <ListItem
-                key={articleId}
+                key={articleId || `article-${index}`}
                 sx={{
                   border: '1px solid rgba(55, 65, 81, 0.3)',
                   borderRadius: '8px',
                   mb: 1,
-                  backgroundColor: selectedArticles.includes(articleId) 
+                  backgroundColor: selectedArticles.has(articleId) 
                     ? 'rgba(34, 197, 94, 0.1)' 
                     : 'rgba(15, 23, 42, 0.3)',
-                  borderColor: selectedArticles.includes(articleId) 
+                  borderColor: selectedArticles.has(articleId) 
                     ? '#22c55e' 
                     : 'rgba(55, 65, 81, 0.3)',
                   cursor: 'pointer',
@@ -1749,7 +1878,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
                   alignItems: 'center',
                   minHeight: 60,
                   '&:hover': {
-                    backgroundColor: selectedArticles.includes(articleId)
+                    backgroundColor: selectedArticles.has(articleId)
                       ? 'rgba(34, 197, 94, 0.15)'
                       : 'rgba(59, 130, 246, 0.05)',
                   },
@@ -1758,7 +1887,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 {/* Left side: Checkbox and content */}
                 <Box sx={{ display: 'flex', alignItems: 'center', flex: 1, mr: 2 }}>
                   <Checkbox
-                    checked={selectedArticles.includes(articleId)}
+                    checked={selectedArticles.has(articleId)}
                     onChange={() => {
                       handleArticleSelect(articleId);
                     }}
@@ -1885,6 +2014,16 @@ const NewsTile: React.FC<NewsTileProps> = ({
             })}
           </List>
 
+          {/* Loading indicator for page loading */}
+          {isLoadingPage && (
+            <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', borderTop: '1px solid rgba(55, 65, 81, 0.3)' }}>
+              <CircularProgress size={20} sx={{ color: '#3b82f6', mr: 2 }} />
+              <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                Loading page {currentPage}...
+              </Typography>
+            </Box>
+          )}
+
           {/* Pagination */}
           {totalPages > 1 && (
             <Box sx={{ 
@@ -1896,28 +2035,62 @@ const NewsTile: React.FC<NewsTileProps> = ({
               borderTop: '1px solid rgba(55, 65, 81, 0.3)' 
             }}>
               <Typography variant="caption" color="#6b7280" sx={{ fontSize: '0.75rem' }}>
-                Showing {startIndex + 1}-{Math.min(endIndex, newsArticles.length)} of {newsArticles.length} articles
+                {totalFound > 0 ? (
+                  <>Page {currentPage} of {totalPages} (Showing {startIndex}-{endIndex} of {totalFound} results)</>
+                ) : (
+                  <>Showing {startIndex}-{endIndex} of {displayArticles.length} articles</>
+                )}
               </Typography>
-              <Pagination
-                count={totalPages}
-                page={currentPage}
-                onChange={(_, page) => setCurrentPage(page)}
-                color="primary"
-                size="small"
-                sx={{
-                  '& .MuiPaginationItem-root': {
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant="outlined"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1 || isLoading || isLoadingPage}
+                  startIcon={<ChevronLeftIcon />}
+                  sx={{
                     color: '#9ca3af',
-                    fontSize: '0.875rem',
-                  },
-                  '& .Mui-selected': {
-                    backgroundColor: '#3b82f6',
-                    color: 'white',
-                  },
-                  '& .MuiPaginationItem-root:hover': {
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  },
-                }}
-              />
+                    borderColor: '#374151',
+                    fontSize: '0.75rem',
+                    minWidth: 'auto',
+                    padding: '4px 8px',
+                    '&:hover': {
+                      borderColor: '#3b82f6',
+                      color: '#3b82f6',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                    '&:disabled': {
+                      borderColor: '#374151',
+                      color: '#6b7280',
+                    },
+                  }}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage >= totalPages || isLoading || isLoadingPage}
+                  endIcon={<ChevronRightIcon />}
+                  sx={{
+                    color: '#9ca3af',
+                    borderColor: '#374151',
+                    fontSize: '0.75rem',
+                    minWidth: 'auto',
+                    padding: '4px 8px',
+                    '&:hover': {
+                      borderColor: '#3b82f6',
+                      color: '#3b82f6',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                    '&:disabled': {
+                      borderColor: '#374151',
+                      color: '#6b7280',
+                    },
+                  }}
+                >
+                  Next
+                </Button>
+              </Box>
             </Box>
           )}
         </Box>
@@ -2503,32 +2676,66 @@ const NewsTile: React.FC<NewsTileProps> = ({
             )}
           </Box>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 3, py: 2 }}>
           <Button onClick={() => {
             setFiltersDialogOpen(false);
             // Clean up trailing operators before resetting
             const cleanedFilters = cleanupAllExpressions(localFilters);
             setLocalFilters(cleanedFilters);
           }}>Cancel</Button>
-          <Button onClick={() => { 
-            // Clean up trailing operators before applying
-            const cleanedFilters = cleanupAllExpressions(localFilters);
-            // Update local state without triggering onSettingsChange immediately
-            setLocalFilters(cleanedFilters);
-            setFiltersDialogOpen(false); 
-            runNewsSearch();
-            // Update settings after search to avoid race condition
-            setTimeout(() => {
-              onSettingsChange(id, { filters: cleanedFilters });
-            }, 200);
-          }} 
-          variant="contained"
-          sx={{
-            background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-            '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
-          }}>
-            Apply & Search
-          </Button>
+          
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            {/* Results Per Page */}
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+              <Select
+                value={localDisplayOptions.maxResults || 20}
+                label="Per Page"
+                onChange={(e) => {
+                  const newMaxResults = Number(e.target.value);
+                  const newOptions = {
+                    ...localDisplayOptions,
+                    maxResults: newMaxResults,
+                  };
+                  setLocalDisplayOptions(newOptions);
+                  // Update settings (search will be triggered when user clicks "Apply & Search")
+                  setTimeout(() => {
+                    onSettingsChange(id, { displayOptions: newOptions });
+                  }, 100);
+                }}
+                sx={{
+                  color: '#ffffff',
+                  '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                }}
+              >
+                <MenuItem value={10}>10</MenuItem>
+                <MenuItem value={25}>25</MenuItem>
+                <MenuItem value={50}>50</MenuItem>
+                <MenuItem value={100}>100</MenuItem>
+              </Select>
+            </FormControl>
+            
+            <Button onClick={() => { 
+              // Clean up trailing operators before applying
+              const cleanedFilters = cleanupAllExpressions(localFilters);
+              // Update local state without triggering onSettingsChange immediately
+              setLocalFilters(cleanedFilters);
+              setFiltersDialogOpen(false); 
+              runNewsSearch();
+              // Update settings after search to avoid race condition
+              setTimeout(() => {
+                onSettingsChange(id, { filters: cleanedFilters });
+              }, 200);
+            }} 
+            variant="contained"
+            sx={{
+              background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+              '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+            }}>
+              Apply & Search
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
 

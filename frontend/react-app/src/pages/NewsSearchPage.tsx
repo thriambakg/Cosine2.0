@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   TextField,
   Typography,
@@ -50,6 +50,7 @@ import {
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../services/api';
 import { addArticleToContext, addMultipleArticlesToContext } from '../components/tiles/common';
+import { newsCache } from '../utils/newsCache';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -185,9 +186,13 @@ const NewsSearchPage: React.FC = () => {
   const [currentResults, setCurrentResults] = useState<NewsArticle[]>([]);
   const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
   const [isSearching, setIsSearching] = useState<boolean>(savedState?.isSearching || false);
+  const [isLoadingPage, setIsLoadingPage] = useState<boolean>(false); // Separate state for page loading
   const [searchError, setSearchError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
-  const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 50);
+  const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 25);
+  
+  // Cache for fetched pages: { pageNumber: articles[] }
+  const [fetchedPages, setFetchedPages] = useState<Map<number, NewsArticle[]>>(new Map());
   
   // Selection state
   const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
@@ -387,11 +392,107 @@ const NewsSearchPage: React.FC = () => {
     searchExpanded,
   ]);
   
-  // Perform search - fetch all results using expression-based filters
+  // Helper function to ensure articles have a valid ID
+  const ensureArticleId = (article: NewsArticle): NewsArticle => {
+    if (article.id) {
+      return article;
+    }
+    // Use source_url as fallback ID, or generate one from title + source_url
+    return {
+      ...article,
+      id: article.source_url || `${article.title}-${article.source_name || 'unknown'}`,
+    };
+  };
+
+  // Fetch a specific page of results
+  const fetchPage = async (page: number, size: number, basePayload: NewsSearchRequest) => {
+    // Check cache first (for page, we don't use tileId)
+    const cached = newsCache.getCachedPage(basePayload, page, size);
+    if (cached) {
+      console.log(`📦 Using cached page ${page}`);
+      // Update total found from cached data
+      if (page === 1) {
+        setTotalFound(cached.total);
+      }
+      
+      // Ensure all cached articles have IDs
+      const articlesWithIds = cached.articles.map(ensureArticleId);
+      
+      // Update local fetchedPages cache
+      setFetchedPages(prev => {
+        const newMap = new Map(prev);
+        newMap.set(page, articlesWithIds);
+        return newMap;
+      });
+      
+      return articlesWithIds;
+    }
+    
+    // Not in cache, fetch from API
+    const offset = (page - 1) * size;
+    const searchRequest: NewsSearchRequest = {
+      ...basePayload,
+      limit: size,
+      offset: offset,
+    };
+    
+    console.log(`🔍 Fetching page ${page} from API (offset: ${offset}, limit: ${size})`);
+    
+    const response = await newsSearchAPI.searchNews(searchRequest);
+    
+    if (response.articles && response.articles.length > 0) {
+      // Ensure all articles have IDs
+      const articlesWithIds = response.articles.map(ensureArticleId);
+      
+      // Update total found from first page
+      if (page === 1) {
+        setTotalFound(response.total || 0);
+      }
+      
+      // Store in cache (with IDs)
+      newsCache.setCachedPage(basePayload, page, size, articlesWithIds, response.total || 0);
+      
+      // Cache this page in local state
+      setFetchedPages(prev => {
+        const newMap = new Map(prev);
+        newMap.set(page, articlesWithIds);
+        return newMap;
+      });
+      
+      return articlesWithIds;
+    }
+    
+    return [];
+  };
+
+  // Redistribute cached articles when page size changes
+  const redistributeCachedArticles = (newPageSize: number) => {
+    const allCached: NewsArticle[] = [];
+    const sortedPages = Array.from(fetchedPages.keys()).sort((a, b) => a - b);
+    
+    // Collect all cached articles in order
+    for (const pageNum of sortedPages) {
+      const articles = fetchedPages.get(pageNum) || [];
+      allCached.push(...articles);
+    }
+    
+    // Redistribute into new page size
+    const newFetchedPages = new Map<number, NewsArticle[]>();
+    for (let i = 0; i < allCached.length; i += newPageSize) {
+      const pageNum = Math.floor(i / newPageSize) + 1;
+      const pageArticles = allCached.slice(i, i + newPageSize);
+      newFetchedPages.set(pageNum, pageArticles);
+    }
+    
+    setFetchedPages(newFetchedPages);
+  };
+
+  // Perform search - fetch first page only
   const handleSearch = async () => {
     setIsSearching(true);
     setSearchError(null);
     setCurrentPage(1);
+    setFetchedPages(new Map()); // Clear local cache on new search
     setAllSearchResults([]);
     setCurrentResults([]);
     
@@ -402,50 +503,22 @@ const NewsSearchPage: React.FC = () => {
       // Build API payload from expression filters
       const basePayload = buildApiPayload(cleanedFilters);
       
-      // Fetch all results by making requests for all pages
-      let allResults: NewsArticle[] = [];
-      let currentOffset = 0;
-      let hasMore = true;
-      const fetchLimit = 10000; // Large limit to get all results in one request
-      
-      while (hasMore) {
-        const searchRequest: NewsSearchRequest = {
-          ...basePayload,
-          limit: fetchLimit,
-          offset: currentOffset,
-        };
-        
-        console.log('🔍 News Search Request:', searchRequest);
-        
-        const response = await newsSearchAPI.searchNews(searchRequest);
-        
-        if (response.articles && response.articles.length > 0) {
-          allResults = [...allResults, ...response.articles];
-          
-          // Check if there are more pages
-          const totalFromAPI = response.total || 0;
-          const fetchedSoFar = allResults.length;
-          hasMore = fetchedSoFar < totalFromAPI && response.articles.length === fetchLimit;
-          
-          if (currentOffset === 0) {
-            // Set total found from first response
-            setTotalFound(totalFromAPI);
-          }
-          
-          currentOffset += fetchLimit;
-        } else {
-          hasMore = false;
-          if (currentOffset === 0) {
-            setAllSearchResults([]);
-            setTotalFound(0);
-          }
-        }
+      // Try to load all cached pages for this search
+      const cachedPages = newsCache.getAllCachedPages(basePayload);
+      if (cachedPages.size > 0) {
+        console.log(`📦 Found ${cachedPages.size} cached pages, restoring to local cache`);
+        setFetchedPages(cachedPages);
       }
       
-      if (allResults.length > 0) {
-        setAllSearchResults(allResults);
+      // Fetch first page (will use cache if available)
+      const firstPageArticles = await fetchPage(1, pageSize, basePayload);
+      
+      if (firstPageArticles.length > 0) {
+        setAllSearchResults(firstPageArticles);
+        setCurrentResults(firstPageArticles);
       } else {
         setAllSearchResults([]);
+        setCurrentResults([]);
         setTotalFound(0);
       }
     } catch (error: any) {
@@ -457,19 +530,131 @@ const NewsSearchPage: React.FC = () => {
       setIsSearching(false);
     }
   };
-  
-  // Paginate results (no client-side filtering, API handles it)
+
+  // Fetch page if not cached, then compute current page results
   useEffect(() => {
-    const startIndex = (currentPage - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    setCurrentResults(allSearchResults.slice(startIndex, endIndex));
-  }, [allSearchResults, currentPage, pageSize]);
+    const loadCurrentPage = async () => {
+      // Check if current page is already cached
+      if (fetchedPages.has(currentPage)) {
+        const cachedArticles = fetchedPages.get(currentPage) || [];
+        setCurrentResults(cachedArticles);
+        setAllSearchResults(cachedArticles); // For display purposes
+        setIsLoadingPage(false);
+        return;
+      }
+      
+      // Only fetch if we have a search that was performed (totalFound > 0 or we're on page 1)
+      if (totalFound > 0 || currentPage === 1) {
+        // Use isLoadingPage for page navigation, isSearching only for initial search
+        if (currentPage === 1) {
+          setIsSearching(true);
+        } else {
+          setIsLoadingPage(true);
+          // Don't clear current results when loading a new page - keep them visible
+        }
+        
+        try {
+          const cleanedFilters = cleanupAllExpressions(filters);
+          const basePayload = buildApiPayload(cleanedFilters);
+          const pageArticles = await fetchPage(currentPage, pageSize, basePayload);
+          // Only update results once we have the new page data
+          setCurrentResults(pageArticles);
+          setAllSearchResults(pageArticles); // For display purposes
+        } catch (err) {
+          console.error('Error fetching page:', err);
+          // Only clear results on first page error
+          if (currentPage === 1) {
+            setCurrentResults([]);
+            setAllSearchResults([]);
+          }
+          // For other pages, keep current results on error
+        } finally {
+          setIsSearching(false);
+          setIsLoadingPage(false);
+        }
+      } else {
+        // Only clear if we don't have any search results
+        if (currentPage === 1) {
+          setCurrentResults([]);
+          setAllSearchResults([]);
+        }
+      }
+    };
+    
+    // Only load if we have filters or are on a valid page
+    if (totalFound > 0 || currentPage === 1) {
+      loadCurrentPage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, pageSize]);
+  
+  // Update current results when page is cached
+  useEffect(() => {
+    if (fetchedPages.has(currentPage)) {
+      const cachedArticles = fetchedPages.get(currentPage) || [];
+      setCurrentResults(cachedArticles);
+      setAllSearchResults(cachedArticles);
+    }
+  }, [currentPage, fetchedPages]);
   
   // Handle page change
-  const handlePageChange = (newPage: number) => {
-    const maxPages = Math.ceil(allSearchResults.length / pageSize);
-    if (newPage < 1 || newPage > maxPages) return;
+  const handlePageChange = async (newPage: number) => {
+    const maxPages = totalFound > 0 ? Math.ceil(totalFound / pageSize) : 0;
+    
+    if (newPage < 1 || (maxPages > 0 && newPage > maxPages)) {
+      return;
+    }
+    
+    // If page is cached, just switch to it immediately
+    if (fetchedPages.has(newPage)) {
+      setCurrentPage(newPage);
+      return;
+    }
+    
+    // Otherwise, set loading state and fetch
+    setIsLoadingPage(true);
     setCurrentPage(newPage);
+    
+    // Fetch page if not cached
+    if (!fetchedPages.has(newPage)) {
+      try {
+        const cleanedFilters = cleanupAllExpressions(filters);
+        const basePayload = buildApiPayload(cleanedFilters);
+        await fetchPage(newPage, pageSize, basePayload);
+      } catch (err) {
+        console.error('Error fetching page:', err);
+      } finally {
+        setIsLoadingPage(false);
+      }
+    }
+  };
+  
+  const handlePageSizeChange = (newSize: number) => {
+    // Redistribute cached articles
+    redistributeCachedArticles(newSize);
+    
+    // Calculate which page the current first article should be on
+    const allCached: NewsArticle[] = [];
+    const sortedPages = Array.from(fetchedPages.keys()).sort((a, b) => a - b);
+    for (const pageNum of sortedPages) {
+      const articles = fetchedPages.get(pageNum) || [];
+      allCached.push(...articles);
+    }
+    
+    // Find current article index in cached results
+    const currentPageArticles = fetchedPages.get(currentPage) || [];
+    const firstArticle = currentPageArticles[0];
+    if (firstArticle && allCached.length > 0) {
+      const articleIndex = allCached.findIndex(a => a.id === firstArticle.id);
+      if (articleIndex >= 0) {
+        const newPage = Math.floor(articleIndex / newSize) + 1;
+        setCurrentPage(newPage);
+      }
+    } else {
+      setCurrentPage(1);
+    }
+    
+    setPageSize(newSize);
   };
   
   // Toggle article selection
@@ -487,14 +672,46 @@ const NewsSearchPage: React.FC = () => {
   
   // Select all articles on current page
   const selectAllArticles = () => {
-    const allIds = new Set(currentResults.map(article => article.id));
-    setSelectedArticles(allIds);
+    setSelectedArticles(prev => {
+      const newSet = new Set(prev);
+      currentResults.forEach(article => {
+        const articleWithId = ensureArticleId(article);
+        newSet.add(articleWithId.id);
+      });
+      return newSet;
+    });
   };
   
-  // Deselect all articles
+  // Deselect all articles on current page
   const deselectAllArticles = () => {
-    setSelectedArticles(new Set());
+    setSelectedArticles(prev => {
+      const newSet = new Set(prev);
+      currentResults.forEach(article => {
+        const articleWithId = ensureArticleId(article);
+        newSet.delete(articleWithId.id);
+      });
+      return newSet;
+    });
   };
+  
+  // Check if all articles on current page are selected
+  const areAllCurrentPageArticlesSelected = useMemo(() => {
+    if (currentResults.length === 0) return false;
+    return currentResults.every(article => {
+      const articleWithId = ensureArticleId(article);
+      return selectedArticles.has(articleWithId.id);
+    });
+  }, [currentResults, selectedArticles]);
+  
+  // Check if some (but not all) articles on current page are selected
+  const areSomeCurrentPageArticlesSelected = useMemo(() => {
+    if (currentResults.length === 0) return false;
+    const selectedCount = currentResults.filter(article => {
+      const articleWithId = ensureArticleId(article);
+      return selectedArticles.has(articleWithId.id);
+    }).length;
+    return selectedCount > 0 && selectedCount < currentResults.length;
+  }, [currentResults, selectedArticles]);
   
   // Handle context menu close
   const handleContextMenuClose = () => {
@@ -511,22 +728,29 @@ const NewsSearchPage: React.FC = () => {
     if (selectedArticles.size === 0) return;
     
     // Get the selected article objects from currentResults
-    const selectedArticleObjects = currentResults.filter(article => selectedArticles.has(article.id));
+    const selectedArticleObjects = currentResults.filter(article => {
+      const articleWithId = ensureArticleId(article);
+      return selectedArticles.has(articleWithId.id);
+    });
     
     console.log(`📰 Adding ${selectedArticleObjects.length} article(s) to context (target: ${target})`);
     
     // Add to context using the context manager functions
     if (selectedArticleObjects.length > 1) {
-      const articlesForContext = selectedArticleObjects.map(article => ({
-        articleId: article.id,
-        title: article.title,
-        source: article.source_name,
-        articleData: article,
-      }));
+      const articlesForContext = selectedArticleObjects.map(article => {
+        const articleWithId = ensureArticleId(article);
+        return {
+          articleId: articleWithId.id,
+          title: article.title,
+          source: article.source_name,
+          articleData: article,
+        };
+      });
       addMultipleArticlesToContext(articlesForContext, target);
     } else if (selectedArticleObjects.length === 1) {
       const article = selectedArticleObjects[0];
-      addArticleToContext(article.id, article.title, article.source_name, article, target);
+      const articleWithId = ensureArticleId(article);
+      addArticleToContext(articleWithId.id, article.title, article.source_name, article, target);
     }
     
     // Clear selection and close menu
@@ -1533,20 +1757,43 @@ const NewsSearchPage: React.FC = () => {
                   true // Use dropdown mode
                 )}
                 
-                {/* Search Button */}
-                <Button
-                  variant="contained"
-                  onClick={handleSearch}
-                  disabled={isSearching}
-                  startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
-                  sx={{
-                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                    '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
-                    alignSelf: 'flex-start',
-                  }}
-                >
-                  {isSearching ? 'Searching...' : 'Search'}
-                </Button>
+                {/* Search Button and Results Per Page */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+                  <Button
+                    variant="contained"
+                    onClick={handleSearch}
+                    disabled={isSearching}
+                    startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
+                    sx={{
+                      background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                      '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+                    }}
+                  >
+                    {isSearching ? 'Searching...' : 'Search'}
+                  </Button>
+                  
+                  {/* Results Per Page */}
+                  <FormControl size="small" sx={{ minWidth: 120 }}>
+                    <InputLabel sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+                    <Select
+                      value={pageSize}
+                      label="Per Page"
+                      onChange={(e) => {
+                        handlePageSizeChange(Number(e.target.value));
+                      }}
+                      sx={{
+                        color: '#ffffff',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                      }}
+                    >
+                      <MenuItem value={10}>10</MenuItem>
+                      <MenuItem value={25}>25</MenuItem>
+                      <MenuItem value={50}>50</MenuItem>
+                      <MenuItem value={100}>100</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
                 </Box>
               </Collapse>
             </GlassCard>
@@ -1569,7 +1816,7 @@ const NewsSearchPage: React.FC = () => {
               </GlassCard>
             )}
             
-            {!isSearching && allSearchResults.length > 0 && (
+            {(allSearchResults.length > 0 || currentResults.length > 0) && (
               <GlassCard>
                 {/* Results Header */}
                 <Box sx={{ p: 3, borderBottom: '1px solid #374151', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1579,29 +1826,6 @@ const NewsSearchPage: React.FC = () => {
                   </Typography>
                   
                   <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                    {/* Results Per Page */}
-                    <FormControl size="small" sx={{ minWidth: 120 }}>
-                      <InputLabel sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
-                      <Select
-                        value={pageSize}
-                        label="Per Page"
-                        onChange={(e) => {
-                          setPageSize(Number(e.target.value));
-                          setCurrentPage(1);
-                        }}
-                        sx={{
-                          color: '#ffffff',
-                          '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                        }}
-                      >
-                        <MenuItem value={10}>10</MenuItem>
-                        <MenuItem value={25}>25</MenuItem>
-                        <MenuItem value={50}>50</MenuItem>
-                        <MenuItem value={100}>100</MenuItem>
-                      </Select>
-                    </FormControl>
-                    
                     {/* Column Visibility Button */}
                     <Tooltip title="Column Visibility">
                       <IconButton
@@ -1715,8 +1939,8 @@ const NewsSearchPage: React.FC = () => {
                             <TableRow sx={{ backgroundColor: 'rgba(31, 41, 55, 0.5)' }}>
                               <TableCell padding="checkbox" sx={{ py: 1 }}>
                                 <Checkbox
-                                  checked={selectedArticles.size === currentResults.length && currentResults.length > 0}
-                                  indeterminate={selectedArticles.size > 0 && selectedArticles.size < currentResults.length}
+                                  checked={areAllCurrentPageArticlesSelected}
+                                  indeterminate={areSomeCurrentPageArticlesSelected}
                                   onChange={(e) => {
                                     if (e.target.checked) {
                                       selectAllArticles();
@@ -1746,30 +1970,47 @@ const NewsSearchPage: React.FC = () => {
                             </TableRow>
                           </TableHead>
                           <TableBody>
-                            {currentResults.map((article) => (
+                            {currentResults.map((article, index) => {
+                              // Ensure article has an ID
+                              const articleWithId = ensureArticleId(article);
+                              return (
                               <TableRow
-                                key={article.id}
+                                key={articleWithId.id || `article-${index}`}
                                 sx={{
                                   '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
                                   cursor: 'pointer',
                                 }}
-                                onClick={() => toggleArticleSelection(article.id)}
+                                onClick={(e) => {
+                                  // Don't toggle if clicking on checkbox or other interactive elements
+                                  const target = e.target as HTMLElement;
+                                  if (target.closest('input[type="checkbox"]') || 
+                                      target.closest('button') || 
+                                      target.closest('a')) {
+                                    return;
+                                  }
+                                  toggleArticleSelection(articleWithId.id);
+                                }}
                                 onContextMenu={(e) => {
                                   e.preventDefault();
                                   setContextMenuAnchor(e.currentTarget);
                                 }}
                               >
-                                <TableCell padding="checkbox" sx={{ py: 1 }}>
+                                <TableCell key={`checkbox-${articleWithId.id || index}`} padding="checkbox" sx={{ py: 1 }} onClick={(e) => e.stopPropagation()}>
                                   <Checkbox
-                                    checked={selectedArticles.has(article.id)}
-                                    onChange={() => toggleArticleSelection(article.id)}
-                                    onClick={(e) => e.stopPropagation()}
+                                    checked={selectedArticles.has(articleWithId.id)}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      toggleArticleSelection(articleWithId.id);
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                    }}
                                     sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
                                     size="small"
                                   />
                                 </TableCell>
                                 {selectedColumns.includes('Title') && (
-                                  <TableCell key={`title-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem', minWidth: '400px' }}>
+                                  <TableCell key={`title-${articleWithId.id || index}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem', minWidth: '400px' }}>
                                     <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
                                       {/* Image */}
                                       {article.image_url ? (
@@ -1845,12 +2086,12 @@ const NewsSearchPage: React.FC = () => {
                                   </TableCell>
                                 )}
                                 {selectedColumns.includes('Source') && (
-                                  <TableCell key={`source-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
+                                  <TableCell key={`source-${articleWithId.id || index}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                                     {article.source_name || 'N/A'}
                                   </TableCell>
                                 )}
                                 {selectedColumns.includes('Published Date') && (
-                                  <TableCell key={`published-date-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
+                                  <TableCell key={`published-date-${articleWithId.id || index}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                       <CalendarIcon sx={{ fontSize: '0.875rem', color: '#9ca3af' }} />
                                       {formatDate(article.published_date)}
@@ -1858,17 +2099,20 @@ const NewsSearchPage: React.FC = () => {
                                   </TableCell>
                                 )}
                                 {selectedColumns.includes('Category') && (
-                                  <TableCell key={`category-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
+                                  <TableCell key={`category-${articleWithId.id || index}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                                     {article.category || 'N/A'}
                                   </TableCell>
                                 )}
                                 {selectedColumns.includes('Description') && (
-                                  <TableCell key={`description-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem', width: '150px' }}>
+                                  <TableCell key={`description-${articleWithId.id || index}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem', width: '150px' }}>
                                     {article.description ? (
                                       <Button
                                         size="small"
                                         variant="outlined"
-                                        onClick={(e) => handleViewDescription(article, e)}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleViewDescription(articleWithId, e);
+                                        }}
                                         sx={{
                                           color: '#3b82f6',
                                           borderColor: '#3b82f6',
@@ -1890,24 +2134,35 @@ const NewsSearchPage: React.FC = () => {
                                   </TableCell>
                                 )}
                               </TableRow>
-                            ))}
+                              );
+                            })}
                           </TableBody>
                         </Table>
                       </TableContainer>
                     ) : null}
                     
+                    {/* Loading indicator for page loading */}
+                    {isLoadingPage && (
+                      <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', borderTop: '1px solid #374151' }}>
+                        <CircularProgress size={24} sx={{ color: '#3b82f6', mr: 2 }} />
+                        <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                          Loading page {currentPage}...
+                        </Typography>
+                      </Box>
+                    )}
+                    
                     {/* Pagination */}
-                    {allSearchResults.length > pageSize && (
+                    {totalFound > pageSize && (
                       <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #374151' }}>
                         <Typography variant="body2" sx={{ color: '#9ca3af' }}>
-                          Page {currentPage} of {Math.ceil(allSearchResults.length / pageSize)}
-                          {' '}(Showing {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, allSearchResults.length)} of {allSearchResults.length} results)
+                          Page {currentPage} of {Math.ceil(totalFound / pageSize)}
+                          {' '}(Showing {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, totalFound)} of {totalFound} results)
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 1 }}>
                           <Button
                             variant="outlined"
                             onClick={() => handlePageChange(currentPage - 1)}
-                            disabled={currentPage === 1 || isSearching}
+                            disabled={currentPage === 1 || isSearching || isLoadingPage}
                             startIcon={<ChevronLeftIcon />}
                             sx={{
                               color: '#9ca3af',
@@ -1928,7 +2183,7 @@ const NewsSearchPage: React.FC = () => {
                           <Button
                             variant="outlined"
                             onClick={() => handlePageChange(currentPage + 1)}
-                            disabled={currentPage >= Math.ceil(allSearchResults.length / pageSize) || isSearching}
+                            disabled={currentPage >= Math.ceil(totalFound / pageSize) || isSearching || isLoadingPage}
                             endIcon={<ChevronRightIcon />}
                             sx={{
                               color: '#9ca3af',
