@@ -164,6 +164,13 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [countryInputValue, setCountryInputValue] = useState('');
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [selectedCountryGroupIndex, setSelectedCountryGroupIndex] = useState<number | null>(null);
+  
+  // Validation error states
+  const [keywordError, setKeywordError] = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [countryError, setCountryError] = useState<string | null>(null);
+  
   const tileRef = useRef<HTMLDivElement>(null);
   const localFiltersRef = useRef(localFilters);
   const initialLoadDone = useRef(false);
@@ -382,6 +389,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
           inputValue={inputValue}
           onInputChange={(_, newInputValue) => {
             setInputValue(newInputValue);
+            // Clear error when user starts typing
+            if (filterType === 'source') setSourceError(null);
+            if (filterType === 'category') setCategoryError(null);
+            if (filterType === 'country') setCountryError(null);
           }}
           onChange={(_, newValue) => {
             if (useDropdown && newValue) {
@@ -393,7 +404,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 if (newExpression.length > 0) {
                   const lastItem = newExpression[newExpression.length - 1];
                   if (lastItem.type === filterType || lastItem.type === 'group') {
-                    alert(`Please add an AND or OR operator before adding another ${filterType}`);
+                    const errorMsg = `Please add an AND or OR operator before adding another ${filterType}`;
+                    if (filterType === 'source') setSourceError(errorMsg);
+                    if (filterType === 'category') setCategoryError(errorMsg);
+                    if (filterType === 'country') setCountryError(errorMsg);
                     return;
                   }
                 }
@@ -406,6 +420,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
                   [expressionKey]: newExpression 
                 }));
                 setInputValue('');
+                // Clear error on successful add
+                if (filterType === 'source') setSourceError(null);
+                if (filterType === 'category') setCategoryError(null);
+                if (filterType === 'country') setCountryError(null);
               }
             }
           }}
@@ -421,7 +439,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 if (newExpression.length > 0) {
                   const lastItem = newExpression[newExpression.length - 1];
                   if (lastItem.type === filterType || lastItem.type === 'group') {
-                    alert(`Please add an AND or OR operator before adding another ${filterType}`);
+                    const errorMsg = `Please add an AND or OR operator before adding another ${filterType}`;
+                    if (filterType === 'source') setSourceError(errorMsg);
+                    if (filterType === 'category') setCategoryError(errorMsg);
+                    if (filterType === 'country') setCountryError(errorMsg);
                     return;
                   }
                 }
@@ -434,19 +455,47 @@ const NewsTile: React.FC<NewsTileProps> = ({
                   [expressionKey]: newExpression 
                 }));
                 setInputValue('');
+                // Clear error on successful add
+                if (filterType === 'source') setSourceError(null);
+                if (filterType === 'category') setCategoryError(null);
+                if (filterType === 'country') setCountryError(null);
               }
             }
           }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              placeholder={placeholder}
-              variant="outlined"
-              sx={{ '& .MuiOutlinedInput-root': { color: 'white' } }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onMouseUp={(e) => e.stopPropagation()}
-            />
-          )}
+          renderInput={(params) => {
+            const errorState = filterType === 'source' ? sourceError : filterType === 'category' ? categoryError : countryError;
+            return (
+              <Box>
+                <TextField
+                  {...params}
+                  placeholder={placeholder}
+                  error={!!errorState}
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: '#334155',
+                      color: 'white',
+                      ...(errorState && {
+                        '& fieldset': {
+                          borderColor: '#ef4444',
+                        },
+                        '&:hover fieldset': {
+                          borderColor: '#ef4444',
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: '#ef4444',
+                        },
+                      }),
+                    },
+                  }}
+                />
+                {errorState && (
+                  <Typography variant="caption" sx={{ color: '#ef4444', mt: 0.5, display: 'block' }}>
+                    {errorState}
+                  </Typography>
+                )}
+              </Box>
+            );
+          }}
         />
         
         {/* Expression Display */}
@@ -1977,6 +2026,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 inputValue={keywordInputValue}
                 onInputChange={(_, newInputValue) => {
                   setKeywordInputValue(newInputValue);
+                  // Clear error when user starts typing
+                  setKeywordError(null);
                 }}
                 onKeyDown={(e) => {
                   e.stopPropagation();
@@ -1991,7 +2042,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
                       if (newExpression.length > 0) {
                         const lastItem = newExpression[newExpression.length - 1];
                         if (lastItem.type === 'keyword' || lastItem.type === 'group') {
-                          alert('Please add an AND or OR operator before adding another keyword');
+                          setKeywordError('Please add an AND or OR operator before adding another keyword');
                           return;
                         }
                       }
@@ -2004,18 +2055,44 @@ const NewsTile: React.FC<NewsTileProps> = ({
                         keywordExpression: newExpression 
                       }));
                       setKeywordInputValue('');
+                      // Clear error on successful add
+                      setKeywordError(null);
                     }
                   }
                 }}
                 renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    placeholder="Type keyword and press Enter"
-                    variant="outlined"
-                    sx={{ '& .MuiOutlinedInput-root': { color: 'white' } }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onMouseUp={(e) => e.stopPropagation()}
-                  />
+                  <Box>
+                    <TextField
+                      {...params}
+                      placeholder="Type keyword and press Enter"
+                      variant="outlined"
+                      error={!!keywordError}
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: '#334155',
+                          color: 'white',
+                          ...(keywordError && {
+                            '& fieldset': {
+                              borderColor: '#ef4444',
+                            },
+                            '&:hover fieldset': {
+                              borderColor: '#ef4444',
+                            },
+                            '&.Mui-focused fieldset': {
+                              borderColor: '#ef4444',
+                            },
+                          }),
+                        },
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onMouseUp={(e) => e.stopPropagation()}
+                    />
+                    {keywordError && (
+                      <Typography variant="caption" sx={{ color: '#ef4444', mt: 0.5, display: 'block' }}>
+                        {keywordError}
+                      </Typography>
+                    )}
+                  </Box>
                 )}
               />
 
@@ -2444,7 +2521,12 @@ const NewsTile: React.FC<NewsTileProps> = ({
             setTimeout(() => {
               onSettingsChange(id, { filters: cleanedFilters });
             }, 200);
-          }} variant="contained">
+          }} 
+          variant="contained"
+          sx={{
+            background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+            '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+          }}>
             Apply & Search
           </Button>
         </DialogActions>

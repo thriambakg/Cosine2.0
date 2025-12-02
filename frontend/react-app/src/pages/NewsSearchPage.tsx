@@ -147,6 +147,12 @@ const NewsSearchPage: React.FC = () => {
   const [countryInputValue, setCountryInputValue] = useState('');
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [selectedCountryGroupIndex, setSelectedCountryGroupIndex] = useState<number | null>(null);
+
+  // Validation error states
+  const [keywordError, setKeywordError] = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [countryError, setCountryError] = useState<string | null>(null);
   
   // Category and country options
   const categoryOptions = [
@@ -588,6 +594,10 @@ const NewsSearchPage: React.FC = () => {
           inputValue={inputValue}
           onInputChange={(_, newInputValue) => {
             setInputValue(newInputValue);
+            // Clear error when user starts typing
+            if (filterType === 'source') setSourceError(null);
+            if (filterType === 'category') setCategoryError(null);
+            if (filterType === 'country') setCountryError(null);
           }}
           onChange={(_, newValue) => {
             if (useDropdown && newValue) {
@@ -599,13 +609,20 @@ const NewsSearchPage: React.FC = () => {
                 if (newExpression.length > 0) {
                   const lastItem = newExpression[newExpression.length - 1];
                   if (lastItem.type === filterType || lastItem.type === 'group') {
-                    alert(`Please add an AND or OR operator before adding another ${filterType}`);
+                    const errorMsg = `Please add an AND or OR operator before adding another ${filterType}`;
+                    if (filterType === 'source') setSourceError(errorMsg);
+                    if (filterType === 'category') setCategoryError(errorMsg);
+                    if (filterType === 'country') setCountryError(errorMsg);
                     return;
                   }
                 }
                 
                 // Add the new item
                 newExpression.push({ type: filterType, value });
+                // Clear error on successful add
+                if (filterType === 'source') setSourceError(null);
+                if (filterType === 'category') setCategoryError(null);
+                if (filterType === 'country') setCountryError(null);
                 
                 setFilters(prev => ({ 
                   ...prev, 
@@ -627,7 +644,10 @@ const NewsSearchPage: React.FC = () => {
                 if (newExpression.length > 0) {
                   const lastItem = newExpression[newExpression.length - 1];
                   if (lastItem.type === filterType || lastItem.type === 'group') {
-                    alert(`Please add an AND or OR operator before adding another ${filterType}`);
+                    const errorMsg = `Please add an AND or OR operator before adding another ${filterType}`;
+                    if (filterType === 'source') setSourceError(errorMsg);
+                    if (filterType === 'category') setCategoryError(errorMsg);
+                    if (filterType === 'country') setCountryError(errorMsg);
                     return;
                   }
                 }
@@ -640,17 +660,47 @@ const NewsSearchPage: React.FC = () => {
                   [expressionKey]: newExpression 
                 }));
                 setInputValue('');
+                // Clear error on successful add
+                if (filterType === 'source') setSourceError(null);
+                if (filterType === 'category') setCategoryError(null);
+                if (filterType === 'country') setCountryError(null);
               }
             }
           }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              placeholder={placeholder}
-              variant="outlined"
-              sx={{ '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: 'white' } }}
-            />
-          )}
+          renderInput={(params) => {
+            const errorState = filterType === 'source' ? sourceError : filterType === 'category' ? categoryError : countryError;
+            return (
+              <Box>
+                <TextField
+                  {...params}
+                  placeholder={placeholder}
+                  error={!!errorState}
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: '#334155',
+                      color: 'white',
+                      ...(errorState && {
+                        '& fieldset': {
+                          borderColor: '#ef4444',
+                        },
+                        '&:hover fieldset': {
+                          borderColor: '#ef4444',
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: '#ef4444',
+                        },
+                      }),
+                    },
+                  }}
+                />
+                {errorState && (
+                  <Typography variant="caption" sx={{ color: '#ef4444', mt: 0.5, display: 'block' }}>
+                    {errorState}
+                  </Typography>
+                )}
+              </Box>
+            );
+          }}
         />
         
         {/* Expression Display */}
@@ -1029,6 +1079,8 @@ const NewsSearchPage: React.FC = () => {
                     inputValue={keywordInputValue}
                     onInputChange={(_, newInputValue) => {
                       setKeywordInputValue(newInputValue);
+                      // Clear error when user starts typing
+                      setKeywordError(null);
                     }}
                     onKeyDown={(e) => {
                       e.stopPropagation();
@@ -1043,7 +1095,7 @@ const NewsSearchPage: React.FC = () => {
                           if (newExpression.length > 0) {
                             const lastItem = newExpression[newExpression.length - 1];
                             if (lastItem.type === 'keyword' || lastItem.type === 'group') {
-                              alert('Please add an AND or OR operator before adding another keyword');
+                              setKeywordError('Please add an AND or OR operator before adding another keyword');
                               return;
                             }
                           }
@@ -1056,16 +1108,42 @@ const NewsSearchPage: React.FC = () => {
                             keywordExpression: newExpression 
                           }));
                           setKeywordInputValue('');
+                          // Clear error on successful add
+                          setKeywordError(null);
                         }
                       }
                     }}
                     renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        placeholder="Type keyword and press Enter"
-                        variant="outlined"
-                        sx={{ '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: 'white' } }}
-                      />
+                      <Box>
+                        <TextField
+                          {...params}
+                          placeholder="Type keyword and press Enter"
+                          variant="outlined"
+                          error={!!keywordError}
+                          sx={{
+                            '& .MuiOutlinedInput-root': {
+                              backgroundColor: '#334155',
+                              color: 'white',
+                              ...(keywordError && {
+                                '& fieldset': {
+                                  borderColor: '#ef4444',
+                                },
+                                '&:hover fieldset': {
+                                  borderColor: '#ef4444',
+                                },
+                                '&.Mui-focused fieldset': {
+                                  borderColor: '#ef4444',
+                                },
+                              }),
+                            },
+                          }}
+                        />
+                        {keywordError && (
+                          <Typography variant="caption" sx={{ color: '#ef4444', mt: 0.5, display: 'block' }}>
+                            {keywordError}
+                          </Typography>
+                        )}
+                      </Box>
                     )}
                   />
 
