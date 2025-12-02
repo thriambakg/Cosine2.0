@@ -45,8 +45,6 @@ import {
   Chat as SidebarChatIcon,
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
-  PushPin as PinIcon,
-  Visibility as VisibilityIcon,
   ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../../services/api';
@@ -539,10 +537,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     };
     setLocalDisplayOptions(newOptions);
     onSettingsChange(id, { displayOptions: newOptions });
-  };
-
-  const handleAutoRefreshToggle = () => {
-    onSettingsChange(id, { autoRefresh: !autoRefresh });
   };
 
   const handleRefresh = () => {

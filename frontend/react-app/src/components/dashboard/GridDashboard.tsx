@@ -11,8 +11,6 @@ import SECSearchTile from '../tiles/SECSearchTile';
 import PlaceholderTile from '../tiles/PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../tiles/tileConfig';
-import TileDataParser from '../tiles/TileDataParser';
-import { stockDataAPI, cryptoStatsAPI } from '../../services/api';
 import { addTileToContext, addMultipleTilesToContext, extractTileData } from '../tiles/common';
 
 interface GridDashboardProps {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   TextField,
   Typography,
@@ -40,7 +40,6 @@ import {
   Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
   OpenInNew as OpenInNewIcon,
-  AddComment as NewChatIcon,
   Article as ArticleIcon,
   CalendarToday as CalendarIcon,
   Visibility as VisibilityIcon,
@@ -50,8 +49,6 @@ import {
   Image as ImageIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../services/api';
-import { useAuth } from '@/contexts/AuthContext';
-import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addArticleToContext, addMultipleArticlesToContext } from '../components/tiles/common';
 
 // Custom styled components
@@ -100,13 +97,10 @@ interface NewsFilters {
   sourceExpression?: any[];
   categoryExpression?: any[];
   countryExpression?: any[];
-  dateRange: string;
+  dateRange: '12h' | '24h' | '7d' | '30d' | 'all';
 }
 
 const NewsSearchPage: React.FC = () => {
-  const { user } = useAuth();
-  const { activeSessionId } = useGlobalChat();
-  
   // Session persistence key
   const SESSION_STORAGE_KEY = 'news-search-page-state';
 
