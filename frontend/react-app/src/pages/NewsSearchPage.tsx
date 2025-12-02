@@ -1536,13 +1536,15 @@ const NewsSearchPage: React.FC = () => {
                     
                     {/* Context Menu Button */}
                     <Tooltip title="Add to Context">
-                      <IconButton
-                        onClick={(e) => setContextMenuAnchor(e.currentTarget)}
-                        disabled={selectedArticles.size === 0}
-                        sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' }, '&:disabled': { color: '#475569' } }}
-                      >
-                        <AddToContextIcon />
-                      </IconButton>
+                      <span>
+                        <IconButton
+                          onClick={(e) => setContextMenuAnchor(e.currentTarget)}
+                          disabled={selectedArticles.size === 0}
+                          sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' }, '&:disabled': { color: '#475569' } }}
+                        >
+                          <AddToContextIcon />
+                        </IconButton>
+                      </span>
                     </Tooltip>
                     
                     {/* Column Visibility Menu */}
@@ -1649,19 +1651,19 @@ const NewsSearchPage: React.FC = () => {
                                 />
                               </TableCell>
                               {selectedColumns.includes('Title') && (
-                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem', minWidth: '400px' }}>Title</TableCell>
+                                <TableCell key="title-header" sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem', minWidth: '400px' }}>Title</TableCell>
                               )}
                               {selectedColumns.includes('Source') && (
-                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Source</TableCell>
+                                <TableCell key="source-header" sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Source</TableCell>
                               )}
                               {selectedColumns.includes('Published Date') && (
-                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Published Date</TableCell>
+                                <TableCell key="published-date-header" sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Published Date</TableCell>
                               )}
                               {selectedColumns.includes('Category') && (
-                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Category</TableCell>
+                                <TableCell key="category-header" sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Category</TableCell>
                               )}
                               {selectedColumns.includes('Description') && (
-                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem', width: '150px' }}>Description</TableCell>
+                                <TableCell key="description-header" sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem', width: '150px' }}>Description</TableCell>
                               )}
                             </TableRow>
                           </TableHead>
@@ -1689,7 +1691,7 @@ const NewsSearchPage: React.FC = () => {
                                   />
                                 </TableCell>
                                 {selectedColumns.includes('Title') && (
-                                  <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem', minWidth: '400px' }}>
+                                  <TableCell key={`title-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem', minWidth: '400px' }}>
                                     <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
                                       {/* Image */}
                                       {article.image_url ? (
@@ -1765,12 +1767,12 @@ const NewsSearchPage: React.FC = () => {
                                   </TableCell>
                                 )}
                                 {selectedColumns.includes('Source') && (
-                                  <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
+                                  <TableCell key={`source-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                                     {article.source_name || 'N/A'}
                                   </TableCell>
                                 )}
                                 {selectedColumns.includes('Published Date') && (
-                                  <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
+                                  <TableCell key={`published-date-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                       <CalendarIcon sx={{ fontSize: '0.875rem', color: '#9ca3af' }} />
                                       {formatDate(article.published_date)}
@@ -1778,12 +1780,12 @@ const NewsSearchPage: React.FC = () => {
                                   </TableCell>
                                 )}
                                 {selectedColumns.includes('Category') && (
-                                  <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
+                                  <TableCell key={`category-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
                                     {article.category || 'N/A'}
                                   </TableCell>
                                 )}
                                 {selectedColumns.includes('Description') && (
-                                  <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem', width: '150px' }}>
+                                  <TableCell key={`description-${article.id}`} sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem', width: '150px' }}>
                                     {article.description ? (
                                       <Button
                                         size="small"
