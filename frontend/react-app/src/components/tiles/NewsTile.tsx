@@ -22,7 +22,6 @@ import {
   List,
   ListItem,
   Avatar,
-  Pagination,
   Alert,
   CircularProgress,
 } from '@mui/material';
@@ -190,9 +189,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
       return article;
     }
     // Use source_url as fallback ID, or generate one from title + source_url
+    // Ensure all required properties are included
     return {
       ...article,
       id: article.source_url || `${article.title}-${article.source_name || 'unknown'}`,
+      creator: article.creator || article.source_name || 'unknown',
     };
   };
 
@@ -841,7 +842,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Mock news data for demonstration
+  // Mock news data for demonstration (currently unused - kept for potential future use)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const mockNewsData: NewsArticle[] = [
     {
       id: '1',
@@ -857,6 +859,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       ai_tag: 'technology,legal',
       country: 'us',
       language: 'english',
+      creator: 'Fast Company',
     },
     {
       id: '2',
@@ -872,6 +875,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       ai_tag: 'finance,policy',
       country: 'us',
       language: 'english',
+      creator: 'Financial Times',
     },
     {
       id: '3',
@@ -887,6 +891,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       ai_tag: 'automotive,earnings',
       country: 'us',
       language: 'english',
+      creator: 'Reuters',
     },
     {
       id: '4',
@@ -902,6 +907,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       ai_tag: 'energy,investment',
       country: 'global',
       language: 'english',
+      creator: 'Bloomberg',
     },
     {
       id: '5',
@@ -917,6 +923,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       ai_tag: 'technology,regulatory',
       country: 'eu',
       language: 'english',
+      creator: 'TechCrunch',
     },
   ];
 
@@ -946,7 +953,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
     'global',
   ];
 
-  // Filter articles based on criteria
+  // Filter articles based on criteria (currently unused - filtering is done server-side)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const filterArticles = useCallback((articles: NewsArticle[], filters: NewsFilters): NewsArticle[] => {
     return articles.filter(article => {
       // Keywords filter with expression logic
