@@ -1423,7 +1423,7 @@ const NewsSearchPage: React.FC = () => {
                   <Select
                     value={filters.dateRange}
                     label="Date Range"
-                    onChange={(e) => setFilters(prev => ({ ...prev, dateRange: e.target.value }))}
+                    onChange={(e) => setFilters(prev => ({ ...prev, dateRange: e.target.value as NewsFilters['dateRange'] }))}
                     sx={{
                       color: '#ffffff',
                       '& .MuiOutlinedInput-root': { backgroundColor: '#334155' },
