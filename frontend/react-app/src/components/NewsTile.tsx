@@ -440,12 +440,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
               </Box>
             );
           }}
-              variant="outlined"
-              sx={{ '& .MuiOutlinedInput-root': { color: 'white' } }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onMouseUp={(e) => e.stopPropagation()}
-            />
-          )}
         />
         
         {/* Expression Display */}
@@ -1873,9 +1867,15 @@ const NewsTile: React.FC<NewsTileProps> = ({
                           }),
                         },
                       }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onMouseUp={(e) => e.stopPropagation()}
-                  />
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onMouseUp={(e) => e.stopPropagation()}
+                    />
+                    {keywordError && (
+                      <Typography variant="caption" sx={{ color: '#ef4444', mt: 0.5, display: 'block' }}>
+                        {keywordError}
+                      </Typography>
+                    )}
+                  </Box>
                 )}
               />
 
