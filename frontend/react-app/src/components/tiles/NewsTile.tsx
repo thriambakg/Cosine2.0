@@ -319,7 +319,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         countries: convertExpressionToQuery(filters.countryExpression || [])
       },
       dateRange: filters.dateRange || '12h',
-      limit: 50,
+      limit: 10000,  // Large limit to get all results
       offset: 0
     };
     

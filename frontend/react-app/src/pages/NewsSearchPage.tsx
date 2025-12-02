@@ -303,7 +303,7 @@ const NewsSearchPage: React.FC = () => {
         countries: convertExpressionToQuery(filters.countryExpression || [])
       },
       dateRange: filters.dateRange || '12h',
-      limit: 50,
+      limit: 10000,  // Large limit to get all results
       offset: 0
     };
     
@@ -406,7 +406,7 @@ const NewsSearchPage: React.FC = () => {
       let allResults: NewsArticle[] = [];
       let currentOffset = 0;
       let hasMore = true;
-      const fetchLimit = 50; // Use consistent limit per request
+      const fetchLimit = 10000; // Large limit to get all results in one request
       
       while (hasMore) {
         const searchRequest: NewsSearchRequest = {

@@ -142,7 +142,7 @@ def lambda_handler(event, context):
         expanded_terms = expand_stock_symbols(search_terms)
         print(f"Expanded search terms: {expanded_terms}")
         
-        # Perform title-based search
+        # Perform title-based search (limit parameter kept for backward compatibility but not used to cap results)
         articles = perform_title_based_search(
             search_terms=expanded_terms,
             query_filters=query_filters,
@@ -150,9 +150,13 @@ def lambda_handler(event, context):
             limit=limit
         )
         
-        # Apply offset and limit for pagination
+        # Apply offset and limit for pagination (only if limit is specified and reasonable)
         total_count = len(articles)
-        paginated_articles = articles[offset:offset + limit]
+        # If limit is very large (>= 10000), return all results without pagination
+        if limit >= 10000:
+            paginated_articles = articles
+        else:
+            paginated_articles = articles[offset:offset + limit]
         
         # Convert Decimal types for JSON serialization
         serializable_articles = convert_decimals(paginated_articles)
@@ -375,8 +379,8 @@ def perform_title_based_search(search_terms, query_filters, date_range, limit):
     # Sort by published date (newest first)
     filtered_articles.sort(key=lambda x: x.get('published_date', ''), reverse=True)
     
-    print(f"Returning {len(filtered_articles[:limit * 2])} articles after filtering and sorting")
-    return filtered_articles[:limit * 2]  # Return extra for pagination
+    print(f"Returning {len(filtered_articles)} articles after filtering and sorting")
+    return filtered_articles  # Return all matching articles
 
 def search_by_title(search_term, date_filter):
     """
@@ -451,9 +455,7 @@ def scan_all_articles(date_filter, limit):
     """Scan all articles with date filter"""
     
     try:
-        scan_params = {
-            'Limit': limit
-        }
+        scan_params = {}
         
         if date_filter:
             scan_params['FilterExpression'] = 'published_date >= :start_date AND attribute_exists(PK)'
@@ -463,11 +465,19 @@ def scan_all_articles(date_filter, limit):
         else:
             scan_params['FilterExpression'] = 'attribute_exists(PK)'
         
+        # Scan all articles (handle pagination)
+        all_articles = []
         response = table.scan(**scan_params)
-        articles = response.get('Items', [])
+        all_articles.extend(response.get('Items', []))
         
-        print(f"Scanned {len(articles)} articles")
-        return articles
+        # Handle pagination - fetch all articles
+        while 'LastEvaluatedKey' in response:
+            scan_params['ExclusiveStartKey'] = response['LastEvaluatedKey']
+            response = table.scan(**scan_params)
+            all_articles.extend(response.get('Items', []))
+        
+        print(f"Scanned {len(all_articles)} articles")
+        return all_articles
     
     except Exception as e:
         print(f"Error scanning articles: {e}")
