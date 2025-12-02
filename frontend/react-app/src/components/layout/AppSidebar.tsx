@@ -22,6 +22,7 @@ import {
   GridOn as GridOnIcon,
   SmartToy as BotIcon,
   Description as DescriptionIcon,
+  Article as ArticleIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
@@ -42,6 +43,7 @@ const iconMap = {
   GridOnIcon,
   BotIcon,
   DescriptionIcon,
+  ArticleIcon,
 };
 
 export default function AppSidebar() {
@@ -77,10 +79,11 @@ export default function AppSidebar() {
     portfolio: 'Portfolio',
     analysis: 'Analysis & Tools',
     government_data: 'Government Data',
+    news: 'News',
     other: 'Other',
   };
 
-  const categoryOrder = ['main', 'government_data', 'portfolio', 'analysis', 'other'];
+  const categoryOrder = ['main', 'government_data', 'news', 'portfolio', 'analysis', 'other'];
 
   const renderNavigationSection = (category: string, items: typeof navigationItems) => {
     // Define colors for each category
@@ -89,6 +92,7 @@ export default function AppSidebar() {
         case 'main': return '#22c55e'; // Green
         case 'portfolio': return '#3b82f6'; // Blue
         case 'analysis': return '#dc2626'; // Red
+        case 'news': return '#f59e0b'; // Orange
         default: return '#8b8b8b'; // Gray
       }
     };
@@ -132,8 +136,8 @@ export default function AppSidebar() {
                     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                     '&:hover': {
                       backgroundColor: isActive 
-                        ? `rgba(${categoryColor === '#22c55e' ? '34, 197, 94' : categoryColor === '#3b82f6' ? '59, 130, 246' : '220, 38, 38'}, 0.2)` 
-                        : `rgba(${categoryColor === '#22c55e' ? '34, 197, 94' : categoryColor === '#3b82f6' ? '59, 130, 246' : '220, 38, 38'}, 0.1)`,
+                        ? `rgba(${categoryColor === '#22c55e' ? '34, 197, 94' : categoryColor === '#3b82f6' ? '59, 130, 246' : categoryColor === '#dc2626' ? '220, 38, 38' : categoryColor === '#f59e0b' ? '245, 158, 11' : '139, 139, 139'}, 0.2)` 
+                        : `rgba(${categoryColor === '#22c55e' ? '34, 197, 94' : categoryColor === '#3b82f6' ? '59, 130, 246' : categoryColor === '#dc2626' ? '220, 38, 38' : categoryColor === '#f59e0b' ? '245, 158, 11' : '139, 139, 139'}, 0.1)`,
                       border: `1px solid ${categoryColor}`,
                       transform: 'translateX(4px)',
                     },

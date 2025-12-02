@@ -36,7 +36,6 @@ import {
   Link,
 } from '@mui/material';
 import {
-  Settings as SettingsIcon,
   Close as CloseIcon,
   Search as SearchIcon,
   Description as DocumentIcon,
@@ -204,7 +203,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     });
   }, [user?.id, activeSessionId]);
   
-  const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [formTypesModalOpen, setFormTypesModalOpen] = useState(false);
@@ -871,13 +869,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     });
   };
 
-  const handleSettingsClick = (event: React.MouseEvent<HTMLElement>) => {
-    setSettingsAnchor(event.currentTarget);
-  };
-
-  const handleSettingsClose = () => {
-    setSettingsAnchor(null);
-  };
 
   const handleRemove = async () => {
     const confirmed = await confirmDialog({
@@ -2307,9 +2298,12 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
 
           <PinButton isPinned={pinnedState} onTogglePin={togglePin} />
 
-          <Tooltip title="Settings" arrow>
+          <Tooltip title="Edit Search Criteria" arrow>
             <IconButton
-              onClick={handleSettingsClick}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSearchDialogOpen(true);
+              }}
               sx={{
                 color: '#9ca3b8',
                 '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
@@ -2317,7 +2311,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               }}
               size="small"
             >
-              <SettingsIcon fontSize="small" />
+              <SearchIcon fontSize="small" />
             </IconButton>
           </Tooltip>
 
@@ -2664,31 +2658,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           </Box>
         )}
       </Box>
-
-      {/* Settings Menu */}
-      <Menu
-        anchorEl={settingsAnchor}
-        open={Boolean(settingsAnchor)}
-        onClose={handleSettingsClose}
-        PaperProps={{
-          sx: {
-            backgroundColor: '#1e293b',
-            border: '1px solid #374151',
-            '& .MuiMenuItem-root': {
-              color: '#ffffff',
-              '&:hover': { backgroundColor: '#334155' },
-            },
-          }
-        }}
-      >
-        <MenuItem onClick={() => {
-          setSearchDialogOpen(true);
-          handleSettingsClose();
-        }}>
-          <ListItemIcon><SearchIcon sx={{ color: '#9ca3b8' }} /></ListItemIcon>
-          <ListItemText>Search Parameters</ListItemText>
-        </MenuItem>
-      </Menu>
 
       {/* Context Menu */}
       <Menu

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Analytics as AnalyticsIcon, Dashboard as ContextIcon, Chat as SidebarChatIcon } from '@mui/icons-material';
+import { Dashboard as ContextIcon, Chat as SidebarChatIcon } from '@mui/icons-material';
 import CryptoTile from '../tiles/CryptoTile';
 import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
@@ -605,118 +605,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     }));
   }, []);
 
-  // Perform analysis on selected tiles
-  const handlePerformAnalysis = useCallback(async () => {
-    const selectedTilesArray = Array.from(selectionState.selectedTiles);
-    console.log('🔍 Analysis Debug - Selected tiles array:', selectedTilesArray);
-    
-    if (selectedTilesArray.length === 0) {
-      console.log('No tiles selected for analysis');
-      return;
-    }
-
-    // Get selected tiles data
-    const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
-    console.log('🔍 Analysis Debug - Selected tiles data:', selectedTilesData);
-    
-    // Fetch live data for each selected tile
-    const analysisData: Record<string, any> = {};
-    
-    try {
-      for (const tile of selectedTilesData) {
-        console.log(`📊 Fetching live data for ${tile.type} tile: ${tile.symbol || tile.id}`);
-        
-        if (tile.type === 'stock' && tile.symbol) {
-          try {
-            const stockData = await stockDataAPI.getStockData({
-              ticker: tile.symbol,
-              period: tile.timeframe === '1d' ? '1y' : '1y' // Map timeframe to API period
-            });
-            
-            analysisData[tile.id] = {
-              ...TileDataParser.extractTileConfigData(tile),
-              liveData: {
-                currentPrice: stockData.current_price,
-                priceChange24h: stockData.price_change_24h,
-                weekReturn: stockData.week_return,
-                annualReturn: stockData.annual_return,
-                volatility: stockData.volatility,
-                chartData: stockData.chart_data,
-                lastUpdated: new Date().toISOString()
-              }
-            };
-            
-            console.log(`✅ Stock data fetched for ${tile.symbol}:`, stockData);
-          } catch (error) {
-            console.error(`❌ Failed to fetch stock data for ${tile.symbol}:`, error);
-            analysisData[tile.id] = {
-              ...TileDataParser.extractTileConfigData(tile),
-              liveData: { error: `Failed to fetch data: ${error}` }
-            };
-          }
-        } else if (tile.type === 'crypto' && tile.symbol) {
-          try {
-            const cryptoData = await cryptoStatsAPI.getStats({
-              symbols: [tile.symbol],
-              timeframe: tile.timeframe as '1d' | '7d' | '30d' | '1y'
-            });
-            
-            const cryptoStats = cryptoData.data.find((c: any) => c.symbol === tile.symbol);
-            if (cryptoStats) {
-              analysisData[tile.id] = {
-                ...TileDataParser.extractTileConfigData(tile),
-                liveData: {
-                  currentPrice: cryptoStats.currentPrice,
-                  return24h: cryptoStats.return24h,
-                  annualReturn: cryptoStats.annualReturn,
-                  annualizedVolatility: cryptoStats.annualizedVolatility,
-                  chartData: cryptoStats.chartData,
-                  lastUpdated: new Date().toISOString()
-                }
-              };
-              
-              console.log(`✅ Crypto data fetched for ${tile.symbol}:`, cryptoStats);
-            } else {
-              analysisData[tile.id] = {
-                ...TileDataParser.extractTileConfigData(tile),
-                liveData: { error: `No data found for ${tile.symbol}` }
-              };
-            }
-          } catch (error) {
-            console.error(`❌ Failed to fetch crypto data for ${tile.symbol}:`, error);
-            analysisData[tile.id] = {
-              ...TileDataParser.extractTileConfigData(tile),
-              liveData: { error: `Failed to fetch data: ${error}` }
-            };
-          }
-        } else {
-          // For placeholder tiles or tiles without symbols, just use config data
-          analysisData[tile.id] = {
-            ...TileDataParser.extractTileConfigData(tile),
-            liveData: { note: 'No live data available for this tile type' }
-          };
-        }
-      }
-      
-      // Format for AI consumption
-      const formattedData = TileDataParser.formatForAI(analysisData);
-      
-      // Log the comprehensive data structure
-      console.log('=== COMPREHENSIVE TILE ANALYSIS DATA ===');
-      console.log(`Selected ${selectedTilesArray.length} tiles for analysis:`);
-      console.log('Formatted data structure with live data:', formattedData);
-      console.log('Raw analysis data:', analysisData);
-      
-      // TODO: Pass formattedData to AI agent for analysis
-      console.log('🚀 Ready to send to AI agent:', formattedData);
-      
-    } catch (error) {
-      console.error('❌ Error during tile analysis:', error);
-    }
-    
-    // Close context menu
-    handleContextMenuClose();
-  }, [selectionState.selectedTiles, tiles, handleContextMenuClose]);
 
   // Add selected tiles to context window
   const handleAddToContext = useCallback(() => {
@@ -1350,15 +1238,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           </ListItemIcon>
           <ListItemText>
             Add to Sidebar Chat ({selectionState.selectedTiles.size} selected)
-          </ListItemText>
-        </MenuItem>
-        
-        <MenuItem onClick={handlePerformAnalysis} disabled={selectionState.selectedTiles.size === 0}>
-          <ListItemIcon>
-            <AnalyticsIcon sx={{ color: '#8b5cf6' }} />
-          </ListItemIcon>
-          <ListItemText>
-            Perform Analysis ({selectionState.selectedTiles.size} selected)
           </ListItemText>
         </MenuItem>
       </Menu>

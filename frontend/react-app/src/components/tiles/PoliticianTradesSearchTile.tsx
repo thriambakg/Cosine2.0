@@ -34,7 +34,6 @@ import {
   Link,
 } from '@mui/material';
 import {
-  Settings as SettingsIcon,
   Close as CloseIcon,
   AutoAwesome as AutoRefreshIcon,
   Search as SearchIcon,
@@ -149,7 +148,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     });
   }, [user?.id, activeSessionId]);
   
-  const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
@@ -490,13 +488,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     loadSecuritySuggestions();
   }, [loadPoliticianSuggestions, loadSecuritySuggestions]);
 
-  const handleSettingsClick = (event: React.MouseEvent<HTMLElement>) => {
-    setSettingsAnchor(event.currentTarget);
-  };
-
-  const handleSettingsClose = () => {
-    setSettingsAnchor(null);
-  };
 
   const handleRemove = async () => {
     const confirmed = await confirmDialog({
@@ -1310,14 +1301,17 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
             </Box>
           </Tooltip>
 
-          <Tooltip title="Settings">
+          <Tooltip title="Edit Search Criteria">
             <IconButton
               size="small"
-              onClick={handleSettingsClick}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSearchDialogOpen(true);
+              }}
               onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}
+              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
             >
-              <SettingsIcon fontSize="small" />
+              <SearchIcon fontSize="small" />
             </IconButton>
           </Tooltip>
 
@@ -1826,36 +1820,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         </Box>
       )}
 
-      {/* Settings Menu */}
-      <Menu
-        anchorEl={settingsAnchor}
-        open={Boolean(settingsAnchor)}
-        onClose={handleSettingsClose}
-        PaperProps={{
-          sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid #374151',
-            color: 'white',
-          },
-        }}
-      >
-        <MenuItem onClick={() => { setSearchDialogOpen(true); handleSettingsClose(); }}>
-          <SearchIcon sx={{ mr: 1, fontSize: 18 }} />
-          Edit Search Criteria
-        </MenuItem>
-        <MenuItem onClick={() => { setDisplayDialogOpen(true); handleSettingsClose(); }}>
-          <VisibilityIcon sx={{ mr: 1, fontSize: 18 }} />
-          Display Options
-        </MenuItem>
-        <MenuItem onClick={handleAutoRefreshToggle}>
-          <AutoRefreshIcon sx={{ mr: 1, fontSize: 18 }} />
-          {autoRefresh ? 'Disable' : 'Enable'} Auto-refresh
-        </MenuItem>
-        <MenuItem onClick={() => { togglePin(); handleSettingsClose(); }}>
-          <PinIcon sx={{ mr: 1, fontSize: 18 }} />
-          {pinnedState ? 'Unpin' : 'Pin'} Tile
-        </MenuItem>
-      </Menu>
 
       {/* Context Menu */}
       <Menu

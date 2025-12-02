@@ -291,39 +291,35 @@ def fetch_all_transactions(award_id: str) -> List[Dict[str, Any]]:
     logger.info(f"Fetching transactions for award {award_id}")
     
     while True:
-        try:
-            response = call_usaspending_api(
-                '/api/v2/transactions/',
-                method='POST',
-                body={
-                    'award_id': award_id,
-                    'page': page,
-                    'limit': limit,
-                    'sort': 'action_date',
-                    'order': 'desc'
-                }
-            )
-            
-            if not response:
-                break
-            
-            transactions = response.get('results', [])
-            if not transactions:
-                break
-            
-            all_transactions.extend(transactions)
-            logger.info(f"Fetched {len(transactions)} transactions (page {page}, total: {len(all_transactions)})")
-            
-            # Check if there are more pages
-            page_metadata = response.get('page_metadata', {})
-            if not page_metadata.get('hasNext', False):
-                break
-            
-            page += 1
+        # API call failures will propagate and stop execution
+        response = call_usaspending_api(
+            '/api/v2/transactions/',
+            method='POST',
+            body={
+                'award_id': award_id,
+                'page': page,
+                'limit': limit,
+                'sort': 'action_date',
+                'order': 'desc'
+            }
+        )
         
-        except Exception as e:
-            logger.error(f"Error fetching transactions page {page} for award {award_id}: {str(e)}")
+        if not response:
             break
+        
+        transactions = response.get('results', [])
+        if not transactions:
+            break
+        
+        all_transactions.extend(transactions)
+        logger.info(f"Fetched {len(transactions)} transactions (page {page}, total: {len(all_transactions)})")
+        
+        # Check if there are more pages
+        page_metadata = response.get('page_metadata', {})
+        if not page_metadata.get('hasNext', False):
+            break
+        
+        page += 1
     
     logger.info(f"Total transactions fetched for award {award_id}: {len(all_transactions)}")
     return all_transactions
@@ -343,44 +339,74 @@ def fetch_all_subawards(award_id: str) -> List[Dict[str, Any]]:
     page = 1
     limit = 100
     
-    logger.info(f"Fetching subawards for award {award_id}")
+    logger.info(f"Starting to fetch subawards for award: {award_id}")
     
     while True:
-        try:
-            response = call_usaspending_api(
-                '/api/v2/subawards/',
-                method='POST',
-                body={
-                    'award_id': award_id,
-                    'page': page,
-                    'limit': limit,
-                    'sort': 'subaward_amount',
-                    'order': 'desc'
-                }
-            )
-            
-            if not response:
-                break
-            
-            subawards = response.get('results', [])
-            if not subawards:
-                break
-            
-            all_subawards.extend(subawards)
-            logger.info(f"Fetched {len(subawards)} subawards (page {page}, total: {len(all_subawards)})")
-            
-            # Check if there are more pages
-            page_metadata = response.get('page_metadata', {})
-            if not page_metadata.get('hasNext', False):
-                break
-            
-            page += 1
+        logger.debug(f"Fetching subawards page {page} for award {award_id} (limit: {limit})")
         
-        except Exception as e:
-            logger.error(f"Error fetching subawards page {page} for award {award_id}: {str(e)}")
+        # API call failures will propagate and stop execution
+        response = call_usaspending_api(
+            '/api/v2/subawards/',
+            method='POST',
+            body={
+                'award_id': award_id,
+                'page': page,
+                'limit': limit,
+                'sort': 'amount',
+                'order': 'desc'
+            }
+        )
+        
+        if not response:
+            logger.warning(f"No response from subawards API for award {award_id} on page {page}")
             break
+        
+        # Log API messages if present
+        if response.get('messages'):
+            logger.warning(f"API messages for subawards (award {award_id}, page {page}): {response.get('messages')}")
+        
+        subawards = response.get('results', [])
+        if not subawards:
+            logger.info(f"No subawards found on page {page} for award {award_id}")
+            # Log response structure for debugging if no results
+            if page == 1:
+                logger.debug(f"Response structure for subawards (award {award_id}): {json.dumps({k: type(v).__name__ for k, v in response.items()}, default=str)}")
+                if response.get('page_metadata'):
+                    logger.debug(f"Page metadata: {response.get('page_metadata')}")
+            break
+        
+        all_subawards.extend(subawards)
+        logger.info(f"✅ Fetched {len(subawards)} subawards from page {page} for award {award_id} (running total: {len(all_subawards)})")
+        
+        # Log sample subaward data on first page for debugging
+        if page == 1 and len(subawards) > 0:
+            sample_subaward = subawards[0]
+            sample_structure = {}
+            for k, v in sample_subaward.items():
+                if isinstance(v, list):
+                    sample_structure[k] = f"{type(v).__name__}({len(v)})"
+                elif isinstance(v, dict):
+                    sample_structure[k] = f"{type(v).__name__}(...)"
+                else:
+                    sample_structure[k] = type(v).__name__
+            logger.debug(f"Sample subaward structure (award {award_id}): {json.dumps(sample_structure, default=str)}")
+        
+        # Check if there are more pages
+        page_metadata = response.get('page_metadata', {})
+        has_next = page_metadata.get('hasNext', False)
+        
+        if not has_next:
+            logger.info(f"Reached last page ({page}) for subawards (award {award_id})")
+            break
+        
+        logger.debug(f"More pages available for subawards (award {award_id}), continuing to page {page + 1}")
+        page += 1
     
-    logger.info(f"Total subawards fetched for award {award_id}: {len(all_subawards)}")
+    logger.info(f"✅ Completed fetching subawards for award {award_id}: Total subawards = {len(all_subawards)}")
+    
+    if len(all_subawards) == 0:
+        logger.warning(f"⚠️  No subawards found for award {award_id} - this may be expected for some awards")
+    
     return all_subawards
 
 
@@ -463,86 +489,54 @@ def index_award(award_id: str, force_reindex: bool = False) -> Dict[str, Any]:
                 logger.warning(f"Error checking existing award: {str(e)}")
         
         # Step 1: Fetch award details
+        # API call failures will propagate and stop execution
         logger.info(f"Fetching award details for {award_id}")
         award_data = call_usaspending_api(f'/api/v2/awards/{award_id}/', method='GET')
         
         if not award_data:
-            return {
-                'success': False,
-                'award_id': award_id,
-                'error': 'Award not found'
-            }
+            # 404 is handled specially - award not found
+            raise Exception(f'Award not found: {award_id}')
         
         # Step 2: Flatten award data
-        try:
-            flattened_award = flatten_award_data(award_data)
-        except Exception as e:
-            logger.error(f"Error flattening award data for {award_id}: {str(e)}", exc_info=True)
-            return {
-                'success': False,
-                'award_id': award_id,
-                'error': f'Error processing award data: {str(e)}'
-            }
+        # Data processing errors will propagate and stop execution
+        flattened_award = flatten_award_data(award_data)
         
         # Step 3: Store award in DynamoDB (before fetching transactions/subawards)
+        # DynamoDB errors will propagate and stop execution
         if awards_table:
-            try:
-                awards_table.put_item(Item=flattened_award)
-                logger.info(f"Stored award {award_id} in DynamoDB")
-            except Exception as e:
-                logger.error(f"Error storing award in DynamoDB: {str(e)}", exc_info=True)
-                return {
-                    'success': False,
-                    'award_id': award_id,
-                    'error': f'Error storing award in DynamoDB: {str(e)}'
-                }
+            awards_table.put_item(Item=flattened_award)
+            logger.info(f"Stored award {award_id} in DynamoDB")
         
         # Step 4: Fetch transactions and subawards
-        try:
-            transactions = fetch_all_transactions(award_id)
-            subawards = fetch_all_subawards(award_id)
-        except Exception as e:
-            logger.error(f"Error fetching transactions/subawards for {award_id}: {str(e)}", exc_info=True)
-            return {
-                'success': False,
-                'award_id': award_id,
-                'error': f'Error fetching transactions/subawards: {str(e)}'
-            }
+        # API call failures will propagate and stop execution
+        logger.info(f"Step 4: Fetching transactions and subawards for award {award_id}")
+        transactions = fetch_all_transactions(award_id)
+        logger.info(f"✅ Transactions fetched: {len(transactions)} transactions for award {award_id}")
+        
+        subawards = fetch_all_subawards(award_id)
+        logger.info(f"✅ Subawards fetched: {len(subawards)} subawards for award {award_id}")
+        
+        logger.info(f"Summary for award {award_id}: {len(transactions)} transactions, {len(subawards)} subawards")
         
         # Step 5: Upload combined file to S3
-        try:
-            s3_key = upload_award_details_to_s3(award_id, transactions, subawards)
-        except Exception as e:
-            logger.error(f"Error uploading award details to S3 for {award_id}: {str(e)}", exc_info=True)
-            return {
-                'success': False,
-                'award_id': award_id,
-                'error': f'Error uploading to S3: {str(e)}'
-            }
+        # S3 errors will propagate and stop execution
+        s3_key = upload_award_details_to_s3(award_id, transactions, subawards)
         
         # Step 6: Update DynamoDB with S3 key and completion flags
-        # Use put_item to ensure S3 key is always stored (more reliable than update_item)
+        # DynamoDB errors will propagate and stop execution
         if awards_table:
-            try:
-                # Get the existing item and merge with S3 key and completion flags
-                existing_item = flattened_award.copy()
-                existing_item['award_details_s3_key'] = s3_key
-                existing_item['award_details_indexed'] = True
-                existing_item['transaction_count'] = len(transactions)
-                existing_item['subaward_count'] = len(subawards)
-                existing_item['full_indexing_complete'] = True
-                existing_item['last_updated'] = datetime.now(timezone.utc).isoformat()
-                
-                # Use put_item to ensure all fields including S3 key are stored
-                awards_table.put_item(Item=existing_item)
-                logger.info(f"Updated award {award_id} in DynamoDB with S3 key ({s3_key}) and completion flags")
-            except Exception as e:
-                logger.error(f"Error updating award in DynamoDB: {str(e)}", exc_info=True)
-                return {
-                    'success': False,
-                    'award_id': award_id,
-                    'error': f'Error updating DynamoDB with S3 key: {str(e)}'
-                }
+            # Get the existing item and merge with S3 key and completion flags
+            existing_item = flattened_award.copy()
+            existing_item['award_details_s3_key'] = s3_key
+            existing_item['award_details_indexed'] = True
+            existing_item['transaction_count'] = len(transactions)
+            existing_item['subaward_count'] = len(subawards)
+            existing_item['full_indexing_complete'] = True
+            existing_item['last_updated'] = datetime.now(timezone.utc).isoformat()
+            
+            # Use put_item to ensure all fields including S3 key are stored
+            awards_table.put_item(Item=existing_item)
+            logger.info(f"Updated award {award_id} in DynamoDB with S3 key ({s3_key}) and completion flags")
         
         return {
             'success': True,
@@ -554,12 +548,9 @@ def index_award(award_id: str, force_reindex: bool = False) -> Dict[str, Any]:
         }
     
     except Exception as e:
-        logger.error(f"Error indexing award {award_id}: {str(e)}", exc_info=True)
-        return {
-            'success': False,
-            'award_id': award_id,
-            'error': str(e)
-        }
+        # Log error and re-raise to stop Lambda execution
+        logger.error(f"❌ CRITICAL ERROR indexing award {award_id}: {str(e)}", exc_info=True)
+        raise  # Re-raise to stop Lambda execution
 
 
 def index_multiple_awards(award_ids: List[str], force_reindex: bool = False) -> Dict[str, Any]:
@@ -853,13 +844,11 @@ def search_and_index_awards(filters: Dict[str, Any], limit: int = 100, force_rei
             page += 1
         
         except Exception as e:
-            logger.error(f"Error searching for awards on page {page}: {str(e)}", exc_info=True)
-            # If it's an API error (400, 422, etc.), we should return error instead of empty results
+            # All API errors should propagate and stop execution
             error_msg = str(e)
-            if 'API error:' in error_msg or '400' in error_msg or '422' in error_msg:
-                # Re-raise to be caught by lambda_handler
-                raise Exception(f"Search API error: {error_msg}")
-            break
+            logger.error(f"❌ CRITICAL ERROR searching for awards on page {page}: {error_msg}", exc_info=True)
+            # Re-raise to stop Lambda execution
+            raise Exception(f"Search API error: {error_msg}")
     
     logger.info(f"Total unique awards found: {len(all_award_ids)}")
     
@@ -1072,13 +1061,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
     
     except Exception as e:
-        logger.error(f"Error processing indexing request: {str(e)}", exc_info=True)
+        # Log error and return proper error status code
+        error_msg = str(e)
+        logger.error(f"❌ CRITICAL ERROR processing indexing request: {error_msg}", exc_info=True)
+        
+        # Determine status code based on error message
+        status_code = 500
+        if 'API error: 400' in error_msg or '400' in error_msg:
+            status_code = 400
+        elif 'API error: 404' in error_msg or 'Award not found' in error_msg:
+            status_code = 404
+        elif 'API error: 422' in error_msg or '422' in error_msg:
+            status_code = 422
+        elif 'API error: 500' in error_msg or '500' in error_msg:
+            status_code = 502  # Bad Gateway (upstream API error)
+        elif 'timeout' in error_msg.lower():
+            status_code = 504  # Gateway Timeout
+        
         return {
-            'statusCode': 500,
+            'statusCode': status_code,
             'headers': headers if 'headers' in locals() else {'Content-Type': 'application/json'},
             'body': json.dumps({
-                'error': 'Internal server error',
-                'message': str(e)
+                'error': 'Indexing failed',
+                'message': error_msg,
+                'status_code': status_code
             })
         }
 

@@ -140,7 +140,7 @@ def get_award_details(award_id: str, include_transactions: bool = True, include_
     # Extract S3 key
     s3_key = award.get('award_details_s3_key')
     
-    # Build response with award metadata
+    # Build response with award metadata (transactions and subawards will be nested inside)
     response = {
         'success': True,
         'award_id': award_id,
@@ -183,10 +183,11 @@ def get_award_details(award_id: str, include_transactions: bool = True, include_
             'def_codes': award.get('def_codes', []),
             'full_response': award.get('full_response'),
             'indexed_at': award.get('indexed_at'),
-            'last_updated': award.get('last_updated')
+            'last_updated': award.get('last_updated'),
+            # Transactions and subawards will be nested here
+            'transactions': [],
+            'subawards': []
         },
-        'transactions': [],
-        'subawards': [],
         'metadata': {
             'transaction_count': award.get('transaction_count', 0),
             'subaward_count': award.get('subaward_count', 0),
@@ -201,9 +202,9 @@ def get_award_details(award_id: str, include_transactions: bool = True, include_
         
         if details:
             if include_transactions:
-                response['transactions'] = details.get('transactions', [])
+                response['award']['transactions'] = details.get('transactions', [])
             if include_subawards:
-                response['subawards'] = details.get('subawards', [])
+                response['award']['subawards'] = details.get('subawards', [])
         else:
             # S3 file not found or error - return what we have
             logger.warning(f"Could not fetch award details from S3 for {award_id}, returning metadata only")

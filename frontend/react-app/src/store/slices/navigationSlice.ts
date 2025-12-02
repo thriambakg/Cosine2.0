@@ -88,6 +88,13 @@ const defaultNavigationItems: NavigationItem[] = [
     path: '/politician-trades-search',
     icon: 'DescriptionIcon',
     category: 'government_data'
+  },
+  {
+    id: 'news-search',
+    label: 'News Search',
+    path: '/news-search',
+    icon: 'ArticleIcon',
+    category: 'news'
   }
 ];
 

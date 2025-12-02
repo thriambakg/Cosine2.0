@@ -28,7 +28,6 @@ import {
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
-  Settings as SettingsIcon,
   Close as CloseIcon,
   Visibility as VisibilityIcon,
   Assessment as AssessmentIcon,
@@ -79,7 +78,6 @@ interface PortfolioTileProps {
     entries: PortfolioEntry[];
     results: PortfolioResults | null;
     timeframe: string;
-    isExpanded: boolean;
   };
   onRemove: (id: string) => void;
   onUpdate: (id: string, data: any) => void;
@@ -128,11 +126,8 @@ const PortfolioTile = memo(({
   const [timeframe, setTimeframe] = useState<string>(
     portfolioData?.timeframe || '1y'
   );
-  const [isExpanded, setIsExpanded] = useState(
-    portfolioData?.isExpanded || false
-  );
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
+  const [displayOptionsDialogOpen, setDisplayOptionsDialogOpen] = useState(false);
   
   // Use the portfolio analysis hook
   const { executeForceRefresh: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
@@ -176,7 +171,6 @@ const PortfolioTile = memo(({
       entries: entries.filter(e => e.stock && e.shares > 0),
       results,
       timeframe,
-      isExpanded,
     };
 
     // Only update if data has actually changed
@@ -189,7 +183,7 @@ const PortfolioTile = memo(({
         portfolioData: currentData
       });
     }
-  }, [entries, results, timeframe, isExpanded, id, onUpdate]);
+  }, [entries, results, timeframe, id, onUpdate]);
 
   const addEntry = useCallback(() => {
     setEntries([...entries, { stock: '', shares: 0 }]);
@@ -241,13 +235,6 @@ const PortfolioTile = memo(({
     return { level: 'High', color: '#ef4444' };
   };
 
-  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-  };
 
   const handleRefresh = useCallback(() => {
     if (results) {
@@ -262,17 +249,23 @@ const PortfolioTile = memo(({
     clearCache();
   }, [clearCache]);
 
-  const handleSettingsOpen = () => {
-    setSettingsOpen(true);
-    handleMenuClose();
+  const handleRecalculateDialogOpen = () => {
+    setRecalculateDialogOpen(true);
   };
 
-  const handleSettingsClose = () => {
-    setSettingsOpen(false);
+  const handleRecalculateDialogClose = () => {
+    setRecalculateDialogOpen(false);
+  };
+
+  const handleDisplayOptionsDialogOpen = () => {
+    setDisplayOptionsDialogOpen(true);
+  };
+
+  const handleDisplayOptionsDialogClose = () => {
+    setDisplayOptionsDialogOpen(false);
   };
 
   const handleRemove = async () => {
-    handleMenuClose(); // Close menu first
     const confirmed = await confirmDialog({
       title: 'Remove Tile',
       message: 'Remove Portfolio Analysis from dashboard?',
@@ -285,9 +278,9 @@ const PortfolioTile = memo(({
     }
   };
 
-  const handleExpand = () => {
-    setIsExpanded(!isExpanded);
-    handleMenuClose();
+  const handleRecalculate = () => {
+    calculateRisk();
+    handleRecalculateDialogClose();
   };
 
   const handleSelectionChange = (selected: boolean) => {
@@ -303,21 +296,19 @@ const PortfolioTile = memo(({
       sx={{
         width: '100%',
         height: '100%',
-        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+        backgroundColor: 'rgba(15, 23, 42, 0.8)',
         border: '1px solid #374151',
-        borderRadius: '8px',
-        backdropFilter: 'blur(10px)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+        borderRadius: '0px',
+        position: 'relative',
+        overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
         cursor: pinnedState ? 'default' : (isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default')),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
         '&:hover': {
           borderColor: '#3b82f6',
           transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
-          boxShadow: (isDragging || pinnedState) ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
         },
         '&::before': {
           content: '""',
@@ -377,6 +368,17 @@ const PortfolioTile = memo(({
             onTogglePin={togglePin}
           />
           
+          <Tooltip title="Recalculate Portfolio">
+            <IconButton
+              size="small"
+              onClick={handleRecalculateDialogOpen}
+              onMouseDown={(e) => e.stopPropagation()}
+              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+            >
+              <CalculateIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+
           <Tooltip title="Refresh data">
             <IconButton
               size="small"
@@ -389,14 +391,25 @@ const PortfolioTile = memo(({
             </IconButton>
           </Tooltip>
           
-          <Tooltip title="Settings">
+          <Tooltip title="Display Options">
             <IconButton
               size="small"
-              onClick={handleMenuOpen}
+              onClick={handleDisplayOptionsDialogOpen}
               onMouseDown={(e) => e.stopPropagation()}
               sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
             >
-              <SettingsIcon fontSize="small" />
+              <VisibilityIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Clear Data">
+            <IconButton
+              size="small"
+              onClick={handleClear}
+              onMouseDown={(e) => e.stopPropagation()}
+              sx={{ color: '#9ca3af', '&:hover': { color: '#ef4444' } }}
+            >
+              <DeleteIcon fontSize="small" />
             </IconButton>
           </Tooltip>
 
@@ -413,122 +426,41 @@ const PortfolioTile = memo(({
         </Box>
       </Box>
 
-      {/* Menu */}
-      <Menu
-        anchorEl={anchorEl}
-        open={Boolean(anchorEl)}
-        onClose={handleMenuClose}
-        PaperProps={{
-          sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid #374151',
-            backdropFilter: 'blur(10px)',
+      {/* Content */}
+      <Box 
+        sx={{ 
+          flex: 1, 
+          overflow: 'auto', 
+          p: 2, 
+          position: 'relative',
+          '&::-webkit-scrollbar': {
+            width: '6px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: '#475569',
+            borderRadius: '3px',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: '#3b82f6',
+            borderRadius: '3px',
+            '&:hover': {
+              backgroundColor: '#2563eb',
+            },
           },
         }}
       >
-        <MenuItem onClick={handleExpand} sx={{ color: '#ffffff' }}>
-          <VisibilityIcon sx={{ mr: 1, fontSize: '1rem' }} />
-          {isExpanded ? 'Collapse' : 'Recalculate'}
-        </MenuItem>
-        <MenuItem onClick={handleSettingsOpen} sx={{ color: '#ffffff' }}>
-          <SettingsIcon sx={{ mr: 1, fontSize: '1rem' }} />
-          Settings
-        </MenuItem>
-        <MenuItem onClick={handleClear} sx={{ color: '#ef4444' }}>
-          <DeleteIcon sx={{ mr: 1, fontSize: '1rem' }} />
-          Clear Data
-        </MenuItem>
-      </Menu>
-
-      {/* Content */}
-      <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
         {error && (
           <Alert severity="error" sx={{ mb: 2, backgroundColor: 'rgba(239, 68, 68, 0.1)' }}>
             {error}
           </Alert>
         )}
 
-        {/* Input Section - Only show when expanded or no results */}
-        {(isExpanded || !results) && (
-          <Box sx={{ mb: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                Portfolio Holdings
-              </Typography>
-              
-              <FormControl size="small" sx={{ minWidth: 100 }}>
-                <InputLabel sx={{ color: '#9ca3af' }}>Timeframe</InputLabel>
-                <Select
-                  value={timeframe}
-                  label="Timeframe"
-                  onChange={(e) => setTimeframe(e.target.value)}
-                  sx={{
-                    color: '#ffffff',
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                  }}
-                >
-                  <MenuItem value="1d">1 Day</MenuItem>
-                  <MenuItem value="5d">5 Days</MenuItem>
-                  <MenuItem value="1mo">1 Month</MenuItem>
-                  <MenuItem value="3mo">3 Months</MenuItem>
-                  <MenuItem value="6mo">6 Months</MenuItem>
-                  <MenuItem value="1y">1 Year</MenuItem>
-                  <MenuItem value="2y">2 Years</MenuItem>
-                  <MenuItem value="5y">5 Years</MenuItem>
-                  <MenuItem value="max">Max</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-
-            {entries.map((entry, index) => (
-              <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                <TextField
-                  size="small"
-                  label="Stock"
-                  value={entry.stock}
-                  onChange={(e) => updateEntry(index, 'stock', e.target.value.toUpperCase())}
-                  sx={{ flexGrow: 1 }}
-                />
-                <TextField
-                  size="small"
-                  type="number"
-                  label="Shares"
-                  value={entry.shares}
-                  onChange={(e) => updateEntry(index, 'shares', parseFloat(e.target.value) || 0)}
-                  sx={{ flexGrow: 1 }}
-                />
-                <IconButton
-                  size="small"
-                  onClick={() => removeEntry(index)}
-                  disabled={entries.length === 1}
-                  sx={{ color: '#ef4444' }}
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </Box>
-            ))}
-
-            <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-              <Button
-                size="small"
-                startIcon={<AddIcon />}
-                onClick={addEntry}
-                sx={{ color: '#3b82f6' }}
-              >
-                Add Stock
-              </Button>
-              <Button
-                size="small"
-                variant="contained"
-                startIcon={<CalculateIcon />}
-                onClick={calculateRisk}
-                disabled={isLoading || entries.some(e => !e.stock || e.shares <= 0)}
-                sx={{ backgroundColor: '#3b82f6' }}
-              >
-                {isLoading ? 'Calculating...' : 'Calculate'}
-              </Button>
-            </Box>
+        {/* Empty State - Show when no results */}
+        {!results && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 4 }}>
+            <Typography variant="body2" sx={{ color: '#9ca3af', textAlign: 'center' }}>
+              No portfolio analysis yet. Click the Recalculate button in the toolbar to get started.
+            </Typography>
           </Box>
         )}
 
@@ -633,7 +565,21 @@ const PortfolioTile = memo(({
                   border: '1px solid #374151',
                   borderRadius: '6px',
                   flex: 1,
-                  overflow: 'auto',
+                  overflowY: 'auto',
+                  '&::-webkit-scrollbar': {
+                    width: '6px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    backgroundColor: '#475569',
+                    borderRadius: '3px',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    backgroundColor: '#3b82f6',
+                    borderRadius: '3px',
+                    '&:hover': {
+                      backgroundColor: '#2563eb',
+                    },
+                  },
                 }}
               >
                 <Table size="small">
@@ -680,10 +626,10 @@ const PortfolioTile = memo(({
         )}
       </Box>
 
-      {/* Settings Dialog */}
+      {/* Recalculate Dialog */}
       <Dialog
-        open={settingsOpen}
-        onClose={handleSettingsClose}
+        open={recalculateDialogOpen}
+        onClose={handleRecalculateDialogClose}
         maxWidth="md"
         fullWidth
         PaperProps={{
@@ -694,7 +640,111 @@ const PortfolioTile = memo(({
           },
         }}
       >
-        <DialogTitle sx={{ color: '#ffffff' }}>Portfolio Settings</DialogTitle>
+        <DialogTitle sx={{ color: '#ffffff' }}>Recalculate Portfolio</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mt: 1 }}>
+            {/* Portfolio Holdings Input */}
+            <Box>
+              <Typography variant="h6" sx={{ color: '#ffffff', mb: 2 }}>
+                Portfolio Holdings
+              </Typography>
+              
+              <FormControl size="small" sx={{ minWidth: 100, mb: 2 }}>
+                <InputLabel sx={{ color: '#9ca3af' }}>Timeframe</InputLabel>
+                <Select
+                  value={timeframe}
+                  label="Timeframe"
+                  onChange={(e) => setTimeframe(e.target.value)}
+                  sx={{
+                    color: '#ffffff',
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                  }}
+                >
+                  <MenuItem value="1d">1 Day</MenuItem>
+                  <MenuItem value="5d">5 Days</MenuItem>
+                  <MenuItem value="1mo">1 Month</MenuItem>
+                  <MenuItem value="3mo">3 Months</MenuItem>
+                  <MenuItem value="6mo">6 Months</MenuItem>
+                  <MenuItem value="1y">1 Year</MenuItem>
+                  <MenuItem value="2y">2 Years</MenuItem>
+                  <MenuItem value="5y">5 Years</MenuItem>
+                  <MenuItem value="max">Max</MenuItem>
+                </Select>
+              </FormControl>
+
+              {entries.map((entry, index) => (
+                <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
+                  <TextField
+                    size="small"
+                    label="Stock"
+                    value={entry.stock}
+                    onChange={(e) => updateEntry(index, 'stock', e.target.value.toUpperCase())}
+                    sx={{ flexGrow: 1 }}
+                  />
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="Shares"
+                    value={entry.shares}
+                    onChange={(e) => updateEntry(index, 'shares', parseFloat(e.target.value) || 0)}
+                    sx={{ flexGrow: 1 }}
+                  />
+                  <IconButton
+                    size="small"
+                    onClick={() => removeEntry(index)}
+                    disabled={entries.length === 1}
+                    sx={{ color: '#ef4444' }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+              ))}
+
+              <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+                <Button
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={addEntry}
+                  sx={{ color: '#3b82f6' }}
+                >
+                  Add Stock
+                </Button>
+              </Box>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleRecalculateDialogClose} sx={{ color: '#9ca3af' }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleRecalculate}
+            variant="contained"
+            startIcon={<CalculateIcon />}
+            disabled={isLoading || entries.some(e => !e.stock || e.shares <= 0)}
+            sx={{ backgroundColor: '#3b82f6' }}
+          >
+            {isLoading ? 'Calculating...' : 'Calculate'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Display Options Dialog */}
+      <Dialog
+        open={displayOptionsDialogOpen}
+        onClose={handleDisplayOptionsDialogClose}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+            backdropFilter: 'blur(10px)',
+          },
+        }}
+      >
+        <DialogTitle sx={{ color: '#ffffff' }}>Display Options</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mt: 1 }}>
             {/* Display Options */}
@@ -746,7 +796,7 @@ const PortfolioTile = memo(({
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleSettingsClose} sx={{ color: '#9ca3af' }}>
+          <Button onClick={handleDisplayOptionsDialogClose} sx={{ color: '#9ca3af' }}>
             Close
           </Button>
         </DialogActions>
