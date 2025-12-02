@@ -42,7 +42,7 @@ import {
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
 } from '@mui/icons-material';
-import { newsSearchAPI, NewsSearchRequest } from '../../services/api';
+import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../../services/api';
 import { useTilePinning, PinButton, addArticleToContext, addMultipleArticlesToContext, confirmDialog } from './common';
 import { newsCache } from '../../utils/newsCache';
 
@@ -84,22 +84,6 @@ interface NewsFilters {
   categoryOperator: 'AND' | 'OR';
   sourceOperator: 'AND' | 'OR';
   countryOperator: 'AND' | 'OR';
-}
-
-interface NewsArticle {
-  id: string;
-  title: string;
-  description: string;
-  source_url: string;
-  source_name: string;
-  published_date: string;
-  keywords: string;
-  category: string;
-  image_url?: string;
-  sentiment?: string;
-  ai_tag?: string;
-  country?: string;
-  language?: string;
 }
 
 const NewsTile: React.FC<NewsTileProps> = ({
@@ -185,14 +169,14 @@ const NewsTile: React.FC<NewsTileProps> = ({
 
   // Helper function to ensure articles have a valid ID
   const ensureArticleId = (article: NewsArticle): NewsArticle => {
-    if (article.id) {
+    if (article.id && article.creator) {
       return article;
     }
     // Use source_url as fallback ID, or generate one from title + source_url
     // Ensure all required properties are included
     return {
       ...article,
-      id: article.source_url || `${article.title}-${article.source_name || 'unknown'}`,
+      id: article.id || article.source_url || `${article.title}-${article.source_name || 'unknown'}`,
       creator: article.creator || article.source_name || 'unknown',
     };
   };
@@ -843,8 +827,9 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Mock news data for demonstration (currently unused - kept for potential future use)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const mockNewsData: NewsArticle[] = [
+  // Uncomment and use if needed for development/testing
+  /*
+  const _mockNewsData: NewsArticle[] = [
     {
       id: '1',
       title: 'Will Big Tech be held liable in chatbot suicide cases?',
@@ -926,6 +911,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       creator: 'TechCrunch',
     },
   ];
+  */
 
   // Category options
   const categoryOptions = [
@@ -954,8 +940,9 @@ const NewsTile: React.FC<NewsTileProps> = ({
   ];
 
   // Filter articles based on criteria (currently unused - filtering is done server-side)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const filterArticles = useCallback((articles: NewsArticle[], filters: NewsFilters): NewsArticle[] => {
+  // Uncomment and use if needed for client-side filtering
+  /*
+  const _filterArticles = useCallback((articles: NewsArticle[], filters: NewsFilters): NewsArticle[] => {
     return articles.filter(article => {
       // Keywords filter with expression logic
       const keywordExpression = ((filters as any).keywordExpression || []).filter((item: any) => item && item.type);
@@ -1215,6 +1202,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       return true;
     });
   }, []);
+  */
 
   // Fetch a specific page of results
   const fetchPage = useCallback(async (page: number, size: number, basePayload: NewsSearchRequest) => {

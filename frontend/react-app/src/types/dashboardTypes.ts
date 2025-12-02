@@ -164,10 +164,11 @@ export interface NewsArticle {
   keywords: string;
   category: string;
   image_url?: string;
-  sentiment?: string;
-  ai_tag?: string;
-  country?: string;
-  language?: string;
+  sentiment: string;
+  ai_tag: string;
+  country: string;
+  language: string;
+  creator: string;
 }
 
 export interface TabManagementState {
@@ -209,8 +210,9 @@ export interface NewsArticle {
   keywords: string;
   category: string;
   image_url?: string;
-  sentiment?: string;
-  ai_tag?: string;
-  country?: string;
-  language?: string;
+  sentiment: string;
+  ai_tag: string;
+  country: string;
+  language: string;
+  creator: string;
 }
