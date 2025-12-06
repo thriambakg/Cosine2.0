@@ -121,7 +121,7 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
   news: {
     sizeConstraints: {
       minWidth: 4,
-      maxWidth: 6,
+      maxWidth: 12,
       minHeight: 4,
       maxHeight: 8,
       defaultWidth: 4,

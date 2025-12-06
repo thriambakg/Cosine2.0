@@ -58,6 +58,9 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
   const isPoliticianTrade =
     item.type === 'politician_trade' ||
     Boolean(data?.tradeId || data?.politicianName || data?.transactionType);
+  const isArticle =
+    item.type === 'article' ||
+    Boolean(data?.source_url || data?.source_name || data?.published_date);
 
   const secDocuments = useMemo(() => {
     const urls: string[] = data.documentUrls || [];
@@ -327,6 +330,109 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
     );
   };
 
+  const formatPublishedDate = (dateStr?: string): string => {
+    if (!dateStr) return 'N/A';
+    try {
+      return new Date(dateStr).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const renderArticleDetails = () => {
+    const infoFields = [
+      { label: 'Title', value: data.title },
+      { label: 'Source', value: data.source_name },
+      { label: 'Published Date', value: formatPublishedDate(data.published_date) },
+      { label: 'Category', value: data.category },
+      { label: 'Country', value: data.country },
+      { label: 'Language', value: data.language },
+      { label: 'Creator', value: data.creator },
+      { label: 'Sentiment', value: data.sentiment },
+      { label: 'AI Tag', value: data.ai_tag },
+    ];
+
+    // Add keywords if they exist
+    if (data.keywords) {
+      const keywordsList = data.keywords.split(',').slice(0, 5).map((k: string) => k.trim()).join(', ');
+      if (keywordsList) {
+        infoFields.push({ label: 'Keywords', value: keywordsList });
+      }
+    }
+
+    return (
+      <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1 }}>
+          {infoFields
+            .filter((field) => field.value && field.value !== 'N/A')
+            .map((field) => (
+              <Box key={field.label} sx={{ backgroundColor: 'rgba(16, 185, 129, 0.08)', borderRadius: 1, p: 1 }}>
+                <Typography variant="caption" sx={{ color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  {field.label}
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'white', wordBreak: 'break-word' }}>
+                  {field.value}
+                </Typography>
+              </Box>
+            ))}
+        </Box>
+
+        {data.description && (
+          <Box sx={{ backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 1, p: 1.5 }}>
+            <Typography variant="subtitle2" sx={{ color: '#f8fafc', mb: 0.5 }}>
+              Description
+            </Typography>
+            <Typography variant="body2" sx={{ color: '#cbd5e1', wordBreak: 'break-word' }}>
+              {data.description}
+            </Typography>
+          </Box>
+        )}
+
+        {data.source_url && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Chip
+              label="View Article"
+              size="small"
+              sx={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', fontWeight: 600 }}
+              icon={<OpenInNewIcon sx={{ fontSize: 16 }} />}
+              component={MuiLink}
+              href={data.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              clickable
+            />
+          </Box>
+        )}
+
+        {data.image_url && (
+          <Box>
+            <Typography variant="subtitle2" sx={{ color: '#f8fafc', mb: 0.5 }}>
+              Article Image
+            </Typography>
+            <Box
+              component="img"
+              src={data.image_url}
+              alt={data.title}
+              sx={{
+                maxWidth: '100%',
+                maxHeight: 200,
+                borderRadius: 1,
+                objectFit: 'cover',
+                cursor: 'pointer',
+                '&:hover': { opacity: 0.8 },
+              }}
+              onClick={() => window.open(data.image_url, '_blank', 'noopener,noreferrer')}
+            />
+          </Box>
+        )}
+      </Box>
+    );
+  };
+
   const renderSecDetails = () => {
     const infoFields = [
       { label: 'Form', value: data.form },
@@ -528,7 +634,7 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
 
       <Collapse in={expanded} timeout="auto" unmountOnExit>
         <Divider sx={{ my: 1, borderColor: 'rgba(148, 163, 184, 0.2)' }} />
-        {isSecFiling ? renderSecDetails() : isPoliticianTrade ? renderPoliticianTradeDetails() : renderGenericDetails(item.data || {})}
+        {isSecFiling ? renderSecDetails() : isPoliticianTrade ? renderPoliticianTradeDetails() : isArticle ? renderArticleDetails() : renderGenericDetails(item.data || {})}
       </Collapse>
     </Box>
   );

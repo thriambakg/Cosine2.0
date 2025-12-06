@@ -197,11 +197,31 @@ export const addArticleToContext = (
   articleData: any,
   target: 'new' | 'sidebar' = 'new'
 ): void => {
+  // Format published date
+  const formatPublishedDate = (dateStr?: string): string => {
+    if (!dateStr) return '';
+    try {
+      return new Date(dateStr).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const publishedDate = formatPublishedDate(articleData.published_date);
+  const formattedTitle = `${title} - ${source}`;
+  const subtitle = publishedDate 
+    ? `Published on ${publishedDate}${articleData.category ? ` • ${articleData.category}` : ''}`
+    : articleData.category ? `Category: ${articleData.category}` : 'News Article';
+
   const contextItem: ContextItem = {
     id: `article_${articleId}_${Date.now()}`,
     type: 'article',
-    title: title,
-    subtitle: `Source: ${source}`,
+    title: formattedTitle,
+    subtitle: subtitle,
     data: articleData,
     timestamp: Date.now(),
   };
@@ -231,14 +251,36 @@ export const addMultipleArticlesToContext = (
   }>,
   target: 'new' | 'sidebar' = 'new'
 ): void => {
-  const contextItems: ContextItem[] = articles.map(article => ({
-    id: `article_${article.articleId}_${Date.now()}_${Math.random()}`,
-    type: 'article',
-    title: article.title,
-    subtitle: `Source: ${article.source}`,
-    data: article.articleData,
-    timestamp: Date.now(),
-  }));
+  // Format published date
+  const formatPublishedDate = (dateStr?: string): string => {
+    if (!dateStr) return '';
+    try {
+      return new Date(dateStr).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const contextItems: ContextItem[] = articles.map(article => {
+    const publishedDate = formatPublishedDate(article.articleData.published_date);
+    const formattedTitle = `${article.title} - ${article.source}`;
+    const subtitle = publishedDate 
+      ? `Published on ${publishedDate}${article.articleData.category ? ` • ${article.articleData.category}` : ''}`
+      : article.articleData.category ? `Category: ${article.articleData.category}` : 'News Article';
+    
+    return {
+      id: `article_${article.articleId}_${Date.now()}_${Math.random()}`,
+      type: 'article',
+      title: formattedTitle,
+      subtitle: subtitle,
+      data: article.articleData,
+      timestamp: Date.now(),
+    };
+  });
   
   if (target === 'sidebar') {
     // Add multiple items to current sidebar session's context

@@ -250,3 +250,8 @@ class NewsCacheManager {
 // Export singleton instance
 export const newsCache = new NewsCacheManager();
 
+
+
+
+
+

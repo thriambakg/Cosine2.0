@@ -389,38 +389,12 @@ export const stockScreenerAPI = {
 
 export interface NewsSearchRequest {
   query: {
-    keywords?: {
-      type: 'term' | 'expression' | 'group';
-      field?: string;
-      value?: string;
-      operator?: 'AND' | 'OR';
-      children?: any;
-    };
-    sources?: {
-      type: 'term' | 'expression' | 'group';
-      field?: string;
-      value?: string;
-      operator?: 'AND' | 'OR';
-      children?: any;
-    };
-    categories?: {
-      type: 'term' | 'expression' | 'group';
-      field?: string;
-      value?: string;
-      operator?: 'AND' | 'OR';
-      children?: any;
-    };
-    countries?: {
-      type: 'term' | 'expression' | 'group';
-      field?: string;
-      value?: string;
-      operator?: 'AND' | 'OR';
-      children?: any;
-    };
+    keywords?: string[]; // Simplified: just array of keywords
   };
   dateRange: '12h' | '24h' | '7d' | '30d' | 'all';
   limit?: number;
-  offset?: number;
+  offset?: number; // Kept for backward compatibility
+  lastEvaluatedKey?: { published_date?: string; SK?: string }; // Cursor for "load more" pagination
 }
 
 export interface NewsArticle {
@@ -444,7 +418,9 @@ export interface NewsSearchResponse {
   articles: NewsArticle[];
   total: number;
   limit: number;
-  offset: number;
+  offset: number; // Kept for backward compatibility
+  has_more?: boolean;
+  last_evaluated_key?: { published_date?: string; SK?: string }; // Cursor for next "load more" request
   query: NewsSearchRequest;
   timestamp: string;
 }
@@ -915,6 +891,7 @@ export interface PoliticianTradesSearchParams {
   matchConfidence?: number;
   page?: number;
   pageSize?: number;
+  lastEvaluatedKey?: { transactionDate?: number; tradeId?: string }; // Cursor for "load more" pagination
 }
 
 export interface PoliticianTrade {
@@ -952,6 +929,7 @@ export interface PoliticianTradesSearchResponse {
   page?: number;
   page_size?: number;
   has_more?: boolean;
+  last_evaluated_key?: { transactionDate?: number; tradeId?: string }; // Cursor for next "load more" request
   error?: string;
 }
 

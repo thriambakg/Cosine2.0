@@ -164,9 +164,15 @@ const PoliticianTradesSearchPage: React.FC = () => {
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>([]);
   const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
   const [isSearching, setIsSearching] = useState<boolean>(savedState?.isSearching || false);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
   const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 50);
+  const [lastEvaluatedKey, setLastEvaluatedKey] = useState<{ transactionDate?: number; tradeId?: string } | null>(
+    savedState?.lastEvaluatedKey || null
+  );
+  const [hasMore, setHasMore] = useState<boolean>(savedState?.hasMore || false);
+  const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== undefined ? savedState.searchFormExpanded : true);
   
   // Data loading state for suggestions
   const [isPoliticianDataLoaded, setIsPoliticianDataLoaded] = useState<boolean>(false);
@@ -281,6 +287,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
         availableFilters,
         expandedFilters,
         isFiltered,
+        lastEvaluatedKey,
+        hasMore,
+        searchFormExpanded,
       };
       
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
@@ -298,6 +307,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
     availableFilters,
     expandedFilters,
     isFiltered,
+    lastEvaluatedKey,
+    hasMore,
+    searchFormExpanded,
   ]);
   
   // Compute filters from search results
@@ -411,80 +423,107 @@ const PoliticianTradesSearchPage: React.FC = () => {
     }
   };
   
-  // Perform search - fetch all results
+  // Perform search - fetch first batch of results (load more available)
   const handleSearch = async () => {
     setIsSearching(true);
     setSearchError(null);
     setCurrentPage(1);
     setAllSearchResults([]);
     setCurrentResults([]);
+    setLastEvaluatedKey(null);
+    setHasMore(false);
     
     try {
-      // Fetch all results by making requests for all pages
-      let allResults: PoliticianTrade[] = [];
-      let currentPageNum = 1;
-      let hasMore = true;
       const fetchPageSize = 100; // Use large page size to minimize API calls
       
-      while (hasMore) {
-        // Build search parameters using ONLY searchParams (never include filters)
-        const searchRequest = {
-          ...searchParams,
-          page: currentPageNum,
-          pageSize: fetchPageSize,
-        };
-        
-        console.log('🔍 Search Request:', {
-          searchParams,
-          note: 'Filters will be applied client-side after receiving results',
-          finalRequest: searchRequest
-        });
-        
-        const response = await politicianTradesSearchAPI.search(searchRequest);
-        
-        if (response.success && response.results) {
-          allResults = [...allResults, ...response.results];
-          
-          // Check if there are more pages
-          const totalFromAPI = response.total_found || 0;
-          const fetchedSoFar = allResults.length;
-          hasMore = fetchedSoFar < totalFromAPI && response.results.length === fetchPageSize;
-          
-          if (currentPageNum === 1) {
-            // Set total found from first response
-            setTotalFound(totalFromAPI);
-          }
-          
-          currentPageNum++;
-        } else {
-          hasMore = false;
-          if (currentPageNum === 1) {
-            setSearchError(response.error || 'Search failed');
-            setAllSearchResults([]);
-            setTotalFound(0);
-          }
-        }
-      }
+      // Build search parameters using ONLY searchParams (never include filters)
+      const searchRequest = {
+        ...searchParams,
+        page: 1,
+        pageSize: fetchPageSize,
+      };
       
-      if (allResults.length > 0) {
-        setAllSearchResults(allResults);
+      console.log('🔍 Search Request:', {
+        searchParams,
+        note: 'Filters will be applied client-side after receiving results',
+        finalRequest: searchRequest
+      });
+      
+      const response = await politicianTradesSearchAPI.search(searchRequest);
+      
+      if (response.success && response.results) {
+        setAllSearchResults(response.results);
+        setTotalFound(response.total_found || response.results.length);
+        setHasMore(response.has_more || false);
+        setLastEvaluatedKey(response.last_evaluated_key || null);
         
-        // Compute filters from all results
-        const computedFilters = computeFiltersFromResults(allResults);
+        // Compute filters from results
+        const computedFilters = computeFiltersFromResults(response.results);
         setAvailableFilters(computedFilters);
         setIsFiltered(false);
-      } else if (currentPageNum === 1) {
-        // No results on first page
+      } else {
+        setSearchError(response.error || 'Search failed');
         setAllSearchResults([]);
         setTotalFound(0);
+        setHasMore(false);
       }
     } catch (error: any) {
       console.error('Search error:', error);
       setSearchError(error.message || 'An error occurred during search');
       setAllSearchResults([]);
       setTotalFound(0);
+      setHasMore(false);
     } finally {
       setIsSearching(false);
+    }
+  };
+  
+  // Load more results using cursor-based pagination
+  const handleLoadMore = async () => {
+    if (!hasMore || !lastEvaluatedKey || isLoadingMore) return;
+    
+    setIsLoadingMore(true);
+    setSearchError(null);
+    
+    try {
+      const fetchPageSize = 100; // Use same page size as initial search
+      
+      // Build search parameters using ONLY searchParams with cursor
+      const searchRequest = {
+        ...searchParams,
+        page: 1, // Not used when lastEvaluatedKey is provided
+        pageSize: fetchPageSize,
+        lastEvaluatedKey: lastEvaluatedKey, // Cursor for pagination
+      };
+      
+      console.log('📥 Load More Request:', {
+        searchParams,
+        lastEvaluatedKey,
+        note: 'Loading next batch using cursor'
+      });
+      
+      const response = await politicianTradesSearchAPI.search(searchRequest);
+      
+      if (response.success && response.results) {
+        // Append new results to existing results
+        setAllSearchResults(prev => [...prev, ...response.results!]);
+        setHasMore(response.has_more || false);
+        setLastEvaluatedKey(response.last_evaluated_key || null);
+        
+        // Update filters with new results
+        const allResults = [...allSearchResults, ...response.results];
+        const computedFilters = computeFiltersFromResults(allResults);
+        setAvailableFilters(computedFilters);
+      } else {
+        setSearchError(response.error || 'Load more failed');
+        setHasMore(false);
+      }
+    } catch (error: any) {
+      console.error('Load more error:', error);
+      setSearchError(error.message || 'An error occurred while loading more results');
+      setHasMore(false);
+    } finally {
+      setIsLoadingMore(false);
     }
   };
   
@@ -898,7 +937,21 @@ const PoliticianTradesSearchPage: React.FC = () => {
             </Box>
 
         {/* Search Form */}
-        <GlassCard sx={{ p: 4, mb: 4 }}>
+        <GlassCard sx={{ mb: 4 }}>
+          <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: searchFormExpanded ? '1px solid rgba(55, 65, 81, 0.5)' : 'none' }}>
+            <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 'bold' }}>
+              Search Parameters
+            </Typography>
+            <IconButton
+              onClick={() => setSearchFormExpanded(!searchFormExpanded)}
+              sx={{ color: '#9ca3af' }}
+              size="small"
+            >
+              {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+            </IconButton>
+          </Box>
+          <Collapse in={searchFormExpanded}>
+            <Box sx={{ p: 4 }}>
           {/* Date Range Parameters */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 3 }}>
             {/* Date Range Fields */}
@@ -1282,6 +1335,8 @@ const PoliticianTradesSearchPage: React.FC = () => {
               {isSearching ? 'Searching...' : 'Search'}
             </Button>
           </Box>
+            </Box>
+          </Collapse>
         </GlassCard>
       
         {/* Error Alert */}
@@ -2672,6 +2727,31 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 No trades match the selected filters. Your original search found {allSearchResults.length} trade{allSearchResults.length !== 1 ? 's' : ''}. 
                 Remove filters to see them again.
               </Alert>
+            </Box>
+          )}
+
+          {/* Load More Button - only show when not filtered and has more results */}
+          {!isFiltered && hasMore && allSearchResults.length > 0 && (
+            <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', borderTop: '1px solid #374151' }}>
+              <Button
+                variant="outlined"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore || isSearching}
+                sx={{
+                  color: '#3b82f6',
+                  borderColor: '#3b82f6',
+                  '&:hover': {
+                    borderColor: '#60a5fa',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                  '&:disabled': {
+                    borderColor: '#4b5563',
+                    color: '#6b7280',
+                  },
+                }}
+              >
+                {isLoadingMore ? 'Loading...' : `Load More (${allSearchResults.length} of ${totalFound > 0 ? totalFound : 'many'} loaded)`}
+              </Button>
             </Box>
           )}
 

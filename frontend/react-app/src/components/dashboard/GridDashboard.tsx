@@ -785,14 +785,21 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
     const newsProps = {
       ...commonProps,
-      filters: tile.filters,
+      searchParams: tile.searchParams, // Include searchParams like PoliticianTradesSearchTile
+      filterSettings: tile.filterSettings,
       articles: tile.articles,
       displayOptions: (tile.displayOptions as any) || {
-        showImages: true,
+        showTitle: true,
         showSource: true,
         showDate: true,
-        showKeywords: false,
-        maxResults: 20,
+        showCategory: true,
+        showSentiment: true,
+        showCreator: false,
+        showCountry: false,
+        showImage: true,
+        showDescription: false,
+        showResultsTable: true,
+        maxResults: 50,
         compactView: false,
       },
       autoRefresh: tile.autoRefresh,

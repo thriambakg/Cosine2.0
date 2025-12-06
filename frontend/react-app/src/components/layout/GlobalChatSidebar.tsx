@@ -180,6 +180,22 @@ const SidebarMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabl
               opacity: 1,
             },
           },
+          // Scrollbar styling to match main scroll area (for multiline textarea)
+          '& textarea': {
+            '&::-webkit-scrollbar': {
+              width: '6px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(59, 130, 246, 0.5)',
+              borderRadius: '3px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: 'rgba(59, 130, 246, 0.7)',
+            },
+          },
         }}
       />
       <IconButton
@@ -313,6 +329,9 @@ const GlobalChatSidebar: React.FC = () => {
   const [sidebarWidth, setSidebarWidth] = useState(400);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const previewWidthRef = useRef<number>(400); // Store preview width in ref to avoid state updates during drag
 
   // COMMENTED OUT: Old messaging service handler (replaced by unified handler)
   /*
@@ -1299,29 +1318,67 @@ const GlobalChatSidebar: React.FC = () => {
     };
   }, [activeSessionId]);
 
-  // Resize handlers
+  // Resize handlers - optimized for smooth preview movement
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
-  }, []);
+    // Initialize preview width ref to current sidebar width
+    previewWidthRef.current = sidebarWidth;
+    // Show preview bar immediately
+    if (previewRef.current) {
+      previewRef.current.style.display = 'block';
+      previewRef.current.style.right = `${sidebarWidth}px`;
+    }
+  }, [sidebarWidth]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!isResizing) return;
     
-    const windowWidth = window.innerWidth;
-    const newWidth = windowWidth - e.clientX;
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+    }
     
-    // Calculate percentage limits
-    const minWidth = windowWidth * 0.1; // 10% of screen width
-    const maxWidth = windowWidth * 0.75; // 75% of screen width
-    
-    // Clamp the width within limits
-    const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
-    
-    setSidebarWidth(clampedWidth);
+    // Use requestAnimationFrame for smooth updates
+    rafIdRef.current = requestAnimationFrame(() => {
+      const windowWidth = window.innerWidth;
+      const newWidth = windowWidth - e.clientX;
+      
+      // Calculate percentage limits
+      const minWidth = windowWidth * 0.1; // 10% of screen width
+      const maxWidth = windowWidth * 0.75; // 75% of screen width
+      
+      // Clamp the width within limits
+      const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+      
+      // Store preview width in ref (no state update = no re-render)
+      previewWidthRef.current = clampedWidth;
+      
+      // Update preview bar position directly via DOM for smooth movement
+      // This completely avoids React re-renders during dragging
+      if (previewRef.current) {
+        previewRef.current.style.right = `${clampedWidth}px`;
+      }
+    });
   }, [isResizing]);
 
   const handleMouseUp = useCallback(() => {
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    
+    // Apply preview width to actual sidebar width when mouse is released
+    // This triggers the actual resize and any necessary recalculations
+    const finalWidth = previewWidthRef.current;
+    setSidebarWidth(finalWidth);
+    
+    // Hide preview bar
+    if (previewRef.current) {
+      previewRef.current.style.display = 'none';
+    }
+    
     setIsResizing(false);
   }, []);
 
@@ -1340,6 +1397,11 @@ const GlobalChatSidebar: React.FC = () => {
     }
 
     return () => {
+      // Cancel any pending animation frames on cleanup
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = '';
@@ -1369,6 +1431,24 @@ const GlobalChatSidebar: React.FC = () => {
 
   return (
     <>
+    {/* Preview indicator - shows where the resize will be */}
+    {/* Always rendered but hidden by default, updated via direct DOM manipulation for smooth movement */}
+    <Box
+      ref={previewRef}
+      sx={{
+        position: 'fixed',
+        right: sidebarWidth,
+        top: 64,
+        bottom: 0,
+        width: '2px',
+        backgroundColor: 'rgba(59, 130, 246, 0.8)',
+        zIndex: 1202,
+        pointerEvents: 'none',
+        boxShadow: '0 0 8px rgba(59, 130, 246, 0.6)',
+        display: 'none', // Hidden by default, shown during resize via direct DOM manipulation
+        transition: 'none', // No transitions during drag for instant updates
+      }}
+    />
     <Box
       ref={sidebarRef}
       sx={{

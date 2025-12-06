@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
   Box,
   Typography,
@@ -6,8 +6,6 @@ import {
   Menu,
   MenuItem,
   FormControl,
-  InputLabel,
-  Select,
   TextField,
   Button,
   Chip,
@@ -17,34 +15,44 @@ import {
   DialogContent,
   DialogActions,
   Checkbox,
-  FormControlLabel,
   Autocomplete,
-  List,
-  ListItem,
-  Avatar,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Alert,
   CircularProgress,
+  ListItemIcon,
+  ListItemText,
+  Pagination,
+  FormControlLabel,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Link,
+  InputLabel,
 } from '@mui/material';
 import {
-  Settings as SettingsIcon,
   Close as CloseIcon,
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
-  PushPin as PinIcon,
   AutoAwesome as AutoRefreshIcon,
   Search as SearchIcon,
-  FilterList as FilterIcon,
   Article as ArticleIcon,
-  OpenInNew as OpenInNewIcon,
-  Image as ImageIcon,
-  CalendarToday as CalendarIcon,
-  Dashboard as ContextIcon,
+  Launch as LaunchIcon,
+  Dashboard as AddToContextIcon,
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
+  FilterList as FilterIcon,
+  Refresh as RefreshIcon,
+  ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../../services/api';
 import { useTilePinning, PinButton, addArticleToContext, addMultipleArticlesToContext, confirmDialog } from './common';
-import { newsCache } from '../../utils/newsCache';
+import MultiSelectField from '../MultiSelectField';
+import { useAuth } from '@/contexts/AuthContext';
+import { useGlobalChat } from '@/contexts/GlobalChatContext';
 
 interface NewsTileProps {
   id: string;
@@ -53,20 +61,35 @@ interface NewsTileProps {
   onRemove: (id: string) => void;
   onUpdate: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;
+  onResize?: (id: string, size: { width: number; height: number }) => void;
   onDragStart?: (event: React.MouseEvent) => void;
   onResizeStart?: (event: React.MouseEvent) => void;
   isDragging?: boolean;
   isResizing?: boolean;
   isSelected?: boolean;
   onSelectionChange?: (id: string, selected: boolean) => void;
-  // News tile specific props
-  filters?: NewsFilters;
+  // News specific props
+  searchParams?: {
+    keywords?: string[];
+    sources?: string[];
+    categories?: string[];
+    countries?: string[];
+    dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
+  };
+  filterSettings?: {
+    sources?: string[];
+    categories?: string[];
+    countries?: string[];
+  };
   articles?: NewsArticle[];
   displayOptions?: {
-    showImages: boolean;
+    showTitle: boolean;
+    showDescription: boolean;
     showSource: boolean;
+    showCategory: boolean;
     showDate: boolean;
-    showKeywords: boolean;
+    showImage: boolean;
+    showResultsTable: boolean;
     maxResults: number;
     compactView: boolean;
   };
@@ -74,846 +97,195 @@ interface NewsTileProps {
   isPinned?: boolean;
 }
 
-interface NewsFilters {
-  keywords: string[];
-  sources: string[];
-  categories: string[];
-  dateRange: string;
-  countries: string[];
-  // Query operators
-  categoryOperator: 'AND' | 'OR';
-  sourceOperator: 'AND' | 'OR';
-  countryOperator: 'AND' | 'OR';
-}
-
 const NewsTile: React.FC<NewsTileProps> = ({
   id,
   size,
   onRemove,
-  onUpdate: _onUpdate,
+  onUpdate,
   onSettingsChange,
   onDragStart,
   isDragging = false,
+  isResizing = false,
   isSelected = false,
   onSelectionChange,
-  filters = {
+  searchParams = {
     keywords: [],
     sources: [],
     categories: [],
-    dateRange: '12h',
     countries: [],
-    categoryOperator: 'OR',
-    sourceOperator: 'OR',
-    countryOperator: 'OR',
+    dateRange: 'all',
   },
+  filterSettings: initialFilterSettings,
   articles = [],
   displayOptions = {
-    showImages: true,
+    showTitle: true,
+    showDescription: false,
     showSource: true,
+    showCategory: true,
     showDate: true,
-    showKeywords: false,
-    maxResults: 20,
+    showImage: true,
+    showResultsTable: true,
+    maxResults: 200,
     compactView: false,
   },
   autoRefresh = false,
   isPinned = false,
 }) => {
-  const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
-  const [filtersDialogOpen, setFiltersDialogOpen] = useState(false);
-
-  // Pinning functionality
-  const { isPinned: pinnedState, togglePin } = useTilePinning({
-    initialPinned: isPinned,
-    onPinChange: (pinned) => {
-      onSettingsChange(id, { isPinned: pinned });
-    },
-  });
-  const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
-  const [localFilters, setLocalFilters] = useState<NewsFilters>(filters);
-  const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [newsArticles, setNewsArticles] = useState<NewsArticle[]>(articles);
-  const [totalFound, setTotalFound] = useState<number>(0);
-  const [isLoadingPage, setIsLoadingPage] = useState<boolean>(false);
-  const [fetchedPages, setFetchedPages] = useState<Map<number, NewsArticle[]>>(new Map());
-  const [currentResults, setCurrentResults] = useState<NewsArticle[]>([]);
-  const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
-  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
-  const [keywordInputValue, setKeywordInputValue] = useState('');
-  const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
-  const [selectedGroupIndex, setSelectedGroupIndex] = useState<number | null>(null);
+  const { user } = useAuth();
+  const { activeSessionId } = useGlobalChat();
   
-  // State for other expression-based filters
-  const [sourceInputValue, setSourceInputValue] = useState('');
-  const [selectedSources, setSelectedSources] = useState<string[]>([]);
-  const [selectedSourceGroupIndex, setSelectedSourceGroupIndex] = useState<number | null>(null);
-  
-  const [categoryInputValue, setCategoryInputValue] = useState('');
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedCategoryGroupIndex, setSelectedCategoryGroupIndex] = useState<number | null>(null);
-  
-  const [countryInputValue, setCountryInputValue] = useState('');
-  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
-  const [selectedCountryGroupIndex, setSelectedCountryGroupIndex] = useState<number | null>(null);
-  
-  // Validation error states
-  const [keywordError, setKeywordError] = useState<string | null>(null);
-  const [sourceError, setSourceError] = useState<string | null>(null);
-  const [categoryError, setCategoryError] = useState<string | null>(null);
-  const [countryError, setCountryError] = useState<string | null>(null);
-  
-  const tileRef = useRef<HTMLDivElement>(null);
-  const localFiltersRef = useRef(localFilters);
-  const initialLoadDone = useRef(false);
-  // Cache is now handled by newsCache utility with tile ID
-
-  // Helper function to ensure articles have a valid ID
-  const ensureArticleId = (article: NewsArticle): NewsArticle => {
-    if (article.id && article.creator) {
-      return article;
-    }
-    // Use source_url as fallback ID, or generate one from title + source_url
-    // Ensure all required properties are included
-    return {
-      ...article,
-      id: article.id || article.source_url || `${article.title}-${article.source_name || 'unknown'}`,
-      creator: article.creator || article.source_name || 'unknown',
-    };
-  };
-
-  // Helper function to convert frontend expression to backend query format
-  const convertExpressionToQuery = (expression: any[]): any => {
-    if (!expression || expression.length === 0) return null;
-    
-    if (expression.length === 1) {
-      const item = expression[0];
-      if (item.type === 'keyword' || item.type === 'source' || item.type === 'category' || item.type === 'country') {
-        return {
-          type: 'term',
-          field: item.type === 'keyword' ? 'keywords' : 
-                 item.type === 'source' ? 'source_name' :
-                 item.type === 'category' ? 'category' : 'country',
-          value: item.value
-        };
-      } else if (item.type === 'group') {
-        return {
-          type: 'group',
-          children: convertExpressionToQuery(item.value)
-        };
-      }
-    }
-    
-    // Handle multiple items with operators
-    const result: any = {
-      type: 'expression',
-      children: []
-    };
-    
-    let i = 0;
-    while (i < expression.length) {
-      const currentItem = expression[i];
-      if (!currentItem || !currentItem.type) {
-        i++;
-        continue;
-      }
-      
-      if (currentItem.type === 'operator') {
-        // Add operator to the last child
-        if (result.children.length > 0) {
-          result.children[result.children.length - 1].operator = currentItem.value;
-        }
-      } else if (currentItem.type === 'group') {
-        result.children.push({
-          type: 'group',
-          children: convertExpressionToQuery(currentItem.value)
-        });
-      } else {
-        result.children.push({
-          type: 'term',
-          field: currentItem.type === 'keyword' ? 'keywords' : 
-                 currentItem.type === 'source' ? 'source_name' :
-                 currentItem.type === 'category' ? 'category' : 'country',
-          value: currentItem.value
-        });
-      }
-      i++;
-    }
-    
-    return result;
-  };
-
-  // Helper function to build API payload from filters
-  const buildApiPayload = (filters: any, limit?: number): NewsSearchRequest => {
-    const payload: NewsSearchRequest = {
-      query: {
-        keywords: convertExpressionToQuery(filters.keywordExpression || []),
-        sources: convertExpressionToQuery(filters.sourceExpression || []),
-        categories: convertExpressionToQuery(filters.categoryExpression || []),
-        countries: convertExpressionToQuery(filters.countryExpression || [])
-      },
-      dateRange: filters.dateRange || '12h',
-      limit: limit || displayOptions.maxResults || 20,  // Use provided limit or maxResults from display options
-      offset: 0
-    };
-    
-    return payload;
-  };
-
-  // Update ref when localFilters changes
+  // Debug authentication state
   useEffect(() => {
-    localFiltersRef.current = localFilters;
-  }, [localFilters]);
+    console.log('📰 NewsTile Auth State:', { 
+      userId: user?.id, 
+      activeSessionId,
+      userExists: !!user 
+    });
+  }, [user?.id, activeSessionId]);
+  
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  
+  // Filter state for client-side filtering - restore from props if available
+  const [allResults, setAllResults] = useState<NewsArticle[]>(() => {
+    // Initialize from articles prop if available
+    if (articles && articles.length > 0) {
+      return articles.map((article, index) => ({
+        ...article,
+        id: article.id || `article_${index}_${Date.now()}`,
+      }));
+    }
+    return [];
+  });
+  const [filteredResults, setFilteredResults] = useState<NewsArticle[]>(() => {
+    // Initialize from articles prop if available
+    if (articles && articles.length > 0) {
+      return articles.map((article, index) => ({
+        ...article,
+        id: article.id || `article_${index}_${Date.now()}`,
+      }));
+    }
+    return [];
+  });
+  const [selectedFilters, setSelectedFilters] = useState<{
+    sources: string[];
+    categories: string[];
+    countries: string[];
+  }>({
+    sources: initialFilterSettings?.sources || [],
+    categories: initialFilterSettings?.categories || [],
+    countries: initialFilterSettings?.countries || [],
+  });
 
-  // Load cached data on mount
+  const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [currentSearchParams, setCurrentSearchParams] = useState<{
+    keywords?: string[];
+    sources?: string[];
+    categories?: string[];
+    countries?: string[];
+    dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
+  }>(searchParams);
+  const [currentResults, setCurrentResults] = useState<NewsArticle[]>(articles);
+  const [lastEvaluatedKey, setLastEvaluatedKey] = useState<{ published_date?: string; SK?: string } | null>(() => {
+    try {
+      const saved = localStorage.getItem(`newsTile_lastEvaluatedKey_${id}`);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [hasMore, setHasMore] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(`newsTile_hasMore_${id}`);
+      return saved === 'true';
+    } catch {
+      return false;
+    }
+  });
+  
+  // Persist lastEvaluatedKey and hasMore to localStorage whenever they change
   useEffect(() => {
     try {
-      // Check cache using the new cache utility
-      // For tiles, we fetch page 1 with a reasonable page size (using maxResults)
-      const pageSize = displayOptions.maxResults || 20;
-      const basePayload = buildApiPayload(localFilters, pageSize);
-      
-      // Check if we have cached data for page 1
-      const cached = newsCache.getCachedPage(basePayload, 1, pageSize, id);
-      if (cached && cached.articles.length > 0) {
-        setNewsArticles(cached.articles);
-        initialLoadDone.current = true;
-        console.log(`📰 NewsTile ${id}: Loaded ${cached.articles.length} articles from cache`);
-        return; // Don't do a fresh search
+      if (lastEvaluatedKey) {
+        localStorage.setItem(`newsTile_lastEvaluatedKey_${id}`, JSON.stringify(lastEvaluatedKey));
+      } else {
+        localStorage.removeItem(`newsTile_lastEvaluatedKey_${id}`);
       }
     } catch (error) {
-      console.error('Error loading cached news data:', error);
+      console.error('❌ Error saving lastEvaluatedKey to localStorage:', error);
     }
-  }, [id, localFilters, displayOptions.maxResults, buildApiPayload]); // Run when filters or maxResults change
-
-  // Save articles to cache whenever articles change
+  }, [lastEvaluatedKey, id]);
+  
   useEffect(() => {
-    if (newsArticles.length > 0 && initialLoadDone.current) {
-      try {
-        // Cache is now handled by newsCache utility in runNewsSearch
-      } catch (error) {
-        console.error('Error caching news data:', error);
-      }
+    try {
+      localStorage.setItem(`newsTile_hasMore_${id}`, hasMore.toString());
+    } catch (error) {
+      console.error('❌ Error saving hasMore to localStorage:', error);
     }
-  }, [newsArticles, id]);
-
-  // Helper function to clean up trailing operators from expressions
-  const cleanupTrailingOperators = (expression: any[]) => {
-    if (!expression || expression.length === 0) return expression;
-    
-    // Remove trailing operators
-    let cleaned = [...expression];
-    while (cleaned.length > 0 && cleaned[cleaned.length - 1]?.type === 'operator') {
-      cleaned.pop();
-    }
-    
-    return cleaned;
+  }, [hasMore, id]);
+  
+  // Ensure defaults are set
+  const defaultDisplayOptions = {
+    showTitle: true,
+    showDescription: false,
+    showSource: true,
+    showCategory: true,
+    showDate: true,
+    showImage: true,
+    showResultsTable: true,
+    maxResults: 200,
+    compactView: false,
   };
-
-  // Helper function to clean up all filter expressions
-  const cleanupAllExpressions = (filters: any) => {
-    return {
-      ...filters,
-      keywordExpression: cleanupTrailingOperators(filters.keywordExpression || []),
-      sourceExpression: cleanupTrailingOperators(filters.sourceExpression || []),
-      categoryExpression: cleanupTrailingOperators(filters.categoryExpression || []),
-      countryExpression: cleanupTrailingOperators(filters.countryExpression || []),
+  
+  const [localDisplayOptions, setLocalDisplayOptions] = useState(() => {
+    const merged = {
+      ...defaultDisplayOptions,
+      ...displayOptions
     };
-  };
+    // Always force showImage to true - images should always be visible
+    merged.showImage = true;
+    console.log('📰 NewsTile: Initializing displayOptions (forcing showImage=true):', {
+      default: defaultDisplayOptions.showImage,
+      prop: displayOptions?.showImage,
+      merged: merged.showImage,
+    });
+    return merged;
+  });
 
-  // Helper function to clean up group after deletion
-  const cleanupGroup = (groupItems: any[]): any[] | any | null => {
-    if (groupItems.length === 0) {
-      return null; // Remove empty group
-    }
-    
-    if (groupItems.length === 1) {
-      // Single item group - dissolve and return the item
-      return groupItems[0];
-    }
-    
-    // Clean up adjacent operators
-    const cleanedItems: any[] = [];
-    for (let i = 0; i < groupItems.length; i++) {
-      const currentItem = groupItems[i];
-      const nextItem = groupItems[i + 1];
-      
-      // Skip if current item is an operator and next item is also an operator
-      if (currentItem.type === 'operator' && nextItem && nextItem.type === 'operator') {
-        continue; // Skip this operator
-      }
-      
-      cleanedItems.push(currentItem);
-    }
-    
-    // If we have 2 items (bubble + operator), dissolve the group
-    if (cleanedItems.length === 2) {
-      return cleanedItems; // Return as array of individual items
-    }
-    
-    // For 3+ items, keep as group
-    return cleanedItems.length > 2 ? { type: 'group', value: cleanedItems } : cleanedItems[0];
-  };
+  // Column visibility state
+  const [visibleColumns, setVisibleColumns] = useState<{
+    title: boolean;
+    source: boolean;
+    category: boolean;
+    date: boolean;
+  }>({
+    title: localDisplayOptions.showTitle,
+    source: localDisplayOptions.showSource,
+    category: localDisplayOptions.showCategory,
+    date: localDisplayOptions.showDate,
+  });
 
-  // Helper function to render expression-based filter UI
-  const renderExpressionFilter = (
-    filterType: 'source' | 'category' | 'country',
-    inputValue: string,
-    setInputValue: (value: string) => void,
-    selectedItems: string[],
-    setSelectedItems: (items: string[]) => void,
-    selectedGroupIndex: number | null,
-    setSelectedGroupIndex: (index: number | null) => void,
-    options: string[],
-    label: string,
-    placeholder: string,
-    useDropdown: boolean = false
-  ) => {
-    const expressionKey = `${filterType}Expression` as keyof NewsFilters;
-    const currentExpression = (localFilters as any)[expressionKey] || [];
+  // Column width state for dynamic sizing
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const [currentPage, setCurrentPage] = useState(1);
+  const [resultsPerPage, setResultsPerPage] = useState(() => {
+    const saved = localStorage.getItem(`newsTile_pageSize_${id}`);
+    return saved ? parseInt(saved) : 5;
+  });
+  const [isPageSizeManuallySet, setIsPageSizeManuallySet] = useState(() => {
+    return localStorage.getItem(`newsTile_pageSize_${id}`) !== null;
+  });
+  const tileRef = useRef<HTMLDivElement>(null);
+  
+  // Ref to track pending onUpdate calls (to avoid calling during render)
+  const pendingUpdateRef = useRef<{ articles: NewsArticle[] } | null>(null);
 
-    return (
-      <FormControl fullWidth>
-        <Typography variant="subtitle2" sx={{ color: 'white', mb: 1 }}>
-          {label} ({useDropdown ? 'Select from dropdown to add, select multiple to group' : 'Press Enter to add, select multiple to group'})
-        </Typography>
-        <Autocomplete
-          freeSolo={!useDropdown}
-          options={options}
-          value={useDropdown ? null : inputValue}
-          inputValue={inputValue}
-          onInputChange={(_, newInputValue) => {
-            setInputValue(newInputValue);
-            // Clear error when user starts typing
-            if (filterType === 'source') setSourceError(null);
-            if (filterType === 'category') setCategoryError(null);
-            if (filterType === 'country') setCountryError(null);
-          }}
-          onChange={(_, newValue) => {
-            if (useDropdown && newValue) {
-              const value = typeof newValue === 'string' ? newValue : newValue;
-              if (value) {
-                const newExpression = [...currentExpression];
-                
-                // Check if we need an operator before adding a new item
-                if (newExpression.length > 0) {
-                  const lastItem = newExpression[newExpression.length - 1];
-                  if (lastItem.type === filterType || lastItem.type === 'group') {
-                    const errorMsg = `Please add an AND or OR operator before adding another ${filterType}`;
-                    if (filterType === 'source') setSourceError(errorMsg);
-                    if (filterType === 'category') setCategoryError(errorMsg);
-                    if (filterType === 'country') setCountryError(errorMsg);
-                    return;
-                  }
-                }
-                
-                // Add the new item
-                newExpression.push({ type: filterType, value });
-                
-                setLocalFilters(prev => ({ 
-                  ...prev, 
-                  [expressionKey]: newExpression 
-                }));
-                setInputValue('');
-                // Clear error on successful add
-                if (filterType === 'source') setSourceError(null);
-                if (filterType === 'category') setCategoryError(null);
-                if (filterType === 'country') setCountryError(null);
-              }
-            }
-          }}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter' && !useDropdown) {
-              e.preventDefault();
-              const value = inputValue.trim();
-              if (value) {
-                const newExpression = [...currentExpression];
-                
-                // Check if we need an operator before adding a new item
-                if (newExpression.length > 0) {
-                  const lastItem = newExpression[newExpression.length - 1];
-                  if (lastItem.type === filterType || lastItem.type === 'group') {
-                    const errorMsg = `Please add an AND or OR operator before adding another ${filterType}`;
-                    if (filterType === 'source') setSourceError(errorMsg);
-                    if (filterType === 'category') setCategoryError(errorMsg);
-                    if (filterType === 'country') setCountryError(errorMsg);
-                    return;
-                  }
-                }
-                
-                // Add the new item
-                newExpression.push({ type: filterType, value });
-                
-                setLocalFilters(prev => ({ 
-                  ...prev, 
-                  [expressionKey]: newExpression 
-                }));
-                setInputValue('');
-                // Clear error on successful add
-                if (filterType === 'source') setSourceError(null);
-                if (filterType === 'category') setCategoryError(null);
-                if (filterType === 'country') setCountryError(null);
-              }
-            }
-          }}
-          renderInput={(params) => {
-            const errorState = filterType === 'source' ? sourceError : filterType === 'category' ? categoryError : countryError;
-            return (
-              <Box>
-                <TextField
-                  {...params}
-                  placeholder={placeholder}
-                  error={!!errorState}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      backgroundColor: '#334155',
-                      color: 'white',
-                      ...(errorState && {
-                        '& fieldset': {
-                          borderColor: '#ef4444',
-                        },
-                        '&:hover fieldset': {
-                          borderColor: '#ef4444',
-                        },
-                        '&.Mui-focused fieldset': {
-                          borderColor: '#ef4444',
-                        },
-                      }),
-                    },
-                  }}
-                />
-                {errorState && (
-                  <Typography variant="caption" sx={{ color: '#ef4444', mt: 0.5, display: 'block' }}>
-                    {errorState}
-                  </Typography>
-                )}
-              </Box>
-            );
-          }}
-        />
-        
-        {/* Expression Display */}
-        <Box sx={{ 
-          mt: 2, 
-          minHeight: 60, 
-          p: 2, 
-          border: '1px solid #374151', 
-          borderRadius: 1, 
-          backgroundColor: '#1f2937',
-          position: 'relative'
-        }}>
-          {/* Clear button */}
-          {currentExpression.length > 0 && (
-            <IconButton
-              size="small"
-              onClick={() => {
-                setLocalFilters(prev => ({
-                  ...prev,
-                  [expressionKey]: []
-                }));
-                setSelectedItems([]);
-                setSelectedGroupIndex(null);
-              }}
-              sx={{
-                position: 'absolute',
-                top: 8,
-                right: 8,
-                color: '#9ca3af',
-                '&:hover': { color: '#ef4444' }
-              }}
-            >
-              <CloseIcon fontSize="small" />
-            </IconButton>
-          )}
-          
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-          {currentExpression.map((item: any, index: number) => (
-            <React.Fragment key={index}>
-              {item.type === filterType ? (
-                <Chip
-                  label={item.value}
-                  size="small"
-                  sx={{ 
-                    backgroundColor: selectedItems.includes(item.value) ? '#f59e0b' : '#3b82f6', 
-                    color: 'white',
-                    cursor: 'pointer'
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    if (selectedItems.includes(item.value)) {
-                      setSelectedItems(selectedItems.filter((s: string) => s !== item.value));
-                    } else {
-                      setSelectedItems([...selectedItems, item.value]);
-                      setSelectedGroupIndex(null);
-                    }
-                  }}
-                  onDelete={() => {
-                    const newExpression = [...currentExpression];
-                    newExpression.splice(index, 1);
-                    setLocalFilters(prev => ({ 
-                      ...prev, 
-                      [expressionKey]: newExpression 
-                    }));
-                  }}
-                />
-              ) : item.type === 'operator' ? (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      color: '#f59e0b', 
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      px: 1,
-                      py: 0.5,
-                      border: '1px solid #f59e0b',
-                      borderRadius: 0.5
-                    }}
-                    onClick={() => {
-                      const newExpression = [...currentExpression];
-                      newExpression[index] = { type: 'operator', value: item.value === 'AND' ? 'OR' : 'AND' };
-                      setLocalFilters(prev => ({ 
-                        ...prev, 
-                        [expressionKey]: newExpression 
-                      }));
-                    }}
-                  >
-                    {item.value}
-                  </Typography>
-                  <IconButton
-                    size="small"
-                    onClick={() => {
-                      const newExpression = [...currentExpression];
-                      newExpression.splice(index, 1);
-                      setLocalFilters(prev => ({ 
-                        ...prev, 
-                        [expressionKey]: newExpression 
-                      }));
-                    }}
-                    sx={{ color: '#ef4444' }}
-                  >
-                    <CloseIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-              ) : item.type === 'group' ? (
-                <Box sx={{ 
-                  display: 'inline-flex', 
-                  alignItems: 'center', 
-                  gap: 0.5,
-                  p: 1,
-                  border: selectedGroupIndex === index ? '2px solid #f59e0b' : '1px solid #10b981',
-                  borderRadius: 1,
-                  backgroundColor: selectedGroupIndex === index ? '#78350f' : '#064e3b',
-                  cursor: 'pointer'
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setSelectedGroupIndex(selectedGroupIndex === index ? null : index);
-                  setSelectedItems([]);
-                }}>
-                  <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 'bold' }}>
-                    (
-                  </Typography>
-                  {Array.isArray(item.value) && item.value.map((groupItem: any, groupIndex: number) => (
-                    <React.Fragment key={groupIndex}>
-                      {groupItem.type === filterType ? (
-                        <Chip
-                          label={groupItem.value}
-                          size="small"
-                          sx={{ 
-                            backgroundColor: selectedItems.includes(groupItem.value) ? '#f59e0b' : '#10b981', 
-                            color: 'white',
-                            cursor: 'pointer'
-                          }}
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            if (selectedItems.includes(groupItem.value)) {
-                              setSelectedItems(selectedItems.filter((s: string) => s !== groupItem.value));
-                            } else {
-                              setSelectedItems([...selectedItems, groupItem.value]);
-                            }
-                          }}
-                          onDelete={() => {
-                            const newExpression = [...currentExpression];
-                            const newGroupValue = [...item.value];
-                            newGroupValue.splice(groupIndex, 1);
-                            
-                            const cleanedResult = cleanupGroup(newGroupValue);
-                            if (cleanedResult === null) {
-                              // Remove the entire group
-                              newExpression.splice(index, 1);
-                            } else if (Array.isArray(cleanedResult)) {
-                              // Dissolve group and replace with individual items
-                              newExpression.splice(index, 1, ...cleanedResult);
-                            } else if (cleanedResult.type === 'group') {
-                              // Keep as group
-                              newExpression[index] = cleanedResult;
-                            } else {
-                              // Dissolve group and replace with single item
-                              newExpression[index] = cleanedResult;
-                            }
-                            
-                            setLocalFilters(prev => ({ 
-                              ...prev, 
-                              [expressionKey]: newExpression 
-                            }));
-                          }}
-                        />
-                      ) : groupItem.type === 'operator' ? (
-                        <Typography 
-                          variant="body2" 
-                          sx={{ 
-                            color: '#f59e0b', 
-                            fontWeight: 'bold',
-                            cursor: 'pointer',
-                            px: 0.5
-                          }}
-                          onClick={() => {
-                            const newExpression = [...currentExpression];
-                            const newGroupValue = [...item.value];
-                            newGroupValue[groupIndex] = { type: 'operator', value: groupItem.value === 'AND' ? 'OR' : 'AND' };
-                            newExpression[index] = { type: 'group', value: newGroupValue };
-                            setLocalFilters(prev => ({ 
-                              ...prev, 
-                              [expressionKey]: newExpression 
-                            }));
-                          }}
-                        >
-                          {groupItem.value}
-                        </Typography>
-                      ) : null}
-                    </React.Fragment>
-                  ))}
-                  <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 'bold' }}>
-                    )
-                  </Typography>
-                  <IconButton
-                    size="small"
-                    onClick={() => {
-                      const newExpression = [...currentExpression];
-                      newExpression.splice(index, 1);
-                      setLocalFilters(prev => ({ 
-                        ...prev, 
-                        [expressionKey]: newExpression 
-                      }));
-                    }}
-                    sx={{ color: '#ef4444', ml: 0.5 }}
-                  >
-                    <CloseIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-              ) : null}
-            </React.Fragment>
-          ))}
-        </Box>
-        
-        {/* Action Buttons */}
-        <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          {selectedItems.length > 1 && (
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => {
-                const newExpression = [...currentExpression];
-                
-                // Find the indices of selected items
-                const selectedIndices = selectedItems.map(item => 
-                  newExpression.findIndex(exprItem => exprItem.type === filterType && exprItem.value === item)
-                ).sort((a, b) => a - b);
-                
-                // Find the range of items to include in the group
-                const minIndex = Math.min(...selectedIndices);
-                const maxIndex = Math.max(...selectedIndices);
-                
-                // Extract the items that should be in the group
-                const groupItems = newExpression.slice(minIndex, maxIndex + 1);
-                
-                // Create the new expression by replacing the range with the group
-                const newExpressionItems: any[] = [
-                  ...newExpression.slice(0, minIndex),
-                  { type: 'group', value: groupItems },
-                  ...newExpression.slice(maxIndex + 1)
-                ];
-                
-                setLocalFilters(prev => ({ 
-                  ...prev, 
-                  [expressionKey]: newExpressionItems 
-                }));
-                setSelectedItems([]);
-                setSelectedGroupIndex(null);
-              }}
-              sx={{ color: '#10b981', borderColor: '#10b981' }}
-            >
-              Create Group ({selectedItems.length} {filterType}s)
-            </Button>
-          )}
-          
-          {(selectedItems.length === 1 || selectedGroupIndex !== null) && (
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Typography variant="body2" sx={{ color: '#9ca3af', alignSelf: 'center' }}>
-                Add operator after selected {selectedItems.length === 1 ? filterType : 'group'}:
-              </Typography>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => {
-                  if (selectedItems.length === 1) {
-                    const selectedItem = selectedItems[0];
-                    const newExpression = [...currentExpression];
-                    const itemIndex = newExpression.findIndex(exprItem => exprItem.type === filterType && exprItem.value === selectedItem);
-                    if (itemIndex !== -1) {
-                      newExpression.splice(itemIndex + 1, 0, { type: 'operator', value: 'AND' });
-                      setLocalFilters(prev => ({ 
-                        ...prev, 
-                        [expressionKey]: newExpression 
-                      }));
-                    }
-                  } else if (selectedGroupIndex !== null) {
-                    const newExpression = [...currentExpression];
-                    newExpression.splice(selectedGroupIndex + 1, 0, { type: 'operator', value: 'AND' });
-                    setLocalFilters(prev => ({ 
-                      ...prev, 
-                      [expressionKey]: newExpression 
-                    }));
-                  }
-                  setSelectedItems([]);
-                  setSelectedGroupIndex(null);
-                }}
-                sx={{ color: '#f59e0b', borderColor: '#f59e0b' }}
-              >
-                Add AND
-              </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => {
-                  if (selectedItems.length === 1) {
-                    const selectedItem = selectedItems[0];
-                    const newExpression = [...currentExpression];
-                    const itemIndex = newExpression.findIndex(exprItem => exprItem.type === filterType && exprItem.value === selectedItem);
-                    if (itemIndex !== -1) {
-                      newExpression.splice(itemIndex + 1, 0, { type: 'operator', value: 'OR' });
-                      setLocalFilters(prev => ({ 
-                        ...prev, 
-                        [expressionKey]: newExpression 
-                      }));
-                    }
-                  } else if (selectedGroupIndex !== null) {
-                    const newExpression = [...currentExpression];
-                    newExpression.splice(selectedGroupIndex + 1, 0, { type: 'operator', value: 'OR' });
-                    setLocalFilters(prev => ({ 
-                      ...prev, 
-                      [expressionKey]: newExpression 
-                    }));
-                  }
-                  setSelectedItems([]);
-                  setSelectedGroupIndex(null);
-                }}
-                sx={{ color: '#f59e0b', borderColor: '#f59e0b' }}
-              >
-                Add OR
-              </Button>
-            </Box>
-          )}
-          </Box>
-        </Box>
-      </FormControl>
-    );
-  };
-  const lastClickTimeRef = useRef<number>(0);
-
-  // Mock loading and error states for now
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Mock news data for demonstration (currently unused - kept for potential future use)
-  // Uncomment and use if needed for development/testing
-  /*
-  const _mockNewsData: NewsArticle[] = [
-    {
-      id: '1',
-      title: 'Will Big Tech be held liable in chatbot suicide cases?',
-      description: 'Legal experts weigh in on the potential liability of tech companies for AI chatbot interactions that may contribute to self-harm incidents.',
-      source_url: 'https://www.fastcompany.com/91407443/big-tech-liable-chatbot-suicide-cases',
-      source_name: 'Fast Company',
-      published_date: '2025-01-25T10:30:00Z',
-      keywords: 'artificial intelligence,big tech,liability,chatbot,legal,suicide,ai safety',
-      category: 'technology',
-      image_url: 'https://images.fastcompany.com/image/upload/w_1280,q_auto,f_auto,fl_lossy/f_webp,q_auto,c_fit/wp-cms-2/2025/09/p-91407443-big-tech-and-chat-bot-suicides.jpg',
-      sentiment: 'neutral',
-      ai_tag: 'technology,legal',
-      country: 'us',
-      language: 'english',
-      creator: 'Fast Company',
-    },
-    {
-      id: '2',
-      title: 'Federal Reserve signals potential rate cuts amid economic uncertainty',
-      description: 'The Federal Reserve hints at possible interest rate reductions as inflation shows signs of cooling and economic growth slows.',
-      source_url: 'https://example.com/fed-rate-cuts',
-      source_name: 'Financial Times',
-      published_date: '2025-01-25T09:15:00Z',
-      keywords: 'federal reserve,interest rates,inflation,monetary policy,economy',
-      category: 'business',
-      image_url: 'https://example.com/fed-image.jpg',
-      sentiment: 'positive',
-      ai_tag: 'finance,policy',
-      country: 'us',
-      language: 'english',
-      creator: 'Financial Times',
-    },
-    {
-      id: '3',
-      title: 'Tesla reports record Q4 deliveries despite production challenges',
-      description: 'Tesla delivered a record number of vehicles in Q4 2024, overcoming supply chain disruptions and manufacturing bottlenecks.',
-      source_url: 'https://example.com/tesla-q4-deliveries',
-      source_name: 'Reuters',
-      published_date: '2025-01-25T08:45:00Z',
-      keywords: 'tesla,deliveries,production,automotive,electric vehicles,earnings',
-      category: 'business',
-      image_url: 'https://example.com/tesla-image.jpg',
-      sentiment: 'positive',
-      ai_tag: 'automotive,earnings',
-      country: 'us',
-      language: 'english',
-      creator: 'Reuters',
-    },
-    {
-      id: '4',
-      title: 'Renewable energy investments surge to $1.8 trillion globally',
-      description: 'Global investment in renewable energy reached a new high in 2024, driven by government incentives and falling technology costs.',
-      source_url: 'https://example.com/renewable-energy-investment',
-      source_name: 'Bloomberg',
-      published_date: '2025-01-25T07:20:00Z',
-      keywords: 'renewable energy,investment,green energy,solar,wind,climate',
-      category: 'business',
-      image_url: 'https://example.com/renewable-image.jpg',
-      sentiment: 'positive',
-      ai_tag: 'energy,investment',
-      country: 'global',
-      language: 'english',
-      creator: 'Bloomberg',
-    },
-    {
-      id: '5',
-      title: 'Apple faces antitrust scrutiny over App Store policies in Europe',
-      description: 'European regulators launch investigation into Apple\'s App Store practices, focusing on anti-competitive behavior and developer fees.',
-      source_url: 'https://example.com/apple-antitrust-europe',
-      source_name: 'TechCrunch',
-      published_date: '2025-01-25T06:30:00Z',
-      keywords: 'apple,antitrust,app store,europe,regulatory,competition',
-      category: 'technology',
-      image_url: 'https://example.com/apple-image.jpg',
-      sentiment: 'negative',
-      ai_tag: 'technology,regulatory',
-      country: 'eu',
-      language: 'english',
-      creator: 'TechCrunch',
-    },
-  ];
-  */
-
-  // Category options
+  // Category and country options (from NewsSearchPage)
   const categoryOptions = [
     'business',
     'technology',
@@ -926,8 +298,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     'pharmaceuticals',
     'retail',
   ];
-
-  // Country options
+  
   const countryOptions = [
     'us',
     'uk',
@@ -939,542 +310,367 @@ const NewsTile: React.FC<NewsTileProps> = ({
     'global',
   ];
 
-  // Filter articles based on criteria (currently unused - filtering is done server-side)
-  // Uncomment and use if needed for client-side filtering
-  /*
-  const _filterArticles = useCallback((articles: NewsArticle[], filters: NewsFilters): NewsArticle[] => {
-    return articles.filter(article => {
-      // Keywords filter with expression logic
-      const keywordExpression = ((filters as any).keywordExpression || []).filter((item: any) => item && item.type);
-      if (keywordExpression.length > 0) {
-        const articleKeywords = article.keywords.toLowerCase();
-        const articleText = `${article.title} ${article.description}`.toLowerCase();
-        
-        // Evaluate the keyword expression
-        const evaluateExpression = (expression: any[]): boolean => {
-          if (!expression || expression.length === 0) return true;
-          if (expression.length === 1) {
-            const item = expression[0];
-            if (!item || !item.type) return false;
-            if (item.type === 'keyword') {
-              return articleKeywords.includes(item.value.toLowerCase()) ||
-                     articleText.includes(item.value.toLowerCase());
-            } else if (item.type === 'group') {
-              return evaluateExpression(item.value);
-            }
-            return false;
-          }
-          
-          // Process expression with operators
-          let result = evaluateExpression([expression[0]]);
-          let i = 1;
-          
-          while (i < expression.length) {
-            const currentItem = expression[i];
-            if (!currentItem || !currentItem.type) {
-              i++;
-              continue;
-            }
-            
-            if (currentItem.type === 'operator') {
-              const operator = currentItem.value;
-              const nextItem = expression[i + 1];
-              
-              if (!nextItem || !nextItem.type) {
-                i++;
-                continue;
-              }
-              
-              const nextResult = nextItem.type === 'group' ? 
-                evaluateExpression(nextItem.value) :
-                evaluateExpression([nextItem]);
-              
-              if (operator === 'AND') {
-                result = result && nextResult;
-              } else if (operator === 'OR') {
-                result = result || nextResult;
-              }
-              i += 2;
-            } else {
-              i++;
-            }
-          }
-          
-          return result;
-        };
-        
-        if (!evaluateExpression(keywordExpression)) return false;
-      }
+  // Pinning functionality
+  const { isPinned: pinnedState, togglePin } = useTilePinning({
+    initialPinned: isPinned,
+    onPinChange: (pinned) => {
+      onSettingsChange(id, { isPinned: pinned });
+    },
+  });
 
-      // Source filter with expression logic
-      const sourceExpression = ((filters as any).sourceExpression || []).filter((item: any) => item && item.type);
-      if (sourceExpression.length > 0) {
-        const evaluateSourceExpression = (expression: any[]): boolean => {
-          if (!expression || expression.length === 0) return true;
-          if (expression.length === 1) {
-            const item = expression[0];
-            if (!item || !item.type) return false;
-            if (item.type === 'source') {
-              return article.source_name === item.value;
-            } else if (item.type === 'group') {
-              return evaluateSourceExpression(item.value);
-            }
-            return false;
-          }
-          
-          let result = evaluateSourceExpression([expression[0]]);
-          let i = 1;
-          
-          while (i < expression.length) {
-            const currentItem = expression[i];
-            if (!currentItem || !currentItem.type) {
-              i++;
-              continue;
-            }
-            
-            if (currentItem.type === 'operator') {
-              const operator = currentItem.value;
-              const nextItem = expression[i + 1];
-              
-              if (!nextItem || !nextItem.type) {
-                i++;
-                continue;
-              }
-              
-              const nextResult = nextItem.type === 'group' ? 
-                evaluateSourceExpression(nextItem.value) :
-                evaluateSourceExpression([nextItem]);
-              
-              if (operator === 'AND') {
-                result = result && nextResult;
-              } else if (operator === 'OR') {
-                result = result || nextResult;
-              }
-              i += 2;
-            } else {
-              i++;
-            }
-          }
-          
-          return result;
-        };
-        
-        if (!evaluateSourceExpression(sourceExpression)) return false;
-      }
+  // Auto refresh functionality
+  const autoRefreshRef = useRef<NodeJS.Timeout>();
+  
+  // Track if initial search has been performed
+  const [hasPerformedInitialSearch, setHasPerformedInitialSearch] = useState(false);
 
-      // Category filter with expression logic
-      const categoryExpression = ((filters as any).categoryExpression || []).filter((item: any) => item && item.type);
-      if (categoryExpression.length > 0) {
-        const evaluateCategoryExpression = (expression: any[]): boolean => {
-          if (!expression || expression.length === 0) return true;
-          if (expression.length === 1) {
-            const item = expression[0];
-            if (!item || !item.type) return false;
-            if (item.type === 'category') {
-              return article.category === item.value;
-            } else if (item.type === 'group') {
-              return evaluateCategoryExpression(item.value);
-            }
-            return false;
-          }
-          
-          let result = evaluateCategoryExpression([expression[0]]);
-          let i = 1;
-          
-          while (i < expression.length) {
-            const currentItem = expression[i];
-            if (!currentItem || !currentItem.type) {
-              i++;
-              continue;
-            }
-            
-            if (currentItem.type === 'operator') {
-              const operator = currentItem.value;
-              const nextItem = expression[i + 1];
-              
-              if (!nextItem || !nextItem.type) {
-                i++;
-                continue;
-              }
-              
-              const nextResult = nextItem.type === 'group' ? 
-                evaluateCategoryExpression(nextItem.value) :
-                evaluateCategoryExpression([nextItem]);
-              
-              if (operator === 'AND') {
-                result = result && nextResult;
-              } else if (operator === 'OR') {
-                result = result || nextResult;
-              }
-              i += 2;
-            } else {
-              i++;
-            }
-          }
-          
-          return result;
-        };
-        
-        if (!evaluateCategoryExpression(categoryExpression)) return false;
-      }
-
-      // Country filter with expression logic
-      const countryExpression = ((filters as any).countryExpression || []).filter((item: any) => item && item.type);
-      if (countryExpression.length > 0) {
-        const evaluateCountryExpression = (expression: any[]): boolean => {
-          if (!expression || expression.length === 0) return true;
-          if (expression.length === 1) {
-            const item = expression[0];
-            if (!item || !item.type) return false;
-            if (item.type === 'country') {
-              return (article.country || '') === item.value;
-            } else if (item.type === 'group') {
-              return evaluateCountryExpression(item.value);
-            }
-            return false;
-          }
-          
-          let result = evaluateCountryExpression([expression[0]]);
-          let i = 1;
-          
-          while (i < expression.length) {
-            const currentItem = expression[i];
-            if (!currentItem || !currentItem.type) {
-              i++;
-              continue;
-            }
-            
-            if (currentItem.type === 'operator') {
-              const operator = currentItem.value;
-              const nextItem = expression[i + 1];
-              
-              if (!nextItem || !nextItem.type) {
-                i++;
-                continue;
-              }
-              
-              const nextResult = nextItem.type === 'group' ? 
-                evaluateCountryExpression(nextItem.value) :
-                evaluateCountryExpression([nextItem]);
-              
-              if (operator === 'AND') {
-                result = result && nextResult;
-              } else if (operator === 'OR') {
-                result = result || nextResult;
-              }
-              i += 2;
-            } else {
-              i++;
-            }
-          }
-          
-          return result;
-        };
-        
-        if (!evaluateCountryExpression(countryExpression)) return false;
-      }
-
-      // Date range filter (simplified for demo)
-      if (filters.dateRange !== 'all') {
-        const articleDate = new Date(article.published_date);
-        const now = new Date();
-        const hoursDiff = (now.getTime() - articleDate.getTime()) / (1000 * 60 * 60);
-        
-        switch (filters.dateRange) {
-          case '1h':
-            if (hoursDiff > 1) return false;
-            break;
-          case '12h':
-            if (hoursDiff > 12) return false;
-            break;
-          case '24h':
-            if (hoursDiff > 24) return false;
-            break;
-          case '7d':
-            if (hoursDiff > 168) return false;
-            break;
-          case '30d':
-            if (hoursDiff > 720) return false;
-            break;
-        }
-      }
-
-      return true;
-    });
-  }, []);
-  */
-
-  // Fetch a specific page of results
-  const fetchPage = useCallback(async (page: number, size: number, basePayload: NewsSearchRequest) => {
-    const offset = (page - 1) * size;
-    const searchRequest: NewsSearchRequest = {
-      ...basePayload,
-      limit: size,
-      offset: offset,
-    };
+  const performSearch = useCallback(async () => {
+    if (!currentSearchParams) return;
     
-    // Check cache first
-    const cached = newsCache.getCachedPage(basePayload, page, size, id);
-    if (cached) {
-      // Ensure all cached articles have IDs
-      const articlesWithIds = cached.articles.map(ensureArticleId);
-      
-      // Update local fetchedPages cache
-      setFetchedPages(prev => {
-        const newMap = new Map(prev);
-        newMap.set(page, articlesWithIds);
-        return newMap;
-      });
-      
-      // Update total found from cached data
-      if (page === 1) {
-        setTotalFound(cached.total);
-      }
-      
-      return articlesWithIds;
-    }
-    
-    // Not in cache, fetch from API
-    const response = await newsSearchAPI.searchNews(searchRequest);
-    
-    if (response.articles && response.articles.length > 0) {
-      // Ensure all articles have IDs
-      const articlesWithIds = response.articles.map(ensureArticleId);
-      
-      // Update total found from first page
-      if (page === 1) {
-        setTotalFound(response.total || 0);
-      }
-      
-      // Store in cache
-      newsCache.setCachedPage(basePayload, page, size, articlesWithIds, response.total || 0, id);
-      
-      // Cache this page in local state
-      setFetchedPages(prev => {
-        const newMap = new Map(prev);
-        newMap.set(page, articlesWithIds);
-        return newMap;
-      });
-      
-      return articlesWithIds;
-    }
-    
-    return [];
-  }, [id]);
-
-  // Run news search - fetch first page only
-  const runNewsSearch = useCallback(async (forceRefresh: boolean = false) => {
+    console.log('📰 NewsTile: Starting search with params:', currentSearchParams);
     setIsLoading(true);
     setError(null);
-    setCurrentPage(1);
-    setFetchedPages(new Map()); // Clear local cache on new search
-    setCurrentResults([]);
+    setLastEvaluatedKey(null);
+    setHasMore(false);
     
-    // Clear selected articles when running a new search
-    setSelectedArticles(new Set());
+    // Clear persisted pagination state when starting new search
+    try {
+      localStorage.removeItem(`newsTile_lastEvaluatedKey_${id}`);
+      localStorage.removeItem(`newsTile_hasMore_${id}`);
+    } catch (error) {
+      console.error('❌ Error clearing pagination state from localStorage:', error);
+    }
     
     try {
-      // Get current filters at the time of execution
-      const currentFilters = localFiltersRef.current;
+      // Build simplified search request - only keywords are sent to API
+      // Sources, categories, and countries are used for client-side filtering
+      const searchRequest: NewsSearchRequest = {
+        query: {
+          keywords: currentSearchParams.keywords && currentSearchParams.keywords.length > 0
+            ? currentSearchParams.keywords
+            : undefined,
+        },
+        dateRange: currentSearchParams.dateRange || 'all',
+        limit: localDisplayOptions.maxResults || 200,
+      };
       
-      // Build API payload from filters with the correct limit
-      const pageSize = localDisplayOptions.maxResults || 20;
-      const basePayload = buildApiPayload(currentFilters, pageSize);
+      console.log('📤 NewsTile: Sending search request with keywords:', currentSearchParams.keywords);
       
-      // Clear cache when forcing refresh
-      if (forceRefresh) {
-        newsCache.clearCache(basePayload, id);
-      }
+      console.log('📤 NewsTile: Sending search request:', searchRequest);
       
-      // Try to load first page from cache if available
-      const cached = newsCache.getCachedPage(basePayload, 1, pageSize, id);
-      if (cached && cached.articles.length > 0 && !forceRefresh) {
-        console.log(`📦 Found cached page 1, restoring to local cache`);
-        setFetchedPages(new Map([[1, cached.articles.map(ensureArticleId)]]));
-        setTotalFound(cached.total);
-      }
+      const response = await newsSearchAPI.searchNews(searchRequest);
       
-      // Fetch first page (will use cache if available)
-      const firstPageArticles = await fetchPage(1, pageSize, basePayload);
-      
-      if (firstPageArticles.length > 0) {
-        setCurrentResults(firstPageArticles);
-        setNewsArticles(firstPageArticles); // Keep for backward compatibility
+      if (response.articles) {
+        console.log('📰 NewsTile: Retrieved', response.articles.length, 'articles');
+        
+        // Debug: Check first article's image_url
+        if (response.articles.length > 0) {
+          console.log('📰 NewsTile: First article data:', {
+            title: response.articles[0].title,
+            image_url: response.articles[0].image_url,
+            hasImageUrl: !!response.articles[0].image_url,
+            allKeys: Object.keys(response.articles[0]),
+          });
+        }
+        
+        // Ensure each article has an id for table rendering
+        const processedResults = response.articles.map((article, index) => ({
+          ...article,
+          id: article.id || `article_${index}_${Date.now()}`,
+        }));
+        
+        // Store all results for filtering
+        setAllResults(processedResults);
+        setFilteredResults(processedResults);
+        setCurrentResults(processedResults);
+        setHasPerformedInitialSearch(true);
+        setHasMore(response.has_more || false);
+        setLastEvaluatedKey(response.last_evaluated_key || null);
+        
+        // Update parent component - persist results in session only (not database)
+        onUpdate(id, {
+          articles: processedResults,
+          lastUpdated: Date.now(),
+        });
+        
+        // Persist search params to backend (database) - NOT results
+        onSettingsChange(id, { searchParams: currentSearchParams });
       } else {
+        console.error('📰 NewsTile: Search failed - no articles returned');
+        setError('Search failed - no articles returned');
         setCurrentResults([]);
-        setNewsArticles([]);
-        setTotalFound(0);
+        setHasMore(false);
+        setHasPerformedInitialSearch(true);
       }
-      
-      initialLoadDone.current = true;
-      
-    } catch (err) {
-      setError('Failed to fetch news articles');
-      console.error('News search error:', err);
+    } catch (err: any) {
+      console.error('📰 NewsTile: Search error:', err);
+      setError(err.message || 'An error occurred during search');
       setCurrentResults([]);
-      setNewsArticles([]);
-      setTotalFound(0);
+      setHasPerformedInitialSearch(true);
+      setHasMore(false);
     } finally {
       setIsLoading(false);
     }
-  }, [id, buildApiPayload, fetchPage, localDisplayOptions.maxResults]);
-
-  // Auto-refresh functionality - refresh every 8 minutes
-  useEffect(() => {
-    if (!autoRefresh) return;
-
-    const interval = setInterval(() => {
-      console.log(`📰 NewsTile ${id}: Auto-refresh triggered`);
-      runNewsSearch(true); // Force refresh on auto-refresh
-    }, 8 * 60 * 1000); // 8 minutes
-
-    return () => clearInterval(interval);
-  }, [autoRefresh, runNewsSearch, id]);
-
-  // Initial load - only if we don't have cached data
-  useEffect(() => {
-    if (!initialLoadDone.current && newsArticles.length === 0) {
-      initialLoadDone.current = true;
-      // Check if we have fresh cached data (this check happens in the cache loading effect above)
-      // If no cache exists or cache is expired, run search
-      const pageSize = displayOptions.maxResults || 20;
-      const basePayload = buildApiPayload(localFilters, pageSize);
-      const cached = newsCache.getCachedPage(basePayload, 1, pageSize, id);
-      if (!cached || cached.articles.length === 0) {
-        console.log(`📰 NewsTile ${id}: No cache found, running initial search`);
-        runNewsSearch();
-      }
-    }
-  }, [id, localFilters, displayOptions.maxResults, buildApiPayload, runNewsSearch]); // Run when dependencies change
-
-  const handleSettingsOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setSettingsAnchor(event.currentTarget);
-  };
-
-  const handleSettingsClose = () => {
-    setSettingsAnchor(null);
-  };
-
-  // Fetch page if not cached, then compute current page results
-  useEffect(() => {
-    const loadCurrentPage = async () => {
-      // Check if current page is already cached
-      if (fetchedPages.has(currentPage)) {
-        const cachedArticles = fetchedPages.get(currentPage) || [];
-        setCurrentResults(cachedArticles);
-        setNewsArticles(cachedArticles); // Keep for backward compatibility
-        setIsLoadingPage(false);
-        return;
-      }
-      
-      // Only fetch if we have filters or totalFound indicates there are results
-      if (totalFound > 0 || currentPage === 1) {
-        // Use isLoadingPage for page navigation, isLoading only for initial search
-        if (currentPage === 1) {
-          setIsLoading(true);
-        } else {
-          setIsLoadingPage(true);
-        }
-        
-        try {
-          const currentFilters = localFiltersRef.current;
-          const pageSize = localDisplayOptions.maxResults || 20;
-          const basePayload = buildApiPayload(currentFilters, pageSize);
-          const pageArticles = await fetchPage(currentPage, pageSize, basePayload);
-          
-          // Only update results once we have the new page data
-          setCurrentResults(pageArticles);
-          setNewsArticles(pageArticles); // Keep for backward compatibility
-        } catch (err) {
-          console.error('Error fetching page:', err);
-          if (currentPage === 1) {
-            setCurrentResults([]);
-            setNewsArticles([]);
-          }
-          // For other pages, keep current results on error
-        } finally {
-          setIsLoading(false);
-          setIsLoadingPage(false);
-        }
-      } else {
-        // No results, clear display
-        if (currentPage === 1) {
-          setCurrentResults([]);
-          setNewsArticles([]);
-        }
-      }
-    };
-    
-    if (totalFound > 0 || currentPage === 1) {
-      loadCurrentPage();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, localDisplayOptions.maxResults]);
+  }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, onSettingsChange]);
   
-  // Update current results when page is cached
-  useEffect(() => {
-    if (fetchedPages.has(currentPage)) {
-      const cachedArticles = fetchedPages.get(currentPage) || [];
-      setCurrentResults(cachedArticles);
-      setNewsArticles(cachedArticles); // Keep for backward compatibility
+  // Load more results using cursor-based pagination
+  const handleLoadMore = useCallback(async () => {
+    if (!hasMore || !lastEvaluatedKey || isLoadingMore || !currentSearchParams) return;
+    
+    setIsLoadingMore(true);
+    setError(null);
+    
+    try {
+      // Build search request - only keywords are sent to API
+      // Sources, categories, and countries are used for client-side filtering
+      const searchRequest: NewsSearchRequest = {
+        query: {
+          keywords: currentSearchParams.keywords && currentSearchParams.keywords.length > 0
+            ? currentSearchParams.keywords
+            : undefined,
+        },
+        dateRange: currentSearchParams.dateRange || 'all',
+        limit: localDisplayOptions.maxResults || 200,
+        lastEvaluatedKey: lastEvaluatedKey, // Cursor for pagination
+      };
+      
+      console.log('📥 NewsTile: Load More Request with keywords:', currentSearchParams.keywords);
+      
+      console.log('📥 NewsTile: Load More Request:', {
+        searchParams: currentSearchParams,
+        lastEvaluatedKey,
+      });
+      
+      const response = await newsSearchAPI.searchNews(searchRequest);
+      
+      if (response.articles && response.articles.length > 0) {
+        // Ensure each article has an id
+        const processedResults = response.articles.map((article, index) => ({
+          ...article,
+          id: article.id || `article_${index}_${Date.now()}`,
+        }));
+        
+        // Append new results to existing results
+        setAllResults(prev => {
+          const updated = [...prev, ...processedResults];
+          // Store for useEffect to call onUpdate (avoid calling during render)
+          pendingUpdateRef.current = { articles: updated };
+          return updated;
+        });
+        setFilteredResults(prev => [...prev, ...processedResults]);
+        setCurrentResults(prev => [...prev, ...processedResults]);
+        setHasMore(response.has_more || false);
+        setLastEvaluatedKey(response.last_evaluated_key || null);
+      } else {
+        console.error('📰 NewsTile: Load more failed - no articles returned');
+        setError('Load more failed - no articles returned');
+        setHasMore(false);
+      }
+    } catch (err: any) {
+      console.error('📰 NewsTile: Load more error:', err);
+      setError(err.message || 'An error occurred while loading more results');
+      setHasMore(false);
+    } finally {
+      setIsLoadingMore(false);
     }
-  }, [currentPage, fetchedPages]);
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate]);
 
-  // Handle page change
-  const handlePageChange = async (newPage: number) => {
-    const pageSize = localDisplayOptions.maxResults || 20;
-    const maxPages = totalFound > 0 ? Math.ceil(totalFound / pageSize) : 0;
+  // Dynamic pagination based on tile height
+  const calculateResultsPerPage = useCallback(() => {
+    if (!tileRef.current) return 5; // Default fallback
     
-    if (newPage < 1 || (maxPages > 0 && newPage > maxPages)) {
-      return;
+    const tileHeight = tileRef.current.clientHeight;
+    const headerHeight = 60; // Approximate header height
+    const paginationHeight = 40; // Approximate pagination height
+    const tableHeaderHeight = 40; // Table header height
+    const rowHeight = 32; // Approximate row height
+    const padding = 24; // Tile padding (12px * 2)
+    
+    // Calculate available height for table rows
+    const availableHeight = tileHeight - headerHeight - paginationHeight - tableHeaderHeight - padding;
+    const maxRows = Math.floor(availableHeight / rowHeight);
+    
+    // Ensure minimum of 3 rows and maximum of 20 rows
+    return Math.max(3, Math.min(20, maxRows));
+  }, []);
+
+  // Update results per page when tile size changes (only if not manually set)
+  useEffect(() => {
+    if (!isPageSizeManuallySet) {
+      const newResultsPerPage = calculateResultsPerPage();
+      setResultsPerPage(newResultsPerPage);
     }
-    
-    // If page is cached, just switch to it immediately
-    if (fetchedPages.has(newPage)) {
-      setCurrentPage(newPage);
-      return;
-    }
-    
-    // Otherwise, set loading state and fetch
-    setIsLoadingPage(true);
-    setCurrentPage(newPage);
-    
-    // Fetch page if not cached
-    if (!fetchedPages.has(newPage)) {
-      try {
-        const currentFilters = localFiltersRef.current;
-        const basePayload = buildApiPayload(currentFilters, pageSize);
-        await fetchPage(newPage, pageSize, basePayload);
-      } catch (err) {
-        console.error('Error fetching page:', err);
-      } finally {
-        setIsLoadingPage(false);
+  }, [calculateResultsPerPage, size, isPageSizeManuallySet]);
+
+  // Add ResizeObserver to recalculate when tile is resized (only if not manually set)
+  useEffect(() => {
+    if (!tileRef.current || isPageSizeManuallySet) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (!isPageSizeManuallySet) {
+        const newResultsPerPage = calculateResultsPerPage();
+        setResultsPerPage(newResultsPerPage);
+      }
+    });
+
+    resizeObserver.observe(tileRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [calculateResultsPerPage, isPageSizeManuallySet]);
+
+  // Sync props to state when they change (for state persistence)
+  // Only sync articles - filtering will be handled by applyFilters useEffect
+  useEffect(() => {
+    // Only update if articles prop actually changed
+    if (articles) {
+      if (articles.length > 0) {
+        // Restore articles from props (persisted state)
+        const processedArticles = articles.map((article, index) => ({
+          ...article,
+          id: article.id || `article_${index}_${Date.now()}`,
+        }));
+        // Only update allResults - applyFilters will handle filtering
+        setAllResults(prev => {
+          // Check if articles actually changed to avoid unnecessary updates
+          // Compare by length and IDs to avoid infinite loops
+          if (prev.length === processedArticles.length) {
+            const prevIds = new Set(prev.map(a => a.id));
+            const newIds = new Set(processedArticles.map(a => a.id));
+            if (prevIds.size === newIds.size && 
+                Array.from(prevIds).every(id => newIds.has(id))) {
+              return prev; // No change
+            }
+          }
+          return processedArticles;
+        });
+        setHasPerformedInitialSearch(true);
+      } else if (articles.length === 0) {
+        // Clear results if empty array is passed
+        setAllResults(prev => {
+          if (prev.length === 0) return prev; // Already empty
+          return [];
+        });
       }
     }
-  };
+  }, [articles]);
 
-  const handleDisplayOptionsChange = (option: keyof typeof displayOptions) => {
-    const newOptions = {
-      ...localDisplayOptions,
-      [option]: !localDisplayOptions[option],
-    };
-    setLocalDisplayOptions(newOptions);
-    // Debounce the settings change to prevent frequent updates
-    setTimeout(() => {
-      onSettingsChange(id, { displayOptions: newOptions });
-    }, 100);
-  };
+  // Handle pending onUpdate calls (to avoid calling during render)
+  useEffect(() => {
+    if (pendingUpdateRef.current) {
+      const { articles } = pendingUpdateRef.current;
+      pendingUpdateRef.current = null;
+      onUpdate(id, {
+        articles,
+        lastUpdated: Date.now(),
+      });
+    }
+  }, [allResults, id, onUpdate]);
 
-  const handleAutoRefreshToggle = () => {
-    // Debounce the settings change to prevent frequent updates
-    setTimeout(() => {
-      onSettingsChange(id, { autoRefresh: !autoRefresh });
-    }, 100);
-  };
+  // Sync searchParams prop to state when it changes (e.g., on refresh when parent loads saved state)
+  // Only sync if prop has meaningful data and current state is empty/defaults
+  useEffect(() => {
+    if (searchParams) {
+      const propHasData = (searchParams.keywords && searchParams.keywords.length > 0) ||
+                         (searchParams.sources && searchParams.sources.length > 0) ||
+                         (searchParams.categories && searchParams.categories.length > 0) ||
+                         (searchParams.countries && searchParams.countries.length > 0);
+      
+      if (propHasData) {
+        setCurrentSearchParams(prev => {
+          const prevHasData = (prev.keywords && prev.keywords.length > 0) ||
+                             (prev.sources && prev.sources.length > 0) ||
+                             (prev.categories && prev.categories.length > 0) ||
+                             (prev.countries && prev.countries.length > 0);
+          
+          // Only sync if current state is empty (user hasn't started editing)
+          if (!prevHasData) {
+            return searchParams;
+          }
+          
+          // If both have data, check if they're different - if so, prefer prop (saved state)
+          const prevStr = JSON.stringify(prev);
+          const propStr = JSON.stringify(searchParams);
+          if (prevStr !== propStr) {
+            return searchParams; // Prop has saved state, use it
+          }
+          
+          return prev; // Keep current state
+        });
+      }
+    }
+  }, [searchParams]);
 
-  const handlePinToggle = () => {
-    togglePin();
-  };
+  // Sync filterSettings prop to state (only if actually different)
+  useEffect(() => {
+    if (initialFilterSettings) {
+      setSelectedFilters(prev => {
+        const newFilters = {
+          sources: initialFilterSettings.sources || [],
+          categories: initialFilterSettings.categories || [],
+          countries: initialFilterSettings.countries || [],
+        };
+        // Check if filters actually changed
+        if (JSON.stringify(prev) === JSON.stringify(newFilters)) {
+          return prev;
+        }
+        return newFilters;
+      });
+    }
+  }, [initialFilterSettings]);
+
+  // Sync displayOptions prop to state (only if actually different)
+  useEffect(() => {
+    if (displayOptions) {
+      setLocalDisplayOptions(prev => {
+        const merged = {
+          ...prev,
+          ...displayOptions
+        };
+        // Always force showImage to true - images should always be visible
+        merged.showImage = true;
+        // Check if displayOptions actually changed
+        const prevStr = JSON.stringify(prev);
+        const newStr = JSON.stringify(merged);
+        if (prevStr === newStr) return prev;
+        console.log('📰 NewsTile: Syncing displayOptions from prop (forcing showImage=true):', {
+          prop: displayOptions.showImage,
+          merged: merged.showImage,
+        });
+        return merged;
+      });
+    }
+  }, [displayOptions]);
+
+  // Auto refresh effect
+  useEffect(() => {
+    if (autoRefresh && !isDragging && !isResizing) {
+      autoRefreshRef.current = setInterval(performSearch, 600000); // 10 minutes
+      return () => {
+        if (autoRefreshRef.current) {
+          clearInterval(autoRefreshRef.current);
+        }
+      };
+    }
+  }, [autoRefresh, performSearch, isDragging, isResizing]);
+
+  // Initial load: Fetch fresh results if none exist
+  useEffect(() => {
+    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading) {
+      // Only auto-search if we have meaningful search params (not just defaults)
+      const hasSearchCriteria = 
+        (currentSearchParams.keywords && currentSearchParams.keywords.length > 0) ||
+        (currentSearchParams.sources && currentSearchParams.sources.length > 0) ||
+        (currentSearchParams.categories && currentSearchParams.categories.length > 0) ||
+        (currentSearchParams.countries && currentSearchParams.countries.length > 0);
+      
+      if (hasSearchCriteria) {
+        console.log('🔄 NewsTile: Initial load - performing search with existing params');
+        performSearch();
+      }
+    }
+  }, [hasPerformedInitialSearch, currentResults.length, isLoading, currentSearchParams, performSearch]);
 
   const handleRemove = async () => {
     const confirmed = await confirmDialog({
@@ -1484,13 +680,143 @@ const NewsTile: React.FC<NewsTileProps> = ({
       cancelText: 'Cancel',
       confirmColor: 'error',
     });
+
     if (confirmed) {
       onRemove(id);
     }
   };
 
-  // Toggle article selection
-  const handleArticleSelect = (articleId: string) => {
+  const handleContextMenuClick = (event: React.MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    setContextMenuAnchor(event.currentTarget);
+  };
+
+  const handleContextMenuClose = () => {
+    setContextMenuAnchor(null);
+  };
+
+  const handleAddToContext = (target: 'new' | 'sidebar') => {
+    const selectedArticleObjects = currentResults.filter(article => 
+      selectedArticles.has(article.id)
+    );
+
+    if (selectedArticleObjects.length === 0) return;
+
+    // Use the article context manager functions
+    if (selectedArticleObjects.length === 1) {
+      const article = selectedArticleObjects[0];
+      addArticleToContext(
+        article.id,
+        article.title,
+        article.source_name || article.source_url || 'Unknown',
+        article,
+        target
+      );
+    } else {
+      addMultipleArticlesToContext(
+        selectedArticleObjects.map(article => ({
+          articleId: article.id,
+          title: article.title,
+          source: article.source_name || article.source_url || 'Unknown',
+          articleData: article,
+        })),
+        target
+      );
+    }
+
+    setSelectedArticles(new Set());
+    handleContextMenuClose();
+  };
+
+  const handleDisplayOptionsChange = (option: keyof typeof displayOptions) => {
+    const newOptions = {
+      ...localDisplayOptions,
+      [option]: !localDisplayOptions[option],
+    };
+    setLocalDisplayOptions(newOptions);
+    onSettingsChange(id, { displayOptions: newOptions });
+  };
+
+  const handleRefresh = () => {
+    performSearch();
+  };
+
+  // Client-side filtering function - operates on existing results, never triggers API calls
+  const applyFilters = useCallback(() => {
+    let filtered = [...allResults];
+    
+    // Filter by sources
+    if (selectedFilters.sources.length > 0) {
+      filtered = filtered.filter(article => 
+        selectedFilters.sources.includes(article.source_name || '')
+      );
+    }
+    
+    // Filter by categories
+    if (selectedFilters.categories.length > 0) {
+      filtered = filtered.filter(article => 
+        selectedFilters.categories.includes(article.category || '')
+      );
+    }
+    
+    // Filter by countries
+    if (selectedFilters.countries.length > 0) {
+      filtered = filtered.filter(article => 
+        selectedFilters.countries.includes(article.country || '')
+      );
+    }
+    
+    setFilteredResults(filtered);
+    setCurrentResults(filtered);
+  }, [allResults, selectedFilters]);
+
+  // Apply filters when selectedFilters change
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
+
+  // Sync visible columns with display options when display options change
+  useEffect(() => {
+    setVisibleColumns({
+      title: localDisplayOptions.showTitle,
+      source: localDisplayOptions.showSource,
+      category: localDisplayOptions.showCategory,
+      date: localDisplayOptions.showDate,
+    });
+  }, [localDisplayOptions]);
+
+  // Generate available filters from all results
+  const availableFilters = useMemo(() => {
+    const sourceMap = new Map<string, number>();
+    const categoryMap = new Map<string, number>();
+    const countryMap = new Map<string, number>();
+    
+    allResults.forEach(article => {
+      if (article.source_name) {
+        sourceMap.set(article.source_name, (sourceMap.get(article.source_name) || 0) + 1);
+      }
+      if (article.category) {
+        categoryMap.set(article.category, (categoryMap.get(article.category) || 0) + 1);
+      }
+      if (article.country) {
+        countryMap.set(article.country, (countryMap.get(article.country) || 0) + 1);
+      }
+    });
+    
+    return {
+      sources: Array.from(sourceMap.entries())
+        .map(([source, count]) => ({ source, count }))
+        .sort((a, b) => b.count - a.count),
+      categories: Array.from(categoryMap.entries())
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count),
+      countries: Array.from(countryMap.entries())
+        .map(([country, count]) => ({ country, count }))
+        .sort((a, b) => b.count - a.count),
+    };
+  }, [allResults]);
+
+  const toggleArticleSelection = (articleId: string) => {
     setSelectedArticles(prev => {
       const newSet = new Set(prev);
       if (newSet.has(articleId)) {
@@ -1502,149 +828,264 @@ const NewsTile: React.FC<NewsTileProps> = ({
     });
   };
 
-  const handleArticleClick = (article: NewsArticle) => {
-    window.open(article.source_url, '_blank', 'noopener,noreferrer');
-  };
-
-  const handleAddToContextClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    if (selectedArticles.size === 0) {
-      alert('Please select at least one article to add to context');
-      return;
-    }
-    setContextMenuAnchor(event.currentTarget);
-  };
-
-  const handleContextMenuClose = () => {
-    setContextMenuAnchor(null);
-  };
-
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
-    if (selectedArticles.size === 0) return;
-    
-    // Get the selected article objects from newsArticles state
-    const selectedArticleObjects = newsArticles.filter(article => {
-      const articleWithId = ensureArticleId(article);
-      return selectedArticles.has(articleWithId.id);
-    });
-    
-    console.log(`📦 Adding ${selectedArticleObjects.length} article(s) to context (target: ${target})`);
-    
-    // Prepare article data for batch addition
-    const articlesToAdd = selectedArticleObjects.map(article => ({
-      articleId: article.source_url, // Use URL as unique ID
-      title: article.title,
-      source: article.source_name,
-      articleData: {
-        url: article.source_url,
-        title: article.title,
-        description: article.description,
-        source: article.source_name,
-        published_date: article.published_date,
-        keywords: article.keywords,
-        category: article.category,
-        image_url: article.image_url,
-      }
-    }));
-    
-    // Use batch addition for multiple articles, single addition for one article
-    if (articlesToAdd.length > 1) {
-      addMultipleArticlesToContext(articlesToAdd, target);
-      console.log(`✅ Added ${articlesToAdd.length} articles to context in batch`);
-    } else if (articlesToAdd.length === 1) {
-      const article = articlesToAdd[0];
-      addArticleToContext(
-        article.articleId,
-        article.title,
-        article.source,
-        article.articleData,
-        target
-      );
-      console.log(`✅ Added article to context: ${article.title}`);
-    }
-    
-    // Clear selection and close menu
-    setSelectedArticles(new Set());
-    handleContextMenuClose();
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
-    
-    if (diffInHours < 1) {
-      return `${Math.floor(diffInHours * 60)}m ago`;
-    } else if (diffInHours < 24) {
-      return `${Math.floor(diffInHours)}h ago`;
-    } else {
-      return date.toLocaleDateString();
+  const formatDate = (dateStr: string | undefined) => {
+    if (!dateStr) return 'N/A';
+    try {
+      return new Date(dateStr).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
+    } catch {
+      return dateStr;
     }
   };
 
-  // Dynamic pagination based on tile height
-  const calculateResultsPerPage = useCallback(() => {
-    if (!tileRef.current) return 5; // Default fallback
+  // Calculate optimal column widths based on content
+  const calculateColumnWidths = useCallback((results: NewsArticle[]) => {
+    const widths: Record<string, number> = {};
     
-    const tileHeight = tileRef.current.clientHeight;
-    const headerHeight = 60; // Approximate header height
-    const paginationHeight = 40; // Approximate pagination height
-    const padding = 24; // Tile padding (12px * 2)
+    // Sample of results to measure (use first 50 for performance)
+    const sampleResults = results.slice(0, 50);
     
-    // Calculate available height for articles
-    const availableHeight = tileHeight - headerHeight - paginationHeight - padding;
-    const articleHeight = localDisplayOptions.compactView ? 60 : 120; // Compact vs full view
-    const maxArticles = Math.floor(availableHeight / articleHeight);
+    if (sampleResults.length === 0) return widths;
     
-    // Ensure minimum of 10 articles and maximum of 20 articles
-    return Math.max(10, Math.min(20, maxArticles));
-  }, [localDisplayOptions.compactView]);
-
-  const [resultsPerPage, setResultsPerPage] = useState(10);
-  
-  // Update results per page when tile size changes
-  useEffect(() => {
-    const newResultsPerPage = calculateResultsPerPage();
-    setResultsPerPage(newResultsPerPage);
-  }, [calculateResultsPerPage, size]);
-
-  // Add ResizeObserver to recalculate when tile is resized (with debounce)
-  useEffect(() => {
-    if (!tileRef.current) return;
-
-    let timeoutId: ReturnType<typeof setTimeout>;
-    const resizeObserver = new ResizeObserver(() => {
-      // Debounce the resize calculation to prevent infinite loops
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        const newResultsPerPage = calculateResultsPerPage();
-        setResultsPerPage(newResultsPerPage);
-      }, 100); // 100ms debounce
-    });
-
-    resizeObserver.observe(tileRef.current);
-
-    return () => {
-      clearTimeout(timeoutId);
-      resizeObserver.disconnect();
+    // Base minimum widths (in pixels)
+    const minWidths = {
+      checkbox: 50,
+      title: 200,
+      description: 300,
+      source: 120,
+      category: 100,
+      date: 120,
+      image: 100,
     };
-  }, [calculateResultsPerPage]);
-
-  // Use currentResults for display (page-based fetching)
-  // Fallback to sliced newsArticles for backward compatibility
-  const displayArticles = currentResults.length > 0 ? currentResults : newsArticles;
-  const pageSize = localDisplayOptions.maxResults || 20;
-  const totalPages = totalFound > 0 ? Math.ceil(totalFound / pageSize) : Math.ceil(displayArticles.length / resultsPerPage);
-  const currentArticles = currentResults.length > 0 ? currentResults : displayArticles.slice((currentPage - 1) * resultsPerPage, currentPage * resultsPerPage);
-  const startIndex = totalFound > 0 ? ((currentPage - 1) * pageSize) + 1 : ((currentPage - 1) * resultsPerPage) + 1;
-  const endIndex = totalFound > 0 ? Math.min(currentPage * pageSize, totalFound) : Math.min(currentPage * resultsPerPage, displayArticles.length);
-
-  // Scroll to top when page changes
-  const listRef = useRef<HTMLUListElement>(null);
-  useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = 0;
+    
+    // Calculate content-based widths
+    widths.checkbox = minWidths.checkbox;
+    
+    if (visibleColumns.title) {
+      const maxLength = Math.max(...sampleResults.map(a => (a.title || '').length));
+      // Add extra width for image (120px) + gap (12px)
+      widths.title = Math.max(minWidths.title, Math.min(maxLength * 8 + 32 + 132, 500));
     }
-  }, [currentPage]);
+    
+    if (visibleColumns.source) {
+      const maxLength = Math.max(...sampleResults.map(a => (a.source_name || '').length));
+      widths.source = Math.max(minWidths.source, Math.min(maxLength * 8 + 32, 200));
+    }
+    
+    if (visibleColumns.category) {
+      widths.category = minWidths.category; // Fixed size for chips
+    }
+    
+    if (visibleColumns.date) {
+      widths.date = minWidths.date; // Fixed for date format
+    }
+    
+    return widths;
+  }, [visibleColumns]);
+
+  // Calculate pagination values
+  const totalPages = Math.ceil(currentResults.length / resultsPerPage);
+  const startIndex = (currentPage - 1) * resultsPerPage;
+  const endIndex = startIndex + resultsPerPage;
+  const currentPageResults = currentResults.slice(startIndex, endIndex);
+
+  // Update column widths when results or visible columns change
+  useEffect(() => {
+    if (currentResults.length > 0) {
+      const newWidths = calculateColumnWidths(currentResults);
+      setColumnWidths(newWidths);
+    }
+  }, [currentResults, calculateColumnWidths]);
+
+  const renderSearchDialog = () => (
+    <Dialog
+      open={searchDialogOpen}
+      onClose={() => setSearchDialogOpen(false)}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{
+        sx: {
+          backgroundColor: '#1e293b',
+          color: '#ffffff',
+          border: '1px solid #334155',
+        },
+      }}
+    >
+      <DialogTitle sx={{ borderBottom: '1px solid #334155' }}>
+        <Box display="flex" alignItems="center" gap={1}>
+          <ArticleIcon />
+          <Typography variant="h6">Search News Articles</Typography>
+        </Box>
+      </DialogTitle>
+      <DialogContent sx={{ p: 3 }}>
+        <Box display="flex" flexDirection="column" gap={3} mt={2}>
+          {/* Keywords Search Field */}
+          <MultiSelectField<string>
+            label="Keywords (Search Parameter)"
+            selectedItems={currentSearchParams.keywords || []}
+            onItemsChange={(keywords) => {
+              setCurrentSearchParams(prev => ({ ...prev, keywords }));
+            }}
+            suggestions={[]}
+            onSearch={() => {
+              // Simple keyword search - no suggestions for now
+              return [];
+            }}
+            renderItem={(keyword) => keyword}
+            placeholder="Enter keywords to search..."
+            helperText="Search by keywords in article titles (e.g., AI, technology, politics)"
+          />
+
+          {/* Sources Search Field */}
+          <MultiSelectField<string>
+            label="Sources (Search Parameter)"
+            selectedItems={currentSearchParams.sources || []}
+            onItemsChange={(sources) => {
+              setCurrentSearchParams(prev => ({ ...prev, sources }));
+            }}
+            suggestions={[]}
+            onSearch={() => {
+              // Simple source search - could add suggestions later
+              return [];
+            }}
+            renderItem={(source) => source}
+            placeholder="Enter source names..."
+            helperText="Search by news source (e.g., Reuters, BBC, CNN)"
+          />
+
+          {/* Categories Search Field */}
+          <FormControl size="small">
+            <Autocomplete
+              multiple
+              options={categoryOptions}
+              value={currentSearchParams.categories || []}
+              onChange={(_, newValue) => {
+                setCurrentSearchParams(prev => ({ ...prev, categories: newValue }));
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Categories (Search Parameter)"
+                  sx={{
+                    '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
+                    '& .MuiInputLabel-root': { color: '#94a3b8' },
+                  }}
+                />
+              )}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => (
+                  <Chip
+                    {...getTagProps({ index })}
+                    key={option}
+                    label={option}
+                    size="small"
+                    sx={{ backgroundColor: '#475569', color: '#ffffff' }}
+                  />
+                ))
+              }
+            />
+          </FormControl>
+
+          {/* Countries Search Field */}
+          <FormControl size="small">
+            <Autocomplete
+              multiple
+              options={countryOptions}
+              value={currentSearchParams.countries || []}
+              onChange={(_, newValue) => {
+                setCurrentSearchParams(prev => ({ ...prev, countries: newValue }));
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Countries (Search Parameter)"
+                  sx={{
+                    '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
+                    '& .MuiInputLabel-root': { color: '#94a3b8' },
+                  }}
+                />
+              )}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => (
+                  <Chip
+                    {...getTagProps({ index })}
+                    key={option}
+                    label={option}
+                    size="small"
+                    sx={{ backgroundColor: '#475569', color: '#ffffff' }}
+                  />
+                ))
+              }
+            />
+          </FormControl>
+
+          {/* Date Range */}
+          <FormControl size="small" fullWidth>
+            <InputLabel sx={{ color: '#94a3b8' }}>Date Range</InputLabel>
+            <Select
+              value={currentSearchParams.dateRange || 'all'}
+              onChange={(e) => {
+                setCurrentSearchParams(prev => ({ 
+                  ...prev, 
+                  dateRange: e.target.value as '12h' | '24h' | '7d' | '30d' | 'all' 
+                }));
+              }}
+              sx={{
+                backgroundColor: '#334155',
+                color: '#ffffff',
+                '& .MuiSelect-icon': { color: '#94a3b8' },
+              }}
+              MenuProps={{
+                PaperProps: {
+                  sx: {
+                    backgroundColor: '#1e293b',
+                    '& .MuiMenuItem-root': {
+                      color: '#ffffff',
+                      '&:hover': { backgroundColor: '#334155' },
+                      '&.Mui-selected': { backgroundColor: '#3b82f6' },
+                    },
+                  },
+                },
+              }}
+            >
+              <MenuItem value="12h">Last 12 Hours</MenuItem>
+              <MenuItem value="24h">Last 24 Hours</MenuItem>
+              <MenuItem value="7d">Last 7 Days</MenuItem>
+              <MenuItem value="30d">Last 30 Days</MenuItem>
+              <MenuItem value="all">All Time</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
+      </DialogContent>
+      <DialogActions sx={{ borderTop: '1px solid #334155', p: 3 }}>
+        <Button
+          onClick={() => setSearchDialogOpen(false)}
+          sx={{ color: '#94a3b8' }}
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={() => {
+            // Persist search params before performing search
+            onSettingsChange(id, { searchParams: currentSearchParams });
+            performSearch();
+            setSearchDialogOpen(false);
+          }}
+          variant="contained"
+          startIcon={<SearchIcon />}
+          sx={{
+            background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+            '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+          }}
+        >
+          Search
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
 
   return (
     <Box
@@ -1657,12 +1098,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
         overflow: 'hidden',
         width: '100%',
         height: '100%',
-        boxSizing: 'border-box',
-        display: 'flex',
-        flexDirection: 'column',
         cursor: pinnedState ? 'default' : (isDragging ? 'grabbing' : (onDragStart ? 'grab' : 'default')),
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
+        display: 'flex',
+        flexDirection: 'column',
         '&:hover': {
           borderColor: '#3b82f6',
           transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
@@ -1675,7 +1115,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
           left: 0,
           right: 0,
           height: '3px',
-          background: newsArticles.length > 0 ? '#3b82f6' : '#dc2626',
+          background: currentResults.length > 0 ? '#3b82f6' : '#dc2626',
         },
       }}
       ref={tileRef}
@@ -1683,18 +1123,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'nowrap', overflow: 'hidden', minWidth: 0 }}>
-          {/* Selection checkbox */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {onSelectionChange && (
             <Checkbox
               checked={isSelected}
-              onClick={(e) => {
-                const now = Date.now();
-                if (now - lastClickTimeRef.current < 200) {
-                  return;
-                }
-                lastClickTimeRef.current = now;
-                
+              onChange={(e) => {
                 e.stopPropagation();
                 onSelectionChange(id, !isSelected);
               }}
@@ -1710,41 +1143,56 @@ const NewsTile: React.FC<NewsTileProps> = ({
             />
           )}
           
-          <ArticleIcon sx={{ color: '#3b82f6', fontSize: '1.5rem', mr: 1, flexShrink: 0 }} />
-          <Typography variant="h6" color="white" fontWeight={600} sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-            Financial News
+          <ArticleIcon sx={{ color: '#3b82f6', fontSize: '1.5rem', mr: 1 }} />
+          <Typography variant="h6" color="white" fontWeight={600}>
+            News Articles
           </Typography>
           
           <Chip
-            label={`${newsArticles.length} articles`}
+            label={
+              isLoadingMore 
+                ? 'Loading...' 
+                : hasMore && allResults.length > 0 && filteredResults.length === allResults.length
+                  ? `Load More (${allResults.length} loaded)`
+                  : allResults.length > 0 && currentResults.length !== allResults.length 
+                    ? `${currentResults.length} of ${allResults.length} results`
+                    : `${currentResults.length} results`
+            }
             size="small"
+            onClick={
+              hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? handleLoadMore
+                : undefined
+            }
+            disabled={isLoadingMore || isLoading || !hasMore || filteredResults.length !== allResults.length}
             sx={{
-              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+              backgroundColor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? 'rgba(59, 130, 246, 0.3)'
+                : 'rgba(59, 130, 246, 0.2)',
               color: '#3b82f6',
               border: '1px solid #3b82f6',
               fontSize: '0.75rem',
               height: '20px',
+              cursor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? 'pointer'
+                : 'default',
+              '&:hover': hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? {
+                    backgroundColor: 'rgba(59, 130, 246, 0.4)',
+                    transform: 'scale(1.05)',
+                  }
+                : {},
+              '&.Mui-disabled': {
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                color: '#6b7280',
+                borderColor: '#4b5563',
+                cursor: 'not-allowed',
+              },
             }}
           />
           
-          {selectedArticles.size > 0 && (
-            <Chip
-              label={`${selectedArticles.size} selected`}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(34, 197, 94, 0.2)',
-                color: '#22c55e',
-                border: '1px solid #22c55e',
-                fontSize: '0.75rem',
-                height: '20px',
-              }}
-            />
-          )}
-          
           {autoRefresh && (
-            <Tooltip title="Auto-refresh enabled">
-              <AutoRefreshIcon sx={{ color: '#22c55e', fontSize: 16 }} />
-            </Tooltip>
+            <AutoRefreshIcon sx={{ color: '#10b981', fontSize: '1rem', ml: 0.5 }} />
           )}
         </Box>
 
@@ -1754,39 +1202,96 @@ const NewsTile: React.FC<NewsTileProps> = ({
             onTogglePin={togglePin}
           />
 
-          {selectedArticles.size > 0 && (
-            <Tooltip title={`Add ${selectedArticles.size} article${selectedArticles.size > 1 ? 's' : ''} to Context`}>
-              <IconButton
-                size="small"
-                onClick={handleAddToContextClick}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-              >
-                <ContextIcon sx={{ fontSize: 18 }} />
-              </IconButton>
-            </Tooltip>
-          )}
-
-          <Tooltip title="Refresh News">
+          <Tooltip title="Run Search">
             <IconButton
               size="small"
-              onClick={() => runNewsSearch(true)} // Force refresh when button is clicked
+              onClick={handleRefresh}
               disabled={isLoading}
               onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+              sx={{ 
+                color: isLoading ? '#6b7280' : '#9ca3af',
+                '&:hover': { color: '#3b82f6' },
+                '&.Mui-disabled': { color: '#6b7280' }
+              }}
             >
-              <SearchIcon sx={{ fontSize: 18 }} />
+              {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
             </IconButton>
           </Tooltip>
 
-          <Tooltip title="Settings">
+          <Tooltip title={`Add ${selectedArticles.size > 0 ? `${selectedArticles.size} article(s)` : 'selected articles'} to context`}>
+            <span>
+              <IconButton
+                size="small"
+                onClick={handleContextMenuClick}
+                disabled={selectedArticles.size === 0}
+                onMouseDown={(e) => e.stopPropagation()}
+                sx={{ 
+                  color: selectedArticles.size > 0 ? '#10b981' : '#6b7280',
+                  '&:hover': { color: selectedArticles.size > 0 ? '#059669' : '#6b7280' },
+                  '&.Mui-disabled': { color: '#6b7280' }
+                }}
+              >
+                <AddToContextIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+
+          <Tooltip title={
+            (selectedFilters.sources.length > 0 || 
+             selectedFilters.categories.length > 0 || 
+             selectedFilters.countries.length > 0) 
+              ? `Filter Results (${Object.values(selectedFilters).flat().length} active)`
+              : "Filter Results"
+          }>
+            <Box sx={{ position: 'relative' }}>
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFilterDialogOpen(true);
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                sx={{ 
+                  color: (selectedFilters.sources.length > 0 || 
+                          selectedFilters.categories.length > 0 || 
+                          selectedFilters.countries.length > 0) 
+                    ? '#3b82f6' 
+                    : '#9ca3af', 
+                  '&:hover': { color: '#3b82f6' } 
+                }}
+              >
+                <FilterIcon fontSize="small" />
+              </IconButton>
+              {(selectedFilters.sources.length > 0 || 
+                selectedFilters.categories.length > 0 || 
+                selectedFilters.countries.length > 0) && (
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: -2,
+                    right: -2,
+                    width: 8,
+                    height: 8,
+                    backgroundColor: '#3b82f6',
+                    borderRadius: '50%',
+                    border: '1px solid #1e293b',
+                  }}
+                />
+              )}
+            </Box>
+          </Tooltip>
+
+          <Tooltip title="Edit Search Criteria">
             <IconButton
               size="small"
-              onClick={handleSettingsOpen}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSearchDialogOpen(true);
+              }}
               onMouseDown={(e) => e.stopPropagation()}
               sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
             >
-              <SettingsIcon sx={{ fontSize: 18 }} />
+              <SearchIcon fontSize="small" />
             </IconButton>
           </Tooltip>
 
@@ -1808,7 +1313,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         <Box sx={{ textAlign: 'center', py: 2, flexShrink: 0 }}>
           <CircularProgress size={24} sx={{ color: '#3b82f6', mb: 1 }} />
           <Typography variant="body2" color="#9ca3af">
-            Searching news...
+            Searching articles...
           </Typography>
         </Box>
       )}
@@ -1820,8 +1325,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
         </Alert>
       )}
 
-      {/* Articles List */}
-      {newsArticles.length > 0 && !isLoading && (
+      {/* Results Table */}
+      {localDisplayOptions.showResultsTable && currentResults.length > 0 && !isLoading && (
         <Box sx={{ 
           flex: 1, 
           display: 'flex', 
@@ -1829,196 +1334,341 @@ const NewsTile: React.FC<NewsTileProps> = ({
           minHeight: 0,
           mt: 1
         }}>
-          <List 
-            ref={listRef}
-            sx={{ 
-              flex: 1,
-              backgroundColor: 'transparent',
-              maxHeight: 'calc(100% - 60px)', // Leave space for pagination
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              '&::-webkit-scrollbar': {
-                width: '6px',
+          <TableContainer sx={{ 
+            flex: 1,
+            backgroundColor: 'transparent',
+            borderRadius: 0,
+            boxShadow: 'none',
+            border: 'none',
+            overflow: 'auto',
+            '&::-webkit-scrollbar': {
+              width: '6px',
+              height: '6px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(59, 130, 246, 0.5)',
+              borderRadius: '3px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: 'rgba(59, 130, 246, 0.7)',
+            },
+            '&::-webkit-scrollbar-corner': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+            },
+          }}>
+            <Table size="small" sx={{ 
+              tableLayout: 'fixed',
+              width: 'max-content',
+              minWidth: '100%',
+              '& .MuiTableCell-root': {
+                borderBottom: '1px solid rgba(55, 65, 81, 0.3)',
+                padding: '12px',
+                overflow: 'hidden',
+                wordBreak: 'break-word',
+                verticalAlign: 'top', // Align content to top
               },
-              '&::-webkit-scrollbar-track': {
-                backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              '& .MuiTableHead-root .MuiTableCell-root': {
+                borderBottom: '2px solid rgba(59, 130, 246, 0.5)',
+                backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                padding: '8px 12px', // Smaller padding for header
               },
-              '&::-webkit-scrollbar-thumb': {
-                backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                borderRadius: '3px',
+              '& .MuiTableRow-root:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.05)',
               },
-              '&::-webkit-scrollbar-thumb:hover': {
-                backgroundColor: 'rgba(59, 130, 246, 0.7)',
+              '& .MuiTableRow-root': {
+                height: 'auto', // Allow rows to expand for images
+                minHeight: '100px', // Minimum height to fit images
               },
             }}>
-            {currentArticles.map((article, index) => {
-              // Ensure article has an ID
-              const articleWithId = ensureArticleId(article);
-              const articleId = articleWithId.id;
-              
-              return (
-              <ListItem
-                key={articleId || `article-${index}`}
-                sx={{
-                  border: '1px solid rgba(55, 65, 81, 0.3)',
-                  borderRadius: '8px',
-                  mb: 1,
-                  backgroundColor: selectedArticles.has(articleId) 
-                    ? 'rgba(34, 197, 94, 0.1)' 
-                    : 'rgba(15, 23, 42, 0.3)',
-                  borderColor: selectedArticles.has(articleId) 
-                    ? '#22c55e' 
-                    : 'rgba(55, 65, 81, 0.3)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  minHeight: 60,
-                  '&:hover': {
-                    backgroundColor: selectedArticles.has(articleId)
-                      ? 'rgba(34, 197, 94, 0.15)'
-                      : 'rgba(59, 130, 246, 0.05)',
-                  },
-                }}
-              >
-                {/* Left side: Checkbox and content */}
-                <Box sx={{ display: 'flex', alignItems: 'center', flex: 1, mr: 2 }}>
-                  <Checkbox
-                    checked={selectedArticles.has(articleId)}
-                    onChange={() => {
-                      handleArticleSelect(articleId);
-                    }}
-                    sx={{ 
-                      color: '#9ca3af',
-                      '&.Mui-checked': { color: '#22c55e' },
-                      mr: 1
-                    }}
-                    size="small"
-                  />
-                  <Box 
-                    sx={{ flex: 1, cursor: 'pointer' }}
-                    onClick={() => handleArticleClick(article)}
-                  >
-                    <Typography
-                      variant="subtitle2"
-                      color="white"
-                      sx={{
-                        fontWeight: 600,
-                        fontSize: localDisplayOptions.compactView ? '0.875rem' : '1rem',
-                        lineHeight: 1.3,
-                        mb: 0.5,
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {article.title}
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
-                      {localDisplayOptions.showSource && (
-                        <Typography
-                          variant="caption"
-                          color="#9ca3af"
-                          sx={{ fontSize: '0.75rem' }}
-                        >
-                          {article.source_name}
-                        </Typography>
-                      )}
-                      {localDisplayOptions.showDate && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <CalendarIcon sx={{ fontSize: 12, color: '#6b7280' }} />
-                          <Typography variant="caption" color="#6b7280">
-                            {formatDate(article.published_date)}
-                          </Typography>
-                        </Box>
-                      )}
-                      {localDisplayOptions.showKeywords && article.keywords && (
-                        <Chip
-                          label={article.keywords.split(',')[0]}
-                          size="small"
-                          sx={{
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            color: '#3b82f6',
-                            fontSize: '0.7rem',
-                            height: '18px',
-                          }}
-                        />
-                      )}
-                      <IconButton
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleArticleClick(article);
-                        }}
-                        sx={{ 
-                          color: '#6b7280',
-                          '&:hover': { color: '#3b82f6' },
-                          p: 0.5,
-                          ml: 'auto'
-                        }}
-                      >
-                        <OpenInNewIcon sx={{ fontSize: 14 }} />
-                      </IconButton>
-                    </Box>
-                  </Box>
-                </Box>
-
-                {/* Right side: Centered image */}
-                {localDisplayOptions.showImages && article.image_url ? (
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    width: 80,
-                    height: 50,
-                    flexShrink: 0
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ 
+                    color: '#9ca3af', 
+                    fontWeight: 600, 
+                    fontSize: '0.875rem',
+                    width: columnWidths.checkbox || 50,
+                    minWidth: columnWidths.checkbox || 50,
+                    maxWidth: columnWidths.checkbox || 50,
                   }}>
-                    <Avatar
-                      src={article.image_url}
-                      variant="rounded"
+                    <Checkbox
+                      size="small"
+                      indeterminate={selectedArticles.size > 0 && selectedArticles.size < currentPageResults.length}
+                      checked={currentPageResults.length > 0 && selectedArticles.size === currentPageResults.length}
+                      onChange={() => {
+                        if (selectedArticles.size === currentPageResults.length) {
+                          const newSelected = new Set(selectedArticles);
+                          currentPageResults.forEach(article => newSelected.delete(article.id));
+                          setSelectedArticles(newSelected);
+                        } else {
+                          const newSelected = new Set(selectedArticles);
+                          currentPageResults.forEach(article => newSelected.add(article.id));
+                          setSelectedArticles(newSelected);
+                        }
+                      }}
                       sx={{ 
-                        width: 80, 
-                        height: 50,
-                        borderRadius: '6px',
-                        objectFit: 'cover'
+                        color: '#9ca3af', 
+                        '&.Mui-checked': { color: '#10b981' }, 
+                        '&.MuiCheckbox-indeterminate': { color: '#10b981' } 
                       }}
-                    >
-                      <ImageIcon />
-                    </Avatar>
-                  </Box>
-                ) : localDisplayOptions.showImages ? (
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    width: 80,
-                    height: 50,
-                    flexShrink: 0
-                  }}>
-                    <Avatar sx={{ 
-                      width: 80, 
-                      height: 50, 
-                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                      borderRadius: '6px'
+                    />
+                  </TableCell>
+                  {visibleColumns.title && (
+                    <TableCell sx={{ 
+                      color: '#9ca3af', 
+                      fontWeight: 600, 
+                      fontSize: '0.875rem',
+                      width: columnWidths.title,
+                      minWidth: columnWidths.title,
+                    }}>Title</TableCell>
+                  )}
+                  {visibleColumns.source && (
+                    <TableCell sx={{ 
+                      color: '#9ca3af', 
+                      fontWeight: 600, 
+                      fontSize: '0.875rem',
+                      width: columnWidths.source,
+                      minWidth: columnWidths.source,
+                    }}>Source</TableCell>
+                  )}
+                  {visibleColumns.category && (
+                    <TableCell sx={{ 
+                      color: '#9ca3af', 
+                      fontWeight: 600, 
+                      fontSize: '0.875rem',
+                      width: columnWidths.category,
+                      minWidth: columnWidths.category,
+                    }}>Category</TableCell>
+                  )}
+                  {visibleColumns.date && (
+                    <TableCell sx={{ 
+                      color: '#9ca3af', 
+                      fontWeight: 600, 
+                      fontSize: '0.875rem',
+                      width: columnWidths.date,
+                      minWidth: columnWidths.date,
+                    }}>Date</TableCell>
+                  )}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {currentPageResults.map((article) => (
+                  <TableRow
+                    key={article.id}
+                    sx={{
+                      backgroundColor: selectedArticles.has(article.id) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                      '&:hover': {
+                        backgroundColor: selectedArticles.has(article.id) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
+                      },
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => toggleArticleSelection(article.id)}
+                  >
+                    <TableCell sx={{ 
+                      padding: '8px 12px',
+                      width: columnWidths.checkbox || 50,
+                      minWidth: columnWidths.checkbox || 50,
+                      maxWidth: columnWidths.checkbox || 50,
                     }}>
-                      <ArticleIcon />
-                    </Avatar>
-                  </Box>
-                ) : null}
-              </ListItem>
-              );
-            })}
-          </List>
-
-          {/* Loading indicator for page loading */}
-          {isLoadingPage && (
-            <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', borderTop: '1px solid rgba(55, 65, 81, 0.3)' }}>
-              <CircularProgress size={20} sx={{ color: '#3b82f6', mr: 2 }} />
-              <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                Loading page {currentPage}...
-              </Typography>
-            </Box>
-          )}
+                      <Checkbox
+                        size="small"
+                        checked={selectedArticles.has(article.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          toggleArticleSelection(article.id);
+                        }}
+                        sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
+                      />
+                    </TableCell>
+                    {visibleColumns.title && (
+                      <TableCell sx={{ 
+                        color: '#ffffff', 
+                        fontSize: '0.875rem',
+                        width: columnWidths.title,
+                        minWidth: columnWidths.title,
+                        padding: '12px',
+                      }}>
+                        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
+                          {/* Image on the left - match ContextItemRow pattern */}
+                          {(() => {
+                            // Debug: Check if image_url exists
+                            const hasImage = !!(article.image_url && article.image_url.trim());
+                            const showImage = localDisplayOptions.showImage;
+                            
+                            // Debug first article only
+                            if (article.id === currentPageResults[0]?.id) {
+                              console.log('📰 NewsTile: Image rendering check:', {
+                                articleId: article.id,
+                                hasImage,
+                                showImage,
+                                image_url: article.image_url?.substring(0, 50),
+                                localDisplayOptions_showImage: localDisplayOptions.showImage,
+                              });
+                            }
+                            
+                            return hasImage && showImage ? (
+                              <Box
+                                component="img"
+                                src={article.image_url}
+                                alt={article.title || 'Article image'}
+                                onError={() => {
+                                  console.error('📰 NewsTile: Image failed to load:', article.image_url);
+                                }}
+                                onLoad={() => {
+                                  if (article.id === currentPageResults[0]?.id) {
+                                    console.log('📰 NewsTile: Image loaded successfully:', article.image_url);
+                                  }
+                                }}
+                                sx={{
+                                  width: 120,
+                                  height: 80,
+                                  objectFit: 'cover',
+                                  borderRadius: '4px',
+                                  flexShrink: 0,
+                                  cursor: 'pointer',
+                                  '&:hover': {
+                                    opacity: 0.8,
+                                  },
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  window.open(article.image_url, '_blank', 'noopener,noreferrer');
+                                }}
+                              />
+                            ) : (
+                              <Box
+                                sx={{
+                                  width: 120,
+                                  height: 80,
+                                  backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                                  borderRadius: '4px',
+                                  flexShrink: 0,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.7rem' }}>
+                                  {hasImage && !showImage ? 'Image Hidden' : 'No Image'}
+                                </Typography>
+                              </Box>
+                            );
+                          })()}
+                          {/* Title on the right */}
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            {article.source_url ? (
+                              <Tooltip title="Click to open article" arrow>
+                                <Link
+                                  href={article.source_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  sx={{
+                                    color: '#3b82f6',
+                                    textDecoration: 'none',
+                                    fontWeight: 500,
+                                    fontSize: '0.875rem',
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: 0.5,
+                                    '&:hover': {
+                                      color: '#60a5fa',
+                                      textDecoration: 'underline',
+                                    },
+                                    cursor: 'pointer',
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <Typography 
+                                    variant="body2" 
+                                    sx={{ 
+                                      flex: 1,
+                                      display: '-webkit-box',
+                                      WebkitLineClamp: 3,
+                                      WebkitBoxOrient: 'vertical',
+                                      overflow: 'hidden',
+                                      lineHeight: 1.4,
+                                    }}
+                                  >
+                                    {article.title}
+                                  </Typography>
+                                  <LaunchIcon sx={{ fontSize: '0.75rem', flexShrink: 0, mt: 0.5 }} />
+                                </Link>
+                              </Tooltip>
+                            ) : (
+                              <Typography 
+                                variant="body2" 
+                                title={article.title} 
+                                sx={{ 
+                                  color: '#ffffff',
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 3,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  lineHeight: 1.4,
+                                }}
+                              >
+                                {article.title}
+                              </Typography>
+                            )}
+                          </Box>
+                        </Box>
+                      </TableCell>
+                    )}
+                    {visibleColumns.source && (
+                      <TableCell sx={{ 
+                        color: '#ffffff', 
+                        fontSize: '0.875rem',
+                        width: columnWidths.source,
+                        minWidth: columnWidths.source,
+                        padding: '8px 12px',
+                      }}>
+                        <Typography variant="body2" noWrap title={article.source_name || 'N/A'}>
+                          {article.source_name || 'N/A'}
+                        </Typography>
+                      </TableCell>
+                    )}
+                    {visibleColumns.category && (
+                      <TableCell sx={{ 
+                        fontSize: '0.875rem',
+                        width: columnWidths.category,
+                        minWidth: columnWidths.category,
+                        padding: '8px 12px',
+                      }}>
+                        {article.category ? (
+                          <Chip
+                            label={article.category}
+                            size="small"
+                            sx={{
+                              backgroundColor: '#3b82f6',
+                              color: '#ffffff',
+                              fontSize: '0.75rem',
+                            }}
+                          />
+                        ) : (
+                          <Typography sx={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                            N/A
+                          </Typography>
+                        )}
+                      </TableCell>
+                    )}
+                    {visibleColumns.date && (
+                      <TableCell sx={{ 
+                        color: '#9ca3af', 
+                        fontSize: '0.875rem',
+                        width: columnWidths.date,
+                        minWidth: columnWidths.date,
+                        padding: '8px 12px',
+                      }}>
+                        {formatDate(article.published_date)}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
 
           {/* Pagination */}
           {totalPages > 1 && (
@@ -2031,707 +1681,689 @@ const NewsTile: React.FC<NewsTileProps> = ({
               borderTop: '1px solid rgba(55, 65, 81, 0.3)' 
             }}>
               <Typography variant="caption" color="#6b7280" sx={{ fontSize: '0.75rem' }}>
-                {totalFound > 0 ? (
-                  <>Page {currentPage} of {totalPages} (Showing {startIndex}-{endIndex} of {totalFound} results)</>
-                ) : (
-                  <>Showing {startIndex}-{endIndex} of {displayArticles.length} articles</>
-                )}
+                Showing {startIndex + 1}-{Math.min(endIndex, currentResults.length)} of {currentResults.length} results
               </Typography>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  variant="outlined"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1 || isLoading || isLoadingPage}
-                  startIcon={<ChevronLeftIcon />}
-                  sx={{
+              <Pagination
+                count={totalPages}
+                page={currentPage}
+                onChange={(_, page) => setCurrentPage(page)}
+                color="primary"
+                size="small"
+                sx={{
+                  '& .MuiPaginationItem-root': {
                     color: '#9ca3af',
-                    borderColor: '#374151',
-                    fontSize: '0.75rem',
-                    minWidth: 'auto',
-                    padding: '4px 8px',
-                    '&:hover': {
-                      borderColor: '#3b82f6',
-                      color: '#3b82f6',
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                    '&:disabled': {
-                      borderColor: '#374151',
-                      color: '#6b7280',
-                    },
-                  }}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage >= totalPages || isLoading || isLoadingPage}
-                  endIcon={<ChevronRightIcon />}
-                  sx={{
-                    color: '#9ca3af',
-                    borderColor: '#374151',
-                    fontSize: '0.75rem',
-                    minWidth: 'auto',
-                    padding: '4px 8px',
-                    '&:hover': {
-                      borderColor: '#3b82f6',
-                      color: '#3b82f6',
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                    '&:disabled': {
-                      borderColor: '#374151',
-                      color: '#6b7280',
-                    },
-                  }}
-                >
-                  Next
-                </Button>
-              </Box>
+                    fontSize: '0.875rem',
+                  },
+                  '& .Mui-selected': {
+                    backgroundColor: '#3b82f6',
+                    color: 'white',
+                  },
+                  '& .MuiPaginationItem-root:hover': {
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                }}
+              />
             </Box>
           )}
         </Box>
       )}
 
       {/* No Results */}
-      {!isLoading && newsArticles.length === 0 && !error && (
+      {!isLoading && currentResults.length === 0 && !error && (
         <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
           <Typography variant="body2" color="#9ca3af">
-            No articles match your filters. Try adjusting your search criteria.
+            No articles match your criteria. Try adjusting your search parameters.
           </Typography>
         </Box>
       )}
 
-      {/* Settings Menu */}
-      <Menu
-        anchorEl={settingsAnchor}
-        open={Boolean(settingsAnchor)}
-        onClose={handleSettingsClose}
-        PaperProps={{
-          sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid #374151',
-            color: 'white',
-          },
-        }}
-      >
-        <MenuItem onClick={() => { setFiltersDialogOpen(true); handleSettingsClose(); }}>
-          <FilterIcon sx={{ mr: 1, fontSize: 18 }} />
-          Edit Filters
-        </MenuItem>
-        <MenuItem onClick={() => { setDisplayDialogOpen(true); handleSettingsClose(); }}>
-          <SettingsIcon sx={{ mr: 1, fontSize: 18 }} />
-          Display Options
-        </MenuItem>
-        <MenuItem onClick={handleAutoRefreshToggle}>
-          <AutoRefreshIcon sx={{ mr: 1, fontSize: 18 }} />
-          {autoRefresh ? 'Disable' : 'Enable'} Auto-refresh
-        </MenuItem>
-        <MenuItem onClick={handlePinToggle}>
-          <PinIcon sx={{ mr: 1, fontSize: 18 }} />
-          {pinnedState ? 'Unpin' : 'Pin'} Tile
-        </MenuItem>
-      </Menu>
-
-      {/* Context Target Menu */}
+      {/* Context Menu */}
       <Menu
         anchorEl={contextMenuAnchor}
         open={Boolean(contextMenuAnchor)}
         onClose={handleContextMenuClose}
         PaperProps={{
           sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid #374151',
-            color: 'white',
+            backgroundColor: '#334155',
+            border: '1px solid #475569',
+            '& .MuiMenuItem-root': {
+              color: '#ffffff',
+              '&:hover': { backgroundColor: '#475569' },
+            },
           },
         }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')}>
-          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-          Add to New Chat
+        <MenuItem onClick={() => handleAddToContext('new')} sx={{ color: '#10b981', fontWeight: 600 }}>
+          <ListItemIcon><NewChatIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /></ListItemIcon>
+          <ListItemText primary="Add to New Chat" />
         </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')}>
-          <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Current Sidebar Chat
+        <MenuItem onClick={() => handleAddToContext('sidebar')} sx={{ color: '#3b82f6', fontWeight: 600 }}>
+          <ListItemIcon><SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} /></ListItemIcon>
+          <ListItemText primary="Add to Current Sidebar Chat" />
         </MenuItem>
       </Menu>
 
-      {/* Filters Dialog */}
+      {/* Search Dialog */}
+      {renderSearchDialog()}
+
+      {/* Filter Dialog */}
       <Dialog
-        open={filtersDialogOpen}
-        onClose={() => setFiltersDialogOpen(false)}
+        open={filterDialogOpen}
+        onClose={() => setFilterDialogOpen(false)}
         maxWidth="md"
         fullWidth
         PaperProps={{
           sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid #374151',
-            color: 'white',
+            backgroundColor: '#1e293b',
+            color: '#ffffff',
+            border: '1px solid #334155',
           },
         }}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
       >
-        <DialogTitle>News Filters</DialogTitle>
-        <DialogContent
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-        >
-          <Box sx={{ mt: 2, display: 'grid', gap: 3 }}>
-            {/* Keywords Search with Inline AND/OR Logic */}
-            <FormControl fullWidth>
-              <Typography variant="subtitle2" sx={{ color: 'white', mb: 1 }}>
-                Keywords (Press Enter to add, select multiple to group)
-              </Typography>
-              
-              {/* Add Keywords Input */}
-              <Autocomplete
-                freeSolo
-                options={[]}
-                value={keywordInputValue}
-                inputValue={keywordInputValue}
-                onInputChange={(_, newInputValue) => {
-                  setKeywordInputValue(newInputValue);
-                  // Clear error when user starts typing
-                  setKeywordError(null);
-                }}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    const value = keywordInputValue.trim();
-                    if (value) {
-                      const currentExpression = (localFilters as any).keywordExpression || [];
-                      const newExpression = [...currentExpression];
-                      
-                      // Check if we need an operator before adding a new keyword
-                      if (newExpression.length > 0) {
-                        const lastItem = newExpression[newExpression.length - 1];
-                        if (lastItem.type === 'keyword' || lastItem.type === 'group') {
-                          setKeywordError('Please add an AND or OR operator before adding another keyword');
-                          return;
-                        }
-                      }
-                      
-                      // Add the new keyword
-                      newExpression.push({ type: 'keyword', value });
-                      
-                      setLocalFilters(prev => ({ 
-                        ...prev, 
-                        keywordExpression: newExpression 
-                      }));
-                      setKeywordInputValue('');
-                      // Clear error on successful add
-                      setKeywordError(null);
-                    }
-                  }
-                }}
-                renderInput={(params) => (
-                  <Box>
-                    <TextField
-                      {...params}
-                      placeholder="Type keyword and press Enter"
-                      variant="outlined"
-                      error={!!keywordError}
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          backgroundColor: '#334155',
-                          color: 'white',
-                          ...(keywordError && {
-                            '& fieldset': {
-                              borderColor: '#ef4444',
-                            },
-                            '&:hover fieldset': {
-                              borderColor: '#ef4444',
-                            },
-                            '&.Mui-focused fieldset': {
-                              borderColor: '#ef4444',
-                            },
-                          }),
-                        },
-                      }}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onMouseUp={(e) => e.stopPropagation()}
-                    />
-                    {keywordError && (
-                      <Typography variant="caption" sx={{ color: '#ef4444', mt: 0.5, display: 'block' }}>
-                        {keywordError}
-                      </Typography>
-                    )}
-                  </Box>
-                )}
-              />
+        <DialogTitle sx={{ borderBottom: '1px solid #334155' }}>
+          <Box display="flex" alignItems="center" gap={1}>
+            <FilterIcon />
+            <Typography variant="h6">Filter Results</Typography>
+            <Chip
+              label={`${filteredResults.length} of ${allResults.length} results`}
+              size="small"
+              sx={{
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                color: '#3b82f6',
+                border: '1px solid #3b82f6',
+                ml: 1
+              }}
+            />
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
+            Refine search results by: Click headings to show top filters. Document counts shown in <span style={{ color: '#3b82f6' }}>#</span>
+          </Typography>
 
-              {/* Keywords Display with AND/OR Logic */}
-              <Box sx={{ 
-                minHeight: 60, 
-                p: 2, 
-                border: '1px solid #374151', 
-                borderRadius: 1, 
-                backgroundColor: '#1f2937',
-                mt: 2,
-                position: 'relative'
-              }}>
-                {/* Clear button */}
-                {((localFilters as any).keywordExpression || []).length > 0 && (
-                  <IconButton
-                    size="small"
-                    onClick={() => {
-                      setLocalFilters(prev => ({
+          {/* Applied Filters Section */}
+          {(selectedFilters.sources.length > 0 || 
+            selectedFilters.categories.length > 0 || 
+            selectedFilters.countries.length > 0) && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
+              <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 2, fontWeight: 600 }}>
+                Applied Filters:
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {selectedFilters.sources.map(source => (
+                  <Chip
+                    key={`source-${source}`}
+                    label={`Source: ${source}`}
+                    onDelete={() => {
+                      setSelectedFilters(prev => ({
                         ...prev,
-                        keywordExpression: []
+                        sources: prev.sources.filter(s => s !== source)
                       }));
-                      setSelectedKeywords([]);
-                      setSelectedGroupIndex(null);
                     }}
+                    size="small"
                     sx={{
-                      position: 'absolute',
-                      top: 8,
-                      right: 8,
-                      color: '#9ca3af',
-                      '&:hover': { color: '#ef4444' }
+                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                      color: '#3b82f6',
+                      border: '1px solid #3b82f6',
+                      '& .MuiChip-deleteIcon': { color: '#3b82f6' }
                     }}
-                  >
-                    <CloseIcon fontSize="small" />
-                  </IconButton>
-                )}
-                
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                  {((localFilters as any).keywordExpression || []).map((item: any, index: number) => (
-                    <React.Fragment key={index}>
-                      {item.type === 'keyword' ? (
-                        <Chip
-                          label={item.value}
-                          size="small"
-                          sx={{ 
-                            backgroundColor: selectedKeywords.includes(item.value) ? '#f59e0b' : '#3b82f6', 
-                            color: 'white',
-                            cursor: 'pointer'
-                          }}
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            if (selectedKeywords.includes(item.value)) {
-                              setSelectedKeywords(prev => prev.filter(k => k !== item.value));
-                            } else {
-                              setSelectedKeywords(prev => [...prev, item.value]);
-                              setSelectedGroupIndex(null); // Clear group selection when selecting keyword
-                            }
-                          }}
-                          onDelete={() => {
-                            const newExpression = [...(localFilters as any).keywordExpression];
-                            newExpression.splice(index, 1);
-                            setLocalFilters(prev => ({ 
-                              ...prev, 
-                              keywordExpression: newExpression 
-                            }));
-                          }}
-                        />
-                      ) : item.type === 'operator' ? (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <Typography 
-                            variant="body2" 
-                            sx={{ 
-                              color: '#f59e0b', 
-                              fontWeight: 'bold',
-                              cursor: 'pointer',
-                              px: 1,
-                              py: 0.5,
-                              border: '1px solid #f59e0b',
-                              borderRadius: 0.5
-                            }}
-                            onClick={() => {
-                              const newExpression = [...(localFilters as any).keywordExpression];
-                              newExpression[index] = { type: 'operator', value: item.value === 'AND' ? 'OR' : 'AND' };
-                              setLocalFilters(prev => ({ 
-                                ...prev, 
-                                keywordExpression: newExpression 
-                              }));
-                            }}
-                          >
-                            {item.value}
-                          </Typography>
-                          <IconButton
-                            size="small"
-                            onClick={() => {
-                              const newExpression = [...(localFilters as any).keywordExpression];
-                              newExpression.splice(index, 1);
-                              setLocalFilters(prev => ({ 
-                                ...prev, 
-                                keywordExpression: newExpression 
-                              }));
-                            }}
-                            sx={{ color: '#ef4444' }}
-                          >
-                            <CloseIcon fontSize="small" />
-                          </IconButton>
-                        </Box>
-                      ) : item.type === 'group' ? (
-                        <Box sx={{ 
-                          display: 'inline-flex', 
-                          alignItems: 'center', 
-                          gap: 0.5,
-                          p: 1,
-                          border: selectedGroupIndex === index ? '2px solid #f59e0b' : '1px solid #10b981',
-                          borderRadius: 1,
-                          backgroundColor: selectedGroupIndex === index ? '#78350f' : '#064e3b',
-                          cursor: 'pointer'
-                        }}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          setSelectedGroupIndex(selectedGroupIndex === index ? null : index);
-                          setSelectedKeywords([]); // Clear keyword selection when selecting group
-                        }}>
-                          <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 'bold' }}>
-                            (
-                          </Typography>
-                          {Array.isArray(item.value) && item.value.map((groupItem: any, groupIndex: number) => (
-                            <React.Fragment key={groupIndex}>
-                              {groupItem.type === 'keyword' ? (
-                                <Chip
-                                  label={groupItem.value}
-                                  size="small"
-                                  sx={{ 
-                                    backgroundColor: selectedKeywords.includes(groupItem.value) ? '#f59e0b' : '#10b981', 
-                                    color: 'white',
-                                    cursor: 'pointer'
-                                  }}
-                                  onContextMenu={(e) => {
-                                    e.preventDefault();
-                                    if (selectedKeywords.includes(groupItem.value)) {
-                                      setSelectedKeywords(prev => prev.filter(k => k !== groupItem.value));
-                                    } else {
-                                      setSelectedKeywords(prev => [...prev, groupItem.value]);
-                                    }
-                                  }}
-                                  onDelete={() => {
-                                    const newExpression = [...(localFilters as any).keywordExpression];
-                                    const newGroupValue = [...item.value];
-                                    newGroupValue.splice(groupIndex, 1);
-                                    
-                                    const cleanedResult = cleanupGroup(newGroupValue);
-                                    if (cleanedResult === null) {
-                                      // Remove the entire group
-                                      newExpression.splice(index, 1);
-                                    } else if (Array.isArray(cleanedResult)) {
-                                      // Dissolve group and replace with individual items
-                                      newExpression.splice(index, 1, ...cleanedResult);
-                                    } else if (cleanedResult.type === 'group') {
-                                      // Keep as group
-                                      newExpression[index] = cleanedResult;
-                                    } else {
-                                      // Dissolve group and replace with single item
-                                      newExpression[index] = cleanedResult;
-                                    }
-                                    
-                                    setLocalFilters(prev => ({ 
-                                      ...prev, 
-                                      keywordExpression: newExpression 
-                                    }));
-                                  }}
-                                />
-                              ) : groupItem.type === 'operator' ? (
-                                <Typography 
-                                  variant="body2" 
-                                  sx={{ 
-                                    color: '#f59e0b', 
-                                    fontWeight: 'bold',
-                                    cursor: 'pointer',
-                                    px: 0.5
-                                  }}
-                                  onClick={() => {
-                                    const newExpression = [...(localFilters as any).keywordExpression];
-                                    const newGroupValue = [...item.value];
-                                    newGroupValue[groupIndex] = { type: 'operator', value: groupItem.value === 'AND' ? 'OR' : 'AND' };
-                                    newExpression[index] = { type: 'group', value: newGroupValue };
-                                    setLocalFilters(prev => ({ 
-                                      ...prev, 
-                                      keywordExpression: newExpression 
-                                    }));
-                                  }}
-                                >
-                                  {groupItem.value}
-                                </Typography>
-                              ) : null}
-                            </React.Fragment>
-                          ))}
-                          <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 'bold' }}>
-                            )
-                          </Typography>
-                          <IconButton
-                            size="small"
-                            onClick={() => {
-                              const newExpression = [...(localFilters as any).keywordExpression];
-                              newExpression.splice(index, 1);
-                              setLocalFilters(prev => ({ 
-                                ...prev, 
-                                keywordExpression: newExpression 
-                              }));
-                            }}
-                            sx={{ color: '#ef4444', ml: 0.5 }}
-                          >
-                            <CloseIcon fontSize="small" />
-                          </IconButton>
-                        </Box>
-                      ) : null}
-                    </React.Fragment>
-                  ))}
-                </Box>
-                
-                {/* Create Group Button */}
-                {selectedKeywords.length > 1 && (
-                  <Box sx={{ mt: 2 }}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={() => {
-                        const newExpression = [...(localFilters as any).keywordExpression];
-                        
-                        // Find the indices of selected keywords
-                        const selectedIndices = selectedKeywords.map(keyword => 
-                          newExpression.findIndex(item => item.type === 'keyword' && item.value === keyword)
-                        ).sort((a, b) => a - b);
-                        
-                        // Find the range of items to include in the group (including operators between keywords)
-                        const minIndex = Math.min(...selectedIndices);
-                        const maxIndex = Math.max(...selectedIndices);
-                        
-                        // Extract the items that should be in the group (keywords and operators between them)
-                        const groupItems = newExpression.slice(minIndex, maxIndex + 1);
-                        
-                        // Create the new expression by replacing the range with the group
-                        const newExpressionItems = [
-                          ...newExpression.slice(0, minIndex), // Items before the group
-                          { type: 'group', value: groupItems }, // The group containing keywords and operators
-                          ...newExpression.slice(maxIndex + 1) // Items after the group
-                        ];
-                        
-                        setLocalFilters(prev => ({ 
-                          ...prev, 
-                          keywordExpression: newExpressionItems 
+                  />
+                ))}
+                {selectedFilters.categories.map(category => (
+                  <Chip
+                    key={`category-${category}`}
+                    label={`Category: ${category}`}
+                    onDelete={() => {
+                      setSelectedFilters(prev => ({
+                        ...prev,
+                        categories: prev.categories.filter(c => c !== category)
+                      }));
+                    }}
+                    size="small"
+                    sx={{
+                      backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                      color: '#10b981',
+                      border: '1px solid #10b981',
+                      '& .MuiChip-deleteIcon': { color: '#10b981' }
+                    }}
+                  />
+                ))}
+                {selectedFilters.countries.map(country => (
+                  <Chip
+                    key={`country-${country}`}
+                    label={`Country: ${country}`}
+                    onDelete={() => {
+                      setSelectedFilters(prev => ({
+                        ...prev,
+                        countries: prev.countries.filter(c => c !== country)
+                      }));
+                    }}
+                    size="small"
+                    sx={{
+                      backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                      color: '#f59e0b',
+                      border: '1px solid #f59e0b',
+                      '& .MuiChip-deleteIcon': { color: '#f59e0b' }
+                    }}
+                  />
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {/* Column Visibility Filter */}
+          <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
+            <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 2, fontWeight: 600 }}>
+              Visible Columns:
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {[
+                { key: 'title', label: 'Title', value: visibleColumns.title },
+                { key: 'source', label: 'Source', value: visibleColumns.source },
+                { key: 'category', label: 'Category', value: visibleColumns.category },
+                { key: 'date', label: 'Date', value: visibleColumns.date },
+              ].map((column) => (
+                <FormControlLabel
+                  key={column.key}
+                  control={
+                    <Checkbox
+                      checked={column.value}
+                      onChange={(e) => {
+                        setVisibleColumns(prev => ({
+                          ...prev,
+                          [column.key]: e.target.checked
                         }));
-                        setSelectedKeywords([]);
-                        setSelectedGroupIndex(null);
+                        setLocalDisplayOptions(prev => ({
+                          ...prev,
+                          [`show${column.key.charAt(0).toUpperCase() + column.key.slice(1)}`]: e.target.checked
+                        }));
                       }}
                       sx={{ 
-                        color: '#10b981', 
-                        borderColor: '#10b981',
-                        '&:hover': { borderColor: '#059669', backgroundColor: '#064e3b' }
+                        color: '#64748b', 
+                        '&.Mui-checked': { color: '#3b82f6' },
+                        '& .MuiSvgIcon-root': { fontSize: 20 },
                       }}
-                    >
-                      Create Group ({selectedKeywords.length} keywords)
-                    </Button>
-                  </Box>
-                )}
-                
-                {/* Add Operator After Selected Item */}
-                {(selectedKeywords.length === 1 || selectedGroupIndex !== null) && (
-                  <Box sx={{ mt: 2 }}>
-                    <Typography variant="caption" sx={{ color: '#9ca3af', mb: 1, display: 'block' }}>
-                      Add operator after selected {selectedKeywords.length === 1 ? 'keyword' : 'group'}:
+                    />
+                  }
+                  label={
+                    <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
+                      {column.label}
                     </Typography>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => {
-                          const newExpression = [...(localFilters as any).keywordExpression];
-                          let selectedIndex = -1;
-                          
-                          if (selectedKeywords.length === 1) {
-                            // Find selected keyword
-                            const selectedKeyword = selectedKeywords[0];
-                            selectedIndex = newExpression.findIndex(item => 
-                              item.type === 'keyword' && item.value === selectedKeyword
-                            );
-                          } else if (selectedGroupIndex !== null) {
-                            // Use selected group index
-                            selectedIndex = selectedGroupIndex;
-                          }
-                          
-                          if (selectedIndex !== -1) {
-                            newExpression.splice(selectedIndex + 1, 0, { type: 'operator', value: 'AND' });
-                            setLocalFilters(prev => ({ 
-                              ...prev, 
-                              keywordExpression: newExpression 
-                            }));
-                          }
-                        }}
-                        sx={{ 
-                          color: '#f59e0b', 
-                          borderColor: '#f59e0b',
-                          '&:hover': { borderColor: '#d97706', backgroundColor: '#78350f' }
-                        }}
-                      >
-                        Add AND after
-                      </Button>
-                      
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => {
-                          const newExpression = [...(localFilters as any).keywordExpression];
-                          let selectedIndex = -1;
-                          
-                          if (selectedKeywords.length === 1) {
-                            // Find selected keyword
-                            const selectedKeyword = selectedKeywords[0];
-                            selectedIndex = newExpression.findIndex(item => 
-                              item.type === 'keyword' && item.value === selectedKeyword
-                            );
-                          } else if (selectedGroupIndex !== null) {
-                            // Use selected group index
-                            selectedIndex = selectedGroupIndex;
-                          }
-                          
-                          if (selectedIndex !== -1) {
-                            newExpression.splice(selectedIndex + 1, 0, { type: 'operator', value: 'OR' });
-                            setLocalFilters(prev => ({ 
-                              ...prev, 
-                              keywordExpression: newExpression 
-                            }));
-                          }
-                        }}
-                        sx={{ 
-                          color: '#f59e0b', 
-                          borderColor: '#f59e0b',
-                          '&:hover': { borderColor: '#d97706', backgroundColor: '#78350f' }
-                        }}
-                      >
-                        Add OR after
-                      </Button>
-                    </Box>
-                  </Box>
-                )}
-              </Box>
-            </FormControl>
+                  }
+                  sx={{ 
+                    margin: 0,
+                    '& .MuiFormControlLabel-label': {
+                      ml: 0.5,
+                    },
+                  }}
+                />
+              ))}
+            </Box>
+          </Box>
 
-            {/* Source Selection with Expression Logic */}
-            {renderExpressionFilter(
-              'source',
-              sourceInputValue,
-              setSourceInputValue,
-              selectedSources,
-              setSelectedSources,
-              selectedSourceGroupIndex,
-              setSelectedSourceGroupIndex,
-              [],  // No predefined options - freeform text
-              'Sources',
-              'Type source name (e.g., Bloomberg, Reuters) and press Enter',
-              false // Freeform text input mode
-            )}
-
-            {/* Category Selection with Expression Logic */}
-            {renderExpressionFilter(
-              'category',
-              categoryInputValue,
-              setCategoryInputValue,
-              selectedCategories,
-              setSelectedCategories,
-              selectedCategoryGroupIndex,
-              setSelectedCategoryGroupIndex,
-              categoryOptions,
-              'Categories',
-              'Select category from dropdown',
-              true // Use dropdown mode
-            )}
-
-            {/* Date Range */}
-            <FormControl fullWidth>
-              <Select
-                value={localFilters.dateRange}
-                onChange={(e) => {
-                  setLocalFilters(prev => ({ ...prev, dateRange: e.target.value }));
-                }}
-                sx={{ color: 'white' }}
-              >
-                <MenuItem value="1h">Last Hour</MenuItem>
-                <MenuItem value="12h">12 Hours (Latest)</MenuItem>
-                <MenuItem value="24h">Last 24 Hours</MenuItem>
-                <MenuItem value="7d">Last 7 Days</MenuItem>
-                <MenuItem value="30d">Last 30 Days</MenuItem>
-                <MenuItem value="all">All Time</MenuItem>
-              </Select>
-            </FormControl>
-
-            {/* Country Selection with Expression Logic */}
-            {renderExpressionFilter(
-              'country',
-              countryInputValue,
-              setCountryInputValue,
-              selectedCountries,
-              setSelectedCountries,
-              selectedCountryGroupIndex,
-              setSelectedCountryGroupIndex,
-              countryOptions,
-              'Countries',
-              'Select country from dropdown',
-              true // Use dropdown mode
+          {/* Page Size Selection */}
+          <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
+            <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 2, fontWeight: 600 }}>
+              Results Per Page:
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <FormControl sx={{ minWidth: 120 }}>
+                <TextField
+                  select
+                  value={resultsPerPage}
+                  onChange={(e) => {
+                    const newSize = parseInt(e.target.value);
+                    setResultsPerPage(newSize);
+                    setCurrentPage(1);
+                    setIsPageSizeManuallySet(true);
+                    localStorage.setItem(`newsTile_pageSize_${id}`, newSize.toString());
+                  }}
+                  size="small"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: '#475569',
+                      color: '#ffffff',
+                      '& fieldset': {
+                        borderColor: '#64748b',
+                      },
+                      '&:hover fieldset': {
+                        borderColor: '#3b82f6',
+                      },
+                      '&.Mui-focused fieldset': {
+                        borderColor: '#3b82f6',
+                      },
+                    },
+                    '& .MuiSelect-select': {
+                      color: '#ffffff',
+                    },
+                    '& .MuiSelect-icon': {
+                      color: '#94a3b8',
+                    },
+                    '& .MuiInputLabel-root': {
+                      color: '#94a3b8',
+                    },
+                  }}
+                  SelectProps={{
+                    MenuProps: {
+                      PaperProps: {
+                        sx: {
+                          backgroundColor: '#334155',
+                          '& .MuiMenuItem-root': {
+                            color: '#ffffff',
+                            '&:hover': {
+                              backgroundColor: '#475569',
+                            },
+                            '&.Mui-selected': {
+                              backgroundColor: '#3b82f6',
+                              '&:hover': {
+                                backgroundColor: '#2563eb',
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  }}
+                >
+                  {[10, 25, 50, 100].map((size) => (
+                    <MenuItem key={size} value={size}>
+                      {size} results
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </FormControl>
+              
+              {isPageSizeManuallySet && (
+                <Button
+                  onClick={() => {
+                    setIsPageSizeManuallySet(false);
+                    const newResultsPerPage = calculateResultsPerPage();
+                    setResultsPerPage(newResultsPerPage);
+                    setCurrentPage(1);
+                    localStorage.removeItem(`newsTile_pageSize_${id}`);
+                  }}
+                  size="small"
+                  sx={{
+                    color: '#94a3b8',
+                    fontSize: '0.75rem',
+                    textTransform: 'none',
+                    minWidth: 'auto',
+                    px: 1.5,
+                    '&:hover': {
+                      color: '#3b82f6',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                  }}
+                >
+                  Auto
+                </Button>
+              )}
+            </Box>
+            {!isPageSizeManuallySet && (
+              <Typography variant="caption" sx={{ color: '#94a3b8', mt: 1, display: 'block' }}>
+                Automatically adjusts based on tile size
+              </Typography>
             )}
           </Box>
+
+          {/* No Results Message */}
+          {availableFilters.sources.length === 0 && 
+           availableFilters.categories.length === 0 && 
+           availableFilters.countries.length === 0 ? (
+            <Box 
+              sx={{ 
+                textAlign: 'center', 
+                py: 6, 
+                backgroundColor: '#334155', 
+                borderRadius: '4px',
+                border: '1px solid #475569'
+              }}
+            >
+              <Typography variant="h6" sx={{ color: '#cbd5e1', mb: 2, fontWeight: 500 }}>
+                No Filters Available
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#94a3b8' }}>
+                {allResults.length === 0 
+                  ? 'No search results found. Try adjusting your search criteria.'
+                  : 'All results are identical - no additional filters can be applied.'
+                }
+              </Typography>
+            </Box>
+          ) : (
+            <Box 
+              display="flex" 
+              flexDirection="column" 
+              gap={2}
+              sx={{
+                '& .MuiAccordion-root': {
+                  backgroundColor: '#334155',
+                  border: '1px solid #475569',
+                  borderRadius: '4px',
+                  boxShadow: 'none',
+                  '&:before': {
+                    display: 'none',
+                  },
+                  '&.Mui-expanded': {
+                    margin: '8px 0',
+                  },
+                  '&:not(:last-child)': {
+                    marginBottom: '8px',
+                  },
+                },
+                '& .MuiAccordionSummary-root': {
+                  backgroundColor: '#475569',
+                  borderRadius: '4px 4px 0 0',
+                  minHeight: '56px',
+                  '&.Mui-expanded': {
+                    minHeight: '56px',
+                    borderRadius: '4px 4px 0 0',
+                  },
+                  '&:hover': {
+                    backgroundColor: '#64748b',
+                  },
+                },
+                '& .MuiAccordionDetails-root': {
+                  padding: '16px',
+                  backgroundColor: '#334155',
+                  borderRadius: '0 0 4px 4px',
+                  borderTop: '1px solid #475569',
+                },
+                '& .MuiAccordionSummary-content': {
+                  margin: '12px 0',
+                },
+                '& .MuiAccordionSummary-expandIconWrapper': {
+                  color: '#e2e8f0',
+                  '&.Mui-expanded': {
+                    transform: 'rotate(180deg)',
+                  },
+                },
+              }}
+            >
+            {/* Sources Filter */}
+            {availableFilters.sources.length > 0 && (
+              <Accordion>
+                <AccordionSummary 
+                  expandIcon={<ExpandMoreIcon sx={{ color: '#ffffff' }} />}
+                  sx={{ cursor: 'pointer' }}
+                >
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#e2e8f0', fontSize: '0.95rem' }}>
+                    Sources ({availableFilters.sources.length})
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Box 
+                    sx={{ 
+                      maxHeight: '200px', 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: '#475569',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: '#3b82f6',
+                        borderRadius: '3px',
+                        '&:hover': {
+                          backgroundColor: '#2563eb',
+                        },
+                      },
+                    }}
+                  >
+                    {availableFilters.sources.map((filter) => (
+                      <Box
+                        key={filter.source}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          p: 1.5,
+                          cursor: 'pointer',
+                          borderRadius: '4px',
+                          backgroundColor: selectedFilters.sources.includes(filter.source)
+                            ? 'rgba(59, 130, 246, 0.15)'
+                            : 'transparent',
+                          '&:hover': { backgroundColor: 'rgba(71, 85, 105, 0.5)' },
+                          transition: 'background-color 0.15s ease',
+                        }}
+                        onClick={() => {
+                          const isSelected = selectedFilters.sources.includes(filter.source);
+                          setSelectedFilters(prev => ({
+                            ...prev,
+                            sources: isSelected
+                              ? prev.sources.filter(s => s !== filter.source)
+                              : [...prev.sources, filter.source]
+                          }));
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1, fontSize: '0.875rem' }}>
+                          {filter.source}
+                        </Typography>
+                        <Chip
+                          label={filter.count}
+                          size="small"
+                          sx={{
+                            backgroundColor: '#3b82f6',
+                            color: '#ffffff',
+                            minWidth: '28px',
+                            height: '22px',
+                            fontSize: '0.75rem',
+                            fontWeight: 500,
+                            '& .MuiChip-label': {
+                              px: 0.75,
+                            },
+                          }}
+                        />
+                      </Box>
+                    ))}
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+            )}
+
+            {/* Categories Filter */}
+            {availableFilters.categories.length > 0 && (
+              <Accordion>
+                <AccordionSummary 
+                  expandIcon={<ExpandMoreIcon sx={{ color: '#ffffff' }} />}
+                  sx={{ cursor: 'pointer' }}
+                >
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#e2e8f0', fontSize: '0.95rem' }}>
+                    Categories ({availableFilters.categories.length})
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Box 
+                    sx={{ 
+                      maxHeight: '200px', 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: '#475569',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: '#3b82f6',
+                        borderRadius: '3px',
+                        '&:hover': {
+                          backgroundColor: '#2563eb',
+                        },
+                      },
+                    }}
+                  >
+                    {availableFilters.categories.map((filter) => (
+                      <Box
+                        key={filter.category}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          p: 1,
+                          cursor: 'pointer',
+                          borderRadius: 1,
+                          backgroundColor: selectedFilters.categories.includes(filter.category)
+                            ? 'rgba(59, 130, 246, 0.2)'
+                            : 'transparent',
+                          '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                        }}
+                        onClick={() => {
+                          const isSelected = selectedFilters.categories.includes(filter.category);
+                          setSelectedFilters(prev => ({
+                            ...prev,
+                            categories: isSelected
+                              ? prev.categories.filter(c => c !== filter.category)
+                              : [...prev.categories, filter.category]
+                          }));
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ color: '#ffffff', flex: 1 }}>
+                          {filter.category}
+                        </Typography>
+                        <Chip
+                          label={filter.count}
+                          size="small"
+                          sx={{
+                            backgroundColor: '#3b82f6',
+                            color: 'white',
+                            minWidth: '32px',
+                            height: '20px',
+                            fontSize: '0.7rem',
+                          }}
+                        />
+                      </Box>
+                    ))}
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+            )}
+
+            {/* Countries Filter */}
+            {availableFilters.countries.length > 0 && (
+              <Accordion>
+                <AccordionSummary 
+                  expandIcon={<ExpandMoreIcon sx={{ color: '#ffffff' }} />}
+                  sx={{ cursor: 'pointer' }}
+                >
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#e2e8f0', fontSize: '0.95rem' }}>
+                    Countries ({availableFilters.countries.length})
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Box 
+                    sx={{ 
+                      maxHeight: '200px', 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '8px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: '#1e293b',
+                        borderRadius: '4px',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: '#3b82f6',
+                        borderRadius: '4px',
+                        '&:hover': {
+                          backgroundColor: '#2563eb',
+                        },
+                      },
+                    }}
+                  >
+                    {availableFilters.countries.map((filter) => (
+                      <Box
+                        key={filter.country}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          p: 1,
+                          cursor: 'pointer',
+                          borderRadius: 1,
+                          backgroundColor: selectedFilters.countries.includes(filter.country)
+                            ? 'rgba(59, 130, 246, 0.2)'
+                            : 'transparent',
+                          '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                        }}
+                        onClick={() => {
+                          const isSelected = selectedFilters.countries.includes(filter.country);
+                          setSelectedFilters(prev => ({
+                            ...prev,
+                            countries: isSelected
+                              ? prev.countries.filter(c => c !== filter.country)
+                              : [...prev.countries, filter.country]
+                          }));
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ color: '#ffffff', flex: 1 }}>
+                          {filter.country}
+                        </Typography>
+                        <Chip
+                          label={filter.count}
+                          size="small"
+                          sx={{
+                            backgroundColor: '#3b82f6',
+                            color: 'white',
+                            minWidth: '32px',
+                            height: '20px',
+                            fontSize: '0.7rem',
+                          }}
+                        />
+                      </Box>
+                    ))}
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+            )}
+          </Box>
+          )}
         </DialogContent>
-        <DialogActions sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 3, py: 2 }}>
-          <Button onClick={() => {
-            setFiltersDialogOpen(false);
-            // Clean up trailing operators before resetting
-            const cleanedFilters = cleanupAllExpressions(localFilters);
-            setLocalFilters(cleanedFilters);
-          }}>Cancel</Button>
-          
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-            {/* Results Per Page */}
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
-              <Select
-                value={localDisplayOptions.maxResults || 20}
-                label="Per Page"
-                onChange={(e) => {
-                  const newMaxResults = Number(e.target.value);
-                  const newOptions = {
-                    ...localDisplayOptions,
-                    maxResults: newMaxResults,
-                  };
-                  setLocalDisplayOptions(newOptions);
-                  // Update settings (search will be triggered when user clicks "Apply & Search")
-                  setTimeout(() => {
-                    onSettingsChange(id, { displayOptions: newOptions });
-                  }, 100);
-                }}
-                sx={{
-                  color: '#ffffff',
-                  '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                }}
-              >
-                <MenuItem value={10}>10</MenuItem>
-                <MenuItem value={25}>25</MenuItem>
-                <MenuItem value={50}>50</MenuItem>
-                <MenuItem value={100}>100</MenuItem>
-              </Select>
-            </FormControl>
-            
-            <Button onClick={() => { 
-              // Clean up trailing operators before applying
-              const cleanedFilters = cleanupAllExpressions(localFilters);
-              // Update local state without triggering onSettingsChange immediately
-              setLocalFilters(cleanedFilters);
-              setFiltersDialogOpen(false); 
-              runNewsSearch();
-              // Update settings after search to avoid race condition
-              setTimeout(() => {
-                onSettingsChange(id, { filters: cleanedFilters });
-              }, 200);
-            }} 
+        <DialogActions sx={{ borderTop: '1px solid #334155', p: 3, gap: 1 }}>
+          <Button
+            onClick={() => {
+              setSelectedFilters({
+                sources: [],
+                categories: [],
+                countries: [],
+              });
+            }}
+            disabled={
+              selectedFilters.sources.length === 0 && 
+              selectedFilters.categories.length === 0 && 
+              selectedFilters.countries.length === 0
+            }
+            sx={{ 
+              color: '#94a3b8',
+              '&:hover': {
+                backgroundColor: 'rgba(148, 163, 184, 0.1)',
+              },
+              '&.Mui-disabled': {
+                color: '#64748b',
+              },
+            }}
+          >
+            Clear All
+          </Button>
+          <Button
+            onClick={() => {
+              onSettingsChange(id, { 
+                displayOptions: localDisplayOptions,
+                filterSettings: selectedFilters 
+              });
+              setFilterDialogOpen(false);
+            }}
             variant="contained"
             sx={{
               background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
               '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
-            }}>
-              Apply & Search
-            </Button>
-          </Box>
+              color: '#ffffff',
+              fontWeight: 600,
+            }}
+          >
+            Apply Filters
+          </Button>
         </DialogActions>
       </Dialog>
 
@@ -2749,66 +2381,77 @@ const NewsTile: React.FC<NewsTileProps> = ({
       >
         <DialogTitle>Display Options</DialogTitle>
         <DialogContent>
-          <Box sx={{ mt: 1 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={localDisplayOptions.showImages}
-                  onChange={() => handleDisplayOptionsChange('showImages')}
+                  checked={localDisplayOptions.showTitle}
+                  onChange={() => handleDisplayOptionsChange('showTitle')}
+                  sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
                 />
               }
-              label="Show Article Images"
+              label="Show Title"
             />
             <FormControlLabel
               control={
                 <Checkbox
                   checked={localDisplayOptions.showSource}
                   onChange={() => handleDisplayOptionsChange('showSource')}
+                  sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
                 />
               }
-              label="Show Source Name"
+              label="Show Source"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={localDisplayOptions.showCategory}
+                  onChange={() => handleDisplayOptionsChange('showCategory')}
+                  sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
+                />
+              }
+              label="Show Category"
             />
             <FormControlLabel
               control={
                 <Checkbox
                   checked={localDisplayOptions.showDate}
                   onChange={() => handleDisplayOptionsChange('showDate')}
+                  sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
                 />
               }
-              label="Show Publication Date"
+              label="Show Date"
             />
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={localDisplayOptions.showKeywords}
-                  onChange={() => handleDisplayOptionsChange('showKeywords')}
+                  checked={localDisplayOptions.showResultsTable}
+                  onChange={() => handleDisplayOptionsChange('showResultsTable')}
+                  sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
                 />
               }
-              label="Show Keywords"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.compactView}
-                  onChange={() => handleDisplayOptionsChange('compactView')}
-                />
-              }
-              label="Compact View"
+              label="Show Results Table"
             />
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDisplayDialogOpen(false)}>Close</Button>
+          <Button
+            onClick={() => setDisplayDialogOpen(false)}
+            sx={{ color: '#9ca3af' }}
+          >
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
   );
 };
 
-// Memo comparison - check essential props
+// Custom comparison function for memo
 const NewsTileMemo = memo(NewsTile, (prevProps, nextProps) => {
   // Always re-render if key props change
-  if (prevProps.id !== nextProps.id) {
+  if (prevProps.id !== nextProps.id ||
+      prevProps.dashboardContext !== nextProps.dashboardContext) {
     return false; // Re-render
   }
   
@@ -2816,12 +2459,13 @@ const NewsTileMemo = memo(NewsTile, (prevProps, nextProps) => {
   const prevDisplay = prevProps.displayOptions;
   const nextDisplay = nextProps.displayOptions;
   if (prevDisplay && nextDisplay) {
-    if (prevDisplay.showImages !== nextDisplay.showImages ||
+    if (prevDisplay.showTitle !== nextDisplay.showTitle ||
+        prevDisplay.showDescription !== nextDisplay.showDescription ||
         prevDisplay.showSource !== nextDisplay.showSource ||
+        prevDisplay.showCategory !== nextDisplay.showCategory ||
         prevDisplay.showDate !== nextDisplay.showDate ||
-        prevDisplay.showKeywords !== nextDisplay.showKeywords ||
-        prevDisplay.maxResults !== nextDisplay.maxResults ||
-        prevDisplay.compactView !== nextDisplay.compactView) {
+        prevDisplay.showResultsTable !== nextDisplay.showResultsTable ||
+        prevDisplay.maxResults !== nextDisplay.maxResults) {
       return false; // Re-render
     }
   }
@@ -2848,3 +2492,4 @@ const NewsTileMemo = memo(NewsTile, (prevProps, nextProps) => {
 });
 
 export default NewsTileMemo;
+

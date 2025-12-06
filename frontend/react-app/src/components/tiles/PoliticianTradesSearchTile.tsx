@@ -170,9 +170,12 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
 
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentSearchParams, setCurrentSearchParams] = useState<PoliticianTradesSearchParams>(searchParams);
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>(results);
+  const [lastEvaluatedKey, setLastEvaluatedKey] = useState<{ transactionDate?: number; tradeId?: string } | null>(null);
+  const [hasMore, setHasMore] = useState<boolean>(false);
   // Ensure defaults are set
   const defaultDisplayOptions = {
     showPolitician: true,
@@ -348,6 +351,8 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     console.log('🏛️ PoliticianTradesSearchTile: Starting search with params:', currentSearchParams);
     setIsLoading(true);
     setError(null);
+    setLastEvaluatedKey(null);
+    setHasMore(false);
     
     try {
       const searchRequest = {
@@ -367,13 +372,13 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           tradeId: trade.tradeId || `trade_${index}_${Date.now()}`,
         }));
         
-
-        
         // Store all results for filtering
         setAllResults(processedResults);
         setFilteredResults(processedResults);
         setCurrentResults(processedResults);
         setHasPerformedInitialSearch(true);
+        setHasMore(response.has_more || false);
+        setLastEvaluatedKey(response.last_evaluated_key || null);
         
         // Update parent component - persist results in session only (not database)
         onUpdate(id, {
@@ -387,6 +392,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         console.error('🏛️ PoliticianTradesSearchTile: Search failed:', response.error);
         setError(response.error || 'Search failed');
         setCurrentResults([]);
+        setHasMore(false);
         setHasPerformedInitialSearch(true);
       }
     } catch (err: any) {
@@ -394,10 +400,68 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       setError(err.message || 'An error occurred during search');
       setCurrentResults([]);
       setHasPerformedInitialSearch(true);
+      setHasMore(false);
     } finally {
       setIsLoading(false);
     }
-  }, [currentSearchParams, displayOptions.maxResults, id, onUpdate]);
+  }, [currentSearchParams, displayOptions.maxResults, id, onUpdate, onSettingsChange]);
+  
+  // Load more results using cursor-based pagination
+  const handleLoadMore = useCallback(async () => {
+    if (!hasMore || !lastEvaluatedKey || isLoadingMore || !currentSearchParams) return;
+    
+    setIsLoadingMore(true);
+    setError(null);
+    
+    try {
+      const searchRequest = {
+        ...currentSearchParams,
+        page: 1, // Not used when lastEvaluatedKey is provided
+        pageSize: displayOptions.maxResults,
+        lastEvaluatedKey: lastEvaluatedKey, // Cursor for pagination
+      };
+      
+      console.log('📥 PoliticianTradesSearchTile: Load More Request:', {
+        lastEvaluatedKey,
+        note: 'Loading next batch using cursor'
+      });
+      
+      const response = await politicianTradesSearchAPI.search(searchRequest);
+      
+      if (response.success && response.results) {
+        // Ensure each trade has a tradeId for table rendering
+        const processedResults = response.results.map((trade, index) => ({
+          ...trade,
+          tradeId: trade.tradeId || `trade_${index}_${Date.now()}`,
+        }));
+        
+        // Append new results to existing results
+        setAllResults(prev => {
+          const updated = [...prev, ...processedResults];
+          // Update parent component
+          onUpdate(id, {
+            results: updated,
+            lastUpdated: Date.now(),
+          });
+          return updated;
+        });
+        setFilteredResults(prev => [...prev, ...processedResults]);
+        setCurrentResults(prev => [...prev, ...processedResults]);
+        setHasMore(response.has_more || false);
+        setLastEvaluatedKey(response.last_evaluated_key || null);
+      } else {
+        console.error('🏛️ PoliticianTradesSearchTile: Load more failed:', response.error);
+        setError(response.error || 'Load more failed');
+        setHasMore(false);
+      }
+    } catch (err: any) {
+      console.error('🏛️ PoliticianTradesSearchTile: Load more error:', err);
+      setError(err.message || 'An error occurred while loading more results');
+      setHasMore(false);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, displayOptions.maxResults, id, onUpdate]);
 
   // Dynamic pagination based on tile height
   const calculateResultsPerPage = useCallback(() => {
@@ -1186,16 +1250,45 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           </Typography>
           
           <Chip
-            label={allResults.length > 0 && currentResults.length !== allResults.length 
-              ? `${currentResults.length} of ${allResults.length} results`
-              : `${currentResults.length} results`}
+            label={
+              isLoadingMore 
+                ? 'Loading...' 
+                : hasMore && allResults.length > 0 && filteredResults.length === allResults.length
+                  ? `Load More (${allResults.length} loaded)`
+                  : allResults.length > 0 && currentResults.length !== allResults.length 
+                    ? `${currentResults.length} of ${allResults.length} results`
+                    : `${currentResults.length} results`
+            }
             size="small"
+            onClick={
+              hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? handleLoadMore
+                : undefined
+            }
+            disabled={isLoadingMore || isLoading || !hasMore || filteredResults.length !== allResults.length}
             sx={{
-              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+              backgroundColor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? 'rgba(59, 130, 246, 0.3)'
+                : 'rgba(59, 130, 246, 0.2)',
               color: '#3b82f6',
               border: '1px solid #3b82f6',
               fontSize: '0.75rem',
               height: '20px',
+              cursor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? 'pointer'
+                : 'default',
+              '&:hover': hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? {
+                    backgroundColor: 'rgba(59, 130, 246, 0.4)',
+                    transform: 'scale(1.05)',
+                  }
+                : {},
+              '&.Mui-disabled': {
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                color: '#6b7280',
+                borderColor: '#4b5563',
+                cursor: 'not-allowed',
+              },
             }}
           />
           

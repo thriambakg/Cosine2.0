@@ -746,6 +746,7 @@ const SECSearchPage: React.FC = () => {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>(
     savedState?.selectedCategoryFilter || 'all'
   );
+  const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== undefined ? savedState.searchFormExpanded : true);
   
   // Store all results from current search for client-side filtering
   const [allSearchResults, setAllSearchResults] = useState<SECSearchResult[]>(
@@ -927,6 +928,7 @@ const SECSearchPage: React.FC = () => {
         selectedCategoryFilter,
         selectedColumns,
         isFiltered,
+        searchFormExpanded,
         // Save search state in legacy format for compatibility
         isFetchingAll: searchState.isSearching,
         fetchProgress: searchState.isSearching 
@@ -953,6 +955,7 @@ const SECSearchPage: React.FC = () => {
     selectedCategoryFilter,
     selectedColumns,
     isFiltered,
+    searchFormExpanded,
     searchState,
     searchStartTime,
     isRestoringState,
@@ -1821,12 +1824,21 @@ const SECSearchPage: React.FC = () => {
         </Box>
 
         {/* Search Form */}
-        <GlassCard sx={{ p: 4, mb: 4 }}>
-          {/* Search Parameters Section Header */}
-          <Typography variant="h6" sx={{ color: '#ffffff', mb: 3, fontSize: '1.1rem', fontWeight: 600 }}>
-            Search Parameters (Applied when you click Search)
-          </Typography>
-          
+        <GlassCard sx={{ mb: 4 }}>
+          <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: searchFormExpanded ? '1px solid rgba(55, 65, 81, 0.5)' : 'none' }}>
+            <Typography variant="h6" sx={{ color: '#ffffff', fontSize: '1.1rem', fontWeight: 600 }}>
+              Search Parameters (Applied when you click Search)
+            </Typography>
+            <IconButton
+              onClick={() => setSearchFormExpanded(!searchFormExpanded)}
+              sx={{ color: '#9ca3af' }}
+              size="small"
+            >
+              {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+            </IconButton>
+          </Box>
+          <Collapse in={searchFormExpanded}>
+            <Box sx={{ p: 4 }}>
           {/* Search Parameters */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 3 }}>
             {/* Row 1: Filers and Keywords - Multi-Select */}
@@ -2134,6 +2146,8 @@ const SECSearchPage: React.FC = () => {
               ))}
             </FormGroup>
           </Box>
+            </Box>
+          </Collapse>
         </GlassCard>
 
         {/* Form Types Selection Modal */}

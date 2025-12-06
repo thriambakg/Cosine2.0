@@ -31,6 +31,7 @@ GSI_NAMES = {
     'position': 'PositionTradeDateIndex',
     'party': 'PartyTradeDateIndex',
     'securitySymbol': 'SecurityTradeDateIndex',
+    'securityName': 'SecurityNameTradeDateIndex',
     'transactionType': 'TransactionTypeTradeDateIndex',
     'amountMin': 'AmountRangeTradeDateIndex',
     'stateDistrict': 'StateDistrictTradeDateIndex',
@@ -147,7 +148,7 @@ def build_query_params(
     logger.info(f"🔧 build_query_params called with filters: {json.dumps(filters, default=str)}")
     
     # Determine which GSI to use based on provided filters
-    # Priority order: politicianName > position > party > securitySymbol > formType > transactionType > amountMin > stateDistrict
+    # Priority order: politicianName > position > party > securitySymbol > securityName > transactionType > amountMin > stateDistrict
     
     index_name = None
     key_condition = None
@@ -305,35 +306,22 @@ def build_query_params(
     
     # If we have a security search but no other GSI key, try to use SecuritySymbol GSI for better performance
     elif filters.get('security'):
-        securities = filters['security']
-        if isinstance(securities, list):
-            if len(securities) == 1:
-                # Single security - check if it's a good GSI candidate
-                security_value = securities[0].strip()
-                if (2 <= len(security_value) <= 6 and 
-                    security_value.replace('.', '').replace('-', '').isalnum() and
-                    security_value.isupper()):
-                    index_name = GSI_NAMES['securitySymbol']
-                    key_condition = Key('securitySymbol').eq(security_value.upper())
-                    logger.info(f"✅ Selected GSI: {index_name} for single security symbol: '{security_value}'")
-                else:
-                    logger.info(f"🔍 Single security search '{security_value}' will use scan with filter")
-            else:
-                # Multiple securities - always use scan with filter
-                logger.info(f"🔍 Multiple securities search ({len(securities)} items) will use scan with filter")
-        else:
-            # Single string
-            security_value = securities.strip()
-            # Use GSI if it looks like an exact stock symbol match
-            # Criteria: short (2-6 chars), mostly uppercase, and alphanumeric
+        securities = filters['security']  # Always a list of strings
+        if len(securities) == 1:
+            # Single security - check if it's a good GSI candidate
+            security_value = securities[0].strip()
             if (2 <= len(security_value) <= 6 and 
                 security_value.replace('.', '').replace('-', '').isalnum() and
                 security_value.isupper()):
                 index_name = GSI_NAMES['securitySymbol']
                 key_condition = Key('securitySymbol').eq(security_value.upper())
-                logger.info(f"✅ Selected GSI: {index_name} for exact security symbol: '{security_value}'")
+                logger.info(f"✅ Selected GSI: {index_name} for single security symbol: '{security_value}'")
             else:
-                logger.info(f"🔍 Security search '{security_value}' will use scan with filter (likely company name or partial match)")
+                logger.info(f"🔍 Single security search '{security_value}' will use scan with filter")
+        elif len(securities) > 1:
+            # Multiple securities - always use scan with filter
+            logger.info(f"🔍 Multiple securities search ({len(securities)} items) will use scan with filter")
+        # Empty list case is handled by the check above
     
     # Add transactionDate range filter if using a GSI (all GSIs have transactionDate as range key)
     # IMPORTANT: transactionDate is stored as YYYYMMDD integer (e.g., 20251021), NOT Unix timestamp
@@ -375,7 +363,7 @@ def build_query_params(
     
     # Enhanced security search - searches both securitySymbol and securityName with improved logic
     if filters.get('security') and index_name != GSI_NAMES.get('securitySymbol'):
-        securities = filters['security']
+        securities = filters['security']  # Always a list of strings
         
         def create_security_filter(security_value):
             """Create a comprehensive security filter for a single security value"""
@@ -397,28 +385,23 @@ def build_query_params(
                 (Attr('securitySymbol').eq('--') & Attr('securityName').contains(security_value))
             )
         
-        if isinstance(securities, list):
-            if len(securities) == 1:
-                # Single security
-                security_filter = create_security_filter(securities[0])
-                filter_conditions.append(security_filter)
-                logger.info(f"🔍 Added security filter for: '{securities[0]}' (symbol/name/other search)")
-            elif len(securities) > 1:
-                # Multiple securities - use OR condition
-                combined_filter = None
-                for security_value in securities:
-                    security_filter = create_security_filter(security_value)
-                    if combined_filter is None:
-                        combined_filter = security_filter
-                    else:
-                        combined_filter = combined_filter | security_filter
-                filter_conditions.append(combined_filter)
-                logger.info(f"🔍 Added multiple securities filter: {securities} (symbol/name/other search)")
-        else:
-            # Single string
-            security_filter = create_security_filter(securities)
+        if len(securities) == 1:
+            # Single security
+            security_filter = create_security_filter(securities[0])
             filter_conditions.append(security_filter)
-            logger.info(f"🔍 Added security filter for: '{securities}' (symbol/name/other search)")
+            logger.info(f"🔍 Added security filter for: '{securities[0]}' (symbol/name/other search)")
+        elif len(securities) > 1:
+            # Multiple securities - use OR condition
+            combined_filter = None
+            for security_value in securities:
+                single_filter = create_security_filter(security_value)
+                if combined_filter is None:
+                    combined_filter = single_filter
+                else:
+                    combined_filter = combined_filter | single_filter
+            filter_conditions.append(combined_filter)
+            logger.info(f"🔍 Added multiple securities filter: {securities} (symbol/name/other search)")
+        # Empty list case is handled by the check above
     
     # Politician name filter (when not using GSI)
     if filters.get('politicianName') and index_name != GSI_NAMES.get('politicianName'):
@@ -708,17 +691,215 @@ def search_multiple_politicians(table, politician_names: List[str], filters: Dic
     return all_results
 
 
-def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -> Dict[str, Any]:
+def is_valid_ticker(security: str) -> bool:
+    """
+    Check if a security string is a valid ticker symbol (can use GSI)
+    
+    Args:
+        security: Security string to check
+    
+    Returns:
+        True if it's a valid ticker, False otherwise (likely a security name)
+    """
+    security_value = security.strip().upper()
+    return (2 <= len(security_value) <= 6 and 
+            security_value.replace('.', '').replace('-', '').isalnum() and
+            security_value.isupper())
+
+
+def search_securities(table, securities: List[str], filters: Dict[str, Any], max_results: int = 1000) -> List[Dict[str, Any]]:
+    """
+    Unified security search that handles both tickers (GSI) and security names (scan).
+    Works for both single and multiple securities.
+    
+    Args:
+        table: DynamoDB table resource
+        securities: List of security strings (tickers or names) to search for
+                   Examples: ["NFLX", "WBD"] or ["HEMPFIELD PA AREA SCH DIST"]
+        filters: Additional filters to apply (dateFrom, dateTo, etc.)
+        max_results: Maximum number of results to return across all securities
+    
+    Returns:
+        List of deduplicated trade records
+    """
+    all_results = []
+    seen_trade_ids = set()
+    
+    logger.info(f"🔄 Starting unified security search for {len(securities)} securities: {securities}")
+    
+    # Separate tickers (can use GSI) from security names (need scan)
+    tickers = []
+    security_names = []
+    
+    for security in securities:
+        security_stripped = security.strip()
+        if is_valid_ticker(security_stripped):
+            tickers.append(security_stripped.upper())
+        else:
+            # Keep original case for security names (e.g., "HEMPFIELD PA AREA SCH DIST")
+            security_names.append(security_stripped)
+    
+    logger.info(f"📊 Security breakdown - Tickers (GSI): {tickers}, Names (scan): {security_names}")
+    
+    # Process tickers using GSI queries
+    for ticker in tickers:
+        logger.info(f"🔍 Querying GSI for ticker: {ticker}")
+        
+        # Create individual filters for this ticker
+        individual_filters = filters.copy()
+        individual_filters['security'] = [ticker]  # Pass as list to match expected format
+        
+        # Build query parameters for this individual ticker
+        index_name, key_condition, filter_expression = build_query_params(table, individual_filters, 1, max_results)
+        
+        if not index_name or not key_condition:
+            logger.warning(f"⚠️ Could not build query for ticker: {ticker}")
+            continue
+            
+        try:
+            query_kwargs = {
+                'IndexName': index_name,
+                'KeyConditionExpression': key_condition,
+                'Limit': max_results,
+                'ScanIndexForward': False  # Most recent first
+            }
+            
+            if filter_expression:
+                query_kwargs['FilterExpression'] = filter_expression
+            
+            logger.info(f"🚀 Executing GSI query for {ticker}")
+            response = table.query(**query_kwargs)
+            
+            ticker_results = response.get('Items', [])
+            logger.info(f"📊 Found {len(ticker_results)} results for ticker {ticker}")
+            
+            # Deduplicate by tradeId and add to results
+            for item in ticker_results:
+                trade_id = item.get('tradeId')
+                if trade_id and trade_id not in seen_trade_ids:
+                    seen_trade_ids.add(trade_id)
+                    all_results.append(item)
+                    
+            # Stop if we've reached the maximum results
+            if len(all_results) >= max_results:
+                logger.info(f"🛑 Reached maximum results limit: {max_results}")
+                break
+                
+        except Exception as e:
+            logger.error(f"❌ Error querying for ticker {ticker}: {str(e)}")
+            continue
+    
+    # Process security names using scan with filters (if we haven't hit max results and there are names)
+    if security_names and len(all_results) < max_results:
+        logger.info(f"🔍 Processing security names using scan: {security_names}")
+        
+        # Create security name filter
+        def create_security_name_filter(security_value):
+            """Create a comprehensive security filter for a security name"""
+            security_value = security_value.strip()
+            security_upper = security_value.upper()
+            security_lower = security_value.lower()
+            
+            return (
+                Attr('securityName').eq(security_value) |                    # Exact name match
+                Attr('securityName').contains(security_value) |               # Name contains (original case)
+                Attr('securityName').contains(security_lower) |               # Name contains (lowercase)
+                Attr('securityName').contains(security_upper) |               # Name contains (uppercase)
+                Attr('securityName').begins_with(security_value) |            # Name begins with (original case)
+                Attr('securityName').begins_with(security_value.title()) |    # Name begins with (title case)
+                # Also search securities with missing/empty symbols (other securities like bonds, school districts)
+                (Attr('securitySymbol').not_exists() & Attr('securityName').contains(security_value)) |
+                (Attr('securitySymbol').eq('') & Attr('securityName').contains(security_value)) |
+                (Attr('securitySymbol').eq('--') & Attr('securityName').contains(security_value))
+            )
+        
+        # Build combined filter for all names
+        combined_name_filter = None
+        for name in security_names:
+            name_filter = create_security_name_filter(name)
+            if combined_name_filter is None:
+                combined_name_filter = name_filter
+            else:
+                combined_name_filter = combined_name_filter | name_filter
+        
+        # Build scan filter expression
+        scan_filters = []
+        if combined_name_filter:
+            scan_filters.append(combined_name_filter)
+        
+        # Add date range filter if present
+        if filters.get('dateFrom') or filters.get('dateTo'):
+            date_from = filters.get('dateFrom')
+            date_to = filters.get('dateTo')
+            
+            if date_from and date_to:
+                try:
+                    date_from_obj = datetime.strptime(date_from, '%Y-%m-%d').date()
+                    date_to_obj = datetime.strptime(date_to, '%Y-%m-%d').date()
+                    date_from_num = int(date_from_obj.strftime('%Y%m%d'))
+                    date_to_num = int(date_to_obj.strftime('%Y%m%d'))
+                    scan_filters.append(Attr('transactionDate').between(date_from_num, date_to_num))
+                except ValueError as e:
+                    logger.warning(f"⚠️ Invalid date format: {date_from} or {date_to}, error: {e}")
+            elif date_from:
+                try:
+                    date_from_obj = datetime.strptime(date_from, '%Y-%m-%d').date()
+                    date_from_num = int(date_from_obj.strftime('%Y%m%d'))
+                    scan_filters.append(Attr('transactionDate').gte(date_from_num))
+                except ValueError as e:
+                    logger.warning(f"⚠️ Invalid date format: {date_from}, error: {e}")
+            elif date_to:
+                try:
+                    date_to_obj = datetime.strptime(date_to, '%Y-%m-%d').date()
+                    date_to_num = int(date_to_obj.strftime('%Y%m%d'))
+                    scan_filters.append(Attr('transactionDate').lte(date_to_num))
+                except ValueError as e:
+                    logger.warning(f"⚠️ Invalid date format: {date_to}, error: {e}")
+        
+        # Combine all scan filters
+        if scan_filters:
+            scan_filter_expression = scan_filters[0]
+            for f in scan_filters[1:]:
+                scan_filter_expression = scan_filter_expression & f
+            
+            try:
+                scan_kwargs = {
+                    'FilterExpression': scan_filter_expression,
+                    'Limit': max_results - len(all_results)  # Only get remaining needed results
+                }
+                
+                logger.info(f"🚀 Executing scan for security names")
+                response = table.scan(**scan_kwargs)
+                
+                name_results = response.get('Items', [])
+                logger.info(f"📊 Found {len(name_results)} results for security names")
+                
+                # Deduplicate by tradeId and add to results
+                for item in name_results:
+                    trade_id = item.get('tradeId')
+                    if trade_id and trade_id not in seen_trade_ids:
+                        seen_trade_ids.add(trade_id)
+                        all_results.append(item)
+                        
+            except Exception as e:
+                logger.error(f"❌ Error scanning for security names: {str(e)}")
+    
+    logger.info(f"✅ Unified security search complete: {len(all_results)} total deduplicated results")
+    return all_results
+
+
+def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Search politician trades based on filters
     
     Args:
         filters: Dictionary of filter criteria
-        page: Page number (1-indexed)
+        page: Page number (1-indexed) - used for backward compatibility, ignored if last_evaluated_key provided
         page_size: Number of results per page
+        last_evaluated_key: DynamoDB LastEvaluatedKey for cursor-based pagination (for "load more" feature)
     
     Returns:
-        Dictionary with results and metadata
+        Dictionary with results and metadata including last_evaluated_key for next page
     """
     try:
         logger.info(f"🔍 Starting search_trades with filters: {json.dumps(filters, default=str)}, page: {page}, page_size: {page_size}")
@@ -732,28 +913,144 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -
             logger.info(f"🔄 Detected multiple politicians: {politician_names}")
             logger.info("✅ Using multiple GSI queries approach instead of scan")
             
+            # For cursor-based pagination, we need to fetch more results and filter
+            # Increase max_results to allow for cursor-based continuation
+            fetch_limit = 1000 if not last_evaluated_key else 2000  # Fetch more if continuing
+            
             # Use the new multi-politician search approach
-            all_items = search_multiple_politicians(table, politician_names, filters, max_results=1000)
+            all_items = search_multiple_politicians(table, politician_names, filters, max_results=fetch_limit)
             
-            # Sort by transactionDate descending (most recent first)
-            all_items.sort(key=lambda x: x.get('transactionDate', 0), reverse=True)
+            # Sort by transactionDate descending (most recent first), then by tradeId for stability
+            all_items.sort(key=lambda x: (x.get('transactionDate', 0), x.get('tradeId', '')), reverse=True)
             
-            # Apply pagination
-            start_idx = (page - 1) * page_size
-            end_idx = start_idx + page_size
-            paginated_items = all_items[start_idx:end_idx]
+            # Apply cursor-based pagination if cursor provided
+            if last_evaluated_key:
+                cursor_date = last_evaluated_key.get('transactionDate')
+                cursor_trade_id = last_evaluated_key.get('tradeId')
+                if cursor_date is not None:
+                    # Filter items that come AFTER the cursor in descending sort order
+                    # Since we sort DESC by (transactionDate, tradeId):
+                    # - Items with date < cursor_date come after (include)
+                    # - Items with date == cursor_date and tradeId < cursor_trade_id come after (include)
+                    # - Items with date == cursor_date and tradeId == cursor_trade_id are the cursor (skip)
+                    # - Items with date == cursor_date and tradeId > cursor_trade_id come before (skip)
+                    # - Items with date > cursor_date come before (skip)
+                    filtered_items = []
+                    for item in all_items:
+                        item_date = item.get('transactionDate', 0)
+                        item_trade_id = item.get('tradeId', '')
+                        if item_date < cursor_date:
+                            # Older dates come after in descending order
+                            filtered_items.append(item)
+                        elif item_date == cursor_date:
+                            if item_trade_id < cursor_trade_id:
+                                # Same date, lower tradeId comes after in descending order
+                                filtered_items.append(item)
+                            elif item_trade_id == cursor_trade_id:
+                                # This is the cursor item itself, skip it
+                                continue
+                            # else: item_trade_id > cursor_trade_id comes before, skip
+                        # else: item_date > cursor_date comes before, skip
+                    all_items = filtered_items
+                    logger.info(f"📄 Applied cursor filter, {len(all_items)} items remaining after cursor")
+            
+            # Apply pagination (always take first page_size items after cursor)
+            paginated_items = all_items[:page_size]
             
             # Convert from DynamoDB format
             converted_items = [convert_from_dynamodb_format(item) for item in paginated_items]
             
-            logger.info(f"✅ Multi-politician search complete - success: True, results_count: {len(converted_items)}, total_found: {len(all_items)}")
+            # Generate cursor for next page if we have more items
+            next_cursor = None
+            if len(all_items) > page_size:
+                last_item = paginated_items[-1]
+                next_cursor = {
+                    'transactionDate': last_item.get('transactionDate'),
+                    'tradeId': last_item.get('tradeId')
+                }
+            
+            logger.info(f"✅ Multi-politician search complete - success: True, results_count: {len(converted_items)}, total_found: {len(all_items)}, has_more: {next_cursor is not None}")
             return {
                 'success': True,
                 'results': converted_items,
-                'total_found': len(all_items),
+                'total_found': len(all_items),  # Approximate total
                 'page': page,
                 'page_size': page_size,
-                'total_pages': (len(all_items) + page_size - 1) // page_size
+                'has_more': next_cursor is not None,
+                'last_evaluated_key': next_cursor  # Cursor for next "load more" request
+            }
+        
+        # Check if we need to handle securities (single or multiple)
+        securities = filters.get('security')
+        if securities and isinstance(securities, list) and len(securities) > 0:
+            logger.info(f"🔄 Detected securities search: {securities}")
+            logger.info("✅ Using unified security search (GSI for tickers, scan for names)")
+            
+            # For cursor-based pagination, we need to fetch more results and filter
+            # Increase max_results to allow for cursor-based continuation
+            fetch_limit = 1000 if not last_evaluated_key else 2000  # Fetch more if continuing
+            
+            # Use the unified security search approach (handles both tickers and names)
+            all_items = search_securities(table, securities, filters, max_results=fetch_limit)
+            
+            # Sort by transactionDate descending (most recent first), then by tradeId for stability
+            all_items.sort(key=lambda x: (x.get('transactionDate', 0), x.get('tradeId', '')), reverse=True)
+            
+            # Apply cursor-based pagination if cursor provided
+            if last_evaluated_key:
+                cursor_date = last_evaluated_key.get('transactionDate')
+                cursor_trade_id = last_evaluated_key.get('tradeId')
+                if cursor_date is not None:
+                    # Filter items that come AFTER the cursor in descending sort order
+                    # Since we sort DESC by (transactionDate, tradeId):
+                    # - Items with date < cursor_date come after (include)
+                    # - Items with date == cursor_date and tradeId < cursor_trade_id come after (include)
+                    # - Items with date == cursor_date and tradeId == cursor_trade_id are the cursor (skip)
+                    # - Items with date == cursor_date and tradeId > cursor_trade_id come before (skip)
+                    # - Items with date > cursor_date come before (skip)
+                    filtered_items = []
+                    for item in all_items:
+                        item_date = item.get('transactionDate', 0)
+                        item_trade_id = item.get('tradeId', '')
+                        if item_date < cursor_date:
+                            # Older dates come after in descending order
+                            filtered_items.append(item)
+                        elif item_date == cursor_date:
+                            if item_trade_id < cursor_trade_id:
+                                # Same date, lower tradeId comes after in descending order
+                                filtered_items.append(item)
+                            elif item_trade_id == cursor_trade_id:
+                                # This is the cursor item itself, skip it
+                                continue
+                            # else: item_trade_id > cursor_trade_id comes before, skip
+                        # else: item_date > cursor_date comes before, skip
+                    all_items = filtered_items
+                    logger.info(f"📄 Applied cursor filter, {len(all_items)} items remaining after cursor")
+            
+            # Apply pagination (always take first page_size items after cursor)
+            paginated_items = all_items[:page_size]
+            
+            # Convert from DynamoDB format
+            converted_items = [convert_from_dynamodb_format(item) for item in paginated_items]
+            
+            # Generate cursor for next page if we have more items
+            next_cursor = None
+            if len(all_items) > page_size:
+                last_item = paginated_items[-1]
+                next_cursor = {
+                    'transactionDate': last_item.get('transactionDate'),
+                    'tradeId': last_item.get('tradeId')
+                }
+            
+            logger.info(f"✅ Security search complete - success: True, results_count: {len(converted_items)}, total_found: {len(all_items)}, has_more: {next_cursor is not None}")
+            return {
+                'success': True,
+                'results': converted_items,
+                'total_found': len(all_items),  # Approximate total
+                'page': page,
+                'page_size': page_size,
+                'has_more': next_cursor is not None,
+                'last_evaluated_key': next_cursor  # Cursor for next "load more" request
             }
         
         # Build query parameters for single politician or other GSI filters
@@ -768,6 +1065,11 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -
                 'Limit': page_size
             }
             
+            # Handle cursor-based pagination for scan
+            if last_evaluated_key:
+                logger.info(f"📄 Using cursor-based pagination for scan with LastEvaluatedKey")
+                scan_kwargs['ExclusiveStartKey'] = convert_to_dynamodb_format(last_evaluated_key)
+            
             # Build filter expression for scan
             if filter_expression:
                 scan_kwargs['FilterExpression'] = filter_expression
@@ -777,15 +1079,50 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -
                 scan_kwargs['FilterExpression'] = (scan_kwargs.get('FilterExpression', Attr('tradeId').exists()) & 
                                                    Attr('politicianName').contains(filters['politicianName']))
             
-            # Combined security search
+            # Combined security search - always a list of strings
             if filters.get('security'):
-                security_value = filters['security'].strip()
+                securities = filters['security']
                 existing_filter = scan_kwargs.get('FilterExpression', Attr('tradeId').exists())
-                security_filter = (
-                    Attr('securitySymbol').eq(security_value.upper()) | 
-                    Attr('securityName').contains(security_value)
-                )
-                scan_kwargs['FilterExpression'] = existing_filter & security_filter
+                
+                def create_security_filter(security_value):
+                    """Create a comprehensive security filter for a single security value"""
+                    security_value = security_value.strip()
+                    security_upper = security_value.upper()
+                    security_lower = security_value.lower()
+                    
+                    return (
+                        Attr('securitySymbol').eq(security_upper) |                    # Exact symbol match
+                        Attr('securitySymbol').contains(security_upper) |             # Partial symbol match
+                        Attr('securityName').contains(security_value) |               # Name contains (original case)
+                        Attr('securityName').contains(security_lower) |               # Name contains (lowercase)
+                        Attr('securityName').contains(security_upper) |               # Name contains (uppercase)
+                        Attr('securityName').begins_with(security_value) |            # Name begins with (original case)
+                        Attr('securityName').begins_with(security_value.title()) |    # Name begins with (title case)
+                        # Also search securities with missing/empty symbols (other securities like bonds)
+                        (Attr('securitySymbol').not_exists() & Attr('securityName').contains(security_value)) |
+                        (Attr('securitySymbol').eq('') & Attr('securityName').contains(security_value)) |
+                        (Attr('securitySymbol').eq('--') & Attr('securityName').contains(security_value))
+                    )
+                
+                if len(securities) == 1:
+                    # Single security in list
+                    security_filter = create_security_filter(securities[0])
+                elif len(securities) > 1:
+                    # Multiple securities - use OR condition
+                    combined_filter = None
+                    for security_value in securities:
+                        single_filter = create_security_filter(security_value)
+                        if combined_filter is None:
+                            combined_filter = single_filter
+                        else:
+                            combined_filter = combined_filter | single_filter
+                    security_filter = combined_filter
+                else:
+                    # Empty list, skip
+                    security_filter = None
+                
+                if security_filter:
+                    scan_kwargs['FilterExpression'] = existing_filter & security_filter
             
             # Transaction date range filter
             if filters.get('dateFrom') or filters.get('dateTo'):
@@ -839,22 +1176,27 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -
             
             # Handle pagination
             total_scanned = response.get('ScannedCount', 0)
-            last_evaluated_key = response.get('LastEvaluatedKey')
+            last_evaluated_key_raw = response.get('LastEvaluatedKey')
             
-            logger.info(f"📊 Scan results - Items found: {len(items)}, Scanned: {total_scanned}, Has more: {last_evaluated_key is not None}")
+            logger.info(f"📊 Scan results - Items found: {len(items)}, Scanned: {total_scanned}, Has more: {last_evaluated_key_raw is not None}")
             
             # Convert items
             results = [convert_from_dynamodb_format(item) for item in items]
             logger.info(f"✅ Converted {len(results)} items from DynamoDB format")
             
+            # Convert LastEvaluatedKey to JSON-serializable format
+            last_key = None
+            if last_evaluated_key_raw:
+                last_key = convert_from_dynamodb_format(last_evaluated_key_raw)
+            
             return {
                 'success': True,
                 'results': results,
-                'total_found': len(results),
+                'total_found': len(results),  # Approximate for scan
                 'page': page,
                 'page_size': page_size,
-                'has_more': last_evaluated_key is not None,
-                'last_evaluated_key': last_evaluated_key
+                'has_more': last_key is not None,
+                'last_evaluated_key': last_key  # Cursor for next "load more" request
             }
         else:
             # Use GSI query (more efficient)
@@ -874,8 +1216,13 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -
             if key_condition:
                 logger.info(f"🔑 Key condition: {key_condition}")
             
-            # Handle pagination
-            if page > 1:
+            # Handle pagination - prefer cursor-based (last_evaluated_key) over page-based
+            if last_evaluated_key:
+                # Use cursor-based pagination (for "load more" feature)
+                logger.info(f"📄 Using cursor-based pagination with LastEvaluatedKey")
+                query_kwargs['ExclusiveStartKey'] = convert_to_dynamodb_format(last_evaluated_key)
+            elif page > 1:
+                # Fallback to page-based pagination (for backward compatibility)
                 logger.info(f"📄 Fetching page {page}, iterating through previous pages...")
                 # For simplicity, we'll fetch all pages up to the requested page
                 # In production, you'd want to store LastEvaluatedKey client-side
@@ -956,14 +1303,19 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50) -
             results = [convert_from_dynamodb_format(item) for item in items]
             logger.info(f"✅ Converted {len(results)} items from DynamoDB format")
             
+            # Convert LastEvaluatedKey to JSON-serializable format
+            last_key = None
+            if 'LastEvaluatedKey' in response:
+                last_key = convert_from_dynamodb_format(response['LastEvaluatedKey'])
+            
             return {
                 'success': True,
                 'results': results,
                 'total_found': count if count > 0 else len(results),
                 'page': page,
                 'page_size': page_size,
-                'has_more': 'LastEvaluatedKey' in response,
-                'last_evaluated_key': response.get('LastEvaluatedKey')
+                'has_more': last_key is not None,
+                'last_evaluated_key': last_key  # Cursor for next "load more" request
             }
     
     except Exception as e:
@@ -1043,11 +1395,12 @@ def lambda_handler(event, context):
         
         page = int(body.get('page', 1))
         page_size = min(int(body.get('pageSize', 50)), MAX_RESULTS)
+        last_evaluated_key = body.get('lastEvaluatedKey')  # Cursor for "load more" pagination
         
-        logger.info(f"📄 Pagination - page: {page}, page_size: {page_size}")
+        logger.info(f"📄 Pagination - page: {page}, page_size: {page_size}, has_cursor: {last_evaluated_key is not None}")
         
         # Perform search
-        result = search_trades(filters, page, page_size)
+        result = search_trades(filters, page, page_size, last_evaluated_key)
         
         logger.info(f"✅ Search complete - success: {result.get('success')}, results_count: {len(result.get('results', []))}, total_found: {result.get('total_found', 0)}")
         
