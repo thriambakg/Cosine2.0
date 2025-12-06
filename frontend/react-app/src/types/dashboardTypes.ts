@@ -68,6 +68,11 @@ export interface UnifiedTile {
   results?: StockResult[]; // For stock_screener tiles
   filters?: NewsFilters; // For news tiles
   articles?: NewsArticle[]; // For news tiles
+  filterSettings?: { // For news tiles - client-side filtering settings
+    sources?: string[];
+    categories?: string[];
+    countries?: string[];
+  };
   searchParams?: any; // For politician_trades tiles - keeping flexible for now
   trades?: any[]; // For politician_trades tiles - keeping flexible for now
   portfolioData?: { // For portfolio tiles

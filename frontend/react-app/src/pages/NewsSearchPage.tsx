@@ -425,8 +425,18 @@ const NewsSearchPage: React.FC = () => {
           // Recompute filters from all results
           const computedFilters = computeFiltersFromResults(updated);
           setAvailableFilters(computedFilters);
+          
+          // Update totalFound if API provides total count, otherwise use loaded count
+          if (response.total !== undefined) {
+            setTotalFound(response.total);
+          } else {
+            // If no total provided, update to reflect total loaded
+            setTotalFound(updated.length);
+          }
+          
           return updated;
         });
+        
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
       } else {
@@ -1285,9 +1295,9 @@ const NewsSearchPage: React.FC = () => {
                             </span>
                           </Tooltip>
                         )}
-                        {totalFound > 0 ? (
+                        {allSearchResults.length > 0 ? (
                           <Chip
-                            label={`${totalFound} article${totalFound !== 1 ? 's' : ''} found`}
+                            label={`${allSearchResults.length} article${allSearchResults.length !== 1 ? 's' : ''} found`}
                             sx={{
                               backgroundColor: 'rgba(34, 197, 94, 0.2)',
                               color: '#86efac',
