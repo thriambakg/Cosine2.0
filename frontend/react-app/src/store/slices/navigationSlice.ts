@@ -90,6 +90,13 @@ const defaultNavigationItems: NavigationItem[] = [
     category: 'government_data'
   },
   {
+    id: 'govt-contracts-search',
+    label: 'Government Contracts',
+    path: '/govt-contracts-search',
+    icon: 'DescriptionIcon',
+    category: 'government_data'
+  },
+  {
     id: 'news-search',
     label: 'News Search',
     path: '/news-search',

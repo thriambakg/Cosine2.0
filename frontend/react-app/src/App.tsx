@@ -18,6 +18,7 @@ import HeatmapPage from './pages/HeatmapPage';
 import SECSearchPage from './pages/SECSearchPage';
 import PoliticianTradesSearchPage from './pages/PoliticianTradesSearchPage';
 import NewsSearchPage from './pages/NewsSearchPage';
+import GovtContractsSearchPage from './pages/GovtContractsSearchPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import { ConfirmDialog } from './components/tiles/common';
 
@@ -104,6 +105,11 @@ function AppContent() {
               <Route path="/news-search" element={
                 <ProtectedRoute>
                   <NewsSearchPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/govt-contracts-search" element={
+                <ProtectedRoute>
+                  <GovtContractsSearchPage />
                 </ProtectedRoute>
               } />
               <Route path="*" element={<Navigate to="/" replace />} />

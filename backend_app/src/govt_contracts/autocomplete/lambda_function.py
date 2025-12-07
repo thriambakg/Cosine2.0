@@ -426,6 +426,16 @@ def route_autocomplete_request(autocomplete_type: str, request_body: Dict[str, A
         raise ValueError(f"Unhandled autocomplete type: {autocomplete_type}")
 
 
+def get_cors_headers():
+    """Get CORS headers for API responses"""
+    return {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+    }
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Lambda handler for USAspending autocomplete requests
@@ -447,6 +457,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         "limit": 10
     }
     """
+    cors_headers = get_cors_headers()
+    
+    # Handle OPTIONS preflight request
+    if event.get('httpMethod') == 'OPTIONS':
+        return {
+            'statusCode': 200,
+            'headers': cors_headers,
+            'body': json.dumps({'message': 'CORS preflight successful'})
+        }
+    
     try:
         logger.info(f"Received autocomplete request: {json.dumps(event)}")
         
@@ -477,10 +497,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not autocomplete_type:
             return {
                 'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
+                'headers': cors_headers,
                 'body': json.dumps({
                     'error': 'Missing autocomplete type',
                     'message': 'Please specify autocomplete type in path or request body',
@@ -492,10 +509,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if 'search_text' not in request_body and 'searchText' not in request_body:
             return {
                 'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
+                'headers': cors_headers,
                 'body': json.dumps({
                     'error': 'Missing search_text',
                     'message': 'Please provide search_text in request body'
@@ -516,10 +530,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Return success response
         return {
             'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
+            'headers': cors_headers,
             'body': json.dumps({
                 'success': True,
                 'autocomplete_type': autocomplete_type,
@@ -536,10 +547,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"Validation error: {str(e)}")
         return {
             'statusCode': 400,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
+            'headers': cors_headers,
             'body': json.dumps({
                 'error': 'Validation error',
                 'message': str(e)
@@ -550,10 +558,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"Error processing autocomplete request: {str(e)}", exc_info=True)
         return {
             'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
+            'headers': cors_headers,
             'body': json.dumps({
                 'error': 'Internal server error',
                 'message': str(e)

@@ -942,6 +942,116 @@ export const politicianTradesSearchAPI = {
   },
 };
 
+// ============================================================================
+// GOVERNMENT CONTRACTS SEARCH API
+// ============================================================================
+
+export interface GovtContractsSearchFilters {
+  keywords?: string[];
+  award_type?: string[];
+  awarding_agency_code?: string[];
+  funding_agency_code?: string[];
+  recipient_id?: string[];
+  recipient_name?: string[];
+  recipient_location_state?: string[];
+  recipient_location_country?: string[];
+  naics_code?: string[];
+  psc_code?: string[];
+  cfda_number?: string[];
+  min_obligation?: number;
+  max_obligation?: number;
+  date_from?: string;
+  date_to?: string;
+  fiscal_year?: number[];
+}
+
+export interface GovtContractsSearchRequest {
+  filters: GovtContractsSearchFilters;
+  limit?: number;
+  last_evaluated_key?: any;
+}
+
+export interface GovtContractAward {
+  award_id: string;
+  award_type?: string;
+  total_obligation?: number;
+  period_start_date?: string;
+  period_end_date?: string;
+  awarding_agency_name?: string;
+  awarding_agency_code?: string;
+  funding_agency_name?: string;
+  funding_agency_code?: string;
+  recipient_name?: string;
+  recipient_id?: string;
+  recipient_location_state?: string;
+  recipient_location_country?: string;
+  naics_code?: string;
+  psc_code?: string;
+  cfda_number?: string;
+  fiscal_year?: number;
+  description?: string;
+  award_details_s3_key?: string;
+  transactions?: any[];
+  subawards?: any[];
+  [key: string]: any;
+}
+
+export interface GovtContractsSearchResponse {
+  success: boolean;
+  results: GovtContractAward[];
+  count: number;
+  has_more: boolean;
+  last_evaluated_key?: any;
+  method?: string;
+  index_used?: string;
+}
+
+export const govtContractsSearchAPI = {
+  search: async (params: GovtContractsSearchRequest): Promise<GovtContractsSearchResponse> => {
+    return apiRequest<GovtContractsSearchResponse>('/usaspending-search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
+// ============================================================================
+// GOVERNMENT CONTRACTS AUTOCOMPLETE API
+// ============================================================================
+
+export interface GovtContractsAutocompleteRequest {
+  autocomplete_type: string;
+  search_text: string;
+  limit?: number;
+  filter?: any;
+}
+
+export interface GovtContractsAutocompleteResponse {
+  success: boolean;
+  autocomplete_type: string;
+  results: Array<{
+    id?: string;
+    code?: string;
+    name?: string;
+    text?: string;
+    [key: string]: any;
+  }>;
+  messages?: string[];
+  metadata?: {
+    timestamp: string;
+    endpoint: string;
+  };
+}
+
+export const govtContractsAutocompleteAPI = {
+  autocomplete: async (params: GovtContractsAutocompleteRequest): Promise<GovtContractsAutocompleteResponse> => {
+    return apiRequest<GovtContractsAutocompleteResponse>('/usaspending-autocomplete', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
 // Session Management API
 export const sessionManagementAPI = {
   // Get all sessions for a user
@@ -1016,6 +1126,8 @@ export const api = {
   sessions: sessionManagementAPI,
   secSearch: secSearchAPI,
   politicianTradesSearch: politicianTradesSearchAPI,
+  govtContractsSearch: govtContractsSearchAPI,
+  govtContractsAutocomplete: govtContractsAutocompleteAPI,
 };
 
 export default api;
