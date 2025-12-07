@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   TextField,
   Typography,
@@ -24,22 +24,14 @@ import {
   Menu,
   Collapse,
   Chip,
-  Tooltip,
-  Link,
   Pagination,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
 } from '@mui/material';
 import {
   Search as SearchIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
-  Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
-  Launch as LaunchIcon,
-  ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import { 
   govtContractsSearchAPI, 
@@ -102,8 +94,8 @@ interface ExpandedFiltersState {
 }
 
 const GovtContractsSearchPage: React.FC = () => {
-  const { user } = useAuth();
-  const { activeSessionId } = useGlobalChat();
+  const {} = useAuth();
+  const {} = useGlobalChat();
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'govt-contracts-search-page-state';
@@ -147,7 +139,6 @@ const GovtContractsSearchPage: React.FC = () => {
     savedState?.allSearchResults || []
   );
   const [currentResults, setCurrentResults] = useState<GovtContractAward[]>([]);
-  const [totalFound, setTotalFound] = useState<number>(0);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -158,24 +149,15 @@ const GovtContractsSearchPage: React.FC = () => {
   
   // Filter state
   const [availableFilters, setAvailableFilters] = useState<{
-    award_types: Set<string>;
-    agencies: Set<string>;
-    recipients: Set<string>;
-    states: Set<string>;
-    countries: Set<string>;
-    naics: Set<string>;
-    psc: Set<string>;
-    cfda: Set<string>;
-  }>({
-    award_types: new Set(),
-    agencies: new Set(),
-    recipients: new Set(),
-    states: new Set(),
-    countries: new Set(),
-    naics: new Set(),
-    psc: new Set(),
-    cfda: new Set(),
-  });
+    award_type_filters?: Array<{ awardType: string; count: number }>;
+    agency_filters?: Array<{ agency: string; count: number }>;
+    recipient_filters?: Array<{ recipient: string; count: number }>;
+    state_filters?: Array<{ state: string; count: number }>;
+    country_filters?: Array<{ country: string; count: number }>;
+    naics_filters?: Array<{ naics: string; count: number }>;
+    psc_filters?: Array<{ psc: string; count: number }>;
+    cfda_filters?: Array<{ cfda: string; count: number }>;
+  }>({});
   
   const [expandedFilters, setExpandedFilters] = useState<ExpandedFiltersState>(
     savedState?.expandedFilters || {
@@ -418,7 +400,6 @@ const GovtContractsSearchPage: React.FC = () => {
 
       if (response.success) {
         setAllSearchResults(response.results || []);
-        setTotalFound(response.results?.length || allSearchResults.length);
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
         computeFiltersFromResults(response.results || []);
@@ -461,7 +442,6 @@ const GovtContractsSearchPage: React.FC = () => {
 
       if (response.success) {
         setAllSearchResults((prev) => [...prev, ...(response.results || [])]);
-        setTotalFound(allSearchResults.length);
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
         computeFiltersFromResults([...allSearchResults, ...(response.results || [])]);
@@ -532,11 +512,11 @@ const GovtContractsSearchPage: React.FC = () => {
     }
   };
 
-  // Context menu handlers
-  const handleContextMenuClick = (event: React.MouseEvent<HTMLElement>) => {
-    event.preventDefault();
-    setContextMenuAnchor({ mouseX: event.clientX, mouseY: event.clientY });
-  };
+  // Context menu handlers (for future use)
+  // const handleContextMenuClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+  //   event.preventDefault();
+  //   setContextMenuAnchor({ mouseX: event.clientX, mouseY: event.clientY });
+  // }, []);
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
@@ -627,7 +607,7 @@ const GovtContractsSearchPage: React.FC = () => {
                   />
 
                   {/* Awarding Agency */}
-                  <MultiSelectField<{ code: string; name: string; [key: string]: any }>
+                  <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
                     label="Awarding Agency"
                     selectedItems={(() => {
                       // Convert codes back to objects for display
@@ -637,7 +617,7 @@ const GovtContractsSearchPage: React.FC = () => {
                         const found = autocompleteOptions.awarding_agency?.find(opt => 
                           opt.code === code || opt.id === code
                         );
-                        return found || { code, name: code };
+                        return found || { code: code || '', name: code || '' };
                       });
                     })()}
                     onItemsChange={(items) => {
@@ -664,7 +644,7 @@ const GovtContractsSearchPage: React.FC = () => {
                   />
 
                   {/* Funding Agency */}
-                  <MultiSelectField<{ code: string; name: string; [key: string]: any }>
+                  <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
                     label="Funding Agency"
                     selectedItems={(() => {
                       const codes = searchParams.funding_agency_code || [];
@@ -672,7 +652,7 @@ const GovtContractsSearchPage: React.FC = () => {
                         const found = autocompleteOptions.funding_agency?.find(opt => 
                           opt.code === code || opt.id === code
                         );
-                        return found || { code, name: code };
+                        return found || { code: code || '', name: code || '' };
                       });
                     })()}
                     onItemsChange={(items) => {
@@ -707,7 +687,9 @@ const GovtContractsSearchPage: React.FC = () => {
                         const found = autocompleteOptions.recipient?.find(opt => 
                           opt.name === name || opt.text === name
                         );
-                        return found || { name: typeof name === 'string' ? name : name.name || name.text || '' };
+                        if (found) return found;
+                        const nameStr = typeof name === 'string' ? name : (name as any)?.name || (name as any)?.text || '';
+                        return { name: nameStr, text: nameStr };
                       });
                     })()}
                     onItemsChange={(items) => {
@@ -1334,7 +1316,7 @@ const GovtContractsSearchPage: React.FC = () => {
                             backgroundColor: 'rgba(59, 130, 246, 0.7)',
                           },
                         }}>
-                          {availableFilters.award_type_filters.map((filter, idx) => {
+                          {availableFilters.award_type_filters.map((filter: { awardType: string; count: number }, idx: number) => {
                             const isSelected = selectedFilters.award_types.has(filter.awardType);
                             return (
                               <Box
@@ -1444,7 +1426,7 @@ const GovtContractsSearchPage: React.FC = () => {
                             backgroundColor: 'rgba(59, 130, 246, 0.7)',
                           },
                         }}>
-                          {availableFilters.agency_filters.slice(0, 50).map((filter, idx) => {
+                          {availableFilters.agency_filters?.slice(0, 50).map((filter: { agency: string; count: number }, idx: number) => {
                             const isSelected = selectedFilters.agencies.has(filter.agency);
                             return (
                               <Box
@@ -1554,7 +1536,7 @@ const GovtContractsSearchPage: React.FC = () => {
                             backgroundColor: 'rgba(59, 130, 246, 0.7)',
                           },
                         }}>
-                          {availableFilters.recipient_filters.slice(0, 50).map((filter, idx) => {
+                          {availableFilters.recipient_filters?.slice(0, 50).map((filter: { recipient: string; count: number }, idx: number) => {
                             const isSelected = selectedFilters.recipients.has(filter.recipient);
                             return (
                               <Box
@@ -1664,7 +1646,7 @@ const GovtContractsSearchPage: React.FC = () => {
                             backgroundColor: 'rgba(59, 130, 246, 0.7)',
                           },
                         }}>
-                          {availableFilters.state_filters.map((filter, idx) => {
+                          {availableFilters.state_filters?.map((filter: { state: string; count: number }, idx: number) => {
                             const isSelected = selectedFilters.states.has(filter.state);
                             return (
                               <Box
@@ -1774,7 +1756,7 @@ const GovtContractsSearchPage: React.FC = () => {
                             backgroundColor: 'rgba(59, 130, 246, 0.7)',
                           },
                         }}>
-                          {availableFilters.country_filters.map((filter, idx) => {
+                          {availableFilters.country_filters?.map((filter: { country: string; count: number }, idx: number) => {
                             const isSelected = selectedFilters.countries.has(filter.country);
                             return (
                               <Box
@@ -1884,7 +1866,7 @@ const GovtContractsSearchPage: React.FC = () => {
                             backgroundColor: 'rgba(59, 130, 246, 0.7)',
                           },
                         }}>
-                          {availableFilters.naics_filters.slice(0, 30).map((filter, idx) => {
+                          {availableFilters.naics_filters?.slice(0, 30).map((filter: { naics: string; count: number }, idx: number) => {
                             const isSelected = selectedFilters.naics.has(filter.naics);
                             return (
                               <Box
@@ -1994,7 +1976,7 @@ const GovtContractsSearchPage: React.FC = () => {
                             backgroundColor: 'rgba(59, 130, 246, 0.7)',
                           },
                         }}>
-                          {availableFilters.psc_filters.slice(0, 30).map((filter, idx) => {
+                          {availableFilters.psc_filters?.slice(0, 30).map((filter: { psc: string; count: number }, idx: number) => {
                             const isSelected = selectedFilters.psc.has(filter.psc);
                             return (
                               <Box
@@ -2104,7 +2086,7 @@ const GovtContractsSearchPage: React.FC = () => {
                             backgroundColor: 'rgba(59, 130, 246, 0.7)',
                           },
                         }}>
-                          {availableFilters.cfda_filters.slice(0, 30).map((filter, idx) => {
+                          {availableFilters.cfda_filters?.slice(0, 30).map((filter: { cfda: string; count: number }, idx: number) => {
                             const isSelected = selectedFilters.cfda.has(filter.cfda);
                             return (
                               <Box
