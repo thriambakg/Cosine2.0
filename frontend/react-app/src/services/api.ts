@@ -949,8 +949,8 @@ export const politicianTradesSearchAPI = {
 export interface GovtContractsSearchFilters {
   keywords?: string[];
   award_type?: string[];
-  awarding_agency_code?: string[];
-  funding_agency_code?: string[];
+  awarding_agency_name?: string[];
+  funding_agency_name?: string[];
   recipient_id?: string[];
   recipient_name?: string[];
   recipient_location_state?: string[];

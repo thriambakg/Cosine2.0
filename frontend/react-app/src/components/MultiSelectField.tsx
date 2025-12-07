@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -49,6 +49,9 @@ function MultiSelectField<T = string>({
   const [dynamicSuggestions, setDynamicSuggestions] = useState<T[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
+  // Track last search query to prevent duplicate calls
+  const lastSearchQueryRef = useRef<string>('');
+  
   // Debounced search effect - prevent excessive API calls
   useEffect(() => {
     if (!onSearch) {
@@ -58,20 +61,34 @@ function MultiSelectField<T = string>({
 
     // Show default suggestions when dropdown is opened but no search input
     if (isDropdownOpen && (!inputValue || inputValue.length === 0)) {
-      const searchResults = onSearch('');
-      setDynamicSuggestions(searchResults);
+      if (lastSearchQueryRef.current !== '') {
+        lastSearchQueryRef.current = '';
+        setDynamicSuggestions([]);
+      }
       return;
     }
 
     if (!inputValue || inputValue.length < 2) {
-      setDynamicSuggestions([]);
+      if (lastSearchQueryRef.current !== '') {
+        lastSearchQueryRef.current = '';
+        setDynamicSuggestions([]);
+      }
+      return;
+    }
+
+    // Skip if we're already searching for this exact query
+    if (lastSearchQueryRef.current === inputValue) {
       return;
     }
 
     // Debounce the search to avoid excessive API calls
     const timeoutId = setTimeout(() => {
-      const searchResults = onSearch(inputValue);
-      setDynamicSuggestions(searchResults);
+      // Only search if query hasn't changed during debounce
+      if (lastSearchQueryRef.current !== inputValue) {
+        lastSearchQueryRef.current = inputValue;
+        const searchResults = onSearch(inputValue);
+        setDynamicSuggestions(searchResults);
+      }
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timeoutId);
@@ -124,7 +141,15 @@ function MultiSelectField<T = string>({
         }}
         options={availableOptions}
         getOptionLabel={(option) => renderItem(option as T)}
-        isOptionEqualToValue={(option, value) => getItemKey(option as T) === getItemKey(value as T)}
+        isOptionEqualToValue={(option, value) => {
+          const optionKey = getItemKey(option as T);
+          const valueKey = getItemKey(value as T);
+          // If keys are empty, compare the objects directly
+          if (!optionKey || !valueKey) {
+            return JSON.stringify(option) === JSON.stringify(value);
+          }
+          return optionKey === valueKey;
+        }}
         filterOptions={(options) => {
           // Don't filter options - we handle this via the search
           return options;
@@ -239,11 +264,16 @@ function MultiSelectField<T = string>({
             }}
           />
         )}
-        renderOption={(props, option) => {
+        renderOption={(props, option, state) => {
           const { key, ...otherProps } = props;
+          // Ensure unique key - use getItemKey with fallback to index
+          const optionKey = getItemKey(option as T);
+          // Always include index to ensure uniqueness, even if optionKey exists
+          // This prevents duplicate key warnings when multiple items have the same key
+          const uniqueKey = optionKey ? `${optionKey}-${state.index}` : `option-${state.index}`;
           return (
             <Box
-              key={key}
+              key={uniqueKey}
               component="li"
               {...otherProps}
               sx={{

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   TextField,
   Typography,
@@ -25,6 +25,13 @@ import {
   Collapse,
   Chip,
   Pagination,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControlLabel,
+  FormGroup,
+  Tooltip,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -32,6 +39,8 @@ import {
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
+  ViewColumn as ViewColumnIcon,
+  Dashboard as AddToContextIcon,
 } from '@mui/icons-material';
 import { 
   govtContractsSearchAPI, 
@@ -81,9 +90,6 @@ const US_STATES = [
   'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC'
 ];
 
-// Fiscal years (last 10 years)
-const FISCAL_YEARS = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i + 1);
-
 interface ExpandedFiltersState {
   awardTypes: boolean;
   agencies: boolean;
@@ -122,8 +128,8 @@ const GovtContractsSearchPage: React.FC = () => {
     return {
       keywords: Array.isArray(saved?.keywords) ? saved.keywords : [],
       award_type: Array.isArray(saved?.award_type) ? saved.award_type : [],
-      awarding_agency_code: Array.isArray(saved?.awarding_agency_code) ? saved.awarding_agency_code : [],
-      funding_agency_code: Array.isArray(saved?.funding_agency_code) ? saved.funding_agency_code : [],
+      awarding_agency_name: Array.isArray(saved?.awarding_agency_name) ? saved.awarding_agency_name : [],
+      funding_agency_name: Array.isArray(saved?.funding_agency_name) ? saved.funding_agency_name : [],
       recipient_id: Array.isArray(saved?.recipient_id) ? saved.recipient_id : [],
       recipient_name: Array.isArray(saved?.recipient_name) ? saved.recipient_name : [],
       recipient_location_state: Array.isArray(saved?.recipient_location_state) ? saved.recipient_location_state : [],
@@ -131,7 +137,8 @@ const GovtContractsSearchPage: React.FC = () => {
       naics_code: Array.isArray(saved?.naics_code) ? saved.naics_code : [],
       psc_code: Array.isArray(saved?.psc_code) ? saved.psc_code : [],
       cfda_number: Array.isArray(saved?.cfda_number) ? saved.cfda_number : [],
-      fiscal_year: Array.isArray(saved?.fiscal_year) ? saved.fiscal_year : [],
+      date_from: saved?.date_from || '',
+      date_to: saved?.date_to || '',
     };
   });
   
@@ -145,7 +152,29 @@ const GovtContractsSearchPage: React.FC = () => {
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(savedState?.lastEvaluatedKey || null);
   const [hasMore, setHasMore] = useState<boolean>(savedState?.hasMore || false);
   const [selectedAwards, setSelectedAwards] = useState<Set<string>>(new Set());
-  const [contextMenuAnchor, setContextMenuAnchor] = useState<{ mouseX: number; mouseY: number } | null>(null);
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedAwardForDetails, setSelectedAwardForDetails] = useState<GovtContractAward | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
+  
+  // Column visibility state
+  const AVAILABLE_COLUMNS = [
+    'recipient',
+    'awarding_agency',
+    'funding_agency',
+    'amount',
+    'period_start_date',
+    'period_end_date',
+    'naics_code',
+    'psc_code',
+    'last_updated',
+  ] as const;
+  
+  const DEFAULT_VISIBLE_COLUMNS = ['recipient', 'awarding_agency', 'funding_agency', 'amount', 'last_updated'];
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(
+    savedState?.visibleColumns || DEFAULT_VISIBLE_COLUMNS
+  );
+  const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
+  const columnMenuOpen = Boolean(columnMenuAnchor);
   
   // Filter state
   const [availableFilters, setAvailableFilters] = useState<{
@@ -196,10 +225,17 @@ const GovtContractsSearchPage: React.FC = () => {
   const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== false);
   const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== false);
 
-  // Autocomplete state
+  // Autocomplete state - use ref to avoid dependency issues
+  const autocompleteOptionsRef = useRef<{
+    [key: string]: Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>;
+  }>({});
+  
   const [autocompleteOptions, setAutocompleteOptions] = useState<{
     [key: string]: Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>;
   }>({});
+  
+  // Track ongoing searches to prevent duplicate requests
+  const searchInProgressRef = useRef<{ [key: string]: string }>({});
 
   // Compute available filters from results
   const computeFiltersFromResults = useCallback((results: GovtContractAward[]) => {
@@ -338,37 +374,155 @@ const GovtContractsSearchPage: React.FC = () => {
     setCurrentPage(1);
   }, [allSearchResults, selectedFilters]);
 
-  // Load autocomplete options for MultiSelectField (synchronous wrapper)
-  const createAutocompleteSearch = useCallback((type: string) => {
-    return (query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
-      if (!query || query.length < 2) {
-        return [];
+  // Transform API response to match expected format
+  const transformAutocompleteResults = useCallback((results: any[], type: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
+    return results.map((item: any) => {
+      // Map recipient_name to name and text
+      if (type === 'recipient' && item.recipient_name) {
+        return {
+          ...item,
+          name: item.recipient_name,
+          text: item.recipient_name,
+          id: item.uei || item.duns || item.recipient_name,
+        };
       }
+      // For other types, preserve existing structure
+      return item;
+    });
+  }, []);
 
-      // Trigger async fetch and update state
-      (async () => {
-        try {
-          const response = await govtContractsAutocompleteAPI.autocomplete({
-            autocomplete_type: type,
-            search_text: query,
-            limit: 20,
-          });
+  // Memoized search functions for each type to prevent recreation
+  const recipientSearch = useCallback((query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
+    if (!query || query.length < 2) {
+      return [];
+    }
 
-          if (response.success && response.results) {
-            setAutocompleteOptions((prev) => ({
+    // Check if we're already searching for this query
+    const searchKey = `recipient-${query}`;
+    if (searchInProgressRef.current[searchKey]) {
+      // Return cached results if search is in progress
+      return autocompleteOptionsRef.current.recipient || [];
+    }
+
+    // Mark search as in progress
+    searchInProgressRef.current[searchKey] = query;
+
+    // Trigger async fetch and update state
+    (async () => {
+      try {
+        const response = await govtContractsAutocompleteAPI.autocomplete({
+          autocomplete_type: 'recipient',
+          search_text: query,
+          limit: 10,
+        });
+
+        if (response.success && response.results) {
+          const transformedResults = transformAutocompleteResults(response.results, 'recipient');
+          // Update both state and ref
+          setAutocompleteOptions((prev) => {
+            const updated = {
               ...prev,
-              [type]: response.results || [],
-            }));
-          }
-        } catch (error) {
-          console.error(`Error loading autocomplete for ${type}:`, error);
+              recipient: transformedResults,
+            };
+            autocompleteOptionsRef.current = updated;
+            return updated;
+          });
         }
-      })();
+      } catch (error) {
+        console.error(`Error loading autocomplete for recipient:`, error);
+      } finally {
+        // Remove from in-progress tracking
+        delete searchInProgressRef.current[searchKey];
+      }
+    })();
 
-      // Return cached results immediately (will update on next render)
-      return autocompleteOptions[type] || [];
-    };
-  }, [autocompleteOptions]);
+    // Return cached results immediately (will update on next render)
+    // Use ref to get latest value without causing re-renders
+    const cached = autocompleteOptionsRef.current.recipient || [];
+    return cached;
+  }, [transformAutocompleteResults]);
+
+  const awardingAgencySearch = useCallback((query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
+    if (!query || query.length < 2) {
+      return [];
+    }
+
+    const searchKey = `awarding_agency-${query}`;
+    if (searchInProgressRef.current[searchKey]) {
+      return autocompleteOptionsRef.current.awarding_agency || [];
+    }
+
+    searchInProgressRef.current[searchKey] = query;
+
+    (async () => {
+      try {
+        const response = await govtContractsAutocompleteAPI.autocomplete({
+          autocomplete_type: 'awarding_agency',
+          search_text: query,
+          limit: 10,
+        });
+
+        if (response.success && response.results) {
+          const transformedResults = transformAutocompleteResults(response.results, 'awarding_agency');
+          setAutocompleteOptions((prev) => {
+            const updated = {
+              ...prev,
+              awarding_agency: transformedResults,
+            };
+            autocompleteOptionsRef.current = updated;
+            return updated;
+          });
+        }
+      } catch (error) {
+        console.error(`Error loading autocomplete for awarding_agency:`, error);
+      } finally {
+        delete searchInProgressRef.current[searchKey];
+      }
+    })();
+
+    return autocompleteOptionsRef.current.awarding_agency || [];
+  }, [transformAutocompleteResults]);
+
+  const fundingAgencySearch = useCallback((query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
+    if (!query || query.length < 2) {
+      return [];
+    }
+
+    const searchKey = `funding_agency-${query}`;
+    if (searchInProgressRef.current[searchKey]) {
+      return autocompleteOptionsRef.current.funding_agency || [];
+    }
+
+    searchInProgressRef.current[searchKey] = query;
+
+    (async () => {
+      try {
+        const response = await govtContractsAutocompleteAPI.autocomplete({
+          autocomplete_type: 'funding_agency',
+          search_text: query,
+          limit: 10,
+        });
+
+        if (response.success && response.results) {
+          const transformedResults = transformAutocompleteResults(response.results, 'funding_agency');
+          setAutocompleteOptions((prev) => {
+            const updated = {
+              ...prev,
+              funding_agency: transformedResults,
+            };
+            autocompleteOptionsRef.current = updated;
+            return updated;
+          });
+        }
+      } catch (error) {
+        console.error(`Error loading autocomplete for funding_agency:`, error);
+      } finally {
+        delete searchInProgressRef.current[searchKey];
+      }
+    })();
+
+    return autocompleteOptionsRef.current.funding_agency || [];
+  }, [transformAutocompleteResults]);
 
   // Handle search
   const handleSearch = useCallback(async () => {
@@ -381,15 +535,38 @@ const GovtContractsSearchPage: React.FC = () => {
     setSelectedAwards(new Set());
 
     try {
-      const filters: GovtContractsSearchFilters = {
+      const filters: any = {
         ...searchParams,
       };
 
+      // Convert agency names to codes for API call
+      if (filters.awarding_agency_name && filters.awarding_agency_name.length > 0) {
+        const codes = filters.awarding_agency_name.map((name: string) => {
+          const found = autocompleteOptions.awarding_agency?.find(opt => 
+            opt.name === name || opt.text === name
+          );
+          return found?.code || found?.id || name;
+        }).filter(Boolean);
+        filters.awarding_agency_code = codes;
+        delete filters.awarding_agency_name;
+      }
+      
+      if (filters.funding_agency_name && filters.funding_agency_name.length > 0) {
+        const codes = filters.funding_agency_name.map((name: string) => {
+          const found = autocompleteOptions.funding_agency?.find(opt => 
+            opt.name === name || opt.text === name
+          );
+          return found?.code || found?.id || name;
+        }).filter(Boolean);
+        filters.funding_agency_code = codes;
+        delete filters.funding_agency_name;
+      }
+
       // Remove empty arrays
       Object.keys(filters).forEach((key) => {
-        const value = filters[key as keyof GovtContractsSearchFilters];
+        const value = filters[key];
         if (Array.isArray(value) && value.length === 0) {
-          delete filters[key as keyof GovtContractsSearchFilters];
+          delete filters[key];
         }
       });
 
@@ -399,10 +576,44 @@ const GovtContractsSearchPage: React.FC = () => {
       });
 
       if (response.success) {
-        setAllSearchResults(response.results || []);
+        const results = response.results || [];
+        setAllSearchResults(results);
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
-        computeFiltersFromResults(response.results || []);
+        computeFiltersFromResults(results);
+        
+        // Set default date ranges from results only if one date is set but not the other
+        if (results.length > 0) {
+          const dates = results
+            .map(award => award.period_start_date)
+            .filter((date): date is string => !!date)
+            .map(date => {
+              // Extract just the date part (YYYY-MM-DD) if it includes time
+              return date.split('T')[0];
+            })
+            .sort();
+          
+          if (dates.length > 0) {
+            const minDate = dates[0];
+            const maxDate = dates[dates.length - 1];
+            
+            setSearchParams((prev) => {
+              // Only set defaults if one date is set but not the other
+              const hasDateFrom = !!prev.date_from;
+              const hasDateTo = !!prev.date_to;
+              
+              // If date_from is set but date_to is not, set date_to to max
+              // If date_to is set but date_from is not, set date_from to min
+              // If both are empty, don't set either
+              if (hasDateFrom && !hasDateTo) {
+                return { ...prev, date_to: maxDate };
+              } else if (hasDateTo && !hasDateFrom) {
+                return { ...prev, date_from: minDate };
+              }
+              return prev;
+            });
+          }
+        }
       } else {
         setSearchError('Search failed. Please try again.');
       }
@@ -422,15 +633,38 @@ const GovtContractsSearchPage: React.FC = () => {
     setSearchError(null);
 
     try {
-      const filters: GovtContractsSearchFilters = {
+      const filters: any = {
         ...searchParams,
       };
 
+      // Convert agency names to codes for API call
+      if (filters.awarding_agency_name && filters.awarding_agency_name.length > 0) {
+        const codes = filters.awarding_agency_name.map((name: string) => {
+          const found = autocompleteOptions.awarding_agency?.find(opt => 
+            opt.name === name || opt.text === name
+          );
+          return found?.code || found?.id || name;
+        }).filter(Boolean);
+        filters.awarding_agency_code = codes;
+        delete filters.awarding_agency_name;
+      }
+      
+      if (filters.funding_agency_name && filters.funding_agency_name.length > 0) {
+        const codes = filters.funding_agency_name.map((name: string) => {
+          const found = autocompleteOptions.funding_agency?.find(opt => 
+            opt.name === name || opt.text === name
+          );
+          return found?.code || found?.id || name;
+        }).filter(Boolean);
+        filters.funding_agency_code = codes;
+        delete filters.funding_agency_name;
+      }
+
       // Remove empty arrays
       Object.keys(filters).forEach((key) => {
-        const value = filters[key as keyof GovtContractsSearchFilters];
+        const value = filters[key];
         if (Array.isArray(value) && value.length === 0) {
-          delete filters[key as keyof GovtContractsSearchFilters];
+          delete filters[key];
         }
       });
 
@@ -441,10 +675,45 @@ const GovtContractsSearchPage: React.FC = () => {
       });
 
       if (response.success) {
-        setAllSearchResults((prev) => [...prev, ...(response.results || [])]);
+        const newResults = response.results || [];
+        const updatedResults = [...allSearchResults, ...newResults];
+        setAllSearchResults(updatedResults);
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
-        computeFiltersFromResults([...allSearchResults, ...(response.results || [])]);
+        computeFiltersFromResults(updatedResults);
+        
+        // Update date ranges from all results only if one date is set but not the other
+        if (updatedResults.length > 0) {
+          const dates = updatedResults
+            .map(award => award.period_start_date)
+            .filter((date): date is string => !!date)
+            .map(date => {
+              // Extract just the date part (YYYY-MM-DD) if it includes time
+              return date.split('T')[0];
+            })
+            .sort();
+          
+          if (dates.length > 0) {
+            const minDate = dates[0];
+            const maxDate = dates[dates.length - 1];
+            
+            setSearchParams((prev) => {
+              // Only set defaults if one date is set but not the other
+              const hasDateFrom = !!prev.date_from;
+              const hasDateTo = !!prev.date_to;
+              
+              // If date_from is set but date_to is not, set date_to to max
+              // If date_to is set but date_from is not, set date_from to min
+              // If both are empty, don't set either
+              if (hasDateFrom && !hasDateTo) {
+                return { ...prev, date_to: maxDate };
+              } else if (hasDateTo && !hasDateFrom) {
+                return { ...prev, date_from: minDate };
+              }
+              return prev;
+            });
+          }
+        }
       }
     } catch (error: any) {
       console.error('Load more error:', error);
@@ -460,6 +729,17 @@ const GovtContractsSearchPage: React.FC = () => {
   const endIndex = startIndex + pageSize;
   const paginatedResults = currentResults.slice(startIndex, endIndex);
 
+  // Column toggle handler
+  const handleColumnToggle = (column: string) => {
+    setVisibleColumns((prev) => {
+      if (prev.includes(column)) {
+        return prev.filter((c) => c !== column);
+      } else {
+        return [...prev, column];
+      }
+    });
+  };
+
   // Save state to sessionStorage
   useEffect(() => {
     const stateToSave = {
@@ -471,9 +751,10 @@ const GovtContractsSearchPage: React.FC = () => {
       pageSize,
       searchFormExpanded,
       advancedSearchExpanded,
+      visibleColumns,
     };
     sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
-  }, [searchParams, allSearchResults, lastEvaluatedKey, hasMore, currentPage, pageSize, searchFormExpanded, advancedSearchExpanded]);
+  }, [searchParams, allSearchResults, lastEvaluatedKey, hasMore, currentPage, pageSize, searchFormExpanded, advancedSearchExpanded, visibleColumns]);
 
   // Apply filters when they change
   useEffect(() => {
@@ -487,25 +768,45 @@ const GovtContractsSearchPage: React.FC = () => {
     }
   }, [allSearchResults, computeFiltersFromResults]);
 
-  // Format currency
+  // Format currency (not rounded)
   const formatCurrency = (amount?: number) => {
     if (amount === undefined || amount === null) return 'N/A';
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     }).format(amount);
   };
 
-  // Format date
+  // Format date (fix timezone issue by parsing date string directly)
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A';
     try {
-      return new Date(dateString).toLocaleDateString('en-US', {
+      // Parse date string directly to avoid timezone conversion issues
+      const [year, month, day] = dateString.split('T')[0].split('-');
+      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      return date.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  // Format last updated date
+  const formatLastUpdated = (dateString?: string) => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
       });
     } catch {
       return dateString;
@@ -592,44 +893,33 @@ const GovtContractsSearchPage: React.FC = () => {
                 <Typography variant="h6" sx={{ color: '#e2e8f0', mb: 2 }}>
                   Basic Search
                 </Typography>
-                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
-                  {/* Keywords */}
-                  <MultiSelectField<string>
-                    label="Keywords"
-                    selectedItems={searchParams.keywords || []}
-                    onItemsChange={(keywords) => {
-                      setSearchParams((prev) => ({ ...prev, keywords }));
-                    }}
-                    suggestions={[]}
-                    onSearch={() => []}
-                    renderItem={(keyword) => keyword}
-                    placeholder="Enter keywords to search..."
-                  />
-
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
                   {/* Awarding Agency */}
                   <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
                     label="Awarding Agency"
                     selectedItems={(() => {
-                      // Convert codes back to objects for display
-                      const codes = searchParams.awarding_agency_code || [];
-                      return codes.map(code => {
-                        // Try to find in autocomplete options first
+                      // Convert names back to objects for display
+                      const names = searchParams.awarding_agency_name || [];
+                      return names.map(name => {
+                        // Try to find in autocomplete options
                         const found = autocompleteOptions.awarding_agency?.find(opt => 
-                          opt.code === code || opt.id === code
+                          opt.name === name || opt.text === name
                         );
-                        return found || { code: code || '', name: code || '' };
+                        if (found) return found;
+                        // Fallback - create object with name
+                        return { name: name || '', code: '', text: name || '' };
                       });
                     })()}
                     onItemsChange={(items) => {
                       setSearchParams((prev) => ({
                         ...prev,
-                        awarding_agency_code: items.map(item => 
-                          typeof item === 'string' ? item : item.code || item.id || ''
+                        awarding_agency_name: items.map(item => 
+                          typeof item === 'string' ? item : item.name || item.text || ''
                         ),
                       }));
                     }}
                     suggestions={[]}
-                    onSearch={createAutocompleteSearch('awarding_agency')}
+                    onSearch={awardingAgencySearch}
                     renderItem={(item) => {
                       if (typeof item === 'string') return item;
                       // Return name for display (chips will show name)
@@ -647,24 +937,28 @@ const GovtContractsSearchPage: React.FC = () => {
                   <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
                     label="Funding Agency"
                     selectedItems={(() => {
-                      const codes = searchParams.funding_agency_code || [];
-                      return codes.map(code => {
+                      // Convert names back to objects for display
+                      const names = searchParams.funding_agency_name || [];
+                      return names.map(name => {
+                        // Try to find in autocomplete options
                         const found = autocompleteOptions.funding_agency?.find(opt => 
-                          opt.code === code || opt.id === code
+                          opt.name === name || opt.text === name
                         );
-                        return found || { code: code || '', name: code || '' };
+                        if (found) return found;
+                        // Fallback - create object with name
+                        return { name: name || '', code: '', text: name || '' };
                       });
                     })()}
                     onItemsChange={(items) => {
                       setSearchParams((prev) => ({
                         ...prev,
-                        funding_agency_code: items.map(item => 
-                          typeof item === 'string' ? item : item.code || item.id || ''
+                        funding_agency_name: items.map(item => 
+                          typeof item === 'string' ? item : item.name || item.text || ''
                         ),
                       }));
                     }}
                     suggestions={[]}
-                    onSearch={createAutocompleteSearch('funding_agency')}
+                    onSearch={fundingAgencySearch}
                     renderItem={(item) => {
                       if (typeof item === 'string') return item;
                       // Return name for display (chips will show name)
@@ -700,8 +994,8 @@ const GovtContractsSearchPage: React.FC = () => {
                         ),
                       }));
                     }}
-                    suggestions={[]}
-                    onSearch={createAutocompleteSearch('recipient')}
+                    suggestions={autocompleteOptions.recipient || []}
+                    onSearch={recipientSearch}
                     renderItem={(item) => {
                       if (typeof item === 'string') return item;
                       // Return name for display (chips will show name)
@@ -709,12 +1003,22 @@ const GovtContractsSearchPage: React.FC = () => {
                     }}
                     getItemKey={(item) => {
                       if (typeof item === 'string') return item;
-                      return item.id || item.name || item.text || '';
+                      // Ensure we always return a unique, non-empty key
+                      // Try id, then name, then text, then generate from object
+                      const key = item.id || item.name || item.text || '';
+                      if (key) return key;
+                      // Generate a unique key from the item's content
+                      const itemStr = JSON.stringify(item);
+                      // Use a hash-like approach for uniqueness
+                      return `recipient-${itemStr.slice(0, 100).replace(/[^a-zA-Z0-9]/g, '-')}`;
                     }}
                     placeholder="Search for recipients..."
                     allowCustomInput={false}
                   />
+                </Box>
 
+                {/* Min/Max Obligation Row */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, mt: 2 }}>
                   {/* Min Obligation */}
                   <TextField
                     label="Min Obligation ($)"
@@ -735,6 +1039,18 @@ const GovtContractsSearchPage: React.FC = () => {
                         '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                       },
                       '& .MuiInputLabel-root': { color: '#94a3b8' },
+                      // Hide spinner buttons
+                      '& input[type=number]': {
+                        MozAppearance: 'textfield',
+                      },
+                      '& input[type=number]::-webkit-outer-spin-button': {
+                        WebkitAppearance: 'none',
+                        margin: 0,
+                      },
+                      '& input[type=number]::-webkit-inner-spin-button': {
+                        WebkitAppearance: 'none',
+                        margin: 0,
+                      },
                     }}
                   />
 
@@ -748,6 +1064,73 @@ const GovtContractsSearchPage: React.FC = () => {
                         ...prev,
                         max_obligation: e.target.value ? Number(e.target.value) : undefined,
                       }));
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                        color: '#e2e8f0',
+                        '& fieldset': { borderColor: '#475569' },
+                        '&:hover fieldset': { borderColor: '#64748b' },
+                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                      },
+                      '& .MuiInputLabel-root': { color: '#94a3b8' },
+                      // Hide spinner buttons
+                      '& input[type=number]': {
+                        MozAppearance: 'textfield',
+                      },
+                      '& input[type=number]::-webkit-outer-spin-button': {
+                        WebkitAppearance: 'none',
+                        margin: 0,
+                      },
+                      '& input[type=number]::-webkit-inner-spin-button': {
+                        WebkitAppearance: 'none',
+                        margin: 0,
+                      },
+                    }}
+                  />
+                </Box>
+
+                {/* Date Range Row */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, mt: 2 }}>
+                  {/* Date From */}
+                  <TextField
+                    label="Date From"
+                    type="date"
+                    value={searchParams.date_from || ''}
+                    onChange={(e) => {
+                      setSearchParams((prev) => ({
+                        ...prev,
+                        date_from: e.target.value || undefined,
+                      }));
+                    }}
+                    InputLabelProps={{
+                      shrink: true,
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                        color: '#e2e8f0',
+                        '& fieldset': { borderColor: '#475569' },
+                        '&:hover fieldset': { borderColor: '#64748b' },
+                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                      },
+                      '& .MuiInputLabel-root': { color: '#94a3b8' },
+                    }}
+                  />
+
+                  {/* Date To */}
+                  <TextField
+                    label="Date To"
+                    type="date"
+                    value={searchParams.date_to || ''}
+                    onChange={(e) => {
+                      setSearchParams((prev) => ({
+                        ...prev,
+                        date_to: e.target.value || undefined,
+                      }));
+                    }}
+                    InputLabelProps={{
+                      shrink: true,
                     }}
                     sx={{
                       '& .MuiOutlinedInput-root': {
@@ -842,20 +1225,6 @@ const GovtContractsSearchPage: React.FC = () => {
                     placeholder="Enter CFDA numbers..."
                   />
 
-                  {/* Fiscal Year */}
-                  <MultiSelectField<string>
-                    label="Fiscal Year"
-                    selectedItems={(searchParams.fiscal_year || []).map(String)}
-                    onItemsChange={(fiscalYears) => {
-                      setSearchParams((prev) => ({
-                        ...prev,
-                        fiscal_year: fiscalYears.map(Number),
-                      }));
-                    }}
-                    suggestions={FISCAL_YEARS.map(String)}
-                    renderItem={(year) => year}
-                    placeholder="Select fiscal years..."
-                  />
                   </Box>
                 </Collapse>
               </Box>
@@ -867,8 +1236,8 @@ const GovtContractsSearchPage: React.FC = () => {
                     setSearchParams({
                       keywords: [],
                       award_type: [],
-                      awarding_agency_code: [],
-                      funding_agency_code: [],
+                      awarding_agency_name: [],
+                      funding_agency_name: [],
                       recipient_id: [],
                       recipient_name: [],
                       recipient_location_state: [],
@@ -876,7 +1245,8 @@ const GovtContractsSearchPage: React.FC = () => {
                       naics_code: [],
                       psc_code: [],
                       cfda_number: [],
-                      fiscal_year: [],
+                      date_from: '',
+                      date_to: '',
                     });
                   }}
                   sx={{
@@ -893,9 +1263,10 @@ const GovtContractsSearchPage: React.FC = () => {
                   disabled={isSearching}
                   startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
                   sx={{
-                    backgroundColor: '#3b82f6',
-                    '&:hover': { backgroundColor: '#2563eb' },
-                    '&:disabled': { backgroundColor: '#475569' },
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                    color: '#ffffff',
+                    '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+                    '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
                   }}
                 >
                   {isSearching ? 'Searching...' : 'Search'}
@@ -2160,10 +2531,53 @@ const GovtContractsSearchPage: React.FC = () => {
               <Box sx={{ p: 3 }}>
                 {/* Results Header */}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                    Results
-                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Results
+                    </Typography>
+                    {currentResults.length > 0 && (
+                      <IconButton
+                        onClick={(e) => setColumnMenuAnchor(e.currentTarget)}
+                        size="small"
+                        sx={{
+                          color: '#9ca3af',
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            color: '#3b82f6',
+                          },
+                        }}
+                        title="Select columns to display"
+                      >
+                        <ViewColumnIcon fontSize="small" />
+                      </IconButton>
+                    )}
+                  </Box>
                   <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    {/* Add to Context Button */}
+                    {currentResults.length > 0 && (
+                      <Tooltip title={`Add ${selectedAwards.size > 0 ? `${selectedAwards.size} award(s)` : 'selected awards'} to context`}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              if (selectedAwards.size === 0) {
+                                alert('Please select at least one award to add to context');
+                                return;
+                              }
+                              setContextMenuAnchor(e.currentTarget);
+                            }}
+                            disabled={selectedAwards.size === 0}
+                            sx={{ 
+                              color: selectedAwards.size > 0 ? '#10b981' : '#9ca3af', 
+                              '&:hover': { color: '#10b981' },
+                              '&:disabled': { color: '#4b5563' }
+                            }}
+                          >
+                            <AddToContextIcon sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
                     {currentResults.length > 0 ? (
                       <Chip
                         label={`${currentResults.length} award${currentResults.length !== 1 ? 's' : ''} found`}
@@ -2196,65 +2610,120 @@ const GovtContractsSearchPage: React.FC = () => {
                       />
                     ) : null}
                     {currentResults.length > 0 && (
-                      <FormControl size="small" sx={{ minWidth: 120 }}>
-                        <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
-                        <Select
-                          labelId="results-per-page-label"
-                          value={pageSize}
-                          label="Per Page"
-                          onChange={(e) => {
-                            const newPageSize = Number(e.target.value);
-                            setPageSize(newPageSize);
-                            setCurrentPage(1);
-                          }}
-                          sx={{
-                            color: '#ffffff',
-                            '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                            '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                            '& .MuiSelect-icon': { color: '#9ca3af' },
-                          }}
-                          MenuProps={{
-                            PaperProps: {
-                              sx: {
-                                bgcolor: '#1f2937',
-                                border: '1px solid #374151',
-                                '& .MuiMenuItem-root': {
-                                  color: '#ffffff',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                  },
-                                  '&.Mui-selected': {
-                                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                                    '&:hover': {
-                                      backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                                    },
-                                  },
-                                },
-                                '&::-webkit-scrollbar': {
-                                  width: '8px',
-                                },
-                                '&::-webkit-scrollbar-track': {
-                                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                                  borderRadius: '4px',
-                                },
-                                '&::-webkit-scrollbar-thumb': {
-                                  backgroundColor: '#3b82f6',
-                                  borderRadius: '4px',
-                                },
-                                '&::-webkit-scrollbar-thumb:hover': {
-                                  backgroundColor: '#2563eb',
-                                },
-                              },
+                      <>
+                        <Menu
+                          anchorEl={columnMenuAnchor}
+                          open={columnMenuOpen}
+                          onClose={() => setColumnMenuAnchor(null)}
+                          PaperProps={{
+                            sx: {
+                              bgcolor: '#1f2937',
+                              border: '1px solid #374151',
+                              mt: 1,
                             },
                           }}
                         >
-                          <MenuItem value={10}>10</MenuItem>
-                          <MenuItem value={25}>25</MenuItem>
-                          <MenuItem value={50}>50</MenuItem>
-                          <MenuItem value={100}>100</MenuItem>
-                        </Select>
-                      </FormControl>
+                          <Box sx={{ p: 1, minWidth: 200 }}>
+                            <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, px: 1 }}>
+                              Select Columns
+                            </Typography>
+                            <FormGroup>
+                              {AVAILABLE_COLUMNS.map((col) => {
+                                const columnLabels: Record<string, string> = {
+                                  recipient: 'Recipient',
+                                  awarding_agency: 'Awarding Agency',
+                                  funding_agency: 'Funding Agency',
+                                  amount: 'Amount',
+                                  period_start_date: 'Period Start Date',
+                                  period_end_date: 'Period End Date',
+                                  naics_code: 'NAICS Code',
+                                  psc_code: 'PSC Code',
+                                  last_updated: 'Last Updated',
+                                };
+                                return (
+                                  <FormControlLabel
+                                    key={col}
+                                    control={
+                                      <Checkbox
+                                        checked={visibleColumns.includes(col)}
+                                        onChange={() => handleColumnToggle(col)}
+                                        sx={{
+                                          color: '#9ca3af',
+                                          '&.Mui-checked': { color: '#3b82f6' },
+                                        }}
+                                      />
+                                    }
+                                    label={columnLabels[col] || col}
+                                    sx={{
+                                      color: '#e2e8f0',
+                                      '& .MuiFormControlLabel-label': { fontSize: '0.875rem' },
+                                    }}
+                                  />
+                                );
+                              })}
+                            </FormGroup>
+                          </Box>
+                        </Menu>
+                        <FormControl size="small" sx={{ minWidth: 120, ml: 1 }}>
+                          <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+                          <Select
+                            labelId="results-per-page-label"
+                            value={pageSize}
+                            label="Per Page"
+                            onChange={(e) => {
+                              const newPageSize = Number(e.target.value);
+                              setPageSize(newPageSize);
+                              setCurrentPage(1);
+                            }}
+                            sx={{
+                              color: '#ffffff',
+                              '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '& .MuiSelect-icon': { color: '#9ca3af' },
+                            }}
+                            MenuProps={{
+                              PaperProps: {
+                                sx: {
+                                  bgcolor: '#1f2937',
+                                  border: '1px solid #374151',
+                                  '& .MuiMenuItem-root': {
+                                    color: '#ffffff',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                    },
+                                    '&.Mui-selected': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                      '&:hover': {
+                                        backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                                      },
+                                    },
+                                  },
+                                  '&::-webkit-scrollbar': {
+                                    width: '8px',
+                                  },
+                                  '&::-webkit-scrollbar-track': {
+                                    backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb': {
+                                    backgroundColor: '#3b82f6',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb:hover': {
+                                    backgroundColor: '#2563eb',
+                                  },
+                                },
+                              },
+                            }}
+                          >
+                            <MenuItem value={10}>10</MenuItem>
+                            <MenuItem value={25}>25</MenuItem>
+                            <MenuItem value={50}>50</MenuItem>
+                            <MenuItem value={100}>100</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </>
                     )}
                   </Box>
                 </Box>
@@ -2294,12 +2763,34 @@ const GovtContractsSearchPage: React.FC = () => {
                             sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
                           />
                         </TableCell>
-                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Award ID</TableCell>
-                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Type</TableCell>
-                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Recipient</TableCell>
-                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Agency</TableCell>
-                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Amount</TableCell>
-                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Date</TableCell>
+                        {visibleColumns.includes('recipient') && (
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Recipient</TableCell>
+                        )}
+                        {visibleColumns.includes('awarding_agency') && (
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Awarding Agency</TableCell>
+                        )}
+                        {visibleColumns.includes('funding_agency') && (
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Funding Agency</TableCell>
+                        )}
+                        {visibleColumns.includes('amount') && (
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Amount</TableCell>
+                        )}
+                        {visibleColumns.includes('period_start_date') && (
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Period Start Date</TableCell>
+                        )}
+                        {visibleColumns.includes('period_end_date') && (
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Period End Date</TableCell>
+                        )}
+                        {visibleColumns.includes('naics_code') && (
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>NAICS Code</TableCell>
+                        )}
+                        {visibleColumns.includes('psc_code') && (
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>PSC Code</TableCell>
+                        )}
+                        {visibleColumns.includes('last_updated') && (
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Last Updated</TableCell>
+                        )}
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Actions</TableCell>
                       </TableRow>
                     </TableHead>
                       <TableBody>
@@ -2320,23 +2811,70 @@ const GovtContractsSearchPage: React.FC = () => {
                                 sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
                               />
                             </TableCell>
+                            {visibleColumns.includes('recipient') && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                {award.recipient_name || 'N/A'}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('awarding_agency') && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                {award.awarding_agency_name || 'N/A'}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('funding_agency') && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                {award.funding_agency_name || 'N/A'}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('amount') && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                {formatCurrency(award.total_obligation)}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('period_start_date') && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                {formatDate(award.period_start_date)}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('period_end_date') && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                {formatDate(award.period_end_date)}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('naics_code') && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                {award.naics_code || 'N/A'}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('psc_code') && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                {award.psc_code || 'N/A'}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('last_updated') && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                {formatLastUpdated(award.last_updated)}
+                              </TableCell>
+                            )}
                             <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                              {award.award_id}
-                            </TableCell>
-                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                              {award.award_type || 'N/A'}
-                            </TableCell>
-                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                              {award.recipient_name || 'N/A'}
-                            </TableCell>
-                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                              {award.awarding_agency_name || award.funding_agency_name || 'N/A'}
-                            </TableCell>
-                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                              {formatCurrency(award.total_obligation)}
-                            </TableCell>
-                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                              {formatDate(award.period_start_date)}
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => {
+                                  setSelectedAwardForDetails(award);
+                                  setDetailsDialogOpen(true);
+                                }}
+                                sx={{
+                                  borderColor: '#3b82f6',
+                                  color: '#3b82f6',
+                                  '&:hover': {
+                                    borderColor: '#2563eb',
+                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                }}
+                              >
+                                View More
+                              </Button>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -2371,13 +2909,20 @@ const GovtContractsSearchPage: React.FC = () => {
                 {!isFiltered && hasMore && lastEvaluatedKey && allSearchResults.length > 0 && (
                   <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
                     <Button
-                      variant="contained"
+                      variant="outlined"
                       onClick={handleLoadMore}
                       disabled={isLoadingMore}
                       sx={{
-                        backgroundColor: '#3b82f6',
-                        '&:hover': { backgroundColor: '#2563eb' },
-                        '&:disabled': { backgroundColor: '#475569' },
+                        color: '#3b82f6',
+                        borderColor: '#3b82f6',
+                        '&:hover': {
+                          borderColor: '#60a5fa',
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        },
+                        '&:disabled': {
+                          borderColor: '#4b5563',
+                          color: '#6b7280',
+                        },
                       }}
                     >
                       {isLoadingMore ? (
@@ -2399,24 +2944,208 @@ const GovtContractsSearchPage: React.FC = () => {
         </Box>
       </Container>
 
+      {/* Award Details Dialog */}
+      <Dialog
+        open={detailsDialogOpen}
+        onClose={() => setDetailsDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.98)',
+            border: '2px solid #374151',
+            color: '#ffffff',
+          },
+        }}
+      >
+        <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151' }}>
+          {selectedAwardForDetails?.recipient_name || 'Award Details'}
+        </DialogTitle>
+        <DialogContent
+          sx={{
+            mt: 2,
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#3b82f6',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: '#2563eb',
+            },
+          }}
+        >
+          {selectedAwardForDetails && (
+            <Box>
+              {/* Description */}
+              {selectedAwardForDetails.description && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="subtitle2" sx={{ color: '#94a3b8', mb: 1, fontWeight: 600 }}>
+                    Description
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {selectedAwardForDetails.description}
+                  </Typography>
+                </Box>
+              )}
+
+              {/* PSC Description */}
+              {selectedAwardForDetails.psc_description && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="subtitle2" sx={{ color: '#94a3b8', mb: 1, fontWeight: 600 }}>
+                    PSC Description
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {selectedAwardForDetails.psc_description}
+                  </Typography>
+                </Box>
+              )}
+
+              {/* Transactions */}
+              {selectedAwardForDetails.transactions && selectedAwardForDetails.transactions.length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="subtitle2" sx={{ color: '#94a3b8', mb: 1, fontWeight: 600 }}>
+                    Transactions ({selectedAwardForDetails.transactions.length})
+                  </Typography>
+                  <Box sx={{ maxHeight: '300px', overflowY: 'auto' }}>
+                    {selectedAwardForDetails.transactions.map((transaction: any, idx: number) => (
+                      <Box
+                        key={transaction.transaction_id || idx}
+                        sx={{
+                          p: 2,
+                          mb: 1,
+                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                          borderRadius: '4px',
+                          border: '1px solid #374151',
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                          <strong>ID:</strong> {transaction.transaction_id || 'N/A'}
+                        </Typography>
+                        {transaction.action_date && (
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                            <strong>Date:</strong> {formatDate(transaction.action_date)}
+                          </Typography>
+                        )}
+                        {transaction.federal_action_obligation && (
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                            <strong>Amount:</strong> {formatCurrency(parseFloat(transaction.federal_action_obligation))}
+                          </Typography>
+                        )}
+                        {transaction.transaction_description && (
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                            <strong>Description:</strong> {transaction.transaction_description}
+                          </Typography>
+                        )}
+                        {transaction.action_type && (
+                          <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                            <strong>Type:</strong> {transaction.action_type}
+                          </Typography>
+                        )}
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              )}
+
+              {/* Subawards */}
+              {selectedAwardForDetails.subawards && selectedAwardForDetails.subawards.length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="subtitle2" sx={{ color: '#94a3b8', mb: 1, fontWeight: 600 }}>
+                    Subawards ({selectedAwardForDetails.subawards.length})
+                  </Typography>
+                  <Box sx={{ maxHeight: '300px', overflowY: 'auto' }}>
+                    {selectedAwardForDetails.subawards.map((subaward: any, idx: number) => (
+                      <Box
+                        key={subaward.subaward_id || idx}
+                        sx={{
+                          p: 2,
+                          mb: 1,
+                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                          borderRadius: '4px',
+                          border: '1px solid #374151',
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                          <strong>ID:</strong> {subaward.subaward_id || 'N/A'}
+                        </Typography>
+                        {subaward.subawardee_name && (
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                            <strong>Recipient:</strong> {subaward.subawardee_name}
+                          </Typography>
+                        )}
+                        {subaward.subaward_amount && (
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                            <strong>Amount:</strong> {formatCurrency(parseFloat(subaward.subaward_amount))}
+                          </Typography>
+                        )}
+                        {subaward.subaward_date && (
+                          <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                            <strong>Date:</strong> {formatDate(subaward.subaward_date)}
+                          </Typography>
+                        )}
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              )}
+
+              {(!selectedAwardForDetails.transactions || selectedAwardForDetails.transactions.length === 0) &&
+                (!selectedAwardForDetails.subawards || selectedAwardForDetails.subawards.length === 0) &&
+                !selectedAwardForDetails.description &&
+                !selectedAwardForDetails.psc_description && (
+                  <Typography variant="body2" sx={{ color: '#94a3b8', textAlign: 'center', py: 3 }}>
+                    No additional details available
+                  </Typography>
+                )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+          <Button
+            onClick={() => setDetailsDialogOpen(false)}
+            sx={{
+              color: '#94a3b8',
+              '&:hover': {
+                backgroundColor: 'rgba(71, 85, 105, 0.1)',
+              },
+            }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Context Menu */}
       <Menu
-        open={contextMenuAnchor !== null}
+        anchorEl={contextMenuAnchor}
+        open={Boolean(contextMenuAnchor)}
         onClose={handleContextMenuClose}
-        anchorReference="anchorPosition"
-        anchorPosition={
-          contextMenuAnchor !== null
-            ? { top: contextMenuAnchor.mouseY, left: contextMenuAnchor.mouseX }
-            : undefined
-        }
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+          }
+        }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')}>
-          <NewChatIcon sx={{ mr: 1 }} />
+        <MenuItem
+          onClick={() => handleAddToContext('new')}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
           Add to New Chat
         </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')}>
-          <SidebarChatIcon sx={{ mr: 1 }} />
-          Add to Current Chat
+        <MenuItem
+          onClick={() => handleAddToContext('sidebar')}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+          Add to Current Sidebar Chat
         </MenuItem>
       </Menu>
     </Box>

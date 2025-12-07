@@ -2730,31 +2730,6 @@ const PoliticianTradesSearchPage: React.FC = () => {
             </Box>
           )}
 
-          {/* Load More Button - only show when not filtered and has more results */}
-          {!isFiltered && hasMore && allSearchResults.length > 0 && (
-            <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', borderTop: '1px solid #374151' }}>
-              <Button
-                variant="outlined"
-                onClick={handleLoadMore}
-                disabled={isLoadingMore || isSearching}
-                sx={{
-                  color: '#3b82f6',
-                  borderColor: '#3b82f6',
-                  '&:hover': {
-                    borderColor: '#60a5fa',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  },
-                  '&:disabled': {
-                    borderColor: '#4b5563',
-                    color: '#6b7280',
-                  },
-                }}
-              >
-                {isLoadingMore ? 'Loading...' : `Load More (${allSearchResults.length} of ${totalFound > 0 ? totalFound : 'many'} loaded)`}
-              </Button>
-            </Box>
-          )}
-
           {/* Pagination */}
           {filteredResults.length > pageSize && (
             <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #374151' }}>
@@ -2806,6 +2781,31 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   Next
                 </Button>
               </Box>
+            </Box>
+          )}
+
+          {/* Load More Button - only show when not filtered and has more results */}
+          {!isFiltered && hasMore && allSearchResults.length > 0 && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+              <Button
+                variant="outlined"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore || isSearching}
+                sx={{
+                  color: '#3b82f6',
+                  borderColor: '#3b82f6',
+                  '&:hover': {
+                    borderColor: '#60a5fa',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                  '&:disabled': {
+                    borderColor: '#4b5563',
+                    color: '#6b7280',
+                  },
+                }}
+              >
+                {isLoadingMore ? 'Loading...' : `Load More (${allSearchResults.length} of ${totalFound > 0 ? totalFound : 'many'} loaded)`}
+              </Button>
             </Box>
           )}
         </GlassCard>
