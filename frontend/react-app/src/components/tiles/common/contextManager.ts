@@ -7,7 +7,7 @@
 
 export interface ContextItem {
   id: string;
-  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'custom';
+  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'custom';
   title: string;
   subtitle?: string;
   data: any;
@@ -811,6 +811,154 @@ export const addMultipleTradesToContext = (
   } else {
     // Add to new chat (existing behavior) - dispatch each item separately
     console.log('🆕 Context Manager: Adding multiple trades to new chat context');
+    contextItems.forEach(item => addToContext(item));
+  }
+};
+
+/**
+ * Add a government contract award to the context window
+ * Used for adding individual awards from the government contracts search page
+ */
+export const addAwardToContext = (
+  award: any,
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  // Use award_id as the primary unique identifier
+  const awardId = award.award_id || award.id || `award_${Date.now()}`;
+  
+  // Format date
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return '';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  // Format currency
+  const formatCurrency = (amount?: number): string => {
+    if (amount === undefined || amount === null) return '';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const title = `${award.recipient_name || 'Unknown Recipient'} - ${award.award_type || 'Award'}`;
+  const subtitle = award.period_start_date 
+    ? `${formatDate(award.period_start_date)}${award.total_obligation ? ` • ${formatCurrency(award.total_obligation)}` : ''}${award.awarding_agency_name ? ` • ${award.awarding_agency_name}` : ''}`
+    : award.total_obligation ? formatCurrency(award.total_obligation) : 'Government Contract Award';
+  
+  const contextItem: ContextItem = {
+    id: `govt_contract_award_${awardId}_${Date.now()}`,
+    type: 'govt_contract_award',
+    title,
+    subtitle,
+    data: award, // Include all award data
+    timestamp: Date.now(),
+  };
+  
+  if (target === 'sidebar') {
+    // Add to current sidebar session's context
+    const event = new CustomEvent('add-to-sidebar-context', {
+      detail: contextItem
+    });
+    window.dispatchEvent(event);
+    
+    // Listen for potential error response (if sidebar can't handle it)
+    const handleSidebarError = () => {
+      // Fallback to new chat if sidebar fails
+      addToContext(contextItem);
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+  } else {
+    // Add to new chat (existing behavior)
+    addToContext(contextItem);
+  }
+};
+
+/**
+ * Add multiple government contract awards to the context window
+ * Used for adding multiple selected awards from the government contracts search page
+ */
+export const addMultipleAwardsToContext = (
+  awards: any[],
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  // Format date
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return '';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  // Format currency
+  const formatCurrency = (amount?: number): string => {
+    if (amount === undefined || amount === null) return '';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const contextItems: ContextItem[] = awards.map(award => {
+    const awardId = award.award_id || award.id || `award_${Date.now()}`;
+    const title = `${award.recipient_name || 'Unknown Recipient'} - ${award.award_type || 'Award'}`;
+    const subtitle = award.period_start_date 
+      ? `${formatDate(award.period_start_date)}${award.total_obligation ? ` • ${formatCurrency(award.total_obligation)}` : ''}${award.awarding_agency_name ? ` • ${award.awarding_agency_name}` : ''}`
+      : award.total_obligation ? formatCurrency(award.total_obligation) : 'Government Contract Award';
+    
+    return {
+      id: `govt_contract_award_${awardId}_${Date.now()}_${Math.random()}`,
+      type: 'govt_contract_award' as const,
+      title,
+      subtitle,
+      data: award,
+      timestamp: Date.now(),
+    };
+  });
+  
+  if (target === 'sidebar') {
+    // Add multiple items to current sidebar session's context
+    const event = new CustomEvent('add-multiple-to-sidebar-context', {
+      detail: contextItems
+    });
+    window.dispatchEvent(event);
+    
+    // Listen for potential error response
+    const handleSidebarError = () => {
+      // Fallback to new chat if sidebar fails
+      contextItems.forEach(item => addToContext(item));
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+  } else {
+    // Add to new chat (existing behavior) - dispatch each item separately
     contextItems.forEach(item => addToContext(item));
   }
 };

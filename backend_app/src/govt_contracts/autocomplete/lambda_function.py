@@ -22,6 +22,8 @@ USASPENDING_USER_AGENT = os.environ.get('USASPENDING_USER_AGENT', 'Cosine Financ
 REQUEST_TIMEOUT = int(os.environ.get('REQUEST_TIMEOUT', '30'))
 
 # Supported autocomplete endpoints mapping
+# Note: awarding_agency and funding_agency are deprecated by USAspending API
+# They are mapped via aliases to awarding_agency_office and funding_agency_office
 AUTOCOMPLETE_ENDPOINTS = {
     # Account autocomplete endpoints
     'accounts_a': '/api/v2/autocomplete/accounts/a/',
@@ -32,10 +34,8 @@ AUTOCOMPLETE_ENDPOINTS = {
     'accounts_main': '/api/v2/autocomplete/accounts/main/',
     'accounts_sub': '/api/v2/autocomplete/accounts/sub/',
     
-    # Agency autocomplete endpoints
-    'awarding_agency': '/api/v2/autocomplete/awarding_agency/',
+    # Agency autocomplete endpoints (using non-deprecated endpoints)
     'awarding_agency_office': '/api/v2/autocomplete/awarding_agency_office/',
-    'funding_agency': '/api/v2/autocomplete/funding_agency/',
     'funding_agency_office': '/api/v2/autocomplete/funding_agency_office/',
     
     # Other autocomplete endpoints
@@ -49,8 +49,10 @@ AUTOCOMPLETE_ENDPOINTS = {
     'glossary': '/api/v2/autocomplete/glossary/',
 }
 
-# Alias mapping for user-friendly names
+# Alias mapping for user-friendly names and backward compatibility
+# Deprecated endpoints are mapped to their replacements
 AUTOCOMPLETE_ALIASES = {
+    # TAS (Treasury Account Symbol) aliases
     'tas_availability_type': 'accounts_a',
     'tas_agency_id': 'accounts_aid',
     'tas_allocation_transfer_agency': 'accounts_ata',
@@ -61,6 +63,10 @@ AUTOCOMPLETE_ALIASES = {
     'tas_epoa': 'accounts_epoa',
     'tas_main_account': 'accounts_main',
     'tas_sub_account': 'accounts_sub',
+    
+    # Deprecated agency endpoints -> new endpoints (for backward compatibility)
+    'awarding_agency': 'awarding_agency_office',  # Deprecated: use awarding_agency_office
+    'funding_agency': 'funding_agency_office',     # Deprecated: use funding_agency_office
 }
 
 
@@ -151,16 +157,126 @@ def handle_account_autocomplete(autocomplete_type: str, request_body: Dict[str, 
     return call_usaspending_api(endpoint, method='POST', body=body)
 
 
+def transform_agency_office_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Transform awarding_agency_office/funding_agency_office results to flat format
+    
+    The office endpoints return nested structures with toptier_agency, subtier_agency, and office.
+    We need to flatten these into a simple array of {code, name} objects.
+    
+    Args:
+        results: List of agency/office match objects from USAspending API
+    
+    Returns:
+        Flattened list of {code, name, type} objects
+    """
+    flattened = []
+    seen_codes = set()  # Prevent duplicates
+    seen_names = set()  # Also track by name to prevent duplicates when code is missing
+    
+    for item in results:
+        # Handle toptier_agency - can be a dict or a list of dicts
+        if 'toptier_agency' in item:
+            agencies = item['toptier_agency']
+            # Handle both single dict and list of dicts
+            if isinstance(agencies, dict):
+                agencies = [agencies]
+            elif not isinstance(agencies, list):
+                continue
+            
+            for agency in agencies:
+                if not isinstance(agency, dict):
+                    continue
+                code = agency.get('code', '') or ''
+                name = agency.get('name', '') or ''
+                
+                # Use code as primary identifier, fall back to name if code is missing
+                identifier = code if code else name
+                if identifier and identifier not in seen_codes:
+                    flattened.append({
+                        'code': code or name,  # Use name as code if code is missing
+                        'name': name,
+                        'type': 'toptier_agency',
+                        'abbreviation': agency.get('abbreviation')
+                    })
+                    seen_codes.add(identifier)
+                    if name:
+                        seen_names.add(name.lower())
+        
+        # Handle subtier_agency - can be a dict or a list of dicts
+        if 'subtier_agency' in item:
+            agencies = item['subtier_agency']
+            # Handle both single dict and list of dicts
+            if isinstance(agencies, dict):
+                agencies = [agencies]
+            elif not isinstance(agencies, list):
+                continue
+            
+            for agency in agencies:
+                if not isinstance(agency, dict):
+                    continue
+                code = agency.get('code', '') or ''
+                name = agency.get('name', '') or ''
+                
+                # Use code as primary identifier, fall back to name if code is missing
+                identifier = code if code else name
+                if identifier and identifier not in seen_codes:
+                    # Also check name to avoid duplicates
+                    name_lower = name.lower() if name else ''
+                    if not name_lower or name_lower not in seen_names:
+                        flattened.append({
+                            'code': code or name,  # Use name as code if code is missing
+                            'name': name,
+                            'type': 'subtier_agency',
+                            'abbreviation': agency.get('abbreviation')
+                        })
+                        seen_codes.add(identifier)
+                        if name_lower:
+                            seen_names.add(name_lower)
+        
+        # Handle office - can be a dict or a list of dicts
+        if 'office' in item:
+            offices = item['office']
+            # Handle both single dict and list of dicts
+            if isinstance(offices, dict):
+                offices = [offices]
+            elif not isinstance(offices, list):
+                continue
+            
+            for office in offices:
+                if not isinstance(office, dict):
+                    continue
+                code = office.get('code', '') or ''
+                name = office.get('name', '') or ''
+                
+                # Use code as primary identifier, fall back to name if code is missing
+                identifier = code if code else name
+                if identifier and identifier not in seen_codes:
+                    # Also check name to avoid duplicates
+                    name_lower = name.lower() if name else ''
+                    if not name_lower or name_lower not in seen_names:
+                        flattened.append({
+                            'code': code or name,  # Use name as code if code is missing
+                            'name': name,
+                            'type': 'office'
+                        })
+                        seen_codes.add(identifier)
+                        if name_lower:
+                            seen_names.add(name_lower)
+    
+    return flattened
+
+
 def handle_agency_autocomplete(autocomplete_type: str, request_body: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handle agency autocomplete endpoints
     
     Args:
-        autocomplete_type: Type of agency autocomplete (e.g., 'awarding_agency')
+        autocomplete_type: Type of agency autocomplete (e.g., 'awarding_agency_office')
         request_body: Request body with search_text and optional filters
     
     Returns:
-        Autocomplete results
+        Autocomplete results with transformed structure for office endpoints
     """
     endpoint = AUTOCOMPLETE_ENDPOINTS.get(autocomplete_type)
     if not endpoint:
@@ -171,11 +287,69 @@ def handle_agency_autocomplete(autocomplete_type: str, request_body: Dict[str, A
         'search_text': request_body.get('search_text', ''),
     }
     
-    # Add optional limit if provided
-    if 'limit' in request_body:
-        body['limit'] = request_body['limit']
+    # Add optional limit if provided, but cap at 50 to prevent 413 errors
+    limit = min(request_body.get('limit', 20), 50)
+    body['limit'] = limit
     
-    return call_usaspending_api(endpoint, method='POST', body=body)
+    # Call API
+    api_response = call_usaspending_api(endpoint, method='POST', body=body)
+    
+    # Transform results for office endpoints (they return nested structures)
+    if autocomplete_type in ['awarding_agency_office', 'funding_agency_office']:
+        original_results = api_response.get('results', [])
+        
+        # Log the structure we received for debugging
+        logger.info(f"API response for {autocomplete_type}: results type = {type(original_results)}")
+        
+        # Handle case where results is a single dict (one match object)
+        # The API can return either a list of dicts OR a single dict with keys ['toptier_agency', 'subtier_agency', 'office']
+        if isinstance(original_results, dict):
+            # Check if this is a single match object (has the expected keys)
+            if any(key in original_results for key in ['toptier_agency', 'subtier_agency', 'office']):
+                logger.info(f"Results is a single match object with keys: {list(original_results.keys())}")
+                # Log the structure for debugging
+                for key in ['toptier_agency', 'subtier_agency', 'office']:
+                    if key in original_results:
+                        obj = original_results[key]
+                        if isinstance(obj, dict):
+                            logger.info(f"  {key}: code={obj.get('code', 'N/A')}, name={obj.get('name', 'N/A')[:50]}")
+                        elif isinstance(obj, list):
+                            logger.info(f"  {key}: list with {len(obj)} items")
+                            if len(obj) > 0 and isinstance(obj[0], dict):
+                                logger.info(f"    First item: code={obj[0].get('code', 'N/A')}, name={obj[0].get('name', 'N/A')[:50]}")
+                        else:
+                            logger.info(f"  {key}: type={type(obj)}")
+                # Wrap it in a list so transform_agency_office_results can process it
+                original_results = [original_results]
+            # Or if it's a dict containing a 'results' key with a list
+            elif 'results' in original_results and isinstance(original_results['results'], list):
+                logger.info("Results dict contains 'results' key with list")
+                original_results = original_results['results']
+            # Or if it's a dict containing a 'data' key with a list
+            elif 'data' in original_results and isinstance(original_results['data'], list):
+                logger.info("Results dict contains 'data' key with list")
+                original_results = original_results['data']
+            else:
+                logger.warning(f"Results dict has unexpected structure, keys: {list(original_results.keys())[:10]}")
+                # Try to convert dict values to list if they look like match objects
+                dict_values = list(original_results.values())
+                if dict_values and isinstance(dict_values[0], dict) and any(key in dict_values[0] for key in ['toptier_agency', 'subtier_agency', 'office']):
+                    logger.info("Converting dict values to list of match objects")
+                    original_results = dict_values
+                else:
+                    original_results = []
+        
+        if isinstance(original_results, list):
+            if len(original_results) > 0:
+                logger.info(f"Transforming {len(original_results)} results for {autocomplete_type}")
+            transformed_results = transform_agency_office_results(original_results)
+            api_response['results'] = transformed_results[:limit]  # Ensure we don't exceed limit
+            logger.info(f"Transformed to {len(api_response['results'])} results")
+        else:
+            logger.error(f"Could not transform results for {autocomplete_type}: results is {type(original_results)}, value: {str(original_results)[:200]}")
+            api_response['results'] = []  # Return empty array if transformation fails
+    
+    return api_response
 
 
 def handle_recipient_autocomplete(request_body: Dict[str, Any]) -> Dict[str, Any]:
@@ -382,6 +556,20 @@ def handle_glossary_autocomplete(request_body: Dict[str, Any]) -> Dict[str, Any]
     return call_usaspending_api(endpoint, method='POST', body=body)
 
 
+def get_cors_headers() -> Dict[str, str]:
+    """
+    Get CORS headers for API Gateway responses
+    
+    Returns:
+        Dictionary of CORS headers
+    """
+    return {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+    }
+
+
 def route_autocomplete_request(autocomplete_type: str, request_body: Dict[str, Any]) -> Dict[str, Any]:
     """
     Route autocomplete request to appropriate handler
@@ -404,7 +592,7 @@ def route_autocomplete_request(autocomplete_type: str, request_body: Dict[str, A
     # Route to appropriate handler
     if autocomplete_type.startswith('accounts_'):
         return handle_account_autocomplete(autocomplete_type, request_body)
-    elif autocomplete_type in ['awarding_agency', 'awarding_agency_office', 'funding_agency', 'funding_agency_office']:
+    elif autocomplete_type in ['awarding_agency_office', 'funding_agency_office']:
         return handle_agency_autocomplete(autocomplete_type, request_body)
     elif autocomplete_type == 'recipient':
         return handle_recipient_autocomplete(request_body)
@@ -424,16 +612,6 @@ def route_autocomplete_request(autocomplete_type: str, request_body: Dict[str, A
         return handle_glossary_autocomplete(request_body)
     else:
         raise ValueError(f"Unhandled autocomplete type: {autocomplete_type}")
-
-
-def get_cors_headers():
-    """Get CORS headers for API responses"""
-    return {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
-        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
-    }
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -527,6 +705,46 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if results is None:
             results = {'results': [], 'messages': []}
         
+        # Extract results array and ensure it's actually an array
+        results_array = results.get('results', [])
+        if not isinstance(results_array, list):
+            # If results is not a list, try to convert it
+            if isinstance(results_array, dict):
+                # For nested structures, try to extract a list
+                logger.warning(f"Results is a dict instead of list for {autocomplete_type}, attempting to extract list")
+                logger.info(f"Results dict structure: keys = {list(results_array.keys())[:10]}")
+                
+                # Try common patterns
+                if 'results' in results_array:
+                    results_array = results_array['results']
+                elif 'data' in results_array:
+                    results_array = results_array['data']
+                elif len(results_array) > 0:
+                    # If it's a dict with values, try to use the values
+                    dict_values = list(results_array.values())
+                    if dict_values and isinstance(dict_values[0], (dict, str)):
+                        results_array = dict_values
+                    else:
+                        results_array = []
+                else:
+                    results_array = []
+                
+                # If still not a list after extraction, log and return empty
+                if not isinstance(results_array, list):
+                    logger.error(f"Could not convert results dict to list for {autocomplete_type}, returning empty array")
+                    results_array = []
+            else:
+                logger.warning(f"Results is {type(results_array)} instead of list for {autocomplete_type}, returning empty array")
+                results_array = []
+        
+        # Limit results to prevent 413 errors (max 50 items, but be conservative)
+        # Each item should be small, but we'll limit to 50 to be safe
+        # Note: This is a safety check - individual handlers should also limit their results
+        max_items = 50
+        if len(results_array) > max_items:
+            logger.info(f"Truncating results from {len(results_array)} to {max_items} items to prevent 413 error")
+            results_array = results_array[:max_items]
+        
         # Return success response
         return {
             'statusCode': 200,
@@ -534,11 +752,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'body': json.dumps({
                 'success': True,
                 'autocomplete_type': autocomplete_type,
-                'results': results.get('results', []) if isinstance(results, dict) else [],
+                'results': results_array,
                 'messages': results.get('messages', []) if isinstance(results, dict) else [],
                 'metadata': {
                     'timestamp': datetime.utcnow().isoformat(),
-                    'endpoint': AUTOCOMPLETE_ENDPOINTS.get(autocomplete_type, 'unknown')
+                    'endpoint': AUTOCOMPLETE_ENDPOINTS.get(autocomplete_type, 'unknown'),
+                    'result_count': len(results_array)
                 }
             })
         }

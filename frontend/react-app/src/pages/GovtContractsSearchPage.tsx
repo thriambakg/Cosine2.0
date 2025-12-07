@@ -26,7 +26,6 @@ import {
   Chip,
   Tooltip,
   Link,
-  Autocomplete,
   Pagination,
   Accordion,
   AccordionSummary,
@@ -51,6 +50,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
+import { addAwardToContext, addMultipleAwardsToContext } from '../components/tiles/common';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -91,6 +91,15 @@ const US_STATES = [
 
 // Fiscal years (last 10 years)
 const FISCAL_YEARS = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i + 1);
+
+interface ExpandedFiltersState {
+  awardTypes: boolean;
+  agencies: boolean;
+  recipients: boolean;
+  states: boolean;
+  countries: boolean;
+  codes: boolean;
+}
 
 const GovtContractsSearchPage: React.FC = () => {
   const { user } = useAuth();
@@ -168,13 +177,16 @@ const GovtContractsSearchPage: React.FC = () => {
     cfda: new Set(),
   });
   
-  const [expandedFilters, setExpandedFilters] = useState({
-    award_types: true,
-    agencies: true,
-    recipients: true,
-    locations: true,
-    codes: true,
-  });
+  const [expandedFilters, setExpandedFilters] = useState<ExpandedFiltersState>(
+    savedState?.expandedFilters || {
+      awardTypes: false,
+      agencies: false,
+      recipients: false,
+      states: false,
+      countries: false,
+      codes: false,
+    }
+  );
   
   const [selectedFilters, setSelectedFilters] = useState<{
     award_types: Set<string>;
@@ -198,8 +210,9 @@ const GovtContractsSearchPage: React.FC = () => {
   
   const [isFiltered, setIsFiltered] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
-  const [pageSize] = useState<number>(savedState?.pageSize || 25);
+  const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 25);
   const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== false);
+  const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== false);
 
   // Autocomplete state
   const [autocompleteOptions, setAutocompleteOptions] = useState<{
@@ -208,30 +221,71 @@ const GovtContractsSearchPage: React.FC = () => {
 
   // Compute available filters from results
   const computeFiltersFromResults = useCallback((results: GovtContractAward[]) => {
-    const filters = {
-      award_types: new Set<string>(),
-      agencies: new Set<string>(),
-      recipients: new Set<string>(),
-      states: new Set<string>(),
-      countries: new Set<string>(),
-      naics: new Set<string>(),
-      psc: new Set<string>(),
-      cfda: new Set<string>(),
-    };
+    const awardTypeMap = new Map<string, number>();
+    const agencyMap = new Map<string, number>();
+    const recipientMap = new Map<string, number>();
+    const stateMap = new Map<string, number>();
+    const countryMap = new Map<string, number>();
+    const naicsMap = new Map<string, number>();
+    const pscMap = new Map<string, number>();
+    const cfdaMap = new Map<string, number>();
 
     results.forEach((award) => {
-      if (award.award_type) filters.award_types.add(award.award_type);
-      if (award.awarding_agency_name) filters.agencies.add(award.awarding_agency_name);
-      if (award.funding_agency_name) filters.agencies.add(award.funding_agency_name);
-      if (award.recipient_name) filters.recipients.add(award.recipient_name);
-      if (award.recipient_location_state) filters.states.add(award.recipient_location_state);
-      if (award.recipient_location_country) filters.countries.add(award.recipient_location_country);
-      if (award.naics_code) filters.naics.add(award.naics_code);
-      if (award.psc_code) filters.psc.add(award.psc_code);
-      if (award.cfda_number) filters.cfda.add(award.cfda_number);
+      if (award.award_type) {
+        awardTypeMap.set(award.award_type, (awardTypeMap.get(award.award_type) || 0) + 1);
+      }
+      if (award.awarding_agency_name) {
+        agencyMap.set(award.awarding_agency_name, (agencyMap.get(award.awarding_agency_name) || 0) + 1);
+      }
+      if (award.funding_agency_name && award.funding_agency_name !== award.awarding_agency_name) {
+        agencyMap.set(award.funding_agency_name, (agencyMap.get(award.funding_agency_name) || 0) + 1);
+      }
+      if (award.recipient_name) {
+        recipientMap.set(award.recipient_name, (recipientMap.get(award.recipient_name) || 0) + 1);
+      }
+      if (award.recipient_location_state) {
+        stateMap.set(award.recipient_location_state, (stateMap.get(award.recipient_location_state) || 0) + 1);
+      }
+      if (award.recipient_location_country) {
+        countryMap.set(award.recipient_location_country, (countryMap.get(award.recipient_location_country) || 0) + 1);
+      }
+      if (award.naics_code) {
+        naicsMap.set(award.naics_code, (naicsMap.get(award.naics_code) || 0) + 1);
+      }
+      if (award.psc_code) {
+        pscMap.set(award.psc_code, (pscMap.get(award.psc_code) || 0) + 1);
+      }
+      if (award.cfda_number) {
+        cfdaMap.set(award.cfda_number, (cfdaMap.get(award.cfda_number) || 0) + 1);
+      }
     });
 
-    setAvailableFilters(filters);
+    setAvailableFilters({
+      award_type_filters: Array.from(awardTypeMap.entries())
+        .map(([awardType, count]) => ({ awardType, count }))
+        .sort((a, b) => b.count - a.count),
+      agency_filters: Array.from(agencyMap.entries())
+        .map(([agency, count]) => ({ agency, count }))
+        .sort((a, b) => b.count - a.count),
+      recipient_filters: Array.from(recipientMap.entries())
+        .map(([recipient, count]) => ({ recipient, count }))
+        .sort((a, b) => b.count - a.count),
+      state_filters: Array.from(stateMap.entries())
+        .map(([state, count]) => ({ state, count }))
+        .sort((a, b) => b.count - a.count),
+      country_filters: Array.from(countryMap.entries())
+        .map(([country, count]) => ({ country, count }))
+        .sort((a, b) => b.count - a.count),
+      naics_filters: Array.from(naicsMap.entries())
+        .map(([naics, count]) => ({ naics, count }))
+        .sort((a, b) => b.count - a.count),
+      psc_filters: Array.from(pscMap.entries())
+        .map(([psc, count]) => ({ psc, count }))
+        .sort((a, b) => b.count - a.count),
+      cfda_filters: Array.from(cfdaMap.entries())
+        .map(([cfda, count]) => ({ cfda, count }))
+        .sort((a, b) => b.count - a.count),
+    });
   }, []);
 
   // Apply client-side filters
@@ -302,33 +356,37 @@ const GovtContractsSearchPage: React.FC = () => {
     setCurrentPage(1);
   }, [allSearchResults, selectedFilters]);
 
-  // Load autocomplete options
-  const loadAutocompleteOptions = useCallback(async (
-    type: string,
-    searchText: string
-  ) => {
-    if (!searchText || searchText.length < 2) {
-      setAutocompleteOptions((prev) => ({ ...prev, [type]: [] }));
-      return;
-    }
-
-    try {
-      const response = await govtContractsAutocompleteAPI.autocomplete({
-        autocomplete_type: type,
-        search_text: searchText,
-        limit: 20,
-      });
-
-      if (response.success && response.results) {
-        setAutocompleteOptions((prev) => ({
-          ...prev,
-          [type]: response.results || [],
-        }));
+  // Load autocomplete options for MultiSelectField (synchronous wrapper)
+  const createAutocompleteSearch = useCallback((type: string) => {
+    return (query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
+      if (!query || query.length < 2) {
+        return [];
       }
-    } catch (error) {
-      console.error(`Error loading autocomplete for ${type}:`, error);
-    }
-  }, []);
+
+      // Trigger async fetch and update state
+      (async () => {
+        try {
+          const response = await govtContractsAutocompleteAPI.autocomplete({
+            autocomplete_type: type,
+            search_text: query,
+            limit: 20,
+          });
+
+          if (response.success && response.results) {
+            setAutocompleteOptions((prev) => ({
+              ...prev,
+              [type]: response.results || [],
+            }));
+          }
+        } catch (error) {
+          console.error(`Error loading autocomplete for ${type}:`, error);
+        }
+      })();
+
+      // Return cached results immediately (will update on next render)
+      return autocompleteOptions[type] || [];
+    };
+  }, [autocompleteOptions]);
 
   // Handle search
   const handleSearch = useCallback(async () => {
@@ -360,7 +418,7 @@ const GovtContractsSearchPage: React.FC = () => {
 
       if (response.success) {
         setAllSearchResults(response.results || []);
-        setTotalFound(response.results?.length || 0);
+        setTotalFound(response.results?.length || allSearchResults.length);
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
         computeFiltersFromResults(response.results || []);
@@ -403,7 +461,7 @@ const GovtContractsSearchPage: React.FC = () => {
 
       if (response.success) {
         setAllSearchResults((prev) => [...prev, ...(response.results || [])]);
-        setTotalFound((prev) => prev + (response.results?.length || 0));
+        setTotalFound(allSearchResults.length);
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
         computeFiltersFromResults([...allSearchResults, ...(response.results || [])]);
@@ -432,9 +490,10 @@ const GovtContractsSearchPage: React.FC = () => {
       currentPage,
       pageSize,
       searchFormExpanded,
+      advancedSearchExpanded,
     };
     sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
-  }, [searchParams, allSearchResults, lastEvaluatedKey, hasMore, currentPage, pageSize, searchFormExpanded]);
+  }, [searchParams, allSearchResults, lastEvaluatedKey, hasMore, currentPage, pageSize, searchFormExpanded, advancedSearchExpanded]);
 
   // Apply filters when they change
   useEffect(() => {
@@ -473,409 +532,350 @@ const GovtContractsSearchPage: React.FC = () => {
     }
   };
 
+  // Context menu handlers
+  const handleContextMenuClick = (event: React.MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    setContextMenuAnchor({ mouseX: event.clientX, mouseY: event.clientY });
+  };
+
+  const handleContextMenuClose = () => {
+    setContextMenuAnchor(null);
+  };
+
+  const handleAddToContext = (target: 'new' | 'sidebar') => {
+    const selectedAwardObjects = currentResults.filter(award => 
+      selectedAwards.has(award.award_id)
+    );
+
+    if (selectedAwardObjects.length === 0) return;
+
+    if (selectedAwardObjects.length === 1) {
+      addAwardToContext(selectedAwardObjects[0], target);
+    } else {
+      addMultipleAwardsToContext(selectedAwardObjects, target);
+    }
+
+    setSelectedAwards(new Set());
+    handleContextMenuClose();
+  };
+
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)',
-        py: 4,
-      }}
-    >
-      <Container maxWidth="xl">
-        <GlassCard sx={{ mb: 3 }}>
-          <Box sx={{ p: 3, borderBottom: '1px solid #374151' }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="h4" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+    <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
+      <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
+        <Box sx={{ display: 'flex', gap: 3 }}>
+          {/* Main Content */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            {/* Header */}
+            <Box sx={{ mb: 4 }}>
+              <Typography
+                variant="h4"
+                sx={{
+                  color: '#ffffff',
+                  fontWeight: 700,
+                  mb: 1,
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                }}
+              >
                 Government Contracts Search
               </Typography>
-              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                {allSearchResults.length > 0 && (
-                  <Chip
-                    label={
-                      isLoadingMore
-                        ? 'Loading...'
-                        : !isFiltered && hasMore && lastEvaluatedKey
-                        ? `Load More (${allSearchResults.length} loaded)`
-                        : `${allSearchResults.length} ${allSearchResults.length === 1 ? 'award' : 'awards'} found`
-                    }
-                    sx={{
-                      backgroundColor: !isFiltered && hasMore && lastEvaluatedKey ? '#3b82f6' : '#475569',
-                      color: '#fff',
-                      cursor: !isFiltered && hasMore && lastEvaluatedKey ? 'pointer' : 'default',
-                      '&:hover': !isFiltered && hasMore && lastEvaluatedKey
-                        ? { backgroundColor: '#2563eb' }
-                        : {},
+              <Typography
+                variant="body1"
+                sx={{
+                  color: '#9ca3af',
+                  fontSize: '1rem',
+                }}
+              >
+                Search government contracts with advanced filters
+              </Typography>
+            </Box>
+
+        {/* Search Form */}
+        <GlassCard sx={{ mb: 4 }}>
+          <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: searchFormExpanded ? '1px solid rgba(55, 65, 81, 0.5)' : 'none' }}>
+            <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 'bold' }}>
+              Search Parameters
+            </Typography>
+            <IconButton
+              onClick={() => setSearchFormExpanded(!searchFormExpanded)}
+              sx={{ color: '#9ca3af' }}
+              size="small"
+            >
+              {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+            </IconButton>
+          </Box>
+          <Collapse in={searchFormExpanded}>
+            <Box sx={{ p: 4 }}>
+
+              {/* Basic Search Section */}
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="h6" sx={{ color: '#e2e8f0', mb: 2 }}>
+                  Basic Search
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
+                  {/* Keywords */}
+                  <MultiSelectField<string>
+                    label="Keywords"
+                    selectedItems={searchParams.keywords || []}
+                    onItemsChange={(keywords) => {
+                      setSearchParams((prev) => ({ ...prev, keywords }));
                     }}
-                    onClick={() => {
-                      if (!isFiltered && hasMore && lastEvaluatedKey && !isLoadingMore) {
-                        handleLoadMore();
-                      }
+                    suggestions={[]}
+                    onSearch={() => []}
+                    renderItem={(keyword) => keyword}
+                    placeholder="Enter keywords to search..."
+                  />
+
+                  {/* Awarding Agency */}
+                  <MultiSelectField<{ code: string; name: string; [key: string]: any }>
+                    label="Awarding Agency"
+                    selectedItems={(() => {
+                      // Convert codes back to objects for display
+                      const codes = searchParams.awarding_agency_code || [];
+                      return codes.map(code => {
+                        // Try to find in autocomplete options first
+                        const found = autocompleteOptions.awarding_agency?.find(opt => 
+                          opt.code === code || opt.id === code
+                        );
+                        return found || { code, name: code };
+                      });
+                    })()}
+                    onItemsChange={(items) => {
+                      setSearchParams((prev) => ({
+                        ...prev,
+                        awarding_agency_code: items.map(item => 
+                          typeof item === 'string' ? item : item.code || item.id || ''
+                        ),
+                      }));
+                    }}
+                    suggestions={[]}
+                    onSearch={createAutocompleteSearch('awarding_agency')}
+                    renderItem={(item) => {
+                      if (typeof item === 'string') return item;
+                      // Return name for display (chips will show name)
+                      return item.name || item.text || item.code || '';
+                    }}
+                    getItemKey={(item) => {
+                      if (typeof item === 'string') return item;
+                      return item.code || item.id || item.name || '';
+                    }}
+                    placeholder="Search for awarding agencies..."
+                    allowCustomInput={false}
+                  />
+
+                  {/* Funding Agency */}
+                  <MultiSelectField<{ code: string; name: string; [key: string]: any }>
+                    label="Funding Agency"
+                    selectedItems={(() => {
+                      const codes = searchParams.funding_agency_code || [];
+                      return codes.map(code => {
+                        const found = autocompleteOptions.funding_agency?.find(opt => 
+                          opt.code === code || opt.id === code
+                        );
+                        return found || { code, name: code };
+                      });
+                    })()}
+                    onItemsChange={(items) => {
+                      setSearchParams((prev) => ({
+                        ...prev,
+                        funding_agency_code: items.map(item => 
+                          typeof item === 'string' ? item : item.code || item.id || ''
+                        ),
+                      }));
+                    }}
+                    suggestions={[]}
+                    onSearch={createAutocompleteSearch('funding_agency')}
+                    renderItem={(item) => {
+                      if (typeof item === 'string') return item;
+                      // Return name for display (chips will show name)
+                      return item.name || item.text || item.code || '';
+                    }}
+                    getItemKey={(item) => {
+                      if (typeof item === 'string') return item;
+                      return item.code || item.id || item.name || '';
+                    }}
+                    placeholder="Search for funding agencies..."
+                    allowCustomInput={false}
+                  />
+
+                  {/* Recipient */}
+                  <MultiSelectField<{ id?: string; name?: string; text?: string; [key: string]: any }>
+                    label="Recipient"
+                    selectedItems={(() => {
+                      const names = searchParams.recipient_name || [];
+                      return names.map(name => {
+                        const found = autocompleteOptions.recipient?.find(opt => 
+                          opt.name === name || opt.text === name
+                        );
+                        return found || { name: typeof name === 'string' ? name : name.name || name.text || '' };
+                      });
+                    })()}
+                    onItemsChange={(items) => {
+                      setSearchParams((prev) => ({
+                        ...prev,
+                        recipient_name: items.map(item => 
+                          typeof item === 'string' ? item : item.name || item.text || ''
+                        ),
+                      }));
+                    }}
+                    suggestions={[]}
+                    onSearch={createAutocompleteSearch('recipient')}
+                    renderItem={(item) => {
+                      if (typeof item === 'string') return item;
+                      // Return name for display (chips will show name)
+                      return item.name || item.text || '';
+                    }}
+                    getItemKey={(item) => {
+                      if (typeof item === 'string') return item;
+                      return item.id || item.name || item.text || '';
+                    }}
+                    placeholder="Search for recipients..."
+                    allowCustomInput={false}
+                  />
+
+                  {/* Min Obligation */}
+                  <TextField
+                    label="Min Obligation ($)"
+                    type="number"
+                    value={searchParams.min_obligation || ''}
+                    onChange={(e) => {
+                      setSearchParams((prev) => ({
+                        ...prev,
+                        min_obligation: e.target.value ? Number(e.target.value) : undefined,
+                      }));
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                        color: '#e2e8f0',
+                        '& fieldset': { borderColor: '#475569' },
+                        '&:hover fieldset': { borderColor: '#64748b' },
+                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                      },
+                      '& .MuiInputLabel-root': { color: '#94a3b8' },
                     }}
                   />
-                )}
+
+                  {/* Max Obligation */}
+                  <TextField
+                    label="Max Obligation ($)"
+                    type="number"
+                    value={searchParams.max_obligation || ''}
+                    onChange={(e) => {
+                      setSearchParams((prev) => ({
+                        ...prev,
+                        max_obligation: e.target.value ? Number(e.target.value) : undefined,
+                      }));
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                        color: '#e2e8f0',
+                        '& fieldset': { borderColor: '#475569' },
+                        '&:hover fieldset': { borderColor: '#64748b' },
+                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                      },
+                      '& .MuiInputLabel-root': { color: '#94a3b8' },
+                    }}
+                  />
+                </Box>
               </Box>
-            </Box>
-          </Box>
 
-          {/* Search Form */}
-          <Collapse in={searchFormExpanded}>
-            <Box sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ color: '#e2e8f0' }}>
-                  Search Filters
-                </Typography>
-                <IconButton
-                  onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-                  sx={{ color: '#94a3b8' }}
-                >
-                  {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                </IconButton>
-              </Box>
+              {/* Advanced Search Section */}
+              <Box sx={{ mt: 4 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" sx={{ color: '#e2e8f0' }}>
+                    Advanced Search
+                  </Typography>
+                  <IconButton
+                    onClick={() => setAdvancedSearchExpanded(!advancedSearchExpanded)}
+                    sx={{ color: '#94a3b8' }}
+                    size="small"
+                  >
+                    {advancedSearchExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                  </IconButton>
+                </Box>
+                <Collapse in={advancedSearchExpanded}>
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
+                  {/* Award Type */}
+                  <MultiSelectField<string>
+                    label="Award Type"
+                    selectedItems={searchParams.award_type || []}
+                    onItemsChange={(awardTypes) => {
+                      setSearchParams((prev) => ({ ...prev, award_type: awardTypes }));
+                    }}
+                    suggestions={AWARD_TYPES}
+                    renderItem={(type) => type}
+                    placeholder="Select award types..."
+                  />
 
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
-                {/* Keywords */}
-                <MultiSelectField<string>
-                  label="Keywords"
-                  selectedItems={searchParams.keywords || []}
-                  onItemsChange={(keywords) => {
-                    setSearchParams((prev) => ({ ...prev, keywords }));
-                  }}
-                  suggestions={[]}
-                  onSearch={() => []}
-                  renderItem={(keyword) => keyword}
-                  placeholder="Enter keywords to search..."
-                />
+                  {/* State */}
+                  <MultiSelectField<string>
+                    label="Recipient State"
+                    selectedItems={searchParams.recipient_location_state || []}
+                    onItemsChange={(states) => {
+                      setSearchParams((prev) => ({ ...prev, recipient_location_state: states }));
+                    }}
+                    suggestions={US_STATES}
+                    renderItem={(state) => state}
+                    placeholder="Select states..."
+                  />
 
-                {/* Award Type */}
-                <MultiSelectField<string>
-                  label="Award Type"
-                  selectedItems={searchParams.award_type || []}
-                  onItemsChange={(awardTypes) => {
-                    setSearchParams((prev) => ({ ...prev, award_type: awardTypes }));
-                  }}
-                  suggestions={AWARD_TYPES}
-                  renderItem={(type) => type}
-                  placeholder="Select award types..."
-                />
+                  {/* NAICS Code - Direct search, no autocomplete */}
+                  <MultiSelectField<string>
+                    label="NAICS Code"
+                    selectedItems={searchParams.naics_code || []}
+                    onItemsChange={(codes) => {
+                      setSearchParams((prev) => ({ ...prev, naics_code: codes }));
+                    }}
+                    suggestions={[]}
+                    onSearch={() => []}
+                    renderItem={(code) => code}
+                    placeholder="Enter NAICS codes..."
+                  />
 
-                {/* Awarding Agency */}
-                <Autocomplete
-                  multiple
-                  freeSolo
-                  options={autocompleteOptions.awarding_agency || []}
-                  getOptionLabel={(option) => {
-                    if (typeof option === 'string') return option;
-                    return option.name || option.text || option.code || '';
-                  }}
-                  onInputChange={(_, value) => {
-                    if (value.length >= 2) {
-                      loadAutocompleteOptions('awarding_agency', value);
-                    }
-                  }}
-                  value={searchParams.awarding_agency_code || []}
-                  onChange={(_, newValue) => {
-                    setSearchParams((prev) => ({
-                      ...prev,
-                      awarding_agency_code: newValue.map((v) =>
-                        typeof v === 'string' ? v : v.code || v.id || ''
-                      ),
-                    }));
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Awarding Agency"
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                          color: '#e2e8f0',
-                          '& fieldset': { borderColor: '#475569' },
-                          '&:hover fieldset': { borderColor: '#64748b' },
-                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                        },
-                        '& .MuiInputLabel-root': { color: '#94a3b8' },
-                      }}
-                    />
-                  )}
-                />
+                  {/* PSC Code - Direct search, no autocomplete */}
+                  <MultiSelectField<string>
+                    label="PSC Code"
+                    selectedItems={searchParams.psc_code || []}
+                    onItemsChange={(codes) => {
+                      setSearchParams((prev) => ({ ...prev, psc_code: codes }));
+                    }}
+                    suggestions={[]}
+                    onSearch={() => []}
+                    renderItem={(code) => code}
+                    placeholder="Enter PSC codes..."
+                  />
 
-                {/* Funding Agency */}
-                <Autocomplete
-                  multiple
-                  freeSolo
-                  options={autocompleteOptions.funding_agency || []}
-                  getOptionLabel={(option) => {
-                    if (typeof option === 'string') return option;
-                    return option.name || option.text || option.code || '';
-                  }}
-                  onInputChange={(_, value) => {
-                    if (value.length >= 2) {
-                      loadAutocompleteOptions('funding_agency', value);
-                    }
-                  }}
-                  value={searchParams.funding_agency_code || []}
-                  onChange={(_, newValue) => {
-                    setSearchParams((prev) => ({
-                      ...prev,
-                      funding_agency_code: newValue.map((v) =>
-                        typeof v === 'string' ? v : v.code || v.id || ''
-                      ),
-                    }));
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Funding Agency"
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                          color: '#e2e8f0',
-                          '& fieldset': { borderColor: '#475569' },
-                          '&:hover fieldset': { borderColor: '#64748b' },
-                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                        },
-                        '& .MuiInputLabel-root': { color: '#94a3b8' },
-                      }}
-                    />
-                  )}
-                />
+                  {/* CFDA Number - Direct search, no autocomplete */}
+                  <MultiSelectField<string>
+                    label="CFDA Number"
+                    selectedItems={searchParams.cfda_number || []}
+                    onItemsChange={(numbers) => {
+                      setSearchParams((prev) => ({ ...prev, cfda_number: numbers }));
+                    }}
+                    suggestions={[]}
+                    onSearch={() => []}
+                    renderItem={(number) => number}
+                    placeholder="Enter CFDA numbers..."
+                  />
 
-                {/* Recipient */}
-                <Autocomplete
-                  multiple
-                  freeSolo
-                  options={autocompleteOptions.recipient || []}
-                  getOptionLabel={(option) => {
-                    if (typeof option === 'string') return option;
-                    return option.name || option.text || '';
-                  }}
-                  onInputChange={(_, value) => {
-                    if (value.length >= 2) {
-                      loadAutocompleteOptions('recipient', value);
-                    }
-                  }}
-                  value={searchParams.recipient_name || []}
-                  onChange={(_, newValue) => {
-                    setSearchParams((prev) => ({
-                      ...prev,
-                      recipient_name: newValue.map((v) =>
-                        typeof v === 'string' ? v : v.name || v.text || ''
-                      ),
-                    }));
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Recipient"
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                          color: '#e2e8f0',
-                          '& fieldset': { borderColor: '#475569' },
-                          '&:hover fieldset': { borderColor: '#64748b' },
-                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                        },
-                        '& .MuiInputLabel-root': { color: '#94a3b8' },
-                      }}
-                    />
-                  )}
-                />
-
-                {/* State */}
-                <MultiSelectField<string>
-                  label="Recipient State"
-                  selectedItems={searchParams.recipient_location_state || []}
-                  onItemsChange={(states) => {
-                    setSearchParams((prev) => ({ ...prev, recipient_location_state: states }));
-                  }}
-                  suggestions={US_STATES}
-                  renderItem={(state) => state}
-                  placeholder="Select states..."
-                />
-
-                {/* NAICS Code */}
-                <Autocomplete
-                  multiple
-                  freeSolo
-                  options={autocompleteOptions.naics || []}
-                  getOptionLabel={(option) => {
-                    if (typeof option === 'string') return option;
-                    return option.code || option.name || option.text || '';
-                  }}
-                  onInputChange={(_, value) => {
-                    if (value.length >= 2) {
-                      loadAutocompleteOptions('naics', value);
-                    }
-                  }}
-                  value={searchParams.naics_code || []}
-                  onChange={(_, newValue) => {
-                    setSearchParams((prev) => ({
-                      ...prev,
-                      naics_code: newValue.map((v) =>
-                        typeof v === 'string' ? v : v.code || v.id || ''
-                      ),
-                    }));
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="NAICS Code"
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                          color: '#e2e8f0',
-                          '& fieldset': { borderColor: '#475569' },
-                          '&:hover fieldset': { borderColor: '#64748b' },
-                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                        },
-                        '& .MuiInputLabel-root': { color: '#94a3b8' },
-                      }}
-                    />
-                  )}
-                />
-
-                {/* PSC Code */}
-                <Autocomplete
-                  multiple
-                  freeSolo
-                  options={autocompleteOptions.psc || []}
-                  getOptionLabel={(option) => {
-                    if (typeof option === 'string') return option;
-                    return option.code || option.name || option.text || '';
-                  }}
-                  onInputChange={(_, value) => {
-                    if (value.length >= 2) {
-                      loadAutocompleteOptions('psc', value);
-                    }
-                  }}
-                  value={searchParams.psc_code || []}
-                  onChange={(_, newValue) => {
-                    setSearchParams((prev) => ({
-                      ...prev,
-                      psc_code: newValue.map((v) =>
-                        typeof v === 'string' ? v : v.code || v.id || ''
-                      ),
-                    }));
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="PSC Code"
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                          color: '#e2e8f0',
-                          '& fieldset': { borderColor: '#475569' },
-                          '&:hover fieldset': { borderColor: '#64748b' },
-                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                        },
-                        '& .MuiInputLabel-root': { color: '#94a3b8' },
-                      }}
-                    />
-                  )}
-                />
-
-                {/* CFDA Number */}
-                <Autocomplete
-                  multiple
-                  freeSolo
-                  options={autocompleteOptions.cfda || []}
-                  getOptionLabel={(option) => {
-                    if (typeof option === 'string') return option;
-                    return option.code || option.name || option.text || '';
-                  }}
-                  onInputChange={(_, value) => {
-                    if (value.length >= 2) {
-                      loadAutocompleteOptions('cfda', value);
-                    }
-                  }}
-                  value={searchParams.cfda_number || []}
-                  onChange={(_, newValue) => {
-                    setSearchParams((prev) => ({
-                      ...prev,
-                      cfda_number: newValue.map((v) =>
-                        typeof v === 'string' ? v : v.code || v.id || ''
-                      ),
-                    }));
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="CFDA Number"
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                          color: '#e2e8f0',
-                          '& fieldset': { borderColor: '#475569' },
-                          '&:hover fieldset': { borderColor: '#64748b' },
-                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                        },
-                        '& .MuiInputLabel-root': { color: '#94a3b8' },
-                      }}
-                    />
-                  )}
-                />
-
-                {/* Fiscal Year */}
-                <MultiSelectField<string>
-                  label="Fiscal Year"
-                  selectedItems={(searchParams.fiscal_year || []).map(String)}
-                  onItemsChange={(fiscalYears) => {
-                    setSearchParams((prev) => ({
-                      ...prev,
-                      fiscal_year: fiscalYears.map(Number),
-                    }));
-                  }}
-                  suggestions={FISCAL_YEARS.map(String)}
-                  renderItem={(year) => year}
-                  placeholder="Select fiscal years..."
-                />
-
-                {/* Min Obligation */}
-                <TextField
-                  label="Min Obligation ($)"
-                  type="number"
-                  value={searchParams.min_obligation || ''}
-                  onChange={(e) => {
-                    setSearchParams((prev) => ({
-                      ...prev,
-                      min_obligation: e.target.value ? Number(e.target.value) : undefined,
-                    }));
-                  }}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                      color: '#e2e8f0',
-                      '& fieldset': { borderColor: '#475569' },
-                      '&:hover fieldset': { borderColor: '#64748b' },
-                      '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                    },
-                    '& .MuiInputLabel-root': { color: '#94a3b8' },
-                  }}
-                />
-
-                {/* Max Obligation */}
-                <TextField
-                  label="Max Obligation ($)"
-                  type="number"
-                  value={searchParams.max_obligation || ''}
-                  onChange={(e) => {
-                    setSearchParams((prev) => ({
-                      ...prev,
-                      max_obligation: e.target.value ? Number(e.target.value) : undefined,
-                    }));
-                  }}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                      color: '#e2e8f0',
-                      '& fieldset': { borderColor: '#475569' },
-                      '&:hover fieldset': { borderColor: '#64748b' },
-                      '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                    },
-                    '& .MuiInputLabel-root': { color: '#94a3b8' },
-                  }}
-                />
+                  {/* Fiscal Year */}
+                  <MultiSelectField<string>
+                    label="Fiscal Year"
+                    selectedItems={(searchParams.fiscal_year || []).map(String)}
+                    onItemsChange={(fiscalYears) => {
+                      setSearchParams((prev) => ({
+                        ...prev,
+                        fiscal_year: fiscalYears.map(Number),
+                      }));
+                    }}
+                    suggestions={FISCAL_YEARS.map(String)}
+                    renderItem={(year) => year}
+                    placeholder="Select fiscal years..."
+                  />
+                  </Box>
+                </Collapse>
               </Box>
 
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3, gap: 2 }}>
@@ -921,76 +921,439 @@ const GovtContractsSearchPage: React.FC = () => {
               </Box>
             </Box>
           </Collapse>
-
-          {!searchFormExpanded && (
-            <Box sx={{ p: 2, borderTop: '1px solid #374151', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="body2" sx={{ color: '#94a3b8' }}>
-                Search form collapsed
-              </Typography>
-              <IconButton
-                onClick={() => setSearchFormExpanded(true)}
-                sx={{ color: '#94a3b8' }}
+        </GlassCard>
+      
+        {/* Error Alert */}
+        {searchError && (
+          <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
+            {searchError}
+          </Alert>
+        )}
+        
+        {/* Results */}
+        {allSearchResults.length > 0 && (
+          <Box sx={{ display: 'flex', gap: 3 }}>
+            {/* Sidebar Filters */}
+            <GlassCard sx={{ 
+              p: 2, 
+              minWidth: 280, 
+              maxWidth: 320,
+              height: 'fit-content',
+              position: 'sticky',
+              top: 20,
+              alignSelf: 'flex-start',
+            }}>
+              <Typography
+                variant="h6"
+                sx={{
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  mb: 2,
+                  fontSize: '1rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                }}
               >
-                <KeyboardArrowDownIcon />
-              </IconButton>
-            </Box>
-          )}
+                Refine search results by:
+              </Typography>
+              
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#9ca3af',
+                  mb: 2,
+                  display: 'block',
+                  fontSize: '0.75rem',
+                }}
+              >
+                Click headings to show top filters.
+                <br />
+                Award counts shown in <Chip label="#" size="small" sx={{ 
+                  height: 18, 
+                  fontSize: '0.7rem',
+                  backgroundColor: 'rgba(107, 114, 128, 0.3)',
+                  color: '#9ca3af',
+                  border: '1px solid #6b7280',
+                }} />
+              </Typography>
 
-          {searchError && (
-            <Box sx={{ p: 2 }}>
-              <Alert severity="error" onClose={() => setSearchError(null)}>
-                {searchError}
-              </Alert>
-            </Box>
-          )}
-
-          {/* Results Table */}
-          {allSearchResults.length > 0 && (
-            <Box sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', gap: 3 }}>
-                {/* Filters Sidebar */}
-                <Box sx={{ width: 250, flexShrink: 0 }}>
-                  <Typography variant="h6" sx={{ color: '#e2e8f0', mb: 2 }}>
-                    Filters
+              {/* Selected Filters Box */}
+              {(selectedFilters.award_types.size > 0 ||
+                selectedFilters.agencies.size > 0 ||
+                selectedFilters.recipients.size > 0 ||
+                selectedFilters.states.size > 0 ||
+                selectedFilters.countries.size > 0 ||
+                selectedFilters.naics.size > 0 ||
+                selectedFilters.psc.size > 0 ||
+                selectedFilters.cfda.size > 0) && (
+                <Box sx={{ 
+                  mb: 2, 
+                  p: 2, 
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  border: '1px solid #3b82f6',
+                  borderRadius: '4px',
+                }}>
+                  <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600 }}>
+                    Selected Filters:
                   </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+                    {Array.from(selectedFilters.award_types).map((type, idx) => (
+                      <Chip
+                        key={`award-type-${idx}`}
+                        label={type}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.award_types);
+                            newSet.delete(type);
+                            const hasAnyFilters = 
+                              newSet.size > 0 ||
+                              prev.agencies.size > 0 ||
+                              prev.recipients.size > 0 ||
+                              prev.states.size > 0 ||
+                              prev.countries.size > 0 ||
+                              prev.naics.size > 0 ||
+                              prev.psc.size > 0 ||
+                              prev.cfda.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, award_types: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.agencies).map((agency, idx) => (
+                      <Chip
+                        key={`agency-${idx}`}
+                        label={agency}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.agencies);
+                            newSet.delete(agency);
+                            const hasAnyFilters = 
+                              prev.award_types.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.recipients.size > 0 ||
+                              prev.states.size > 0 ||
+                              prev.countries.size > 0 ||
+                              prev.naics.size > 0 ||
+                              prev.psc.size > 0 ||
+                              prev.cfda.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, agencies: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.recipients).map((recipient, idx) => (
+                      <Chip
+                        key={`recipient-${idx}`}
+                        label={recipient}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.recipients);
+                            newSet.delete(recipient);
+                            const hasAnyFilters = 
+                              prev.award_types.size > 0 ||
+                              prev.agencies.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.states.size > 0 ||
+                              prev.countries.size > 0 ||
+                              prev.naics.size > 0 ||
+                              prev.psc.size > 0 ||
+                              prev.cfda.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, recipients: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.states).map((state, idx) => (
+                      <Chip
+                        key={`state-${idx}`}
+                        label={state}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.states);
+                            newSet.delete(state);
+                            const hasAnyFilters = 
+                              prev.award_types.size > 0 ||
+                              prev.agencies.size > 0 ||
+                              prev.recipients.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.countries.size > 0 ||
+                              prev.naics.size > 0 ||
+                              prev.psc.size > 0 ||
+                              prev.cfda.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, states: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.countries).map((country, idx) => (
+                      <Chip
+                        key={`country-${idx}`}
+                        label={country}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.countries);
+                            newSet.delete(country);
+                            const hasAnyFilters = 
+                              prev.award_types.size > 0 ||
+                              prev.agencies.size > 0 ||
+                              prev.recipients.size > 0 ||
+                              prev.states.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.naics.size > 0 ||
+                              prev.psc.size > 0 ||
+                              prev.cfda.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, countries: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.naics).map((code, idx) => (
+                      <Chip
+                        key={`naics-${idx}`}
+                        label={code}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.naics);
+                            newSet.delete(code);
+                            const hasAnyFilters = 
+                              prev.award_types.size > 0 ||
+                              prev.agencies.size > 0 ||
+                              prev.recipients.size > 0 ||
+                              prev.states.size > 0 ||
+                              prev.countries.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.psc.size > 0 ||
+                              prev.cfda.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, naics: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.psc).map((code, idx) => (
+                      <Chip
+                        key={`psc-${idx}`}
+                        label={code}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.psc);
+                            newSet.delete(code);
+                            const hasAnyFilters = 
+                              prev.award_types.size > 0 ||
+                              prev.agencies.size > 0 ||
+                              prev.recipients.size > 0 ||
+                              prev.states.size > 0 ||
+                              prev.countries.size > 0 ||
+                              prev.naics.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.cfda.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, psc: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.cfda).map((code, idx) => (
+                      <Chip
+                        key={`cfda-${idx}`}
+                        label={code}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.cfda);
+                            newSet.delete(code);
+                            const hasAnyFilters = 
+                              prev.award_types.size > 0 ||
+                              prev.agencies.size > 0 ||
+                              prev.recipients.size > 0 ||
+                              prev.states.size > 0 ||
+                              prev.countries.size > 0 ||
+                              prev.naics.size > 0 ||
+                              prev.psc.size > 0 ||
+                              newSet.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, cfda: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                  </Box>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setSelectedFilters({
+                        award_types: new Set(),
+                        agencies: new Set(),
+                        recipients: new Set(),
+                        states: new Set(),
+                        countries: new Set(),
+                        naics: new Set(),
+                        psc: new Set(),
+                        cfda: new Set(),
+                      });
+                      setIsFiltered(false);
+                    }}
+                    sx={{
+                      color: '#93c5fd',
+                      fontSize: '0.75rem',
+                      textTransform: 'none',
+                      mt: 1,
+                      '&:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                      },
+                    }}
+                  >
+                    Clear All Filters
+                  </Button>
+                </Box>
+              )}
 
                   {/* Award Types Filter */}
-                  {availableFilters.award_types.size > 0 && (
-                    <Accordion
-                      expanded={expandedFilters.award_types}
-                      onChange={() =>
-                        setExpandedFilters((prev) => ({
-                          ...prev,
-                          award_types: !prev.award_types,
-                        }))
-                      }
-                      sx={{
-                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                        color: '#e2e8f0',
-                        mb: 1,
-                        '&:before': { display: 'none' },
-                      }}
-                    >
-                      <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#94a3b8' }} />}>
-                        <Typography sx={{ color: '#e2e8f0' }}>Award Types</Typography>
-                      </AccordionSummary>
-                      <AccordionDetails>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 300, overflowY: 'auto' }}>
-                          {Array.from(availableFilters.award_types).map((type) => {
-                            const count = allSearchResults.filter((a) => a.award_type === type).length;
+                  {availableFilters.award_type_filters && availableFilters.award_type_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, awardTypes: !prev.awardTypes }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          Award Types
+                        </Typography>
+                        {expandedFilters.awardTypes ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.awardTypes}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.award_type_filters.map((filter, idx) => {
+                            const isSelected = selectedFilters.award_types.has(filter.awardType);
                             return (
                               <Box
-                                key={type}
+                                key={idx}
                                 onClick={() => {
-                                  setSelectedFilters((prev) => {
-                                    const newSet = new Set(prev.award_types);
-                                    if (newSet.has(type)) {
-                                      newSet.delete(type);
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.award_types.has(filter.awardType);
+                                    if (exists) {
+                                      const newSet = new Set(prev.award_types);
+                                      newSet.delete(filter.awardType);
+                                      return { ...prev, award_types: newSet };
                                     } else {
-                                      newSet.add(type);
+                                      return {
+                                        ...prev,
+                                        award_types: new Set([...prev.award_types, filter.awardType]),
+                                      };
                                     }
-                                    return { ...prev, award_types: newSet };
                                   });
+                                  setIsFiltered(true);
                                 }}
                                 sx={{
                                   display: 'flex',
@@ -998,64 +1361,109 @@ const GovtContractsSearchPage: React.FC = () => {
                                   alignItems: 'center',
                                   p: 1,
                                   cursor: 'pointer',
-                                  borderRadius: 1,
-                                  backgroundColor: selectedFilters.award_types.has(type)
-                                    ? 'rgba(59, 130, 246, 0.2)'
-                                    : 'transparent',
-                                  '&:hover': { backgroundColor: 'rgba(71, 85, 105, 0.3)' },
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
                                 }}
                               >
-                                <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                                  {type}
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.awardType}
                                 </Typography>
-                                <Chip label={count} size="small" sx={{ height: 20, fontSize: '0.75rem' }} />
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
                               </Box>
                             );
                           })}
                         </Box>
-                      </AccordionDetails>
-                    </Accordion>
+                      </Collapse>
+                    </Box>
                   )}
 
                   {/* Agencies Filter */}
-                  {availableFilters.agencies.size > 0 && (
-                    <Accordion
-                      expanded={expandedFilters.agencies}
-                      onChange={() =>
-                        setExpandedFilters((prev) => ({
-                          ...prev,
-                          agencies: !prev.agencies,
-                        }))
-                      }
-                      sx={{
-                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                        color: '#e2e8f0',
-                        mb: 1,
-                        '&:before': { display: 'none' },
-                      }}
-                    >
-                      <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#94a3b8' }} />}>
-                        <Typography sx={{ color: '#e2e8f0' }}>Agencies</Typography>
-                      </AccordionSummary>
-                      <AccordionDetails>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 300, overflowY: 'auto' }}>
-                          {Array.from(availableFilters.agencies).slice(0, 50).map((agency) => {
-                            const count = allSearchResults.filter(
-                              (a) => a.awarding_agency_name === agency || a.funding_agency_name === agency
-                            ).length;
+                  {availableFilters.agency_filters && availableFilters.agency_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, agencies: !prev.agencies }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          Agencies
+                        </Typography>
+                        {expandedFilters.agencies ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.agencies}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.agency_filters.slice(0, 50).map((filter, idx) => {
+                            const isSelected = selectedFilters.agencies.has(filter.agency);
                             return (
                               <Box
-                                key={agency}
+                                key={idx}
                                 onClick={() => {
-                                  setSelectedFilters((prev) => {
-                                    const newSet = new Set(prev.agencies);
-                                    if (newSet.has(agency)) {
-                                      newSet.delete(agency);
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.agencies.has(filter.agency);
+                                    if (exists) {
+                                      const newSet = new Set(prev.agencies);
+                                      newSet.delete(filter.agency);
+                                      return { ...prev, agencies: newSet };
                                     } else {
-                                      newSet.add(agency);
+                                      return {
+                                        ...prev,
+                                        agencies: new Set([...prev.agencies, filter.agency]),
+                                      };
                                     }
-                                    return { ...prev, agencies: newSet };
                                   });
+                                  setIsFiltered(true);
                                 }}
                                 sx={{
                                   display: 'flex',
@@ -1063,62 +1471,109 @@ const GovtContractsSearchPage: React.FC = () => {
                                   alignItems: 'center',
                                   p: 1,
                                   cursor: 'pointer',
-                                  borderRadius: 1,
-                                  backgroundColor: selectedFilters.agencies.has(agency)
-                                    ? 'rgba(59, 130, 246, 0.2)'
-                                    : 'transparent',
-                                  '&:hover': { backgroundColor: 'rgba(71, 85, 105, 0.3)' },
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
                                 }}
                               >
-                                <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                                  {agency}
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.agency}
                                 </Typography>
-                                <Chip label={count} size="small" sx={{ height: 20, fontSize: '0.75rem' }} />
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
                               </Box>
                             );
                           })}
                         </Box>
-                      </AccordionDetails>
-                    </Accordion>
+                      </Collapse>
+                    </Box>
                   )}
 
                   {/* Recipients Filter */}
-                  {availableFilters.recipients.size > 0 && (
-                    <Accordion
-                      expanded={expandedFilters.recipients}
-                      onChange={() =>
-                        setExpandedFilters((prev) => ({
-                          ...prev,
-                          recipients: !prev.recipients,
-                        }))
-                      }
-                      sx={{
-                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                        color: '#e2e8f0',
-                        mb: 1,
-                        '&:before': { display: 'none' },
-                      }}
-                    >
-                      <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#94a3b8' }} />}>
-                        <Typography sx={{ color: '#e2e8f0' }}>Recipients</Typography>
-                      </AccordionSummary>
-                      <AccordionDetails>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 300, overflowY: 'auto' }}>
-                          {Array.from(availableFilters.recipients).slice(0, 50).map((recipient) => {
-                            const count = allSearchResults.filter((a) => a.recipient_name === recipient).length;
+                  {availableFilters.recipient_filters && availableFilters.recipient_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, recipients: !prev.recipients }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          Recipients
+                        </Typography>
+                        {expandedFilters.recipients ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.recipients}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.recipient_filters.slice(0, 50).map((filter, idx) => {
+                            const isSelected = selectedFilters.recipients.has(filter.recipient);
                             return (
                               <Box
-                                key={recipient}
+                                key={idx}
                                 onClick={() => {
-                                  setSelectedFilters((prev) => {
-                                    const newSet = new Set(prev.recipients);
-                                    if (newSet.has(recipient)) {
-                                      newSet.delete(recipient);
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.recipients.has(filter.recipient);
+                                    if (exists) {
+                                      const newSet = new Set(prev.recipients);
+                                      newSet.delete(filter.recipient);
+                                      return { ...prev, recipients: newSet };
                                     } else {
-                                      newSet.add(recipient);
+                                      return {
+                                        ...prev,
+                                        recipients: new Set([...prev.recipients, filter.recipient]),
+                                      };
                                     }
-                                    return { ...prev, recipients: newSet };
                                   });
+                                  setIsFiltered(true);
                                 }}
                                 sx={{
                                   display: 'flex',
@@ -1126,290 +1581,745 @@ const GovtContractsSearchPage: React.FC = () => {
                                   alignItems: 'center',
                                   p: 1,
                                   cursor: 'pointer',
-                                  borderRadius: 1,
-                                  backgroundColor: selectedFilters.recipients.has(recipient)
-                                    ? 'rgba(59, 130, 246, 0.2)'
-                                    : 'transparent',
-                                  '&:hover': { backgroundColor: 'rgba(71, 85, 105, 0.3)' },
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
                                 }}
                               >
-                                <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                                  {recipient}
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.recipient}
                                 </Typography>
-                                <Chip label={count} size="small" sx={{ height: 20, fontSize: '0.75rem' }} />
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
                               </Box>
                             );
                           })}
                         </Box>
-                      </AccordionDetails>
-                    </Accordion>
+                      </Collapse>
+                    </Box>
                   )}
 
-                  {/* Locations Filter */}
-                  {(availableFilters.states.size > 0 || availableFilters.countries.size > 0) && (
-                    <Accordion
-                      expanded={expandedFilters.locations}
-                      onChange={() =>
-                        setExpandedFilters((prev) => ({
-                          ...prev,
-                          locations: !prev.locations,
-                        }))
-                      }
-                      sx={{
-                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                        color: '#e2e8f0',
-                        mb: 1,
-                        '&:before': { display: 'none' },
-                      }}
-                    >
-                      <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#94a3b8' }} />}>
-                        <Typography sx={{ color: '#e2e8f0' }}>Locations</Typography>
-                      </AccordionSummary>
-                      <AccordionDetails>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          {availableFilters.states.size > 0 && (
-                            <Box>
-                              <Typography sx={{ color: '#94a3b8', fontSize: '0.875rem', mb: 1 }}>
-                                States
-                              </Typography>
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 200, overflowY: 'auto' }}>
-                                {Array.from(availableFilters.states).map((state) => {
-                                  const count = allSearchResults.filter((a) => a.recipient_location_state === state).length;
-                                  return (
-                                    <Box
-                                      key={state}
-                                      onClick={() => {
-                                        setSelectedFilters((prev) => {
-                                          const newSet = new Set(prev.states);
-                                          if (newSet.has(state)) {
-                                            newSet.delete(state);
-                                          } else {
-                                            newSet.add(state);
-                                          }
-                                          return { ...prev, states: newSet };
-                                        });
-                                      }}
-                                      sx={{
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center',
-                                        p: 1,
-                                        cursor: 'pointer',
-                                        borderRadius: 1,
-                                        backgroundColor: selectedFilters.states.has(state)
-                                          ? 'rgba(59, 130, 246, 0.2)'
-                                          : 'transparent',
-                                        '&:hover': { backgroundColor: 'rgba(71, 85, 105, 0.3)' },
-                                      }}
-                                    >
-                                      <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                                        {state}
-                                      </Typography>
-                                      <Chip label={count} size="small" sx={{ height: 20, fontSize: '0.75rem' }} />
-                                    </Box>
-                                  );
-                                })}
+                  {/* States Filter */}
+                  {availableFilters.state_filters && availableFilters.state_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, states: !prev.states }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          States
+                        </Typography>
+                        {expandedFilters.states ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.states}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.state_filters.map((filter, idx) => {
+                            const isSelected = selectedFilters.states.has(filter.state);
+                            return (
+                              <Box
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.states.has(filter.state);
+                                    if (exists) {
+                                      const newSet = new Set(prev.states);
+                                      newSet.delete(filter.state);
+                                      return { ...prev, states: newSet };
+                                    } else {
+                                      return {
+                                        ...prev,
+                                        states: new Set([...prev.states, filter.state]),
+                                      };
+                                    }
+                                  });
+                                  setIsFiltered(true);
+                                }}
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  p: 1,
+                                  cursor: 'pointer',
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                }}
+                              >
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.state}
+                                </Typography>
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
                               </Box>
-                            </Box>
-                          )}
+                            );
+                          })}
                         </Box>
-                      </AccordionDetails>
-                    </Accordion>
+                      </Collapse>
+                    </Box>
                   )}
 
-                  {/* Codes Filter */}
-                  {(availableFilters.naics.size > 0 || availableFilters.psc.size > 0 || availableFilters.cfda.size > 0) && (
-                    <Accordion
-                      expanded={expandedFilters.codes}
-                      onChange={() =>
-                        setExpandedFilters((prev) => ({
-                          ...prev,
-                          codes: !prev.codes,
-                        }))
-                      }
-                      sx={{
-                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                        color: '#e2e8f0',
-                        mb: 1,
-                        '&:before': { display: 'none' },
-                      }}
-                    >
-                      <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#94a3b8' }} />}>
-                        <Typography sx={{ color: '#e2e8f0' }}>Codes</Typography>
-                      </AccordionSummary>
-                      <AccordionDetails>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          {availableFilters.naics.size > 0 && (
-                            <Box>
-                              <Typography sx={{ color: '#94a3b8', fontSize: '0.875rem', mb: 1 }}>
-                                NAICS
-                              </Typography>
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 200, overflowY: 'auto' }}>
-                                {Array.from(availableFilters.naics).slice(0, 30).map((code) => {
-                                  const count = allSearchResults.filter((a) => a.naics_code === code).length;
-                                  return (
-                                    <Box
-                                      key={code}
-                                      onClick={() => {
-                                        setSelectedFilters((prev) => {
-                                          const newSet = new Set(prev.naics);
-                                          if (newSet.has(code)) {
-                                            newSet.delete(code);
-                                          } else {
-                                            newSet.add(code);
-                                          }
-                                          return { ...prev, naics: newSet };
-                                        });
-                                      }}
-                                      sx={{
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center',
-                                        p: 1,
-                                        cursor: 'pointer',
-                                        borderRadius: 1,
-                                        backgroundColor: selectedFilters.naics.has(code)
-                                          ? 'rgba(59, 130, 246, 0.2)'
-                                          : 'transparent',
-                                        '&:hover': { backgroundColor: 'rgba(71, 85, 105, 0.3)' },
-                                      }}
-                                    >
-                                      <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                                        {code}
-                                      </Typography>
-                                      <Chip label={count} size="small" sx={{ height: 20, fontSize: '0.75rem' }} />
-                                    </Box>
-                                  );
-                                })}
+                  {/* Countries Filter */}
+                  {availableFilters.country_filters && availableFilters.country_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, countries: !prev.countries }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          Countries
+                        </Typography>
+                        {expandedFilters.countries ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.countries}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.country_filters.map((filter, idx) => {
+                            const isSelected = selectedFilters.countries.has(filter.country);
+                            return (
+                              <Box
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.countries.has(filter.country);
+                                    if (exists) {
+                                      const newSet = new Set(prev.countries);
+                                      newSet.delete(filter.country);
+                                      return { ...prev, countries: newSet };
+                                    } else {
+                                      return {
+                                        ...prev,
+                                        countries: new Set([...prev.countries, filter.country]),
+                                      };
+                                    }
+                                  });
+                                  setIsFiltered(true);
+                                }}
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  p: 1,
+                                  cursor: 'pointer',
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                }}
+                              >
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.country}
+                                </Typography>
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
                               </Box>
-                            </Box>
-                          )}
-                          {availableFilters.psc.size > 0 && (
-                            <Box>
-                              <Typography sx={{ color: '#94a3b8', fontSize: '0.875rem', mb: 1 }}>
-                                PSC
-                              </Typography>
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 200, overflowY: 'auto' }}>
-                                {Array.from(availableFilters.psc).slice(0, 30).map((code) => {
-                                  const count = allSearchResults.filter((a) => a.psc_code === code).length;
-                                  return (
-                                    <Box
-                                      key={code}
-                                      onClick={() => {
-                                        setSelectedFilters((prev) => {
-                                          const newSet = new Set(prev.psc);
-                                          if (newSet.has(code)) {
-                                            newSet.delete(code);
-                                          } else {
-                                            newSet.add(code);
-                                          }
-                                          return { ...prev, psc: newSet };
-                                        });
-                                      }}
-                                      sx={{
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center',
-                                        p: 1,
-                                        cursor: 'pointer',
-                                        borderRadius: 1,
-                                        backgroundColor: selectedFilters.psc.has(code)
-                                          ? 'rgba(59, 130, 246, 0.2)'
-                                          : 'transparent',
-                                        '&:hover': { backgroundColor: 'rgba(71, 85, 105, 0.3)' },
-                                      }}
-                                    >
-                                      <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                                        {code}
-                                      </Typography>
-                                      <Chip label={count} size="small" sx={{ height: 20, fontSize: '0.75rem' }} />
-                                    </Box>
-                                  );
-                                })}
-                              </Box>
-                            </Box>
-                          )}
-                          {availableFilters.cfda.size > 0 && (
-                            <Box>
-                              <Typography sx={{ color: '#94a3b8', fontSize: '0.875rem', mb: 1 }}>
-                                CFDA
-                              </Typography>
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 200, overflowY: 'auto' }}>
-                                {Array.from(availableFilters.cfda).slice(0, 30).map((code) => {
-                                  const count = allSearchResults.filter((a) => a.cfda_number === code).length;
-                                  return (
-                                    <Box
-                                      key={code}
-                                      onClick={() => {
-                                        setSelectedFilters((prev) => {
-                                          const newSet = new Set(prev.cfda);
-                                          if (newSet.has(code)) {
-                                            newSet.delete(code);
-                                          } else {
-                                            newSet.add(code);
-                                          }
-                                          return { ...prev, cfda: newSet };
-                                        });
-                                      }}
-                                      sx={{
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center',
-                                        p: 1,
-                                        cursor: 'pointer',
-                                        borderRadius: 1,
-                                        backgroundColor: selectedFilters.cfda.has(code)
-                                          ? 'rgba(59, 130, 246, 0.2)'
-                                          : 'transparent',
-                                        '&:hover': { backgroundColor: 'rgba(71, 85, 105, 0.3)' },
-                                      }}
-                                    >
-                                      <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                                        {code}
-                                      </Typography>
-                                      <Chip label={count} size="small" sx={{ height: 20, fontSize: '0.75rem' }} />
-                                    </Box>
-                                  );
-                                })}
-                              </Box>
-                            </Box>
-                          )}
+                            );
+                          })}
                         </Box>
-                      </AccordionDetails>
-                    </Accordion>
+                      </Collapse>
+                    </Box>
                   )}
+
+                  {/* NAICS Filter */}
+                  {availableFilters.naics_filters && availableFilters.naics_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, codes: !prev.codes }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          NAICS Codes
+                        </Typography>
+                        {expandedFilters.codes ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.codes}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.naics_filters.slice(0, 30).map((filter, idx) => {
+                            const isSelected = selectedFilters.naics.has(filter.naics);
+                            return (
+                              <Box
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.naics.has(filter.naics);
+                                    if (exists) {
+                                      const newSet = new Set(prev.naics);
+                                      newSet.delete(filter.naics);
+                                      return { ...prev, naics: newSet };
+                                    } else {
+                                      return {
+                                        ...prev,
+                                        naics: new Set([...prev.naics, filter.naics]),
+                                      };
+                                    }
+                                  });
+                                  setIsFiltered(true);
+                                }}
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  p: 1,
+                                  cursor: 'pointer',
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                }}
+                              >
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.naics}
+                                </Typography>
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      </Collapse>
+                    </Box>
+                  )}
+
+                  {/* PSC Filter */}
+                  {availableFilters.psc_filters && availableFilters.psc_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, codes: !prev.codes }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          PSC Codes
+                        </Typography>
+                        {expandedFilters.codes ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.codes}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.psc_filters.slice(0, 30).map((filter, idx) => {
+                            const isSelected = selectedFilters.psc.has(filter.psc);
+                            return (
+                              <Box
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.psc.has(filter.psc);
+                                    if (exists) {
+                                      const newSet = new Set(prev.psc);
+                                      newSet.delete(filter.psc);
+                                      return { ...prev, psc: newSet };
+                                    } else {
+                                      return {
+                                        ...prev,
+                                        psc: new Set([...prev.psc, filter.psc]),
+                                      };
+                                    }
+                                  });
+                                  setIsFiltered(true);
+                                }}
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  p: 1,
+                                  cursor: 'pointer',
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                }}
+                              >
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.psc}
+                                </Typography>
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      </Collapse>
+                    </Box>
+                  )}
+
+                  {/* CFDA Filter */}
+                  {availableFilters.cfda_filters && availableFilters.cfda_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, codes: !prev.codes }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          CFDA Numbers
+                        </Typography>
+                        {expandedFilters.codes ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.codes}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.cfda_filters.slice(0, 30).map((filter, idx) => {
+                            const isSelected = selectedFilters.cfda.has(filter.cfda);
+                            return (
+                              <Box
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.cfda.has(filter.cfda);
+                                    if (exists) {
+                                      const newSet = new Set(prev.cfda);
+                                      newSet.delete(filter.cfda);
+                                      return { ...prev, cfda: newSet };
+                                    } else {
+                                      return {
+                                        ...prev,
+                                        cfda: new Set([...prev.cfda, filter.cfda]),
+                                      };
+                                    }
+                                  });
+                                  setIsFiltered(true);
+                                }}
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  p: 1,
+                                  cursor: 'pointer',
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                }}
+                              >
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.cfda}
+                                </Typography>
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      </Collapse>
+                    </Box>
+                  )}
+            </GlassCard>
+
+            {/* Results Table */}
+            <GlassCard sx={{ flex: 1 }}>
+              <Box sx={{ p: 3 }}>
+                {/* Results Header */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                    Results
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    {currentResults.length > 0 ? (
+                      <Chip
+                        label={`${currentResults.length} award${currentResults.length !== 1 ? 's' : ''} found`}
+                        sx={{
+                          backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                          color: '#86efac',
+                          border: '1px solid #22c55e',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : isFiltered && allSearchResults.length > 0 ? (
+                      <Chip
+                        label={`0 of ${allSearchResults.length} awards match filters`}
+                        sx={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : allSearchResults.length === 0 && !isSearching ? (
+                      <Chip
+                        label="No awards found"
+                        sx={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : null}
+                    {currentResults.length > 0 && (
+                      <FormControl size="small" sx={{ minWidth: 120 }}>
+                        <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+                        <Select
+                          labelId="results-per-page-label"
+                          value={pageSize}
+                          label="Per Page"
+                          onChange={(e) => {
+                            const newPageSize = Number(e.target.value);
+                            setPageSize(newPageSize);
+                            setCurrentPage(1);
+                          }}
+                          sx={{
+                            color: '#ffffff',
+                            '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                            '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                            '& .MuiSelect-icon': { color: '#9ca3af' },
+                          }}
+                          MenuProps={{
+                            PaperProps: {
+                              sx: {
+                                bgcolor: '#1f2937',
+                                border: '1px solid #374151',
+                                '& .MuiMenuItem-root': {
+                                  color: '#ffffff',
+                                  '&:hover': {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                  '&.Mui-selected': {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                                    },
+                                  },
+                                },
+                                '&::-webkit-scrollbar': {
+                                  width: '8px',
+                                },
+                                '&::-webkit-scrollbar-track': {
+                                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb': {
+                                  backgroundColor: '#3b82f6',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb:hover': {
+                                  backgroundColor: '#2563eb',
+                                },
+                              },
+                            },
+                          }}
+                        >
+                          <MenuItem value={10}>10</MenuItem>
+                          <MenuItem value={25}>25</MenuItem>
+                          <MenuItem value={50}>50</MenuItem>
+                          <MenuItem value={100}>100</MenuItem>
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Box>
                 </Box>
-
-                {/* Results Table */}
-                <Box sx={{ flex: 1 }}>
-                  <TableContainer>
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>
-                            <Checkbox
-                              checked={selectedAwards.size === paginatedResults.length && paginatedResults.length > 0}
-                              indeterminate={
-                                selectedAwards.size > 0 && selectedAwards.size < paginatedResults.length
+                <TableContainer
+                  sx={{
+                    '&::-webkit-scrollbar': {
+                      width: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                      borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                    },
+                  }}
+                >
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>
+                          <Checkbox
+                            checked={selectedAwards.size === paginatedResults.length && paginatedResults.length > 0}
+                            indeterminate={
+                              selectedAwards.size > 0 && selectedAwards.size < paginatedResults.length
+                            }
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedAwards(new Set(paginatedResults.map((a) => a.award_id)));
+                              } else {
+                                setSelectedAwards(new Set());
                               }
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedAwards(new Set(paginatedResults.map((a) => a.award_id)));
-                                } else {
-                                  setSelectedAwards(new Set());
-                                }
-                              }}
-                              sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
-                            />
-                          </TableCell>
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Award ID</TableCell>
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Type</TableCell>
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Recipient</TableCell>
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Agency</TableCell>
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Amount</TableCell>
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Date</TableCell>
-                        </TableRow>
-                      </TableHead>
+                            }}
+                            sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Award ID</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Type</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Recipient</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Agency</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Amount</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Date</TableCell>
+                      </TableRow>
+                    </TableHead>
                       <TableBody>
                         {paginatedResults.map((award) => (
                           <TableRow key={award.award_id} sx={{ '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.05)' } }}>
@@ -1452,59 +2362,81 @@ const GovtContractsSearchPage: React.FC = () => {
                     </Table>
                   </TableContainer>
 
-                  {/* Pagination */}
-                  {totalPages > 1 && (
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3 }}>
-                      <Typography sx={{ color: '#94a3b8' }}>
-                        Showing {startIndex + 1}-{Math.min(endIndex, currentResults.length)} of {currentResults.length} results
-                      </Typography>
-                      <Pagination
-                        count={totalPages}
-                        page={currentPage}
-                        onChange={(_, page) => setCurrentPage(page)}
-                        sx={{
-                          '& .MuiPaginationItem-root': {
-                            color: '#94a3b8',
-                            '&.Mui-selected': {
-                              backgroundColor: '#3b82f6',
-                              color: '#fff',
-                            },
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3 }}>
+                    <Typography sx={{ color: '#94a3b8' }}>
+                      Showing {startIndex + 1}-{Math.min(endIndex, currentResults.length)} of {currentResults.length} results
+                    </Typography>
+                    <Pagination
+                      count={totalPages}
+                      page={currentPage}
+                      onChange={(_, page) => setCurrentPage(page)}
+                      sx={{
+                        '& .MuiPaginationItem-root': {
+                          color: '#94a3b8',
+                          '&.Mui-selected': {
+                            backgroundColor: '#3b82f6',
+                            color: '#fff',
                           },
-                        }}
-                      />
-                    </Box>
-                  )}
+                        },
+                      }}
+                    />
+                  </Box>
+                )}
 
-                  {/* Load More Button */}
-                  {!isFiltered && hasMore && lastEvaluatedKey && allSearchResults.length > 0 && (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-                      <Button
-                        variant="contained"
-                        onClick={handleLoadMore}
-                        disabled={isLoadingMore}
-                        sx={{
-                          backgroundColor: '#3b82f6',
-                          '&:hover': { backgroundColor: '#2563eb' },
-                          '&:disabled': { backgroundColor: '#475569' },
-                        }}
-                      >
-                        {isLoadingMore ? (
-                          <>
-                            <CircularProgress size={20} sx={{ mr: 1 }} />
-                            Loading...
-                          </>
-                        ) : (
-                          `Load More (${allSearchResults.length} loaded)`
-                        )}
-                      </Button>
-                    </Box>
-                  )}
-                </Box>
+                {/* Load More Button */}
+                {!isFiltered && hasMore && lastEvaluatedKey && allSearchResults.length > 0 && (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                    <Button
+                      variant="contained"
+                      onClick={handleLoadMore}
+                      disabled={isLoadingMore}
+                      sx={{
+                        backgroundColor: '#3b82f6',
+                        '&:hover': { backgroundColor: '#2563eb' },
+                        '&:disabled': { backgroundColor: '#475569' },
+                      }}
+                    >
+                      {isLoadingMore ? (
+                        <>
+                          <CircularProgress size={20} sx={{ mr: 1 }} />
+                          Loading...
+                        </>
+                      ) : (
+                        `Load More (${allSearchResults.length} loaded)`
+                      )}
+                    </Button>
+                  </Box>
+                )}
               </Box>
-            </Box>
-          )}
-        </GlassCard>
+            </GlassCard>
+          </Box>
+        )}
+          </Box>
+        </Box>
       </Container>
+
+      {/* Context Menu */}
+      <Menu
+        open={contextMenuAnchor !== null}
+        onClose={handleContextMenuClose}
+        anchorReference="anchorPosition"
+        anchorPosition={
+          contextMenuAnchor !== null
+            ? { top: contextMenuAnchor.mouseY, left: contextMenuAnchor.mouseX }
+            : undefined
+        }
+      >
+        <MenuItem onClick={() => handleAddToContext('new')}>
+          <NewChatIcon sx={{ mr: 1 }} />
+          Add to New Chat
+        </MenuItem>
+        <MenuItem onClick={() => handleAddToContext('sidebar')}>
+          <SidebarChatIcon sx={{ mr: 1 }} />
+          Add to Current Chat
+        </MenuItem>
+      </Menu>
     </Box>
   );
 };
