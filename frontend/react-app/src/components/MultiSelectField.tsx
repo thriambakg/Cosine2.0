@@ -76,6 +76,14 @@ function MultiSelectField<T = string>({
       return;
     }
 
+    // Clear suggestions immediately if query changed significantly (not just a continuation)
+    // This prevents showing stale results when user deletes and types a new word
+    if (lastSearchQueryRef.current && 
+        !inputValue.startsWith(lastSearchQueryRef.current) && 
+        !lastSearchQueryRef.current.startsWith(inputValue)) {
+      setDynamicSuggestions([]);
+    }
+
     // Skip if we're already searching for this exact query
     if (lastSearchQueryRef.current === inputValue) {
       return;
@@ -101,15 +109,10 @@ function MultiSelectField<T = string>({
       ? newItem as T 
       : newItem as T;
     
-    console.log('MultiSelectField - Adding item:', itemToAdd);
-    
     const keyExists = selectedItems.some(item => getItemKey(item) === getItemKey(itemToAdd));
     
     if (!keyExists) {
-      console.log('MultiSelectField - Item added successfully');
       onItemsChange([...selectedItems, itemToAdd]);
-    } else {
-      console.log('MultiSelectField - Item already exists, not adding');
     }
     setInputValue('');
   };
@@ -130,7 +133,6 @@ function MultiSelectField<T = string>({
           setInputValue(value);
         }}
         onChange={(_, value, reason) => {
-          console.log('MultiSelectField - Autocomplete onChange called with value:', value, 'reason:', reason);
           if (value && reason === 'selectOption') {
             handleAddItem(value);
             // Clear input after selection
@@ -157,7 +159,7 @@ function MultiSelectField<T = string>({
         freeSolo={false}
         loading={isLoading}
         clearOnBlur={false}
-        open={isDropdownOpen && availableOptions.length > 0}
+        open={isDropdownOpen && (availableOptions.length > 0 || isLoading)}
         onOpen={() => setIsDropdownOpen(true)}
         onClose={() => setIsDropdownOpen(false)}
         PaperComponent={(props) => (

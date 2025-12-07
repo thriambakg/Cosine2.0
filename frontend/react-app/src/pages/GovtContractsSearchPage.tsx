@@ -225,17 +225,52 @@ const GovtContractsSearchPage: React.FC = () => {
   const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== false);
   const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== false);
 
-  // Autocomplete state - use ref to avoid dependency issues
-  const autocompleteOptionsRef = useRef<{
-    [key: string]: Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>;
-  }>({});
+  // Autocomplete state - use state for suggestions (like SECSearchPage)
+  const [recipientSuggestions, setRecipientSuggestions] = useState<Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>>([]);
+  const [awardingAgencySuggestions, setAwardingAgencySuggestions] = useState<Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>>([]);
+  const [fundingAgencySuggestions, setFundingAgencySuggestions] = useState<Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>>([]);
   
-  const [autocompleteOptions, setAutocompleteOptions] = useState<{
-    [key: string]: Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>;
-  }>({});
+  // Loading state for autocomplete searches
+  const [recipientLoading, setRecipientLoading] = useState<boolean>(false);
+  const [awardingAgencyLoading, setAwardingAgencyLoading] = useState<boolean>(false);
+  const [fundingAgencyLoading, setFundingAgencyLoading] = useState<boolean>(false);
   
-  // Track ongoing searches to prevent duplicate requests
-  const searchInProgressRef = useRef<{ [key: string]: string }>({});
+  // Refs to track current suggestions for callbacks (avoid stale closures)
+  const recipientSuggestionsRef = useRef<Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>>([]);
+  const awardingAgencySuggestionsRef = useRef<Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>>([]);
+  const fundingAgencySuggestionsRef = useRef<Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }>>([]);
+  
+  // Track the most recent search timestamp for race condition handling (like SECSearchPage)
+  const latestRecipientSearchRef = useRef<number>(0);
+  const latestAwardingAgencySearchRef = useRef<number>(0);
+  const latestFundingAgencySearchRef = useRef<number>(0);
+  
+  // Track last query to detect query changes and clear stale suggestions
+  const lastRecipientQueryRef = useRef<string>('');
+  const lastAwardingAgencyQueryRef = useRef<string>('');
+  const lastFundingAgencyQueryRef = useRef<string>('');
+  
+  // Helper function to find option by name across all suggestion sources
+  const findOptionByName = useCallback((
+    name: string,
+    type: 'recipient' | 'awarding_agency' | 'funding_agency'
+  ): { id?: string; code?: string; name?: string; text?: string; [key: string]: any } | undefined => {
+    let suggestions: Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> = [];
+    
+    switch (type) {
+      case 'recipient':
+        suggestions = recipientSuggestions;
+        break;
+      case 'awarding_agency':
+        suggestions = awardingAgencySuggestions;
+        break;
+      case 'funding_agency':
+        suggestions = fundingAgencySuggestions;
+        break;
+    }
+    
+    return suggestions.find(opt => opt.name === name || opt.text === name);
+  }, [recipientSuggestions, awardingAgencySuggestions, fundingAgencySuggestions]);
 
   // Compute available filters from results
   const computeFiltersFromResults = useCallback((results: GovtContractAward[]) => {
@@ -391,23 +426,32 @@ const GovtContractsSearchPage: React.FC = () => {
     });
   }, []);
 
-  // Memoized search functions for each type to prevent recreation
+  // Memoized search functions for each type with race condition protection (like SECSearchPage)
   const recipientSearch = useCallback((query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
     if (!query || query.length < 2) {
+      setRecipientSuggestions([]);
+      recipientSuggestionsRef.current = [];
+      lastRecipientQueryRef.current = '';
+      setRecipientLoading(false);
       return [];
     }
 
-    // Check if we're already searching for this query
-    const searchKey = `recipient-${query}`;
-    if (searchInProgressRef.current[searchKey]) {
-      // Return cached results if search is in progress
-      return autocompleteOptionsRef.current.recipient || [];
+    // Clear suggestions immediately if query changed (prevents showing stale results)
+    // This includes both continuations (xxx -> xxxy) and new words
+    if (lastRecipientQueryRef.current !== query) {
+      setRecipientSuggestions([]);
+      recipientSuggestionsRef.current = [];
     }
 
-    // Mark search as in progress
-    searchInProgressRef.current[searchKey] = query;
+    // Track the most recent search timestamp for race condition handling
+    const searchTimestamp = Date.now();
+    latestRecipientSearchRef.current = searchTimestamp;
+    lastRecipientQueryRef.current = query;
 
-    // Trigger async fetch and update state
+    // Set loading state
+    setRecipientLoading(true);
+
+    // Trigger async search in background
     (async () => {
       try {
         const response = await govtContractsAutocompleteAPI.autocomplete({
@@ -416,44 +460,55 @@ const GovtContractsSearchPage: React.FC = () => {
           limit: 10,
         });
 
-        if (response.success && response.results) {
+        // Only update suggestions if this is still the most recent search
+        if (latestRecipientSearchRef.current === searchTimestamp && response.success && response.results) {
           const transformedResults = transformAutocompleteResults(response.results, 'recipient');
-          // Update both state and ref
-          setAutocompleteOptions((prev) => {
-            const updated = {
-              ...prev,
-              recipient: transformedResults,
-            };
-            autocompleteOptionsRef.current = updated;
-            return updated;
-          });
+          setRecipientSuggestions(transformedResults);
+          recipientSuggestionsRef.current = transformedResults;
         }
       } catch (error) {
-        console.error(`Error loading autocomplete for recipient:`, error);
+        if (latestRecipientSearchRef.current === searchTimestamp) {
+          console.error(`Error loading autocomplete for recipient:`, error);
+          setRecipientSuggestions([]);
+          recipientSuggestionsRef.current = [];
+        }
       } finally {
-        // Remove from in-progress tracking
-        delete searchInProgressRef.current[searchKey];
+        // Clear loading state only if this is still the most recent search
+        if (latestRecipientSearchRef.current === searchTimestamp) {
+          setRecipientLoading(false);
+        }
       }
     })();
 
-    // Return cached results immediately (will update on next render)
-    // Use ref to get latest value without causing re-renders
-    const cached = autocompleteOptionsRef.current.recipient || [];
-    return cached;
+    // Return empty array to prevent showing stale results while new search is in progress
+    return [];
   }, [transformAutocompleteResults]);
 
   const awardingAgencySearch = useCallback((query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
     if (!query || query.length < 2) {
+      setAwardingAgencySuggestions([]);
+      awardingAgencySuggestionsRef.current = [];
+      lastAwardingAgencyQueryRef.current = '';
+      setAwardingAgencyLoading(false);
       return [];
     }
 
-    const searchKey = `awarding_agency-${query}`;
-    if (searchInProgressRef.current[searchKey]) {
-      return autocompleteOptionsRef.current.awarding_agency || [];
+    // Clear suggestions immediately if query changed (prevents showing stale results)
+    // This includes both continuations (xxx -> xxxy) and new words
+    if (lastAwardingAgencyQueryRef.current !== query) {
+      setAwardingAgencySuggestions([]);
+      awardingAgencySuggestionsRef.current = [];
     }
 
-    searchInProgressRef.current[searchKey] = query;
+    // Track the most recent search timestamp for race condition handling
+    const searchTimestamp = Date.now();
+    latestAwardingAgencySearchRef.current = searchTimestamp;
+    lastAwardingAgencyQueryRef.current = query;
 
+    // Set loading state
+    setAwardingAgencyLoading(true);
+
+    // Trigger async search in background
     (async () => {
       try {
         const response = await govtContractsAutocompleteAPI.autocomplete({
@@ -462,39 +517,55 @@ const GovtContractsSearchPage: React.FC = () => {
           limit: 10,
         });
 
-        if (response.success && response.results) {
+        // Only update suggestions if this is still the most recent search
+        if (latestAwardingAgencySearchRef.current === searchTimestamp && response.success && response.results) {
           const transformedResults = transformAutocompleteResults(response.results, 'awarding_agency');
-          setAutocompleteOptions((prev) => {
-            const updated = {
-              ...prev,
-              awarding_agency: transformedResults,
-            };
-            autocompleteOptionsRef.current = updated;
-            return updated;
-          });
+          setAwardingAgencySuggestions(transformedResults);
+          awardingAgencySuggestionsRef.current = transformedResults;
         }
       } catch (error) {
-        console.error(`Error loading autocomplete for awarding_agency:`, error);
+        if (latestAwardingAgencySearchRef.current === searchTimestamp) {
+          console.error(`Error loading autocomplete for awarding_agency:`, error);
+          setAwardingAgencySuggestions([]);
+          awardingAgencySuggestionsRef.current = [];
+        }
       } finally {
-        delete searchInProgressRef.current[searchKey];
+        // Clear loading state only if this is still the most recent search
+        if (latestAwardingAgencySearchRef.current === searchTimestamp) {
+          setAwardingAgencyLoading(false);
+        }
       }
     })();
 
-    return autocompleteOptionsRef.current.awarding_agency || [];
+    // Return empty array to prevent showing stale results while new search is in progress
+    return [];
   }, [transformAutocompleteResults]);
 
   const fundingAgencySearch = useCallback((query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
     if (!query || query.length < 2) {
+      setFundingAgencySuggestions([]);
+      fundingAgencySuggestionsRef.current = [];
+      lastFundingAgencyQueryRef.current = '';
+      setFundingAgencyLoading(false);
       return [];
     }
 
-    const searchKey = `funding_agency-${query}`;
-    if (searchInProgressRef.current[searchKey]) {
-      return autocompleteOptionsRef.current.funding_agency || [];
+    // Clear suggestions immediately if query changed (prevents showing stale results)
+    // This includes both continuations (xxx -> xxxy) and new words
+    if (lastFundingAgencyQueryRef.current !== query) {
+      setFundingAgencySuggestions([]);
+      fundingAgencySuggestionsRef.current = [];
     }
 
-    searchInProgressRef.current[searchKey] = query;
+    // Track the most recent search timestamp for race condition handling
+    const searchTimestamp = Date.now();
+    latestFundingAgencySearchRef.current = searchTimestamp;
+    lastFundingAgencyQueryRef.current = query;
 
+    // Set loading state
+    setFundingAgencyLoading(true);
+
+    // Trigger async search in background
     (async () => {
       try {
         const response = await govtContractsAutocompleteAPI.autocomplete({
@@ -503,25 +574,28 @@ const GovtContractsSearchPage: React.FC = () => {
           limit: 10,
         });
 
-        if (response.success && response.results) {
+        // Only update suggestions if this is still the most recent search
+        if (latestFundingAgencySearchRef.current === searchTimestamp && response.success && response.results) {
           const transformedResults = transformAutocompleteResults(response.results, 'funding_agency');
-          setAutocompleteOptions((prev) => {
-            const updated = {
-              ...prev,
-              funding_agency: transformedResults,
-            };
-            autocompleteOptionsRef.current = updated;
-            return updated;
-          });
+          setFundingAgencySuggestions(transformedResults);
+          fundingAgencySuggestionsRef.current = transformedResults;
         }
       } catch (error) {
-        console.error(`Error loading autocomplete for funding_agency:`, error);
+        if (latestFundingAgencySearchRef.current === searchTimestamp) {
+          console.error(`Error loading autocomplete for funding_agency:`, error);
+          setFundingAgencySuggestions([]);
+          fundingAgencySuggestionsRef.current = [];
+        }
       } finally {
-        delete searchInProgressRef.current[searchKey];
+        // Clear loading state only if this is still the most recent search
+        if (latestFundingAgencySearchRef.current === searchTimestamp) {
+          setFundingAgencyLoading(false);
+        }
       }
     })();
 
-    return autocompleteOptionsRef.current.funding_agency || [];
+    // Return empty array to prevent showing stale results while new search is in progress
+    return [];
   }, [transformAutocompleteResults]);
 
   // Handle search
@@ -542,9 +616,7 @@ const GovtContractsSearchPage: React.FC = () => {
       // Convert agency names to codes for API call
       if (filters.awarding_agency_name && filters.awarding_agency_name.length > 0) {
         const codes = filters.awarding_agency_name.map((name: string) => {
-          const found = autocompleteOptions.awarding_agency?.find(opt => 
-            opt.name === name || opt.text === name
-          );
+          const found = findOptionByName(name, 'awarding_agency');
           return found?.code || found?.id || name;
         }).filter(Boolean);
         filters.awarding_agency_code = codes;
@@ -553,9 +625,7 @@ const GovtContractsSearchPage: React.FC = () => {
       
       if (filters.funding_agency_name && filters.funding_agency_name.length > 0) {
         const codes = filters.funding_agency_name.map((name: string) => {
-          const found = autocompleteOptions.funding_agency?.find(opt => 
-            opt.name === name || opt.text === name
-          );
+          const found = findOptionByName(name, 'funding_agency');
           return found?.code || found?.id || name;
         }).filter(Boolean);
         filters.funding_agency_code = codes;
@@ -623,7 +693,7 @@ const GovtContractsSearchPage: React.FC = () => {
     } finally {
       setIsSearching(false);
     }
-  }, [searchParams, computeFiltersFromResults]);
+  }, [searchParams, computeFiltersFromResults, findOptionByName]);
 
   // Handle load more
   const handleLoadMore = useCallback(async () => {
@@ -640,9 +710,7 @@ const GovtContractsSearchPage: React.FC = () => {
       // Convert agency names to codes for API call
       if (filters.awarding_agency_name && filters.awarding_agency_name.length > 0) {
         const codes = filters.awarding_agency_name.map((name: string) => {
-          const found = autocompleteOptions.awarding_agency?.find(opt => 
-            opt.name === name || opt.text === name
-          );
+          const found = findOptionByName(name, 'awarding_agency');
           return found?.code || found?.id || name;
         }).filter(Boolean);
         filters.awarding_agency_code = codes;
@@ -651,9 +719,7 @@ const GovtContractsSearchPage: React.FC = () => {
       
       if (filters.funding_agency_name && filters.funding_agency_name.length > 0) {
         const codes = filters.funding_agency_name.map((name: string) => {
-          const found = autocompleteOptions.funding_agency?.find(opt => 
-            opt.name === name || opt.text === name
-          );
+          const found = findOptionByName(name, 'funding_agency');
           return found?.code || found?.id || name;
         }).filter(Boolean);
         filters.funding_agency_code = codes;
@@ -901,10 +967,7 @@ const GovtContractsSearchPage: React.FC = () => {
                       // Convert names back to objects for display
                       const names = searchParams.awarding_agency_name || [];
                       return names.map(name => {
-                        // Try to find in autocomplete options
-                        const found = autocompleteOptions.awarding_agency?.find(opt => 
-                          opt.name === name || opt.text === name
-                        );
+                        const found = findOptionByName(name, 'awarding_agency');
                         if (found) return found;
                         // Fallback - create object with name
                         return { name: name || '', code: '', text: name || '' };
@@ -918,8 +981,9 @@ const GovtContractsSearchPage: React.FC = () => {
                         ),
                       }));
                     }}
-                    suggestions={[]}
+                    suggestions={awardingAgencySuggestions}
                     onSearch={awardingAgencySearch}
+                    isLoading={awardingAgencyLoading}
                     renderItem={(item) => {
                       if (typeof item === 'string') return item;
                       // Return name for display (chips will show name)
@@ -940,10 +1004,7 @@ const GovtContractsSearchPage: React.FC = () => {
                       // Convert names back to objects for display
                       const names = searchParams.funding_agency_name || [];
                       return names.map(name => {
-                        // Try to find in autocomplete options
-                        const found = autocompleteOptions.funding_agency?.find(opt => 
-                          opt.name === name || opt.text === name
-                        );
+                        const found = findOptionByName(name, 'funding_agency');
                         if (found) return found;
                         // Fallback - create object with name
                         return { name: name || '', code: '', text: name || '' };
@@ -957,8 +1018,9 @@ const GovtContractsSearchPage: React.FC = () => {
                         ),
                       }));
                     }}
-                    suggestions={[]}
+                    suggestions={fundingAgencySuggestions}
                     onSearch={fundingAgencySearch}
+                    isLoading={fundingAgencyLoading}
                     renderItem={(item) => {
                       if (typeof item === 'string') return item;
                       // Return name for display (chips will show name)
@@ -978,9 +1040,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     selectedItems={(() => {
                       const names = searchParams.recipient_name || [];
                       return names.map(name => {
-                        const found = autocompleteOptions.recipient?.find(opt => 
-                          opt.name === name || opt.text === name
-                        );
+                        const found = findOptionByName(name, 'recipient');
                         if (found) return found;
                         const nameStr = typeof name === 'string' ? name : (name as any)?.name || (name as any)?.text || '';
                         return { name: nameStr, text: nameStr };
@@ -994,8 +1054,9 @@ const GovtContractsSearchPage: React.FC = () => {
                         ),
                       }));
                     }}
-                    suggestions={autocompleteOptions.recipient || []}
+                    suggestions={recipientSuggestions}
                     onSearch={recipientSearch}
+                    isLoading={recipientLoading}
                     renderItem={(item) => {
                       if (typeof item === 'string') return item;
                       // Return name for display (chips will show name)

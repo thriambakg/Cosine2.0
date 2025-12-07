@@ -86,6 +86,34 @@ def fetch_award_details_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def is_agency_code(value: str) -> bool:
+    """
+    Determine if a value is an agency code or name.
+    Codes are typically short alphanumeric strings (e.g., "012", "020").
+    Names are longer strings with spaces (e.g., "Department of Agriculture").
+    
+    Args:
+        value: The value to check
+    
+    Returns:
+        True if it looks like a code, False if it looks like a name
+    """
+    if not value or not isinstance(value, str):
+        return False
+    
+    # If it contains spaces, it's likely a name
+    if ' ' in value:
+        return False
+    
+    # If it's very short (1-4 chars) and alphanumeric, it's likely a code
+    if len(value) <= 4 and value.replace('-', '').replace('_', '').isalnum():
+        return True
+    
+    # If it's longer but still no spaces and looks like a code pattern, treat as code
+    # Otherwise, treat as name
+    return len(value) <= 10 and not any(c.islower() for c in value if c.isalpha())
+
+
 def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
     """
     Build DynamoDB filter expression from user filters
@@ -106,29 +134,104 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
         else:
             conditions.append(Attr('award_type').is_in(award_types))
     
-    # Agency filters
+    # Agency filters - support both codes and names with contains matching for flexible searches
     if filters.get('awarding_agency_code'):
-        codes = filters['awarding_agency_code'] if isinstance(filters['awarding_agency_code'], list) else [filters['awarding_agency_code']]
-        if len(codes) == 1:
-            conditions.append(Attr('awarding_agency_code').eq(codes[0]))
-        else:
-            conditions.append(Attr('awarding_agency_code').is_in(codes))
+        values = filters['awarding_agency_code'] if isinstance(filters['awarding_agency_code'], list) else [filters['awarding_agency_code']]
+        # Separate codes and names
+        codes = [v for v in values if is_agency_code(str(v))]
+        names = [v for v in values if not is_agency_code(str(v))]
+        
+        # Build conditions for codes (use contains for flexible partial matching)
+        code_conditions = []
+        if codes:
+            for code in codes:
+                code_str = str(code).strip()
+                if code_str:
+                    code_conditions.append(Attr('awarding_agency_code').contains(code_str))
+        
+        # Build conditions for names (use contains for flexible partial matching)
+        name_conditions = []
+        if names:
+            for name in names:
+                name_str = str(name).strip()
+                if name_str:
+                    name_conditions.append(Attr('awarding_agency_name').contains(name_str))
+        
+        # Combine code and name conditions with OR if both exist, otherwise use the single condition
+        if code_conditions and name_conditions:
+            # Both codes and names: combine with OR
+            combined = code_conditions[0]
+            for cond in code_conditions[1:] + name_conditions:
+                combined = combined | cond
+            conditions.append(combined)
+        elif code_conditions:
+            if len(code_conditions) == 1:
+                conditions.extend(code_conditions)
+            else:
+                # Multiple codes: combine with OR
+                combined = code_conditions[0]
+                for cond in code_conditions[1:]:
+                    combined = combined | cond
+                conditions.append(combined)
+        elif name_conditions:
+            if len(name_conditions) == 1:
+                conditions.extend(name_conditions)
+            else:
+                # Multiple names: combine with OR
+                combined = name_conditions[0]
+                for cond in name_conditions[1:]:
+                    combined = combined | cond
+                conditions.append(combined)
     
     if filters.get('funding_agency_code'):
-        codes = filters['funding_agency_code'] if isinstance(filters['funding_agency_code'], list) else [filters['funding_agency_code']]
-        if len(codes) == 1:
-            conditions.append(Attr('funding_agency_code').eq(codes[0]))
-        else:
-            conditions.append(Attr('funding_agency_code').is_in(codes))
+        values = filters['funding_agency_code'] if isinstance(filters['funding_agency_code'], list) else [filters['funding_agency_code']]
+        # Separate codes and names
+        codes = [v for v in values if is_agency_code(str(v))]
+        names = [v for v in values if not is_agency_code(str(v))]
+        
+        # Build conditions for codes (use contains for flexible partial matching)
+        code_conditions = []
+        if codes:
+            for code in codes:
+                code_str = str(code).strip()
+                if code_str:
+                    code_conditions.append(Attr('funding_agency_code').contains(code_str))
+        
+        # Build conditions for names (use contains for flexible partial matching)
+        name_conditions = []
+        if names:
+            for name in names:
+                name_str = str(name).strip()
+                if name_str:
+                    name_conditions.append(Attr('funding_agency_name').contains(name_str))
+        
+        # Combine code and name conditions with OR if both exist, otherwise use the single condition
+        if code_conditions and name_conditions:
+            # Both codes and names: combine with OR
+            combined = code_conditions[0]
+            for cond in code_conditions[1:] + name_conditions:
+                combined = combined | cond
+            conditions.append(combined)
+        elif code_conditions:
+            if len(code_conditions) == 1:
+                conditions.extend(code_conditions)
+            else:
+                # Multiple codes: combine with OR
+                combined = code_conditions[0]
+                for cond in code_conditions[1:]:
+                    combined = combined | cond
+                conditions.append(combined)
+        elif name_conditions:
+            if len(name_conditions) == 1:
+                conditions.extend(name_conditions)
+            else:
+                # Multiple names: combine with OR
+                combined = name_conditions[0]
+                for cond in name_conditions[1:]:
+                    combined = combined | cond
+                conditions.append(combined)
     
     # Recipient filters
-    if filters.get('recipient_id'):
-        recipient_ids = filters['recipient_id'] if isinstance(filters['recipient_id'], list) else [filters['recipient_id']]
-        if len(recipient_ids) == 1:
-            conditions.append(Attr('recipient_id').eq(recipient_ids[0]))
-        else:
-            conditions.append(Attr('recipient_id').is_in(recipient_ids))
-    
     if filters.get('recipient_name'):
         # Use contains for partial name matching (case-insensitive via normalized field)
         recipient_names = filters['recipient_name'] if isinstance(filters['recipient_name'], list) else [filters['recipient_name']]
@@ -201,21 +304,6 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
             conditions.append(Attr('fiscal_year').eq(fiscal_years[0]))
         else:
             conditions.append(Attr('fiscal_year').is_in(fiscal_years))
-    
-    # Description/keywords filter (text search)
-    if filters.get('keywords') or filters.get('description'):
-        keywords = filters.get('keywords', []) + (filters.get('description', []) if isinstance(filters.get('description'), list) else [filters.get('description')] if filters.get('description') else [])
-        if keywords:
-            keyword_conditions = []
-            for keyword in keywords:
-                if keyword:
-                    keyword_conditions.append(Attr('description').contains(keyword))
-            if keyword_conditions:
-                # OR condition for multiple keywords
-                combined = keyword_conditions[0]
-                for cond in keyword_conditions[1:]:
-                    combined = combined | cond
-                conditions.append(combined)
     
     # Combine all conditions with AND
     if conditions:
@@ -361,11 +449,22 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     items = response.get('Items', [])
     last_eval_key = response.get('LastEvaluatedKey')
     
+    # Log initial results found
+    if items:
+        logger.info(f"Found {len(items)} award(s) in DynamoDB table using {method}" + (f" with index {index_name}" if index_name else ""))
+        # Log sample award IDs for debugging
+        sample_ids = [item.get('award_id', 'unknown') for item in items[:3]]
+        logger.info(f"Sample award IDs found: {sample_ids}")
+    else:
+        logger.info(f"No awards found in DynamoDB table using {method}" + (f" with index {index_name}" if index_name else ""))
+    
     # Convert Decimal to float for JSON serialization
     results = [convert_decimal_to_float(item) for item in items]
     
     # Enrich results with S3 award details (transactions and subawards)
     enriched_results = []
+    s3_fetch_success_count = 0
+    s3_fetch_fail_count = 0
     for award in results:
         # Fetch award details from S3 if s3_key exists
         s3_key = award.get('award_details_s3_key')
@@ -375,16 +474,22 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                 # Add transactions and subawards to the award record
                 award['transactions'] = award_details.get('transactions', [])
                 award['subawards'] = award_details.get('subawards', [])
+                s3_fetch_success_count += 1
             else:
                 # If fetch failed, initialize empty arrays
                 award['transactions'] = []
                 award['subawards'] = []
+                s3_fetch_fail_count += 1
         else:
             # No S3 key, initialize empty arrays
             award['transactions'] = []
             award['subawards'] = []
         
         enriched_results.append(award)
+    
+    # Log enrichment results
+    if enriched_results:
+        logger.info(f"Enriched {len(enriched_results)} award(s). S3 fetch: {s3_fetch_success_count} success, {s3_fetch_fail_count} failed")
     
     return {
         'success': True,
@@ -443,6 +548,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Search awards
         result = search_awards(filters, limit=limit, last_evaluated_key=last_evaluated_key)
+        
+        # Log final results
+        result_count = result.get('count', 0)
+        if result_count > 0:
+            logger.info(f"Search completed successfully: {result_count} award(s) returned (method: {result.get('method', 'unknown')}, index: {result.get('index_used', 'none')}, has_more: {result.get('has_more', False)})")
+        else:
+            logger.info(f"Search completed: No awards found matching the filters")
         
         return {
             'statusCode': 200,

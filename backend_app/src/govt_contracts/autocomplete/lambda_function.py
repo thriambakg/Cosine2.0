@@ -174,7 +174,14 @@ def transform_agency_office_results(results: List[Dict[str, Any]]) -> List[Dict[
     seen_codes = set()  # Prevent duplicates
     seen_names = set()  # Also track by name to prevent duplicates when code is missing
     
+    if not isinstance(results, list):
+        logger.error(f"transform_agency_office_results: Expected list, got {type(results)}")
+        return []
+    
     for item in results:
+        if not isinstance(item, dict):
+            logger.warning(f"transform_agency_office_results: Skipping non-dict item: {type(item)}")
+            continue
         # Handle toptier_agency - can be a dict or a list of dicts
         if 'toptier_agency' in item:
             agencies = item['toptier_agency']
@@ -187,21 +194,25 @@ def transform_agency_office_results(results: List[Dict[str, Any]]) -> List[Dict[
             for agency in agencies:
                 if not isinstance(agency, dict):
                     continue
-                code = agency.get('code', '') or ''
-                name = agency.get('name', '') or ''
-                
-                # Use code as primary identifier, fall back to name if code is missing
-                identifier = code if code else name
-                if identifier and identifier not in seen_codes:
-                    flattened.append({
-                        'code': code or name,  # Use name as code if code is missing
-                        'name': name,
-                        'type': 'toptier_agency',
-                        'abbreviation': agency.get('abbreviation')
-                    })
-                    seen_codes.add(identifier)
-                    if name:
-                        seen_names.add(name.lower())
+                try:
+                    code = str(agency.get('code', '') or '')
+                    name = str(agency.get('name', '') or '')
+                    
+                    # Use code as primary identifier, fall back to name if code is missing
+                    identifier = code if code else name
+                    if identifier and identifier not in seen_codes:
+                        flattened.append({
+                            'code': code or name,  # Use name as code if code is missing
+                            'name': name,
+                            'type': 'toptier_agency',
+                            'abbreviation': agency.get('abbreviation', '')
+                        })
+                        seen_codes.add(identifier)
+                        if name:
+                            seen_names.add(name.lower())
+                except Exception as e:
+                    logger.warning(f"Error processing toptier_agency: {str(e)}")
+                    continue
         
         # Handle subtier_agency - can be a dict or a list of dicts
         if 'subtier_agency' in item:
@@ -215,24 +226,28 @@ def transform_agency_office_results(results: List[Dict[str, Any]]) -> List[Dict[
             for agency in agencies:
                 if not isinstance(agency, dict):
                     continue
-                code = agency.get('code', '') or ''
-                name = agency.get('name', '') or ''
-                
-                # Use code as primary identifier, fall back to name if code is missing
-                identifier = code if code else name
-                if identifier and identifier not in seen_codes:
-                    # Also check name to avoid duplicates
-                    name_lower = name.lower() if name else ''
-                    if not name_lower or name_lower not in seen_names:
-                        flattened.append({
-                            'code': code or name,  # Use name as code if code is missing
-                            'name': name,
-                            'type': 'subtier_agency',
-                            'abbreviation': agency.get('abbreviation')
-                        })
-                        seen_codes.add(identifier)
-                        if name_lower:
-                            seen_names.add(name_lower)
+                try:
+                    code = str(agency.get('code', '') or '')
+                    name = str(agency.get('name', '') or '')
+                    
+                    # Use code as primary identifier, fall back to name if code is missing
+                    identifier = code if code else name
+                    if identifier and identifier not in seen_codes:
+                        # Also check name to avoid duplicates
+                        name_lower = name.lower() if name else ''
+                        if not name_lower or name_lower not in seen_names:
+                            flattened.append({
+                                'code': code or name,  # Use name as code if code is missing
+                                'name': name,
+                                'type': 'subtier_agency',
+                                'abbreviation': agency.get('abbreviation', '')
+                            })
+                            seen_codes.add(identifier)
+                            if name_lower:
+                                seen_names.add(name_lower)
+                except Exception as e:
+                    logger.warning(f"Error processing subtier_agency: {str(e)}")
+                    continue
         
         # Handle office - can be a dict or a list of dicts
         if 'office' in item:
@@ -246,23 +261,27 @@ def transform_agency_office_results(results: List[Dict[str, Any]]) -> List[Dict[
             for office in offices:
                 if not isinstance(office, dict):
                     continue
-                code = office.get('code', '') or ''
-                name = office.get('name', '') or ''
-                
-                # Use code as primary identifier, fall back to name if code is missing
-                identifier = code if code else name
-                if identifier and identifier not in seen_codes:
-                    # Also check name to avoid duplicates
-                    name_lower = name.lower() if name else ''
-                    if not name_lower or name_lower not in seen_names:
-                        flattened.append({
-                            'code': code or name,  # Use name as code if code is missing
-                            'name': name,
-                            'type': 'office'
-                        })
-                        seen_codes.add(identifier)
-                        if name_lower:
-                            seen_names.add(name_lower)
+                try:
+                    code = str(office.get('code', '') or '')
+                    name = str(office.get('name', '') or '')
+                    
+                    # Use code as primary identifier, fall back to name if code is missing
+                    identifier = code if code else name
+                    if identifier and identifier not in seen_codes:
+                        # Also check name to avoid duplicates
+                        name_lower = name.lower() if name else ''
+                        if not name_lower or name_lower not in seen_names:
+                            flattened.append({
+                                'code': code or name,  # Use name as code if code is missing
+                                'name': name,
+                                'type': 'office'
+                            })
+                            seen_codes.add(identifier)
+                            if name_lower:
+                                seen_names.add(name_lower)
+                except Exception as e:
+                    logger.warning(f"Error processing office: {str(e)}")
+                    continue
     
     return flattened
 
@@ -291,63 +310,104 @@ def handle_agency_autocomplete(autocomplete_type: str, request_body: Dict[str, A
     limit = min(request_body.get('limit', 20), 50)
     body['limit'] = limit
     
-    # Call API
-    api_response = call_usaspending_api(endpoint, method='POST', body=body)
+    try:
+        # Call API
+        api_response = call_usaspending_api(endpoint, method='POST', body=body)
+    except Exception as e:
+        # Handle all errors from USAspending API gracefully
+        error_str = str(e)
+        # Check if it's an API error (from call_usaspending_api)
+        if 'API error:' in error_str or 'Request timeout' in error_str or 'Request failed' in error_str:
+            logger.error(f"Error calling USAspending API for {autocomplete_type}: {error_str}", exc_info=True)
+            # Extract status code if available
+            status_code = None
+            if 'API error:' in error_str:
+                try:
+                    # Extract status code from error message like "API error: 500 - ..."
+                    parts = error_str.split('API error:')
+                    if len(parts) > 1:
+                        status_part = parts[1].strip().split()[0]
+                        status_code = int(status_part)
+                except (ValueError, IndexError):
+                    pass
+            
+            error_msg = f"USAspending API error"
+            if status_code:
+                error_msg = f"USAspending API returned {status_code}"
+            
+            # Return empty results with error message instead of crashing
+            return {
+                'results': [],
+                'messages': [f"Unable to fetch results: {error_msg}. The USAspending API may be experiencing issues."]
+            }
+        else:
+            # Unexpected error - log and return empty results
+            logger.error(f"Unexpected error calling USAspending API for {autocomplete_type}: {error_str}", exc_info=True)
+            return {
+                'results': [],
+                'messages': [f"Unable to fetch results: {error_str}"]
+            }
     
     # Transform results for office endpoints (they return nested structures)
     if autocomplete_type in ['awarding_agency_office', 'funding_agency_office']:
-        original_results = api_response.get('results', [])
-        
-        # Log the structure we received for debugging
-        logger.info(f"API response for {autocomplete_type}: results type = {type(original_results)}")
-        
-        # Handle case where results is a single dict (one match object)
-        # The API can return either a list of dicts OR a single dict with keys ['toptier_agency', 'subtier_agency', 'office']
-        if isinstance(original_results, dict):
-            # Check if this is a single match object (has the expected keys)
-            if any(key in original_results for key in ['toptier_agency', 'subtier_agency', 'office']):
-                logger.info(f"Results is a single match object with keys: {list(original_results.keys())}")
-                # Log the structure for debugging
-                for key in ['toptier_agency', 'subtier_agency', 'office']:
-                    if key in original_results:
-                        obj = original_results[key]
-                        if isinstance(obj, dict):
-                            logger.info(f"  {key}: code={obj.get('code', 'N/A')}, name={obj.get('name', 'N/A')[:50]}")
-                        elif isinstance(obj, list):
-                            logger.info(f"  {key}: list with {len(obj)} items")
-                            if len(obj) > 0 and isinstance(obj[0], dict):
-                                logger.info(f"    First item: code={obj[0].get('code', 'N/A')}, name={obj[0].get('name', 'N/A')[:50]}")
-                        else:
-                            logger.info(f"  {key}: type={type(obj)}")
-                # Wrap it in a list so transform_agency_office_results can process it
-                original_results = [original_results]
-            # Or if it's a dict containing a 'results' key with a list
-            elif 'results' in original_results and isinstance(original_results['results'], list):
-                logger.info("Results dict contains 'results' key with list")
-                original_results = original_results['results']
-            # Or if it's a dict containing a 'data' key with a list
-            elif 'data' in original_results and isinstance(original_results['data'], list):
-                logger.info("Results dict contains 'data' key with list")
-                original_results = original_results['data']
-            else:
-                logger.warning(f"Results dict has unexpected structure, keys: {list(original_results.keys())[:10]}")
-                # Try to convert dict values to list if they look like match objects
-                dict_values = list(original_results.values())
-                if dict_values and isinstance(dict_values[0], dict) and any(key in dict_values[0] for key in ['toptier_agency', 'subtier_agency', 'office']):
-                    logger.info("Converting dict values to list of match objects")
-                    original_results = dict_values
+        try:
+            original_results = api_response.get('results', [])
+            
+            # Log the structure we received for debugging
+            logger.info(f"API response for {autocomplete_type}: results type = {type(original_results)}")
+            
+            # Handle case where results is a single dict (one match object)
+            # The API can return either a list of dicts OR a single dict with keys ['toptier_agency', 'subtier_agency', 'office']
+            if isinstance(original_results, dict):
+                # Check if this is a single match object (has the expected keys)
+                if any(key in original_results for key in ['toptier_agency', 'subtier_agency', 'office']):
+                    logger.info(f"Results is a single match object with keys: {list(original_results.keys())}")
+                    # Log the structure for debugging
+                    for key in ['toptier_agency', 'subtier_agency', 'office']:
+                        if key in original_results:
+                            obj = original_results[key]
+                            if isinstance(obj, dict):
+                                logger.info(f"  {key}: code={obj.get('code', 'N/A')}, name={obj.get('name', 'N/A')[:50]}")
+                            elif isinstance(obj, list):
+                                logger.info(f"  {key}: list with {len(obj)} items")
+                                if len(obj) > 0 and isinstance(obj[0], dict):
+                                    logger.info(f"    First item: code={obj[0].get('code', 'N/A')}, name={obj[0].get('name', 'N/A')[:50]}")
+                            else:
+                                logger.info(f"  {key}: type={type(obj)}")
+                    # Wrap it in a list so transform_agency_office_results can process it
+                    original_results = [original_results]
+                # Or if it's a dict containing a 'results' key with a list
+                elif 'results' in original_results and isinstance(original_results['results'], list):
+                    logger.info("Results dict contains 'results' key with list")
+                    original_results = original_results['results']
+                # Or if it's a dict containing a 'data' key with a list
+                elif 'data' in original_results and isinstance(original_results['data'], list):
+                    logger.info("Results dict contains 'data' key with list")
+                    original_results = original_results['data']
                 else:
-                    original_results = []
-        
-        if isinstance(original_results, list):
-            if len(original_results) > 0:
-                logger.info(f"Transforming {len(original_results)} results for {autocomplete_type}")
-            transformed_results = transform_agency_office_results(original_results)
-            api_response['results'] = transformed_results[:limit]  # Ensure we don't exceed limit
-            logger.info(f"Transformed to {len(api_response['results'])} results")
-        else:
-            logger.error(f"Could not transform results for {autocomplete_type}: results is {type(original_results)}, value: {str(original_results)[:200]}")
-            api_response['results'] = []  # Return empty array if transformation fails
+                    logger.warning(f"Results dict has unexpected structure, keys: {list(original_results.keys())[:10]}")
+                    # Try to convert dict values to list if they look like match objects
+                    dict_values = list(original_results.values())
+                    if dict_values and isinstance(dict_values[0], dict) and any(key in dict_values[0] for key in ['toptier_agency', 'subtier_agency', 'office']):
+                        logger.info("Converting dict values to list of match objects")
+                        original_results = dict_values
+                    else:
+                        original_results = []
+            
+            if isinstance(original_results, list):
+                if len(original_results) > 0:
+                    logger.info(f"Transforming {len(original_results)} results for {autocomplete_type}")
+                transformed_results = transform_agency_office_results(original_results)
+                api_response['results'] = transformed_results[:limit]  # Ensure we don't exceed limit
+                logger.info(f"Transformed to {len(api_response['results'])} results")
+            else:
+                logger.error(f"Could not transform results for {autocomplete_type}: results is {type(original_results)}, value: {str(original_results)[:200]}")
+                api_response['results'] = []  # Return empty array if transformation fails
+        except Exception as e:
+            logger.error(f"Error transforming results for {autocomplete_type}: {str(e)}", exc_info=True)
+            # Return empty results instead of crashing
+            api_response['results'] = []
+            api_response['messages'] = api_response.get('messages', []) + [f"Error processing results: {str(e)}"]
     
     return api_response
 
