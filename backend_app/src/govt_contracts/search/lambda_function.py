@@ -134,28 +134,28 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
         else:
             conditions.append(Attr('award_type').is_in(award_types))
     
-    # Agency filters - support both codes and names with contains matching for flexible searches
+    # Agency filters - support both codes and names
     if filters.get('awarding_agency_code'):
         values = filters['awarding_agency_code'] if isinstance(filters['awarding_agency_code'], list) else [filters['awarding_agency_code']]
         # Separate codes and names
         codes = [v for v in values if is_agency_code(str(v))]
         names = [v for v in values if not is_agency_code(str(v))]
         
-        # Build conditions for codes (use contains for flexible partial matching)
+        # Build conditions for codes
         code_conditions = []
         if codes:
-            for code in codes:
-                code_str = str(code).strip()
-                if code_str:
-                    code_conditions.append(Attr('awarding_agency_code').contains(code_str))
+            if len(codes) == 1:
+                code_conditions.append(Attr('awarding_agency_code').eq(codes[0]))
+            else:
+                code_conditions.append(Attr('awarding_agency_code').is_in(codes))
         
-        # Build conditions for names (use contains for flexible partial matching)
+        # Build conditions for names (use exact matching)
         name_conditions = []
         if names:
             for name in names:
                 name_str = str(name).strip()
                 if name_str:
-                    name_conditions.append(Attr('awarding_agency_name').contains(name_str))
+                    name_conditions.append(Attr('awarding_agency_name').eq(name_str))
         
         # Combine code and name conditions with OR if both exist, otherwise use the single condition
         if code_conditions and name_conditions:
@@ -165,14 +165,7 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
                 combined = combined | cond
             conditions.append(combined)
         elif code_conditions:
-            if len(code_conditions) == 1:
-                conditions.extend(code_conditions)
-            else:
-                # Multiple codes: combine with OR
-                combined = code_conditions[0]
-                for cond in code_conditions[1:]:
-                    combined = combined | cond
-                conditions.append(combined)
+            conditions.extend(code_conditions)
         elif name_conditions:
             if len(name_conditions) == 1:
                 conditions.extend(name_conditions)
@@ -189,21 +182,21 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
         codes = [v for v in values if is_agency_code(str(v))]
         names = [v for v in values if not is_agency_code(str(v))]
         
-        # Build conditions for codes (use contains for flexible partial matching)
+        # Build conditions for codes
         code_conditions = []
         if codes:
-            for code in codes:
-                code_str = str(code).strip()
-                if code_str:
-                    code_conditions.append(Attr('funding_agency_code').contains(code_str))
+            if len(codes) == 1:
+                code_conditions.append(Attr('funding_agency_code').eq(codes[0]))
+            else:
+                code_conditions.append(Attr('funding_agency_code').is_in(codes))
         
-        # Build conditions for names (use contains for flexible partial matching)
+        # Build conditions for names (use exact matching)
         name_conditions = []
         if names:
             for name in names:
                 name_str = str(name).strip()
                 if name_str:
-                    name_conditions.append(Attr('funding_agency_name').contains(name_str))
+                    name_conditions.append(Attr('funding_agency_name').eq(name_str))
         
         # Combine code and name conditions with OR if both exist, otherwise use the single condition
         if code_conditions and name_conditions:
@@ -213,14 +206,7 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
                 combined = combined | cond
             conditions.append(combined)
         elif code_conditions:
-            if len(code_conditions) == 1:
-                conditions.extend(code_conditions)
-            else:
-                # Multiple codes: combine with OR
-                combined = code_conditions[0]
-                for cond in code_conditions[1:]:
-                    combined = combined | cond
-                conditions.append(combined)
+            conditions.extend(code_conditions)
         elif name_conditions:
             if len(name_conditions) == 1:
                 conditions.extend(name_conditions)
