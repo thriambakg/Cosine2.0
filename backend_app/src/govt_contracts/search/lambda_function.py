@@ -137,85 +137,122 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
     # Agency filters - support both codes and names
     if filters.get('awarding_agency_code'):
         values = filters['awarding_agency_code'] if isinstance(filters['awarding_agency_code'], list) else [filters['awarding_agency_code']]
-        # Separate codes and names
-        codes = [v for v in values if is_agency_code(str(v))]
-        names = [v for v in values if not is_agency_code(str(v))]
-        
-        # Build conditions for codes
-        code_conditions = []
-        if codes:
-            if len(codes) == 1:
-                code_conditions.append(Attr('awarding_agency_code').eq(codes[0]))
-            else:
-                code_conditions.append(Attr('awarding_agency_code').is_in(codes))
-        
-        # Build conditions for names (use exact matching)
-        name_conditions = []
-        if names:
-            for name in names:
-                name_str = str(name).strip()
-                if name_str:
-                    name_conditions.append(Attr('awarding_agency_name').eq(name_str))
-        
-        # Combine code and name conditions with OR if both exist, otherwise use the single condition
-        if code_conditions and name_conditions:
-            # Both codes and names: combine with OR
-            combined = code_conditions[0]
-            for cond in code_conditions[1:] + name_conditions:
-                combined = combined | cond
-            conditions.append(combined)
-        elif code_conditions:
-            conditions.extend(code_conditions)
-        elif name_conditions:
-            if len(name_conditions) == 1:
-                conditions.extend(name_conditions)
-            else:
-                # Multiple names: combine with OR
-                combined = name_conditions[0]
-                for cond in name_conditions[1:]:
+        # Filter out empty strings
+        values = [v for v in values if v and str(v).strip()]
+        if not values:
+            # Skip if all values are empty
+            pass
+        else:
+            # Separate codes and names
+            codes = [v for v in values if is_agency_code(str(v))]
+            names = [v for v in values if not is_agency_code(str(v))]
+            
+            # Build conditions for codes
+            code_conditions = []
+            if codes:
+                if len(codes) == 1:
+                    code_conditions.append(Attr('awarding_agency_code').eq(codes[0]))
+                else:
+                    code_conditions.append(Attr('awarding_agency_code').is_in(codes))
+            
+            # Build conditions for names (use contains for partial matching, like recipient_name)
+            # Note: DynamoDB contains is case-sensitive
+            name_conditions = []
+            if names:
+                for name in names:
+                    name_str = str(name).strip()
+                    if name_str:
+                        # Try both original case and lowercase for case-insensitive matching
+                        variations = [name_str]
+                        if name_str.lower() != name_str:
+                            variations.append(name_str.lower())
+                        
+                        # Create OR condition for variations
+                        if len(variations) == 1:
+                            name_conditions.append(Attr('awarding_agency_name').contains(variations[0]))
+                        else:
+                            combined = Attr('awarding_agency_name').contains(variations[0])
+                            for var in variations[1:]:
+                                combined = combined | Attr('awarding_agency_name').contains(var)
+                            name_conditions.append(combined)
+            
+            # Combine code and name conditions with OR if both exist, otherwise use the single condition
+            if code_conditions and name_conditions:
+                # Both codes and names: combine with OR
+                combined = code_conditions[0]
+                for cond in code_conditions[1:] + name_conditions:
                     combined = combined | cond
                 conditions.append(combined)
+            elif code_conditions:
+                conditions.extend(code_conditions)
+            elif name_conditions:
+                if len(name_conditions) == 1:
+                    conditions.extend(name_conditions)
+                else:
+                    # Multiple names: combine with OR
+                    combined = name_conditions[0]
+                    for cond in name_conditions[1:]:
+                        combined = combined | cond
+                    conditions.append(combined)
     
     if filters.get('funding_agency_code'):
         values = filters['funding_agency_code'] if isinstance(filters['funding_agency_code'], list) else [filters['funding_agency_code']]
-        # Separate codes and names
-        codes = [v for v in values if is_agency_code(str(v))]
-        names = [v for v in values if not is_agency_code(str(v))]
-        
-        # Build conditions for codes
-        code_conditions = []
-        if codes:
-            if len(codes) == 1:
-                code_conditions.append(Attr('funding_agency_code').eq(codes[0]))
-            else:
-                code_conditions.append(Attr('funding_agency_code').is_in(codes))
-        
-        # Build conditions for names (use exact matching)
-        name_conditions = []
-        if names:
-            for name in names:
-                name_str = str(name).strip()
-                if name_str:
-                    name_conditions.append(Attr('funding_agency_name').eq(name_str))
-        
-        # Combine code and name conditions with OR if both exist, otherwise use the single condition
-        if code_conditions and name_conditions:
-            # Both codes and names: combine with OR
-            combined = code_conditions[0]
-            for cond in code_conditions[1:] + name_conditions:
-                combined = combined | cond
-            conditions.append(combined)
-        elif code_conditions:
-            conditions.extend(code_conditions)
-        elif name_conditions:
-            if len(name_conditions) == 1:
-                conditions.extend(name_conditions)
-            else:
-                # Multiple names: combine with OR
-                combined = name_conditions[0]
-                for cond in name_conditions[1:]:
+        # Filter out empty strings
+        values = [v for v in values if v and str(v).strip()]
+        if not values:
+            # Skip if all values are empty
+            pass
+        else:
+            # Separate codes and names
+            codes = [v for v in values if is_agency_code(str(v))]
+            names = [v for v in values if not is_agency_code(str(v))]
+            
+            # Build conditions for codes
+            code_conditions = []
+            if codes:
+                if len(codes) == 1:
+                    code_conditions.append(Attr('funding_agency_code').eq(codes[0]))
+                else:
+                    code_conditions.append(Attr('funding_agency_code').is_in(codes))
+            
+            # Build conditions for names (use contains for partial matching, like recipient_name)
+            name_conditions = []
+            if names:
+                for name in names:
+                    name_str = str(name).strip()
+                    if name_str:
+                        # Try both original case and lowercase for case-insensitive matching
+                        variations = [name_str]
+                        if name_str.lower() != name_str:
+                            variations.append(name_str.lower())
+                        
+                        # Create OR condition for variations
+                        if len(variations) == 1:
+                            name_conditions.append(Attr('funding_agency_name').contains(variations[0]))
+                        else:
+                            combined = Attr('funding_agency_name').contains(variations[0])
+                            for var in variations[1:]:
+                                combined = combined | Attr('funding_agency_name').contains(var)
+                            name_conditions.append(combined)
+            
+            # Combine code and name conditions with OR if both exist, otherwise use the single condition
+            if code_conditions and name_conditions:
+                # Both codes and names: combine with OR
+                combined = code_conditions[0]
+                for cond in code_conditions[1:] + name_conditions:
                     combined = combined | cond
                 conditions.append(combined)
+            elif code_conditions:
+                conditions.extend(code_conditions)
+            elif name_conditions:
+                if len(name_conditions) == 1:
+                    conditions.extend(name_conditions)
+                else:
+                    # Multiple names: combine with OR
+                    combined = name_conditions[0]
+                    for cond in name_conditions[1:]:
+                        combined = combined | cond
+                    conditions.append(combined)
     
     # Recipient filters
     if filters.get('recipient_name'):
@@ -313,6 +350,40 @@ def determine_query_method(filters: Dict[str, Any]) -> tuple[str, Optional[str],
     """
     # Check for GSI-optimized queries
     
+    # AwardingAgencyCodeFiscalYearIndex: hash_key=awarding_agency_code, range_key=fiscal_year
+    if filters.get('awarding_agency_code'):
+        values = filters['awarding_agency_code'] if isinstance(filters['awarding_agency_code'], list) else [filters['awarding_agency_code']]
+        # Filter out empty strings
+        values = [v for v in values if v and str(v).strip()]
+        if values:
+            # Separate codes and names
+            codes = [v for v in values if is_agency_code(str(v))]
+            names = [v for v in values if not is_agency_code(str(v))]
+            
+            # Prefer codes over names for GSI query
+            if codes:
+                # Use first code for hash key
+                agency_code = codes[0]
+                fiscal_year = None
+                if filters.get('fiscal_year'):
+                    fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
+                    if fiscal_years:
+                        fiscal_year = fiscal_years[0]
+                
+                key_condition = {
+                    'hash_key': ('awarding_agency_code', agency_code),
+                    'range_key': ('fiscal_year', fiscal_year) if fiscal_year else None
+                }
+                return ('query', 'AwardingAgencyCodeFiscalYearIndex', key_condition)
+            elif names:
+                # For agency names, we can't use GSI query with exact match because:
+                # 1. Users might search with partial names (e.g., "Treasury" to find "Department of the Treasury")
+                # 2. Stored values might differ slightly (e.g., "Department of Treasury" vs "Department of the Treasury")
+                # So we should use scan with contains filter instead of GSI query
+                # This allows partial matching which is more user-friendly
+                # Fall through to scan (don't return query here)
+                pass
+    
     # StateFiscalYearIndex: hash_key=recipient_location_state, range_key=fiscal_year
     if filters.get('recipient_location_state') and filters.get('fiscal_year'):
         state = filters['recipient_location_state']
@@ -367,6 +438,81 @@ def determine_query_method(filters: Dict[str, Any]) -> tuple[str, Optional[str],
         }
         return ('query', 'StateFiscalYearIndex', key_condition)
     
+    # RecipientNameFiscalYearIndex: hash_key=recipient_name_normalized, range_key=fiscal_year
+    if filters.get('recipient_name'):
+        recipient_names = filters['recipient_name'] if isinstance(filters['recipient_name'], list) else [filters['recipient_name']]
+        # Filter out empty strings
+        recipient_names = [n for n in recipient_names if n and str(n).strip()]
+        if recipient_names:
+            # Use first recipient name for hash key (normalized)
+            recipient_name = recipient_names[0].lower().strip()
+            fiscal_year = None
+            if filters.get('fiscal_year'):
+                fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
+                if fiscal_years:
+                    fiscal_year = fiscal_years[0]
+            
+            key_condition = {
+                'hash_key': ('recipient_name_normalized', recipient_name),
+                'range_key': ('fiscal_year', fiscal_year) if fiscal_year else None
+            }
+            return ('query', 'RecipientNameFiscalYearIndex', key_condition)
+    
+    # FiscalYearObligationIndex: hash_key=fiscal_year, range_key=total_obligation
+    if filters.get('fiscal_year'):
+        fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
+        if fiscal_years:
+            fiscal_year = fiscal_years[0]
+            # Use this GSI if we have obligation filters (min/max)
+            # The range key condition will be built in the query logic using BETWEEN/GTE/LTE
+            if filters.get('min_obligation') is not None or filters.get('max_obligation') is not None:
+                key_condition = {
+                    'hash_key': ('fiscal_year', fiscal_year),
+                    'range_key': ('total_obligation', None)  # Will be handled with BETWEEN/GTE/LTE in query logic
+                }
+                return ('query', 'FiscalYearObligationIndex', key_condition)
+    
+    # FiscalYearStartDateIndex: hash_key=fiscal_year, range_key=period_start_date
+    if filters.get('fiscal_year'):
+        fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
+        if fiscal_years:
+            fiscal_year = fiscal_years[0]
+            # Use this GSI if we have date_from or date_to filter (for date ranges)
+            # Prefer this over PeriodEndDateIndex if we have date_from
+            if filters.get('date_from') or filters.get('date_to'):
+                key_condition = {
+                    'hash_key': ('fiscal_year', fiscal_year),
+                    'range_key': ('period_start_date', None)  # Will be handled with BETWEEN/GTE/LTE in query logic
+                }
+                return ('query', 'FiscalYearStartDateIndex', key_condition)
+    
+    # PeriodStartDateIndex: hash_key=fiscal_year, range_key=period_start_date (duplicate of FiscalYearStartDateIndex)
+    # Note: This is a duplicate, so we use FiscalYearStartDateIndex above
+    
+    # PeriodEndDateIndex: hash_key=fiscal_year, range_key=period_end_date
+    # Only use this if we have date_to but no date_from (and no obligation filters)
+    if filters.get('fiscal_year') and filters.get('date_to') and not filters.get('date_from') and not (filters.get('min_obligation') or filters.get('max_obligation')):
+        fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
+        if fiscal_years:
+            fiscal_year = fiscal_years[0]
+            key_condition = {
+                'hash_key': ('fiscal_year', fiscal_year),
+                'range_key': ('period_end_date', None)  # Will be handled with LTE in query logic
+            }
+            return ('query', 'PeriodEndDateIndex', key_condition)
+    
+    # FiscalYearObligationIndex with just fiscal_year (no obligation filter)
+    if filters.get('fiscal_year') and not (filters.get('min_obligation') or filters.get('max_obligation') or 
+                                           filters.get('date_from') or filters.get('date_to')):
+        fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
+        if fiscal_years:
+            fiscal_year = fiscal_years[0]
+            key_condition = {
+                'hash_key': ('fiscal_year', fiscal_year),
+                'range_key': None  # No range key filter
+            }
+            return ('query', 'FiscalYearObligationIndex', key_condition)
+    
     # Default to scan if no GSI-optimized query available
     return ('scan', None, None)
 
@@ -389,13 +535,80 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     # Determine query method
     method, index_name, key_condition = determine_query_method(filters)
     
+    # Build filter expression, but exclude conditions already in key_condition
+    # Create a copy of filters to avoid modifying the original
+    filter_filters = filters.copy()
+    
+    # If using GSI query, remove the hash_key and range_key conditions from filters to avoid duplication
+    # DynamoDB doesn't allow primary key attributes in FilterExpression when they're in KeyConditionExpression
+    if method == 'query' and key_condition:
+        hash_key_name = key_condition.get('hash_key', [None])[0] if key_condition.get('hash_key') else None
+        range_key_name = key_condition.get('range_key', [None])[0] if key_condition.get('range_key') else None
+        
+        # Remove hash key from filter - it's already in KeyConditionExpression
+        # This is critical: DynamoDB doesn't allow primary key attributes in FilterExpression
+        if hash_key_name == 'awarding_agency_code' or hash_key_name == 'awarding_agency_name':
+            # Remove awarding_agency_code from filters since we're using it as hash key
+            # Note: We can't filter for multiple agency codes/names when using GSI query
+            # The first one is used for the hash key, others would need to be filtered client-side
+            if 'awarding_agency_code' in filter_filters:
+                del filter_filters['awarding_agency_code']
+        elif hash_key_name == 'recipient_name_normalized':
+            # Remove recipient_name from filters since we're using it as hash key
+            if 'recipient_name' in filter_filters:
+                del filter_filters['recipient_name']
+        elif hash_key_name == 'recipient_location_state':
+            # Remove recipient_location_state from filters since we're using it as hash key
+            if 'recipient_location_state' in filter_filters:
+                del filter_filters['recipient_location_state']
+        elif hash_key_name == 'award_type':
+            # Remove award_type from filters since we're using it as hash key
+            if 'award_type' in filter_filters:
+                del filter_filters['award_type']
+        elif hash_key_name == 'fiscal_year':
+            # Remove fiscal_year from filters since we're using it as hash key
+            if 'fiscal_year' in filter_filters:
+                del filter_filters['fiscal_year']
+        
+        # Remove range key from filter if it's being used in KeyConditionExpression
+        if range_key_name == 'fiscal_year' and 'fiscal_year' in filter_filters:
+            del filter_filters['fiscal_year']
+        elif range_key_name == 'total_obligation':
+            # Remove obligation filters since they're handled in KeyConditionExpression
+            if 'min_obligation' in filter_filters:
+                del filter_filters['min_obligation']
+            if 'max_obligation' in filter_filters:
+                del filter_filters['max_obligation']
+        elif range_key_name == 'period_start_date':
+            # Remove date_from since it's handled in KeyConditionExpression
+            if 'date_from' in filter_filters:
+                del filter_filters['date_from']
+            # Note: date_to might still be needed in FilterExpression if not in range key
+        elif range_key_name == 'period_end_date':
+            # Remove date_to since it's handled in KeyConditionExpression
+            if 'date_to' in filter_filters:
+                del filter_filters['date_to']
+    
     # Build filter expression
-    filter_expr = build_filter_expression(filters)
+    filter_expr = build_filter_expression(filter_filters)
     
     # Build query/scan parameters
-    params = {
-        'Limit': limit
-    }
+    # For scans, we need to scan more items than the result limit to account for filtering
+    # DynamoDB Limit parameter limits the number of items evaluated, not just results returned
+    scan_limit = None  # Will be set for scans
+    if method == 'scan':
+        # Scan more items to increase chances of finding matches after filtering
+        # Use a multiplier to scan more items (e.g., scan 10x the limit to find matches)
+        scan_limit = max(limit * 10, 1000)  # Scan at least 10x the limit, minimum 1000 items
+        params = {
+            'Limit': scan_limit
+        }
+        logger.info(f"Using scan with Limit={scan_limit} (result limit={limit}) to find matches")
+    else:
+        # For queries, we can use the limit directly since queries are more efficient
+        params = {
+            'Limit': limit
+        }
     
     if method == 'query' and index_name:
         # Use GSI query
@@ -406,16 +619,82 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         # Add range key condition if provided
         if key_condition.get('range_key'):
             range_key_name, range_key_value = key_condition['range_key']
-            params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).eq(range_key_value)
+            # Check if we need to use BETWEEN, GTE, or LTE for range key
+            # This is determined by the original filters
+            if range_key_value is None:
+                # Range key name is set but value is None - use filters to build condition
+                if range_key_name == 'period_start_date':
+                    if filters.get('date_from') and filters.get('date_to'):
+                        # Use BETWEEN for date range
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).between(filters['date_from'], filters['date_to'])
+                    elif filters.get('date_from'):
+                        # Use GTE for date_from
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).gte(filters['date_from'])
+                    # If only date_to, we can't use this GSI effectively
+                elif range_key_name == 'period_end_date':
+                    if filters.get('date_to'):
+                        # Use LTE for date_to
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).lte(filters['date_to'])
+                elif range_key_name == 'total_obligation':
+                    if filters.get('min_obligation') is not None and filters.get('max_obligation') is not None:
+                        # Use BETWEEN for obligation range
+                        from decimal import Decimal
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).between(Decimal(str(filters['min_obligation'])), Decimal(str(filters['max_obligation'])))
+                    elif filters.get('min_obligation') is not None:
+                        # Use GTE for min_obligation
+                        from decimal import Decimal
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).gte(Decimal(str(filters['min_obligation'])))
+                    elif filters.get('max_obligation') is not None:
+                        # Use LTE for max_obligation
+                        from decimal import Decimal
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).lte(Decimal(str(filters['max_obligation'])))
+                # If range_key_value is None and no filter matches, don't add range key condition
+            else:
+                # Default to equals
+                params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).eq(range_key_value)
         
         # Add filter expression if we have additional filters
         if filter_expr:
-            # Remove conditions that are already in KeyConditionExpression
-            # (hash_key and range_key are already handled)
-            params['FilterExpression'] = filter_expr
+            # Verify that the filter expression doesn't contain the hash key attribute
+            # DynamoDB doesn't allow primary key attributes in FilterExpression when querying
+            filter_str = str(filter_expr)
+            if hash_key_name and hash_key_name in filter_str:
+                logger.warning(f"FilterExpression contains hash key attribute {hash_key_name}, this will cause an error. Removing it.")
+                # Don't add the filter expression if it contains the hash key
+                # This is a safety check - the removal logic above should have prevented this
+                filter_expr = None
+            
+            if filter_expr:
+                params['FilterExpression'] = filter_expr
         
+        # Validate and use last_evaluated_key for pagination
+        # For GSI queries, the key must include the GSI's hash key and range key (if applicable)
         if last_evaluated_key:
-            params['ExclusiveStartKey'] = last_evaluated_key
+            try:
+                # Validate that the last_evaluated_key has the correct structure for this GSI
+                if isinstance(last_evaluated_key, dict):
+                    # Check if the key has the required hash key for this GSI
+                    # For GSI queries, LastEvaluatedKey should have the GSI's key structure
+                    # It should include the hash_key_name and optionally the range_key_name
+                    has_hash_key = hash_key_name in last_evaluated_key
+                    
+                    if key_condition.get('range_key'):
+                        range_key_name = key_condition['range_key'][0]
+                        has_range_key = range_key_name in last_evaluated_key
+                        if has_hash_key and has_range_key:
+                            params['ExclusiveStartKey'] = last_evaluated_key
+                        else:
+                            logger.warning(f"last_evaluated_key structure doesn't match GSI {index_name} (hash_key={hash_key_name}, range_key={range_key_name}), ignoring pagination")
+                    else:
+                        # No range key, just need hash key
+                        if has_hash_key:
+                            params['ExclusiveStartKey'] = last_evaluated_key
+                        else:
+                            logger.warning(f"last_evaluated_key missing hash key {hash_key_name} for GSI {index_name}, ignoring pagination")
+                else:
+                    logger.warning(f"last_evaluated_key is not a dict, ignoring pagination")
+            except Exception as e:
+                logger.warning(f"Error validating last_evaluated_key: {e}, ignoring pagination")
         
         logger.info(f"Querying {index_name} with hash_key={hash_key_name}={hash_key_value}")
         response = awards_table.query(**params)
@@ -434,13 +713,43 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     # Extract results
     items = response.get('Items', [])
     last_eval_key = response.get('LastEvaluatedKey')
+    scanned_count = response.get('ScannedCount', 0)
+    
+    # For scans, if we didn't find enough results and there are more items, continue scanning
+    if method == 'scan' and scan_limit is not None and len(items) < limit and last_eval_key and scanned_count > 0:
+        # Continue scanning if we haven't found enough results
+        # Limit the number of continuation scans to avoid infinite loops
+        max_continuation_scans = 10
+        continuation_count = 0
+        
+        while len(items) < limit and last_eval_key and continuation_count < max_continuation_scans:
+            continuation_count += 1
+            logger.info(f"Continuing scan (iteration {continuation_count}/{max_continuation_scans}), found {len(items)} items so far, scanned {scanned_count} total")
+            
+            # Continue scan from last evaluated key
+            continuation_params = params.copy()
+            continuation_params['ExclusiveStartKey'] = last_eval_key
+            continuation_params['Limit'] = scan_limit  # Use the same scan limit
+            
+            continuation_response = awards_table.scan(**continuation_params)
+            continuation_items = continuation_response.get('Items', [])
+            last_eval_key = continuation_response.get('LastEvaluatedKey')
+            scanned_count += continuation_response.get('ScannedCount', 0)
+            
+            items.extend(continuation_items)
+            
+            # Stop if we have enough results or no more items
+            if len(items) >= limit or not last_eval_key:
+                break
+        
+        logger.info(f"Scan complete: found {len(items)} items after scanning {scanned_count} total items")
+    
+    # Limit results to requested limit
+    items = items[:limit]
     
     # Log initial results found
     if items:
         logger.info(f"Found {len(items)} award(s) in DynamoDB table using {method}" + (f" with index {index_name}" if index_name else ""))
-        # Log sample award IDs for debugging
-        sample_ids = [item.get('award_id', 'unknown') for item in items[:3]]
-        logger.info(f"Sample award IDs found: {sample_ids}")
     else:
         logger.info(f"No awards found in DynamoDB table using {method}" + (f" with index {index_name}" if index_name else ""))
     
@@ -477,12 +786,22 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     if enriched_results:
         logger.info(f"Enriched {len(enriched_results)} award(s). S3 fetch: {s3_fetch_success_count} success, {s3_fetch_fail_count} failed")
     
+    # Convert last_evaluated_key to JSON-serializable format
+    # DynamoDB LastEvaluatedKey may contain Decimal types and other DynamoDB-specific types
+    serializable_last_key = None
+    if last_eval_key:
+        try:
+            serializable_last_key = convert_decimal_to_float(last_eval_key)
+        except Exception as e:
+            logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
+            serializable_last_key = None
+    
     return {
         'success': True,
         'results': enriched_results,
         'count': len(enriched_results),
         'has_more': last_eval_key is not None,
-        'last_evaluated_key': last_eval_key,
+        'last_evaluated_key': serializable_last_key,
         'method': method,
         'index_used': index_name
     }

@@ -642,7 +642,7 @@ const GovtContractsSearchPage: React.FC = () => {
 
       const response = await govtContractsSearchAPI.search({
         filters,
-        limit: 50,
+        limit: pageSize,
       });
 
       if (response.success) {
@@ -693,7 +693,7 @@ const GovtContractsSearchPage: React.FC = () => {
     } finally {
       setIsSearching(false);
     }
-  }, [searchParams, computeFiltersFromResults, findOptionByName]);
+  }, [searchParams, computeFiltersFromResults, findOptionByName, pageSize]);
 
   // Handle load more
   const handleLoadMore = useCallback(async () => {
@@ -736,7 +736,7 @@ const GovtContractsSearchPage: React.FC = () => {
 
       const response = await govtContractsSearchAPI.search({
         filters,
-        limit: 50,
+        limit: pageSize,
         last_evaluated_key: lastEvaluatedKey,
       });
 
@@ -787,7 +787,7 @@ const GovtContractsSearchPage: React.FC = () => {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [hasMore, lastEvaluatedKey, searchParams, isLoadingMore, allSearchResults, computeFiltersFromResults]);
+  }, [hasMore, lastEvaluatedKey, searchParams, isLoadingMore, allSearchResults, computeFiltersFromResults, pageSize, findOptionByName]);
 
   // Pagination
   const totalPages = Math.ceil(currentResults.length / pageSize);
