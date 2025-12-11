@@ -746,15 +746,15 @@ const GovtContractsSearchPage: React.FC = () => {
                   const found = findOptionByName(name, 'funding_agency');
                   return found?.code || found?.id || name;
                 }).filter(Boolean);
-                currentFilters.funding_agency_code = codes;
+                (currentFilters as any).funding_agency_code = codes;
                 delete currentFilters.funding_agency_name;
               }
               
               // Remove empty arrays
               Object.keys(currentFilters).forEach((key) => {
-                const value = currentFilters[key];
+                const value = (currentFilters as any)[key];
                 if (Array.isArray(value) && value.length === 0) {
-                  delete currentFilters[key];
+                  delete (currentFilters as any)[key];
                 }
               });
               
@@ -3329,19 +3329,6 @@ const GovtContractsSearchPage: React.FC = () => {
             const nonFederalFunding = parseFloat(selectedAwardForDetails.total_non_federal_funding_amount as string) || 0;
             const totalFunding = obligatedAmount;
             
-            // Calculate date progress
-            const getDateProgress = () => {
-              if (!selectedAwardForDetails.period_start_date || !selectedAwardForDetails.period_end_date) return null;
-              const start = new Date(selectedAwardForDetails.period_start_date);
-              const end = new Date(selectedAwardForDetails.period_end_date);
-              const now = new Date();
-              const totalDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-              const elapsedDays = (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-              const progressPercent = Math.max(0, Math.min(100, (elapsedDays / totalDays) * 100));
-              return { progressPercent, start, end, now };
-            };
-            const dateProgress = getDateProgress();
-            
             return (
             <Box>
               {/* Award Overview Section - Two Columns */}
@@ -4339,12 +4326,12 @@ const GovtContractsSearchPage: React.FC = () => {
                           )}
                           {childAward.period_of_performance_start_date && (
                             <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-                              <strong>Start:</strong> {formatDate(childAward.period_of_performance_start_date)}
+                              <strong>Start:</strong> {formatDate(String(childAward.period_of_performance_start_date))}
                             </Typography>
                           )}
                           {childAward.period_of_performance_current_end_date && (
                             <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-                              <strong>End:</strong> {formatDate(childAward.period_of_performance_current_end_date)}
+                              <strong>End:</strong> {formatDate(String(childAward.period_of_performance_current_end_date))}
                             </Typography>
                           )}
                           {childAward.transaction_count !== undefined && (
@@ -4488,7 +4475,7 @@ const GovtContractsSearchPage: React.FC = () => {
                           Current Total Value
                         </Typography>
                         <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                          {formatCurrency(parseFloat(selectedAwardForDetails.current_total_value_of_award))}
+                          {formatCurrency(parseFloat(String(selectedAwardForDetails.current_total_value_of_award)))}
                         </Typography>
                       </Box>
                     )}
@@ -4498,7 +4485,7 @@ const GovtContractsSearchPage: React.FC = () => {
                           Potential Total Value
                         </Typography>
                         <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                          {formatCurrency(parseFloat(selectedAwardForDetails.potential_total_value_of_award))}
+                          {formatCurrency(parseFloat(String(selectedAwardForDetails.potential_total_value_of_award)))}
                         </Typography>
                       </Box>
                     )}
@@ -4508,7 +4495,7 @@ const GovtContractsSearchPage: React.FC = () => {
                           Base and Exercised Options
                         </Typography>
                         <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                          {formatCurrency(parseFloat(selectedAwardForDetails.base_and_exercised_options_value))}
+                          {formatCurrency(parseFloat(String(selectedAwardForDetails.base_and_exercised_options_value)))}
                         </Typography>
                       </Box>
                     )}
@@ -4518,7 +4505,7 @@ const GovtContractsSearchPage: React.FC = () => {
                           Base and All Options
                         </Typography>
                         <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                          {formatCurrency(parseFloat(selectedAwardForDetails.base_and_all_options_value))}
+                          {formatCurrency(parseFloat(String(selectedAwardForDetails.base_and_all_options_value)))}
                         </Typography>
                       </Box>
                     )}

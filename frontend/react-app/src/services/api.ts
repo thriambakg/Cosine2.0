@@ -950,7 +950,9 @@ export interface GovtContractsSearchFilters {
   keywords?: string[];
   award_type?: string[];
   awarding_agency_name?: string[];
+  awarding_agency_code?: string[];  // Added for API conversion
   funding_agency_name?: string[];
+  funding_agency_code?: string[];  // Added for API conversion
   recipient_id?: string[];
   recipient_name?: string[];
   recipient_location_state?: string[];
@@ -963,6 +965,7 @@ export interface GovtContractsSearchFilters {
   date_from?: string;
   date_to?: string;
   fiscal_year?: number[];
+  [key: string]: any;  // Allow additional properties for dynamic filters
 }
 
 export interface GovtContractsSearchRequest {
