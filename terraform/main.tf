@@ -2308,6 +2308,7 @@ resource "aws_iam_policy" "usaspending_search_dynamodb_policy" {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
+          "dynamodb:BatchGetItem", # Required for KEYS_ONLY GSI two-phase fetch approach
           "dynamodb:Query",
           "dynamodb:Scan"
         ]
