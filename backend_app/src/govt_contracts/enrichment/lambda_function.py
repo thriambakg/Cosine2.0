@@ -566,11 +566,41 @@ def normalize_child_award(child: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def fetch_oversized_award_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
+    """Fetch oversized award from S3"""
+    try:
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        compressed_data = response['Body'].read()
+        json_data = gzip.decompress(compressed_data)
+        award_data = json.loads(json_data.decode('utf-8'))
+        return award_data
+    except Exception as e:
+        logger.error(f"Error fetching oversized award from S3 {s3_key}: {str(e)}")
+        return None
+
+
 def get_existing_award(award_id: str) -> Optional[Dict[str, Any]]:
-    """Get existing award from DynamoDB"""
+    """Get existing award from DynamoDB, including fetching from S3 if oversized"""
     try:
         response = awards_table.get_item(Key={'award_id': award_id})
-        return response.get('Item')
+        item = response.get('Item')
+        
+        if not item:
+            return None
+        
+        # If this is an oversized award, fetch full data from S3
+        oversize_s3_key = item.get('oversize_s3_key')
+        if oversize_s3_key:
+            logger.info(f"Fetching full award data from S3 for oversized award {award_id}")
+            full_award = fetch_oversized_award_from_s3(oversize_s3_key)
+            if full_award:
+                # Merge S3 data with DynamoDB GSI fields (S3 data takes precedence)
+                full_award.update(item)
+                return full_award
+            else:
+                logger.warning(f"Failed to fetch from S3 for {award_id}, using DynamoDB data only")
+        
+        return item
     except Exception as e:
         logger.error(f"Error fetching existing award {award_id}: {str(e)}")
         return None
@@ -698,7 +728,11 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
                 'error': f'Award {award_id} not found in DynamoDB'
             }
         
-        logger.info(f"Starting enrichment for award {award_id}")
+        # Check if this is an oversized award (stored in S3)
+        existing_oversize_s3_key = existing_award.get('oversize_s3_key')
+        is_oversized = existing_award.get('is_oversized', False) or existing_oversize_s3_key is not None
+        
+        logger.info(f"Starting enrichment for award {award_id} (oversized: {is_oversized})")
         
         # Fetch fresh data from USAspending API
         award_details = fetch_award_details(award_id)
@@ -823,6 +857,17 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
             if idv_amounts and 'child_award_total_obligation' in idv_amounts:
                 updated_award['combined_obligated_amount'] = Decimal(str(idv_amounts['child_award_total_obligation']))
         
+        # Preserve important fields from existing award that shouldn't be overwritten
+        # Preserve is_assistance (assistance vs contract) - this is critical!
+        if 'is_assistance' in existing_award:
+            updated_award['is_assistance'] = existing_award['is_assistance']
+        # Preserve category if it exists
+        if 'category' in existing_award:
+            updated_award['category'] = existing_award['category']
+        # Preserve award_or_idv_flag if it exists
+        if 'award_or_idv_flag' in existing_award:
+            updated_award['award_or_idv_flag'] = existing_award['award_or_idv_flag']
+        
         # Update enrichment metadata
         updated_award['last_enriched_at'] = datetime.now(timezone.utc).isoformat()
         updated_award['last_updated'] = datetime.now(timezone.utc).isoformat()
@@ -831,8 +876,42 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
         # Convert all floats to Decimal
         updated_award = convert_floats_to_decimal(updated_award)
         
-        # Update in DynamoDB
-        success = update_award_in_dynamodb(award_id, updated_award)
+        # Handle oversized items - update S3 file instead of DynamoDB
+        if is_oversized:
+            logger.info(f"Award {award_id} is oversized, updating S3 file...")
+            # Update the S3 file with new data
+            if existing_oversize_s3_key:
+                # Use existing S3 key
+                oversize_s3_key = existing_oversize_s3_key
+            else:
+                # Generate new S3 key (shouldn't happen, but handle it)
+                oversize_s3_key = f"oversize/{award_id}.json.gz"
+            
+            # Store updated award to S3
+            store_oversized_item_to_s3(award_id, updated_award)
+            
+            # Update GSI fields in DynamoDB
+            gsi_only_item = extract_gsi_fields_only(updated_award)
+            gsi_only_item['oversize_s3_key'] = oversize_s3_key
+            gsi_only_item['is_oversized'] = True
+            
+            # Preserve is_assistance in GSI item if it exists
+            if 'is_assistance' in updated_award:
+                gsi_only_item['is_assistance'] = updated_award['is_assistance']
+            if 'category' in updated_award:
+                gsi_only_item['category'] = updated_award['category']
+            
+            # Update DynamoDB with GSI fields only
+            try:
+                awards_table.put_item(Item=gsi_only_item)
+                logger.info(f"Updated oversized award {award_id} in S3 and DynamoDB GSI fields")
+                success = True
+            except Exception as s3_update_error:
+                logger.error(f"Failed to update DynamoDB GSI fields for oversized award {award_id}: {str(s3_update_error)}")
+                success = False
+        else:
+            # Normal award - update in DynamoDB
+            success = update_award_in_dynamodb(award_id, updated_award)
         
         if success:
             return {
