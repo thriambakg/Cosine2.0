@@ -262,34 +262,45 @@ def fetch_child_award_ids(award_id: str) -> List[str]:
     return all_child_award_ids
 
 
-def store_child_award_as_full_record(child_award_id: str, parent_idv_id: str) -> bool:
+def store_child_award_as_full_record(child_award_id: str, parent_idv_id: str, parent_award: Optional[Dict[str, Any]] = None) -> bool:
     """
     Fetch and store a child award as a full award record in DynamoDB.
     Mimics the glue job behavior - stores child awards as complete award records.
     """
     try:
+        logger.info(f"Fetching full details for child award {child_award_id}...")
+        
         # Check if child award already exists
         existing_child = get_existing_award(child_award_id)
+        if existing_child:
+            logger.info(f"Child award {child_award_id} already exists in DynamoDB, will update with fresh data")
         
         # Fetch full award details from USAspending API
         child_award_details = fetch_award_details(child_award_id)
         if not child_award_details:
-            logger.warning(f"Could not fetch full details for child award {child_award_id}")
+            logger.warning(f"❌ Could not fetch full details for child award {child_award_id} from USAspending API")
             return False
         
+        logger.info(f"✅ Fetched award details for {child_award_id}, fetching transactions and subawards...")
+        
         # Fetch transactions for child award
+        logger.info(f"Fetching transactions for child award {child_award_id}...")
         child_transactions = fetch_all_transactions(child_award_id)
         normalized_child_transactions = [normalize_transaction(tx) for tx in child_transactions]
+        logger.info(f"Fetched {len(normalized_child_transactions)} transactions for child award {child_award_id}")
         
         # Fetch subawards for child award
+        logger.info(f"Fetching subawards for child award {child_award_id}...")
         child_subawards = fetch_all_subawards(child_award_id)
         normalized_child_subawards = [normalize_subaward(sub) for sub in child_subawards]
+        logger.info(f"Fetched {len(normalized_child_subawards)} subawards for child award {child_award_id}")
         
         # Build child award record similar to glue job format
+        # Start with required fields
         child_award_record = {
-            'award_id': child_award_id,
-            'parent_idv_id': parent_idv_id,
-            'is_idv_child': True,
+            'award_id': child_award_id,  # Primary key - required
+            'parent_idv_id': parent_idv_id,  # Link to parent IDV
+            'is_idv_child': True,  # Flag indicating this is a child award
             'award_type': child_award_details.get('type', ''),
             'award_type_description': child_award_details.get('type_description', ''),
             'category': child_award_details.get('category', 'contract'),
@@ -303,8 +314,11 @@ def store_child_award_as_full_record(child_award_id: str, parent_idv_id: str) ->
             'api_version': 'api_v2',
             'indexed_at': datetime.now(timezone.utc).isoformat(),
             'last_updated': datetime.now(timezone.utc).isoformat(),
+            'full_indexing_complete': True,
             'ttl': int((datetime.now(timezone.utc).timestamp() + (90 * 24 * 60 * 60))),
         }
+        
+        logger.info(f"Built child award record for {child_award_id} with {len(normalized_child_transactions)} transactions and {len(normalized_child_subawards)} subawards")
         
         # Extract and add fields from award details API response
         # Map API response fields to DynamoDB schema (matching glue job format)
@@ -334,36 +348,50 @@ def store_child_award_as_full_record(child_award_id: str, parent_idv_id: str) ->
         if 'awarding_agency' in child_award_details:
             agency = child_award_details['awarding_agency']
             if isinstance(agency, dict):
-                child_award_record['awarding_agency_name'] = agency.get('name', '')
-                child_award_record['awarding_agency_code'] = str(agency.get('id', ''))
+                if agency.get('name'):
+                    child_award_record['awarding_agency_name'] = agency.get('name')
+                if agency.get('id'):
+                    child_award_record['awarding_agency_code'] = str(agency.get('id'))
         
         if 'funding_agency' in child_award_details:
             agency = child_award_details['funding_agency']
             if isinstance(agency, dict):
-                child_award_record['funding_agency_name'] = agency.get('name', '')
-                child_award_record['funding_agency_code'] = str(agency.get('id', ''))
+                if agency.get('name'):
+                    child_award_record['funding_agency_name'] = agency.get('name')
+                if agency.get('id'):
+                    child_award_record['funding_agency_code'] = str(agency.get('id'))
         
         # Recipient information
         if 'recipient' in child_award_details:
             recipient = child_award_details['recipient']
             if isinstance(recipient, dict):
-                child_award_record['recipient_name'] = recipient.get('name', '')
-                child_award_record['recipient_name_normalized'] = recipient.get('name', '').lower() if recipient.get('name') else ''
+                recipient_name = recipient.get('name', '')
+                if recipient_name:
+                    child_award_record['recipient_name'] = recipient_name
+                    child_award_record['recipient_name_normalized'] = recipient_name.lower()
                 if 'location' in recipient and isinstance(recipient['location'], dict):
                     location = recipient['location']
-                    child_award_record['recipient_location_state'] = location.get('state_code', '')
-                    child_award_record['recipient_state_name'] = location.get('state_name', '')
-                    child_award_record['recipient_city_name'] = location.get('city_name', '')
-                    child_award_record['recipient_country_name'] = location.get('country_name', '')
+                    if location.get('state_code'):
+                        child_award_record['recipient_location_state'] = location.get('state_code')
+                    if location.get('state_name'):
+                        child_award_record['recipient_state_name'] = location.get('state_name')
+                    if location.get('city_name'):
+                        child_award_record['recipient_city_name'] = location.get('city_name')
+                    if location.get('country_name'):
+                        child_award_record['recipient_country_name'] = location.get('country_name')
         
         # Place of performance
         if 'place_of_performance' in child_award_details:
             pop = child_award_details['place_of_performance']
             if isinstance(pop, dict):
-                child_award_record['primary_place_of_performance_state_code'] = pop.get('state_code', '')
-                child_award_record['primary_place_of_performance_state_name'] = pop.get('state_name', '')
-                child_award_record['primary_place_of_performance_city_name'] = pop.get('city_name', '')
-                child_award_record['primary_place_of_performance_country_name'] = pop.get('country_name', '')
+                if pop.get('state_code'):
+                    child_award_record['primary_place_of_performance_state_code'] = pop.get('state_code')
+                if pop.get('state_name'):
+                    child_award_record['primary_place_of_performance_state_name'] = pop.get('state_name')
+                if pop.get('city_name'):
+                    child_award_record['primary_place_of_performance_city_name'] = pop.get('city_name')
+                if pop.get('country_name'):
+                    child_award_record['primary_place_of_performance_country_name'] = pop.get('country_name')
         
         # Additional important fields
         if 'base_exercised_options' in child_award_details:
@@ -378,14 +406,46 @@ def store_child_award_as_full_record(child_award_id: str, parent_idv_id: str) ->
                 if key not in child_award_record and key not in ['transactions', 'subawards', 'transaction_count', 'subaward_count']:
                     child_award_record[key] = value
         
+        # Ensure full_indexing_complete is set
+        child_award_record['full_indexing_complete'] = True
+        
+        # Inherit missing GSI key fields from parent IDV if available
+        if parent_award:
+            gsi_key_fields_to_inherit = [
+                'awarding_agency_code', 'awarding_agency_name',
+                'funding_agency_code', 'funding_agency_name',
+                'recipient_name_normalized', 'recipient_location_state',
+                'fiscal_year'
+            ]
+            for key in gsi_key_fields_to_inherit:
+                # Only inherit if child award doesn't have the field or it's empty
+                if key not in child_award_record or child_award_record.get(key) == '':
+                    parent_value = parent_award.get(key)
+                    if parent_value and parent_value != '':
+                        child_award_record[key] = parent_value
+                        logger.info(f"Inherited {key} from parent IDV for child award {child_award_id}")
+        
+        # Remove empty strings from GSI keys (DynamoDB doesn't allow empty strings for key attributes)
+        # GSI keys that cannot be empty strings:
+        gsi_key_fields = [
+            'awarding_agency_code', 'awarding_agency_name', 
+            'recipient_name_normalized', 'recipient_location_state',
+            'award_type', 'fiscal_year'
+        ]
+        for key in gsi_key_fields:
+            if key in child_award_record and child_award_record[key] == '':
+                del child_award_record[key]
+                logger.warning(f"Removed empty string GSI key '{key}' from child award {child_award_id}")
+        
         # Store child award in DynamoDB
+        logger.info(f"Storing child award {child_award_id} to DynamoDB (transaction_count={child_award_record.get('transaction_count', 0)}, subaward_count={child_award_record.get('subaward_count', 0)})...")
         success = update_award_in_dynamodb(child_award_id, child_award_record)
         
         if success:
-            logger.info(f"Stored child award {child_award_id} as full award record")
+            logger.info(f"✅ Successfully stored child award {child_award_id} as full award record in DynamoDB")
             return True
         else:
-            logger.error(f"Failed to store child award {child_award_id}")
+            logger.error(f"❌ Failed to store child award {child_award_id} in DynamoDB")
             return False
             
     except Exception as e:
@@ -655,21 +715,47 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
         subawards = fetch_all_subawards(award_id)
         normalized_subawards = [normalize_subaward(sub) for sub in subawards]
         
-        # Check if this is an IDV and fetch child award IDs
-        is_idv = award_details.get('category') == 'contract' and award_details.get('type') in ['IDV', 'IDC', 'BPA', 'BOA']
+        # Check if this is an IDV - check multiple ways to be robust
+        # 1. Check award_id pattern (CONT_IDV_...)
+        # 2. Check category and type from API response
+        # 3. Check existing award's is_idv_parent flag
+        award_type = award_details.get('type', '')
+        award_category = award_details.get('category', '')
+        is_idv_by_id = 'CONT_IDV_' in award_id or award_id.startswith('CONT_IDV_')
+        is_idv_by_type = (award_category == 'contract' and 
+                          (award_type.upper() in ['IDV', 'IDC', 'BPA', 'BOA'] or 
+                           'IDV' in str(award_type).upper()))
+        is_idv_by_existing = existing_award.get('is_idv_parent', False) or existing_award.get('award_or_idv_flag') == 'IDV'
+        
+        is_idv = is_idv_by_id or is_idv_by_type or is_idv_by_existing
+        
+        logger.info(f"IDV detection for {award_id}: by_id={is_idv_by_id}, by_type={is_idv_by_type} (type={award_type}, category={award_category}), by_existing={is_idv_by_existing}, final={is_idv}")
+        
         child_award_ids = []
         idv_amounts = None
         
         if is_idv:
+            logger.info(f"Detected IDV {award_id}, fetching child awards...")
             child_award_ids = fetch_child_award_ids(award_id)
-            idv_amounts = fetch_idv_amounts(award_id)
+            logger.info(f"Fetched {len(child_award_ids)} child award IDs for IDV {award_id}")
             
-            # Store each child award as a full award record (like glue job)
-            stored_count = 0
-            for child_id in child_award_ids:
-                if store_child_award_as_full_record(child_id, award_id):
-                    stored_count += 1
-            logger.info(f"Stored {stored_count}/{len(child_award_ids)} child awards as full records for IDV {award_id}")
+            if child_award_ids:
+                idv_amounts = fetch_idv_amounts(award_id)
+                
+                # Store each child award as a full award record (like glue job)
+                # Pass parent award details so child awards can inherit missing fields
+                logger.info(f"Processing {len(child_award_ids)} child awards for IDV {award_id}...")
+                stored_count = 0
+                failed_count = 0
+                for idx, child_id in enumerate(child_award_ids, 1):
+                    logger.info(f"Processing child award {idx}/{len(child_award_ids)}: {child_id}")
+                    if store_child_award_as_full_record(child_id, award_id, parent_award=existing_award):
+                        stored_count += 1
+                    else:
+                        failed_count += 1
+                logger.info(f"Completed: Stored {stored_count}/{len(child_award_ids)} child awards as full records for IDV {award_id} (failed: {failed_count})")
+            else:
+                logger.info(f"No child awards found for IDV {award_id}")
         
         # Compare with existing data using hash comparison
         existing_transactions_hash = calculate_hash(existing_award.get('transactions', []))

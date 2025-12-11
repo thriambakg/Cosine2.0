@@ -44,6 +44,7 @@ import {
   Warning as WarningIcon,
   InfoOutlined as InfoIcon,
   Refresh as RefreshIcon,
+  ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 import { 
   govtContractsSearchAPI, 
@@ -159,6 +160,7 @@ const GovtContractsSearchPage: React.FC = () => {
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [selectedAwardForDetails, setSelectedAwardForDetails] = useState<GovtContractAward | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
+  const [parentAwardForDetails, setParentAwardForDetails] = useState<GovtContractAward | null>(null);  // Store parent when viewing child
   const [enrichmentLoading, setEnrichmentLoading] = useState<boolean>(false);
   const [enrichmentError, setEnrichmentError] = useState<string | null>(null);
   const [enrichmentSuccess, setEnrichmentSuccess] = useState<string | null>(null);
@@ -3049,6 +3051,7 @@ const GovtContractsSearchPage: React.FC = () => {
                                 size="small"
                                 onClick={() => {
                                   setSelectedAwardForDetails(award);
+                                  setParentAwardForDetails(null);  // Clear parent when opening from table
                                   setDetailsDialogOpen(true);
                                 }}
                                 sx={{
@@ -3134,7 +3137,10 @@ const GovtContractsSearchPage: React.FC = () => {
       {/* Award Details Dialog */}
       <Dialog
         open={detailsDialogOpen}
-        onClose={() => setDetailsDialogOpen(false)}
+        onClose={() => {
+          setDetailsDialogOpen(false);
+          setParentAwardForDetails(null);  // Clear parent when closing
+        }}
         maxWidth="xl"
         fullWidth
         PaperProps={{
@@ -3148,10 +3154,65 @@ const GovtContractsSearchPage: React.FC = () => {
       >
         <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151', pb: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <Box>
+            <Box sx={{ flex: 1 }}>
+              {/* Back button for child awards */}
+              {selectedAwardForDetails?.is_idv_child && parentAwardForDetails && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <IconButton
+                    size="small"
+                    onClick={() => {
+                      if (parentAwardForDetails) {
+                        setSelectedAwardForDetails(parentAwardForDetails);
+                        setParentAwardForDetails(null);
+                      } else if (selectedAwardForDetails?.parent_idv_id) {
+                        // If parent not stored but we have parent_idv_id, search for it
+                        (async () => {
+                          try {
+                            const searchResponse = await govtContractsSearchAPI.search({
+                              filters: {} as any,
+                              limit: 100,
+                            });
+                            const parent = searchResponse.results?.find(
+                              (a: GovtContractAward) => a.award_id === selectedAwardForDetails.parent_idv_id
+                            );
+                            if (parent) {
+                              setSelectedAwardForDetails(parent);
+                              setParentAwardForDetails(null);
+                            }
+                          } catch (error) {
+                            console.error('Error fetching parent IDV:', error);
+                          }
+                        })();
+                      }
+                    }}
+                    sx={{
+                      color: '#3b82f6',
+                      '&:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      },
+                    }}
+                  >
+                    <ArrowBackIcon fontSize="small" />
+                  </IconButton>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', cursor: 'pointer' }} onClick={() => {
+                    if (parentAwardForDetails) {
+                      setSelectedAwardForDetails(parentAwardForDetails);
+                      setParentAwardForDetails(null);
+                    }
+                  }}>
+                    Back to Parent IDV
+                  </Typography>
+                </Box>
+              )}
+              
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                 <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 600 }}>
                   {selectedAwardForDetails?.is_assistance ? 'Other Financial Assistance' : 'Contract'}
+                  {selectedAwardForDetails?.is_idv_child && (
+                    <Typography component="span" variant="caption" sx={{ color: '#94a3b8', ml: 1 }}>
+                      (Child Award)
+                    </Typography>
+                  )}
                 </Typography>
                 <Tooltip title="Refresh award data from USAspending API">
                   <IconButton
@@ -4105,6 +4166,198 @@ const GovtContractsSearchPage: React.FC = () => {
                             <strong>Type:</strong> {transaction.action_type}
                           </Typography>
                         )}
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              )}
+
+              {/* Child Awards (for IDV parents) */}
+              {selectedAwardForDetails.is_idv_parent && selectedAwardForDetails.child_awards_details && selectedAwardForDetails.child_awards_details.length > 0 && (
+                <Box sx={{ mb: 3, position: 'relative' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                    <Typography variant="subtitle2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                      Child Awards ({selectedAwardForDetails.child_awards_details.length})
+                    </Typography>
+                    <Tooltip
+                      title={
+                        <Box>
+                          <Typography variant="body2" sx={{ mb: 1 }}>
+                            Child awards (delivery orders) issued under this IDV. Each child award is a separate contract with its own transactions and obligations.
+                          </Typography>
+                          {selectedAwardForDetails.usaspending_permalink && (
+                            <Typography variant="body2">
+                              For complete child award details, please visit{' '}
+                              <Box
+                                component="a"
+                                href={selectedAwardForDetails.usaspending_permalink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  color: '#60a5fa',
+                                  textDecoration: 'underline',
+                                  '&:hover': {
+                                    color: '#93c5fd',
+                                  },
+                                }}
+                              >
+                                USAspending.gov
+                              </Box>
+                              .
+                            </Typography>
+                          )}
+                        </Box>
+                      }
+                      arrow
+                      placement="left"
+                    >
+                      <InfoIcon 
+                        sx={{ 
+                          color: '#3b82f6', 
+                          fontSize: '20px',
+                          cursor: 'help',
+                          '&:hover': {
+                            color: '#60a5fa',
+                          },
+                        }} 
+                      />
+                    </Tooltip>
+                  </Box>
+                  <Box sx={{ 
+                    maxHeight: '400px', 
+                    overflowY: 'auto',
+                    '&::-webkit-scrollbar': {
+                      width: '8px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: '#3b82f6',
+                      borderRadius: '4px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                      backgroundColor: '#2563eb',
+                    },
+                  }}>
+                    {selectedAwardForDetails.child_awards_details.map((childAward: any, idx: number) => (
+                      <Box
+                        key={childAward.award_id || idx}
+                        sx={{
+                          p: 2,
+                          mb: 1,
+                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                          borderRadius: '4px',
+                          border: '1px solid #374151',
+                          cursor: 'pointer',
+                          '&:hover': {
+                            backgroundColor: 'rgba(30, 41, 59, 0.7)',
+                            borderColor: '#3b82f6',
+                          },
+                        }}
+                        onClick={async () => {
+                          // Store current award as parent before switching
+                          if (selectedAwardForDetails) {
+                            setParentAwardForDetails(selectedAwardForDetails);
+                          }
+                          
+                          // Try to find the child award in search results first
+                          let childAwardFull = allSearchResults.find((a: GovtContractAward) => a.award_id === childAward.award_id);
+                          
+                          // If not found, search for it specifically by searching with empty filters
+                          if (!childAwardFull) {
+                            try {
+                              const searchResponse = await govtContractsSearchAPI.search({
+                                filters: {} as any,
+                                limit: 100,
+                              });
+                              
+                              childAwardFull = searchResponse.results?.find(
+                                (a: GovtContractAward) => a.award_id === childAward.award_id
+                              );
+                              
+                              // If found, add it to search results for future reference
+                              if (childAwardFull) {
+                                setAllSearchResults([...allSearchResults, childAwardFull]);
+                              }
+                            } catch (error) {
+                              console.error('Error searching for child award:', error);
+                            }
+                          }
+                          
+                          // If still not found, create a minimal award object from the child details
+                          // This allows viewing basic info even if full award isn't in DynamoDB yet
+                          if (!childAwardFull) {
+                            childAwardFull = {
+                              ...childAward,
+                              transactions: [],
+                              subawards: [],
+                              transaction_count: childAward.transaction_count || 0,
+                              subaward_count: childAward.subaward_count || 0,
+                            } as GovtContractAward;
+                          }
+                          
+                          // Update the dialog with child award
+                          setSelectedAwardForDetails(childAwardFull);
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                          <Box>
+                            {childAward.award_id_piid && (
+                              <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5, fontFamily: 'monospace' }}>
+                                <strong>PIID:</strong> {childAward.award_id_piid}
+                              </Typography>
+                            )}
+                            {childAward.description && (
+                              <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                                <strong>Description:</strong> {childAward.description}
+                              </Typography>
+                            )}
+                            {childAward.award_type_description && (
+                              <Typography variant="body2" sx={{ color: '#94a3b8', mb: 0.5 }}>
+                                {childAward.award_type_description}
+                              </Typography>
+                            )}
+                          </Box>
+                          {childAward.total_obligated_amount && (
+                            <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 600 }}>
+                              {formatCurrency(parseFloat(childAward.total_obligated_amount.toString()))}
+                            </Typography>
+                          )}
+                        </Box>
+                        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mt: 1 }}>
+                          {childAward.recipient_name && (
+                            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                              <strong>Recipient:</strong> {childAward.recipient_name}
+                            </Typography>
+                          )}
+                          {childAward.awarding_agency_name && (
+                            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                              <strong>Agency:</strong> {childAward.awarding_agency_name}
+                            </Typography>
+                          )}
+                          {childAward.period_of_performance_start_date && (
+                            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                              <strong>Start:</strong> {formatDate(childAward.period_of_performance_start_date)}
+                            </Typography>
+                          )}
+                          {childAward.period_of_performance_current_end_date && (
+                            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                              <strong>End:</strong> {formatDate(childAward.period_of_performance_current_end_date)}
+                            </Typography>
+                          )}
+                          {childAward.transaction_count !== undefined && (
+                            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                              <strong>Transactions:</strong> {childAward.transaction_count}
+                            </Typography>
+                          )}
+                          {childAward.subaward_count !== undefined && (
+                            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                              <strong>Subawards:</strong> {childAward.subaward_count}
+                            </Typography>
+                          )}
+                        </Box>
                       </Box>
                     ))}
                   </Box>

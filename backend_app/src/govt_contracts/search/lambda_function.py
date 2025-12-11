@@ -832,6 +832,48 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
             if combined_obligated > 0 and (not award.get('total_obligated_amount') or award.get('total_obligated_amount') == 0):
                 award['combined_obligated_amount'] = combined_obligated
         
+        # Fetch child award details for IDV parents
+        if award.get('is_idv_parent') and award.get('child_awards'):
+            child_award_ids = award.get('child_awards', [])
+            if isinstance(child_award_ids, list) and len(child_award_ids) > 0:
+                logger.info(f"Fetching details for {len(child_award_ids)} child awards for IDV {award.get('award_id')}")
+                child_awards_details = []
+                for child_id in child_award_ids:
+                    try:
+                        # Get child award from DynamoDB
+                        child_response = awards_table.get_item(Key={'award_id': str(child_id)})
+                        if 'Item' in child_response:
+                            child_item = child_response['Item']
+                            # Convert to JSON-serializable format
+                            child_item = convert_decimal_to_float(child_item)
+                            
+                            # Extract top-level fields for display
+                            child_summary = {
+                                'award_id': child_item.get('award_id'),
+                                'award_id_piid': child_item.get('award_id_piid'),
+                                'description': child_item.get('description'),
+                                'total_obligated_amount': child_item.get('total_obligated_amount'),
+                                'period_of_performance_start_date': child_item.get('period_of_performance_start_date') or child_item.get('period_start_date'),
+                                'period_of_performance_current_end_date': child_item.get('period_of_performance_current_end_date') or child_item.get('period_end_date'),
+                                'transaction_count': child_item.get('transaction_count', 0),
+                                'subaward_count': child_item.get('subaward_count', 0),
+                                'award_type': child_item.get('award_type'),
+                                'award_type_description': child_item.get('award_type_description'),
+                                'recipient_name': child_item.get('recipient_name'),
+                                'awarding_agency_name': child_item.get('awarding_agency_name'),
+                                'parent_idv_id': child_item.get('parent_idv_id'),  # Include parent ID for navigation
+                                'is_idv_child': child_item.get('is_idv_child', False),
+                            }
+                            child_awards_details.append(child_summary)
+                        else:
+                            logger.warning(f"Child award {child_id} not found in DynamoDB")
+                    except Exception as e:
+                        logger.error(f"Error fetching child award {child_id}: {str(e)}")
+                        continue
+                
+                award['child_awards_details'] = child_awards_details
+                logger.info(f"Added {len(child_awards_details)} child award details for IDV {award.get('award_id')}")
+        
         enriched_results.append(award)
     
     # Log enrichment results

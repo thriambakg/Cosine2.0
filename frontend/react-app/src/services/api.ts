@@ -1047,6 +1047,26 @@ export interface GovtContractAward {
   total_non_federal_funding_amount?: string | number;
   award_id_fain?: string;
   combined_obligated_amount?: number;  // Calculated sum of obligations from transactions/child awards (for IDVs)
+  child_awards?: string[];  // Array of child award IDs (for IDV parents)
+  child_awards_details?: Array<{  // Detailed child award information (fetched from DynamoDB)
+    award_id: string;
+    award_id_piid?: string;
+    description?: string;
+    total_obligated_amount?: number;
+    period_of_performance_start_date?: string;
+    period_of_performance_current_end_date?: string;
+    transaction_count?: number;
+    subaward_count?: number;
+    award_type?: string;
+    award_type_description?: string;
+    recipient_name?: string;
+    awarding_agency_name?: string;
+    parent_idv_id?: string;  // Parent IDV ID for navigation
+    is_idv_child?: boolean;  // Flag indicating this is a child award
+  }>;
+  parent_idv_id?: string;  // For child awards - link back to parent IDV
+  is_idv_child?: boolean;  // True if this is a child award of an IDV
+  is_idv_parent?: boolean;  // True if this is an IDV parent award
   [key: string]: any;
 }
 
