@@ -717,48 +717,93 @@ const GovtContractsSearchPage: React.FC = () => {
 
       if (response.success) {
         if (response.updated) {
+          const awardId = selectedAwardForDetails.award_id;
+          
           setEnrichmentSuccess(
-            `Award data refreshed successfully! Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}. Refreshing award details...`
+            `Refreshing award data... Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}.`
           );
           
-          // Re-fetch the award by searching for it specifically
-          try {
-            const searchResponse = await govtContractsSearchAPI.search({
-              filters: {
-                award_id: selectedAwardForDetails.award_id,
-              },
-              limit: 1,
-            });
-            
-            if (searchResponse.success && searchResponse.results.length > 0) {
-              const updatedAward = searchResponse.results[0];
-              setSelectedAwardForDetails(updatedAward);
+          // Wait a moment for DynamoDB to be consistent, then re-fetch
+          setTimeout(async () => {
+            try {
+              // Re-run the current search to get fresh data
+              const currentFilters = { ...searchParams };
               
-              // Also update in search results if it exists there
-              const updatedResults = allSearchResults.map(award => {
-                if (award.award_id === selectedAwardForDetails.award_id) {
-                  return updatedAward;
+              // Convert agency names to codes if needed
+              if (currentFilters.awarding_agency_name && currentFilters.awarding_agency_name.length > 0) {
+                const codes = currentFilters.awarding_agency_name.map((name: string) => {
+                  const found = findOptionByName(name, 'awarding_agency');
+                  return found?.code || found?.id || name;
+                }).filter(Boolean);
+                currentFilters.awarding_agency_code = codes;
+                delete currentFilters.awarding_agency_name;
+              }
+              
+              if (currentFilters.funding_agency_name && currentFilters.funding_agency_name.length > 0) {
+                const codes = currentFilters.funding_agency_name.map((name: string) => {
+                  const found = findOptionByName(name, 'funding_agency');
+                  return found?.code || found?.id || name;
+                }).filter(Boolean);
+                currentFilters.funding_agency_code = codes;
+                delete currentFilters.funding_agency_name;
+              }
+              
+              // Remove empty arrays
+              Object.keys(currentFilters).forEach((key) => {
+                const value = currentFilters[key];
+                if (Array.isArray(value) && value.length === 0) {
+                  delete currentFilters[key];
                 }
-                return award;
               });
-              setAllSearchResults(updatedResults);
               
+              const searchResponse = await govtContractsSearchAPI.search({
+                filters: currentFilters,
+                limit: pageSize,
+              });
+              
+              if (searchResponse.success && searchResponse.results) {
+                // Update search results with fresh data
+                setAllSearchResults(searchResponse.results);
+                
+                // Find and select the updated award
+                const updatedAward = searchResponse.results.find(
+                  (award: GovtContractAward) => award.award_id === awardId
+                );
+                
+                if (updatedAward) {
+                  // Update the selected award with fresh data (keep dialog open)
+                  setSelectedAwardForDetails(updatedAward);
+                  
+                  setEnrichmentSuccess(
+                    `Award data refreshed successfully! Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}.`
+                  );
+                  
+                  // Clear success message after 5 seconds
+                  setTimeout(() => {
+                    setEnrichmentSuccess(null);
+                  }, 5000);
+                } else {
+                  // Award not in current search results - show message to user
+                  setEnrichmentSuccess(
+                    `Award data refreshed successfully! Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}. Please close and reopen this dialog to see the updated data.`
+                  );
+                  setTimeout(() => {
+                    setEnrichmentSuccess(null);
+                  }, 5000);
+                }
+              } else {
+                setEnrichmentError('Award updated but could not refresh search results.');
+              }
+            } catch (fetchError) {
+              console.error('Error refreshing award after enrichment:', fetchError);
               setEnrichmentSuccess(
-                `Award data refreshed successfully! Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}.`
+                `Award was updated successfully! Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}. Please close and reopen the dialog to see the changes.`
               );
+              setTimeout(() => {
+                setEnrichmentSuccess(null);
+              }, 5000);
             }
-          } catch (fetchError) {
-            console.error('Error fetching updated award:', fetchError);
-            // Still show success message even if re-fetch fails
-            setEnrichmentSuccess(
-              `Award data refreshed successfully! Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}. Please close and reopen the dialog to see the changes.`
-            );
-          }
-          
-          // Show success message for 5 seconds
-          setTimeout(() => {
-            setEnrichmentSuccess(null);
-          }, 5000);
+          }, 1500); // Wait 1.5 seconds for DynamoDB consistency
         } else {
           setEnrichmentSuccess('Award data is already up to date.');
           setTimeout(() => {
@@ -774,7 +819,7 @@ const GovtContractsSearchPage: React.FC = () => {
     } finally {
       setEnrichmentLoading(false);
     }
-  }, [selectedAwardForDetails, enrichmentLoading, allSearchResults]);
+  }, [selectedAwardForDetails, enrichmentLoading, allSearchResults, searchParams, findOptionByName, pageSize, setAllSearchResults, setDetailsDialogOpen, setSelectedAwardForDetails]);
 
   // Handle load more
   const handleLoadMore = useCallback(async () => {
