@@ -1,0 +1,683 @@
+"""
+USAspending Award Enrichment Lambda Function
+Fetches up-to-date award data from USAspending API and updates DynamoDB
+"""
+
+import json
+import os
+import logging
+import boto3
+import gzip
+import hashlib
+import time
+import requests
+from typing import Dict, List, Any, Optional
+from decimal import Decimal
+from datetime import datetime, timezone
+
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO').upper())
+
+# AWS clients
+dynamodb = boto3.resource('dynamodb')
+s3_client = boto3.client('s3')
+
+# Environment variables
+AWARDS_TABLE_NAME = os.environ.get('AWARDS_TABLE_NAME', 'usaspending-awards-index')
+S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-usaspending-data-production')
+USASPENDING_BASE_URL = os.environ.get('USASPENDING_BASE_URL', 'https://api.usaspending.gov')
+USASPENDING_USER_AGENT = os.environ.get('USASPENDING_USER_AGENT', 'Cosine Financial Platform (contact@cosine.financial)')
+REQUEST_TIMEOUT = int(os.environ.get('REQUEST_TIMEOUT', '30'))
+MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '5'))
+RETRY_BASE_DELAY = float(os.environ.get('RETRY_BASE_DELAY', '2.0'))
+
+# Get DynamoDB table
+awards_table = dynamodb.Table(AWARDS_TABLE_NAME) if AWARDS_TABLE_NAME else None
+
+# Global session for connection pooling
+_global_session = None
+_last_api_call_time = 0
+
+
+def get_cors_headers():
+    """Get CORS headers for API responses"""
+    return {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+    }
+
+
+def create_session():
+    """Create a requests session with proper headers and retry logic"""
+    global _global_session
+    
+    if _global_session is not None:
+        return _global_session
+    
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': USASPENDING_USER_AGENT,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+    })
+    
+    _global_session = session
+    return session
+
+
+def rate_limit():
+    """Enforce rate limiting between API calls"""
+    global _last_api_call_time
+    current_time = time.time()
+    time_since_last_call = current_time - _last_api_call_time
+    
+    parallel_rate_limit = 0.1
+    if time_since_last_call < parallel_rate_limit:
+        sleep_time = parallel_rate_limit - time_since_last_call
+        time.sleep(sleep_time)
+    
+    _last_api_call_time = time.time()
+
+
+def call_usaspending_api(endpoint: str, method: str = 'GET', body: Optional[Dict] = None, params: Optional[Dict] = None) -> Dict[str, Any]:
+    """Call USAspending API endpoint with retry logic and rate limiting"""
+    url = f"{USASPENDING_BASE_URL}{endpoint}"
+    session = create_session()
+    
+    rate_limit()
+    
+    last_exception = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            if method.upper() == 'POST':
+                response = session.post(url, json=body, timeout=REQUEST_TIMEOUT)
+            else:
+                response = session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            
+            if response.status_code == 429:
+                retry_after = int(response.headers.get('Retry-After', RETRY_BASE_DELAY * (2 ** attempt)))
+                if attempt < MAX_RETRIES:
+                    logger.warning(f"Rate limited (429). Waiting {retry_after}s before retry {attempt + 1}/{MAX_RETRIES}")
+                    time.sleep(retry_after)
+                    continue
+                else:
+                    response.raise_for_status()
+            
+            if response.status_code >= 500:
+                if attempt < MAX_RETRIES:
+                    backoff_delay = RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning(f"Server error {response.status_code}. Retrying in {backoff_delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                    time.sleep(backoff_delay)
+                    continue
+                else:
+                    response.raise_for_status()
+            
+            response.raise_for_status()
+            return response.json()
+            
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, 
+                requests.exceptions.RequestException) as e:
+            last_exception = e
+            if attempt < MAX_RETRIES:
+                backoff_delay = RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(f"Request error (attempt {attempt + 1}/{MAX_RETRIES}): {str(e)[:200]}")
+                time.sleep(backoff_delay)
+                continue
+            else:
+                raise
+    
+    if last_exception:
+        raise last_exception
+    raise Exception("Failed to call USAspending API after retries")
+
+
+def fetch_all_transactions(award_id: str) -> List[Dict[str, Any]]:
+    """Fetch all transactions for an award with pagination"""
+    all_transactions = []
+    page = 1
+    limit = 5000  # Max per page
+    
+    while True:
+        try:
+            response = call_usaspending_api(
+                '/api/v2/transactions/',
+                method='POST',
+                body={
+                    'award_id': award_id,
+                    'page': page,
+                    'limit': limit,
+                    'sort': 'action_date',
+                    'order': 'desc'
+                }
+            )
+            
+            results = response.get('results', [])
+            if not results:
+                break
+            
+            all_transactions.extend(results)
+            
+            # Check if there are more pages
+            page_metadata = response.get('page_metadata', {})
+            if not page_metadata.get('hasNext', False):
+                break
+            
+            page += 1
+            
+        except Exception as e:
+            logger.error(f"Error fetching transactions page {page} for award {award_id}: {str(e)}")
+            break
+    
+    logger.info(f"Fetched {len(all_transactions)} transactions for award {award_id}")
+    return all_transactions
+
+
+def fetch_all_subawards(award_id: str) -> List[Dict[str, Any]]:
+    """Fetch all subawards for an award with pagination"""
+    all_subawards = []
+    page = 1
+    limit = 100  # Default limit
+    
+    while True:
+        try:
+            response = call_usaspending_api(
+                '/api/v2/subawards/',
+                method='POST',
+                body={
+                    'award_id': award_id,
+                    'page': page,
+                    'limit': limit,
+                    'sort': 'subaward_number',
+                    'order': 'desc'
+                }
+            )
+            
+            results = response.get('results', [])
+            if not results:
+                break
+            
+            all_subawards.extend(results)
+            
+            # Check if there are more pages
+            page_metadata = response.get('page_metadata', {})
+            if not page_metadata.get('hasNext', False):
+                break
+            
+            page += 1
+            
+        except Exception as e:
+            logger.error(f"Error fetching subawards page {page} for award {award_id}: {str(e)}")
+            break
+    
+    logger.info(f"Fetched {len(all_subawards)} subawards for award {award_id}")
+    return all_subawards
+
+
+def fetch_child_awards(award_id: str) -> List[Dict[str, Any]]:
+    """Fetch child awards for an IDV with pagination"""
+    all_child_awards = []
+    page = 1
+    limit = 100  # Default limit
+    
+    while True:
+        try:
+            response = call_usaspending_api(
+                '/api/v2/idvs/awards/',
+                method='POST',
+                body={
+                    'award_id': award_id,
+                    'type': 'child_awards',
+                    'page': page,
+                    'limit': limit,
+                    'sort': 'period_of_performance_start_date',
+                    'order': 'desc'
+                }
+            )
+            
+            results = response.get('results', [])
+            if not results:
+                break
+            
+            all_child_awards.extend(results)
+            
+            # Check if there are more pages
+            page_metadata = response.get('page_metadata', {})
+            if not page_metadata.get('hasNext', False):
+                break
+            
+            page += 1
+            
+        except Exception as e:
+            logger.error(f"Error fetching child awards page {page} for IDV {award_id}: {str(e)}")
+            break
+    
+    logger.info(f"Fetched {len(all_child_awards)} child awards for IDV {award_id}")
+    return all_child_awards
+
+
+def fetch_idv_amounts(award_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch combined amounts for an IDV"""
+    try:
+        response = call_usaspending_api(f'/api/v2/idvs/amounts/{award_id}/', method='GET')
+        return response
+    except Exception as e:
+        logger.error(f"Error fetching IDV amounts for {award_id}: {str(e)}")
+        return None
+
+
+def fetch_award_details(award_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch full award details from USAspending API"""
+    try:
+        response = call_usaspending_api(f'/api/v2/awards/{award_id}/', method='GET')
+        return response
+    except Exception as e:
+        logger.error(f"Error fetching award details for {award_id}: {str(e)}")
+        return None
+
+
+def convert_floats_to_decimal(obj: Any) -> Any:
+    """Recursively convert float values to Decimal for DynamoDB"""
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    elif isinstance(obj, dict):
+        return {key: convert_floats_to_decimal(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_floats_to_decimal(item) for item in obj]
+    else:
+        return obj
+
+
+def calculate_hash(data: Any) -> str:
+    """Calculate hash of data for comparison"""
+    # Convert to JSON string and hash
+    json_str = json.dumps(data, sort_keys=True, default=str)
+    return hashlib.sha256(json_str.encode('utf-8')).hexdigest()
+
+
+def normalize_transaction(tx: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize transaction data to match DynamoDB schema"""
+    normalized = {}
+    
+    # Map USAspending API fields to our schema
+    field_mapping = {
+        'id': 'transaction_unique_key',
+        'action_date': 'action_date',
+        'action_type': 'action_type_code',
+        'action_type_description': 'action_type_description',
+        'modification_number': 'modification_number',
+        'description': 'transaction_description',
+        'federal_action_obligation': 'federal_action_obligation',
+        'face_value_loan_guarantee': 'face_value_of_loan',
+        'original_loan_subsidy_cost': 'original_loan_subsidy_cost',
+        'cfda_number': 'cfda_number',
+        'type': 'transaction_type_code',
+        'type_description': 'transaction_type_description'
+    }
+    
+    for api_field, db_field in field_mapping.items():
+        if api_field in tx and tx[api_field] is not None:
+            normalized[db_field] = tx[api_field]
+    
+    return normalized
+
+
+def normalize_subaward(sub: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize subaward data to match DynamoDB schema"""
+    normalized = {}
+    
+    # Map USAspending API fields to our schema
+    field_mapping = {
+        'id': 'subaward_id',
+        'subaward_number': 'subaward_number',
+        'description': 'subaward_description',
+        'action_date': 'subaward_action_date',
+        'amount': 'subaward_amount',
+        'recipient_name': 'subawardee_name'
+    }
+    
+    for api_field, db_field in field_mapping.items():
+        if api_field in sub and sub[api_field] is not None:
+            normalized[db_field] = sub[api_field]
+    
+    return normalized
+
+
+def normalize_child_award(child: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize child award data"""
+    normalized = {}
+    
+    # Map USAspending API fields
+    field_mapping = {
+        'generated_unique_award_id': 'award_id',
+        'award_id': 'award_id_internal',
+        'piid': 'piid',
+        'description': 'description',
+        'obligated_amount': 'total_obligated_amount',
+        'period_of_performance_start_date': 'period_of_performance_start_date',
+        'period_of_performance_current_end_date': 'period_of_performance_current_end_date',
+        'award_type': 'award_type',
+        'funding_agency': 'funding_agency_name',
+        'awarding_agency': 'awarding_agency_name'
+    }
+    
+    for api_field, db_field in field_mapping.items():
+        if api_field in child and child[api_field] is not None:
+            normalized[db_field] = child[api_field]
+    
+    return normalized
+
+
+def get_existing_award(award_id: str) -> Optional[Dict[str, Any]]:
+    """Get existing award from DynamoDB"""
+    try:
+        response = awards_table.get_item(Key={'award_id': award_id})
+        return response.get('Item')
+    except Exception as e:
+        logger.error(f"Error fetching existing award {award_id}: {str(e)}")
+        return None
+
+
+def store_oversized_item_to_s3(award_id: str, full_item: Dict[str, Any]) -> str:
+    """Store oversized item to S3 in oversize/ folder"""
+    s3_key = f"oversize/{award_id}.json.gz"
+    
+    # Convert Decimal values to JSON-serializable types
+    json_ready_item = convert_decimal_to_float(full_item)
+    
+    # Convert to JSON
+    json_data = json.dumps(json_ready_item, ensure_ascii=False, indent=2)
+    
+    # Compress and upload to S3
+    json_bytes = json_data.encode('utf-8')
+    compressed_data = gzip.compress(json_bytes)
+    
+    s3_client.put_object(
+        Bucket=S3_BUCKET_NAME,
+        Key=s3_key,
+        Body=compressed_data,
+        ContentType='application/json',
+        ContentEncoding='gzip'
+    )
+    
+    logger.info(f"Stored oversized award {award_id} to S3: {s3_key}")
+    return s3_key
+
+
+def convert_decimal_to_float(obj: Any) -> Any:
+    """Recursively convert Decimal to float for JSON serialization"""
+    if isinstance(obj, Decimal):
+        try:
+            return float(obj)
+        except (OverflowError, ValueError):
+            return str(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimal_to_float(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimal_to_float(item) for item in obj]
+    else:
+        return obj
+
+
+def extract_gsi_fields_only(full_item: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only GSI fields and essential metadata for DynamoDB"""
+    gsi_fields = {
+        'award_id': full_item.get('award_id'),
+        'awarding_agency_code': full_item.get('awarding_agency_code'),
+        'awarding_agency_name': full_item.get('awarding_agency_name'),
+        'recipient_name_normalized': full_item.get('recipient_name_normalized'),
+        'recipient_location_state': full_item.get('recipient_location_state'),
+        'award_type': full_item.get('award_type'),
+        'fiscal_year': full_item.get('fiscal_year'),
+        'total_obligated_amount': full_item.get('total_obligated_amount'),
+        'period_start_date': full_item.get('period_start_date') or full_item.get('period_of_performance_start_date'),
+        'period_end_date': full_item.get('period_end_date') or full_item.get('period_of_performance_current_end_date'),
+        'transaction_count': full_item.get('transaction_count', 0),
+        'subaward_count': full_item.get('subaward_count', 0),
+        'full_indexing_complete': full_item.get('full_indexing_complete', True),
+        'last_updated': full_item.get('last_updated'),
+        'indexed_at': full_item.get('indexed_at'),
+        'data_source': full_item.get('data_source', 'usaspending_api_enrichment'),
+        'api_version': full_item.get('api_version', 'api_v2'),
+        'ttl': full_item.get('ttl'),
+        'is_oversized': True,
+    }
+    
+    # Remove None values
+    cleaned = {k: v for k, v in gsi_fields.items() if v is not None}
+    return cleaned
+
+
+def update_award_in_dynamodb(award_id: str, updated_data: Dict[str, Any]) -> bool:
+    """Update award in DynamoDB with retry logic"""
+    max_put_retries = 3
+    
+    for put_attempt in range(max_put_retries):
+        try:
+            awards_table.put_item(Item=updated_data)
+            return True
+        except Exception as put_error:
+            error_str = str(put_error)
+            
+            # Handle oversized items
+            if 'ValidationException' in error_str and 'Item size has exceeded' in error_str:
+                logger.warning(f"Award {award_id} exceeds DynamoDB size limit, storing to S3...")
+                
+                oversize_s3_key = store_oversized_item_to_s3(award_id, updated_data)
+                gsi_only_item = extract_gsi_fields_only(updated_data)
+                gsi_only_item['oversize_s3_key'] = oversize_s3_key
+                
+                try:
+                    awards_table.put_item(Item=gsi_only_item)
+                    logger.info(f"Stored GSI fields for oversized award {award_id} to DynamoDB, full data in S3")
+                    return True
+                except Exception as gsi_error:
+                    logger.error(f"Even GSI-only item too large for {award_id}: {str(gsi_error)}")
+                    raise
+            
+            # Handle throttling
+            elif 'ThrottlingException' in error_str or 'ProvisionedThroughputExceededException' in error_str:
+                if put_attempt < max_put_retries - 1:
+                    wait_time = (put_attempt + 1) * 2
+                    logger.warning(f"DynamoDB throttled for award {award_id}, waiting {wait_time}s before retry {put_attempt + 1}/{max_put_retries}")
+                    time.sleep(wait_time)
+                    continue
+            
+            # Re-raise if not throttling or out of retries
+            raise
+    
+    return False
+
+
+def enrich_award(award_id: str) -> Dict[str, Any]:
+    """Main enrichment function - fetches and updates award data"""
+    try:
+        # Get existing award
+        existing_award = get_existing_award(award_id)
+        if not existing_award:
+            return {
+                'success': False,
+                'error': f'Award {award_id} not found in DynamoDB'
+            }
+        
+        logger.info(f"Starting enrichment for award {award_id}")
+        
+        # Fetch fresh data from USAspending API
+        award_details = fetch_award_details(award_id)
+        if not award_details:
+            return {
+                'success': False,
+                'error': f'Failed to fetch award details from USAspending API'
+            }
+        
+        # Fetch transactions
+        transactions = fetch_all_transactions(award_id)
+        normalized_transactions = [normalize_transaction(tx) for tx in transactions]
+        
+        # Fetch subawards
+        subawards = fetch_all_subawards(award_id)
+        normalized_subawards = [normalize_subaward(sub) for sub in subawards]
+        
+        # Check if this is an IDV and fetch child awards
+        is_idv = award_details.get('category') == 'contract' and award_details.get('type') in ['IDV', 'IDC', 'BPA', 'BOA']
+        child_awards = []
+        idv_amounts = None
+        
+        if is_idv:
+            child_awards = fetch_child_awards(award_id)
+            idv_amounts = fetch_idv_amounts(award_id)
+        
+        # Compare with existing data using hash comparison
+        existing_transactions_hash = calculate_hash(existing_award.get('transactions', []))
+        new_transactions_hash = calculate_hash(normalized_transactions)
+        
+        existing_subawards_hash = calculate_hash(existing_award.get('subawards', []))
+        new_subawards_hash = calculate_hash(normalized_subawards)
+        
+        # Check if data has changed
+        transactions_changed = existing_transactions_hash != new_transactions_hash
+        subawards_changed = existing_subawards_hash != new_subawards_hash
+        child_awards_changed = False
+        
+        if is_idv:
+            existing_child_awards = existing_award.get('child_awards', [])
+            existing_child_hash = calculate_hash(existing_child_awards)
+            new_child_hash = calculate_hash(child_awards)
+            child_awards_changed = existing_child_hash != new_child_hash
+        
+        # If nothing changed, return early
+        if not (transactions_changed or subawards_changed or child_awards_changed):
+            logger.info(f"No changes detected for award {award_id}")
+            return {
+                'success': True,
+                'updated': False,
+                'message': 'Award data is already up to date',
+                'award_id': award_id
+            }
+        
+        # Prepare updated award data
+        updated_award = existing_award.copy()
+        
+        # Update transactions if changed
+        if transactions_changed:
+            updated_award['transactions'] = convert_floats_to_decimal(normalized_transactions)
+            updated_award['transaction_count'] = len(normalized_transactions)
+            logger.info(f"Updated {len(normalized_transactions)} transactions for award {award_id}")
+        
+        # Update subawards if changed
+        if subawards_changed:
+            updated_award['subawards'] = convert_floats_to_decimal(normalized_subawards)
+            updated_award['subaward_count'] = len(normalized_subawards)
+            logger.info(f"Updated {len(normalized_subawards)} subawards for award {award_id}")
+        
+        # Update child awards if changed (for IDVs)
+        if is_idv and child_awards_changed:
+            normalized_child_awards = [normalize_child_award(child) for child in child_awards]
+            updated_award['child_awards'] = convert_floats_to_decimal(normalized_child_awards)
+            updated_award['child_award_count'] = len(normalized_child_awards)
+            updated_award['is_idv_parent'] = True
+            logger.info(f"Updated {len(normalized_child_awards)} child awards for IDV {award_id}")
+            
+            # Update combined obligated amount from IDV amounts
+            if idv_amounts and 'child_award_total_obligation' in idv_amounts:
+                updated_award['combined_obligated_amount'] = Decimal(str(idv_amounts['child_award_total_obligation']))
+        
+        # Update enrichment metadata
+        updated_award['last_enriched_at'] = datetime.now(timezone.utc).isoformat()
+        updated_award['last_updated'] = datetime.now(timezone.utc).isoformat()
+        updated_award['enrichment_source'] = 'usaspending_api_v2'
+        
+        # Convert all floats to Decimal
+        updated_award = convert_floats_to_decimal(updated_award)
+        
+        # Update in DynamoDB
+        success = update_award_in_dynamodb(award_id, updated_award)
+        
+        if success:
+            return {
+                'success': True,
+                'updated': True,
+                'message': 'Award data updated successfully',
+                'award_id': award_id,
+                'transactions_count': len(normalized_transactions),
+                'subawards_count': len(normalized_subawards),
+                'child_awards_count': len(child_awards) if is_idv else 0
+            }
+        else:
+            return {
+                'success': False,
+                'error': 'Failed to update award in DynamoDB'
+            }
+            
+    except Exception as e:
+        logger.error(f"Error enriching award {award_id}: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': f'Error enriching award: {str(e)}'
+        }
+
+
+def lambda_handler(event, context):
+    """Lambda handler for award enrichment"""
+    try:
+        # Handle CORS preflight
+        if event.get('httpMethod') == 'OPTIONS':
+            return {
+                'statusCode': 200,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'message': 'CORS preflight'})
+            }
+        
+        # Parse request
+        http_method = event.get('httpMethod', 'POST')
+        path = event.get('path', '')
+        
+        # Extract award_id from path or body
+        award_id = None
+        
+        if http_method == 'POST':
+            try:
+                body = json.loads(event.get('body', '{}'))
+                award_id = body.get('award_id')
+            except json.JSONDecodeError:
+                pass
+        
+        # Try to extract from path (e.g., /enrich/{award_id})
+        if not award_id and path:
+            path_parts = path.strip('/').split('/')
+            if len(path_parts) >= 2 and path_parts[0] == 'enrich':
+                award_id = path_parts[1]
+        
+        if not award_id:
+            return {
+                'statusCode': 400,
+                'headers': get_cors_headers(),
+                'body': json.dumps({
+                    'success': False,
+                    'error': 'award_id is required'
+                })
+            }
+        
+        # Enrich the award
+        result = enrich_award(award_id)
+        
+        status_code = 200 if result.get('success') else 500
+        
+        return {
+            'statusCode': status_code,
+            'headers': get_cors_headers(),
+            'body': json.dumps(result, default=str)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing enrichment request: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'headers': get_cors_headers(),
+            'body': json.dumps({
+                'success': False,
+                'error': f'Internal server error: {str(e)}'
+            })
+        }

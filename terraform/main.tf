@@ -182,6 +182,9 @@ module "api_gateway" {
     usaspending_search = {
       path_part = "usaspending-search"
     }
+    usaspending_enrichment = {
+      path_part = "usaspending-enrichment"
+    }
   }
 
   # Methods configuration
@@ -469,6 +472,16 @@ module "api_gateway" {
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
+    # POST method for USAspending enrichment
+    usaspending_enrichment_post = {
+      resource_key            = "usaspending_enrichment"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.usaspending_enrichment_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -635,12 +648,17 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "usaspending-search"
     }
+    usaspending_enrichment_post = {
+      function_arn  = module.usaspending_enrichment_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "usaspending-enrichment"
+    }
   }
 
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "43" # Updated to add government contracts search endpoints
+  deployment_trigger = "44" # Updated to add government contracts enrichment endpoint
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -2361,6 +2379,103 @@ module "usaspending_search_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.usaspending_search_dynamodb_policy.arn,
     aws_iam_policy.usaspending_search_s3_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# IAM Policy for USAspending Enrichment Lambda to access DynamoDB awards table (read/write)
+resource "aws_iam_policy" "usaspending_enrichment_dynamodb_policy" {
+  name        = "${var.project_name}-usaspending-enrichment-dynamodb-policy-${var.environment}"
+  description = "Policy for USAspending Enrichment Lambda to read/write DynamoDB awards table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for USAspending Enrichment Lambda to access S3 bucket (read/write for oversized items)
+resource "aws_iam_policy" "usaspending_enrichment_s3_policy" {
+  name        = "${var.project_name}-usaspending-enrichment-s3-policy-${var.environment}"
+  description = "Policy for USAspending Enrichment Lambda to read/write S3 bucket for award details"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# USAspending Enrichment Lambda Function
+module "usaspending_enrichment_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-usaspending-enrichment-${var.environment}"
+  description   = "Lambda function for enriching USAspending awards with up-to-date data from API"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 300  # 5 minutes - enrichment may take time for large awards
+  memory_size   = 1024 # More memory for processing large datasets
+
+  # Source directory
+  source_dir = "../backend_app/src/govt_contracts/enrichment"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT            = var.environment
+    LOG_LEVEL              = var.environment == "development" ? "DEBUG" : "INFO"
+    AWARDS_TABLE_NAME      = data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_name
+    S3_BUCKET_NAME         = data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_name
+    USASPENDING_BASE_URL   = "https://api.usaspending.gov"
+    USASPENDING_USER_AGENT = "Cosine Financial Platform (contact@cosine.financial)"
+    REQUEST_TIMEOUT        = "30"
+    MAX_RETRIES            = "5"
+    RETRY_BASE_DELAY       = "2.0"
+  }
+
+  # Attach core layer (includes requests library)
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies - Read/write access to DynamoDB awards table and S3 bucket
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.usaspending_enrichment_dynamodb_policy.arn,
+    aws_iam_policy.usaspending_enrichment_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
 

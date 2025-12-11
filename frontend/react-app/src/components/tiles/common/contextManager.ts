@@ -852,9 +852,10 @@ export const addAwardToContext = (
   };
 
   const title = `${award.recipient_name || 'Unknown Recipient'} - ${award.award_type || 'Award'}`;
+  const amount = award.total_obligated_amount || award.total_obligation;
   const subtitle = award.period_start_date 
-    ? `${formatDate(award.period_start_date)}${award.total_obligation ? ` • ${formatCurrency(award.total_obligation)}` : ''}${award.awarding_agency_name ? ` • ${award.awarding_agency_name}` : ''}`
-    : award.total_obligation ? formatCurrency(award.total_obligation) : 'Government Contract Award';
+    ? `${formatDate(award.period_start_date)}${amount ? ` • ${formatCurrency(amount)}` : ''}${award.awarding_agency_name ? ` • ${award.awarding_agency_name}` : ''}`
+    : amount ? formatCurrency(amount) : 'Government Contract Award';
   
   const contextItem: ContextItem = {
     id: `govt_contract_award_${awardId}_${Date.now()}`,
@@ -925,9 +926,10 @@ export const addMultipleAwardsToContext = (
   const contextItems: ContextItem[] = awards.map(award => {
     const awardId = award.award_id || award.id || `award_${Date.now()}`;
     const title = `${award.recipient_name || 'Unknown Recipient'} - ${award.award_type || 'Award'}`;
+    const amount = award.total_obligated_amount || award.total_obligation;
     const subtitle = award.period_start_date 
-      ? `${formatDate(award.period_start_date)}${award.total_obligation ? ` • ${formatCurrency(award.total_obligation)}` : ''}${award.awarding_agency_name ? ` • ${award.awarding_agency_name}` : ''}`
-      : award.total_obligation ? formatCurrency(award.total_obligation) : 'Government Contract Award';
+      ? `${formatDate(award.period_start_date)}${amount ? ` • ${formatCurrency(amount)}` : ''}${award.awarding_agency_name ? ` • ${award.awarding_agency_name}` : ''}`
+      : amount ? formatCurrency(amount) : 'Government Contract Award';
     
     return {
       id: `govt_contract_award_${awardId}_${Date.now()}_${Math.random()}`,

@@ -974,25 +974,79 @@ export interface GovtContractsSearchRequest {
 export interface GovtContractAward {
   award_id: string;
   award_type?: string;
-  total_obligation?: number;
+  total_obligated_amount?: number;  // Primary field for amount
+  total_obligation?: number;  // Legacy field, kept for backward compatibility
   period_start_date?: string;
-  period_end_date?: string;
+  period_end_date?: string;  // Legacy field
+  period_of_performance_start_date?: string;
+  period_of_performance_current_end_date?: string;
+  period_of_performance_potential_end_date?: string;
+  ordering_period_end_date?: string;  // For IDVs - ordering period end date
+  award_or_idv_flag?: string;  // "IDV" for Indefinite Delivery Vehicles, "AWARD" for regular awards
   awarding_agency_name?: string;
   awarding_agency_code?: string;
+  awarding_sub_agency_name?: string;
+  awarding_sub_agency_code?: string;
+  awarding_office_name?: string;
+  awarding_office_code?: string;
   funding_agency_name?: string;
   funding_agency_code?: string;
+  funding_sub_agency_name?: string;
+  funding_sub_agency_code?: string;
+  funding_office_name?: string;
+  funding_office_code?: string;
   recipient_name?: string;
   recipient_id?: string;
+  recipient_uei?: string;
   recipient_location_state?: string;
+  recipient_state_name?: string;
   recipient_location_country?: string;
+  recipient_country_name?: string;
+  recipient_city_name?: string;
+  recipient_county_name?: string;
+  recipient_address_line_1?: string;
+  recipient_address_line_2?: string;
+  recipient_zip_code?: string;
+  recipient_parent_name?: string;
   naics_code?: string;
+  naics_description?: string;
   psc_code?: string;
+  psc_description?: string;
   cfda_number?: string;
+  cfda_title?: string;
   fiscal_year?: number;
   description?: string;
-  award_details_s3_key?: string;
   transactions?: any[];
   subawards?: any[];
+  is_assistance?: boolean;  // True for assistance, false for contract
+  oversize_s3_key?: string;  // S3 key for oversized items
+  transaction_count?: number;
+  subaward_count?: number;
+  usaspending_permalink?: string;
+  current_total_value_of_award?: string | number;
+  potential_total_value_of_award?: string | number;
+  base_and_exercised_options_value?: string | number;
+  base_and_all_options_value?: string | number;
+  primary_place_of_performance_city_name?: string;
+  primary_place_of_performance_county_name?: string;
+  primary_place_of_performance_state_name?: string;
+  primary_place_of_performance_state_code?: string;
+  primary_place_of_performance_country_name?: string;
+  primary_place_of_performance_country_code?: string;
+  primary_place_of_performance_zip_4?: string;
+  action_date?: string;
+  last_modified_date?: string;
+  last_updated?: string;
+  initial_report_date?: string;
+  federal_accounts_funding_this_award?: string;
+  treasury_accounts_funding_this_award?: string;
+  program_activities_funding_this_award?: string;
+  object_classes_funding_this_award?: string;
+  disaster_emergency_fund_codes_for_overall_award?: string;
+  total_outlayed_amount_for_overall_award?: string | number;
+  total_non_federal_funding_amount?: string | number;
+  award_id_fain?: string;
+  combined_obligated_amount?: number;  // Calculated sum of obligations from transactions/child awards (for IDVs)
   [key: string]: any;
 }
 
@@ -1046,6 +1100,34 @@ export interface GovtContractsAutocompleteResponse {
 export const govtContractsAutocompleteAPI = {
   autocomplete: async (params: GovtContractsAutocompleteRequest): Promise<GovtContractsAutocompleteResponse> => {
     return apiRequest<GovtContractsAutocompleteResponse>('/usaspending-autocomplete', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
+// ============================================================================
+// GOVERNMENT CONTRACTS ENRICHMENT API
+// ============================================================================
+
+export interface GovtContractsEnrichmentRequest {
+  award_id: string;
+}
+
+export interface GovtContractsEnrichmentResponse {
+  success: boolean;
+  updated?: boolean;
+  message?: string;
+  error?: string;
+  award_id: string;
+  transactions_count?: number;
+  subawards_count?: number;
+  child_awards_count?: number;
+}
+
+export const govtContractsEnrichmentAPI = {
+  enrich: async (params: GovtContractsEnrichmentRequest): Promise<GovtContractsEnrichmentResponse> => {
+    return apiRequest<GovtContractsEnrichmentResponse>('/usaspending-enrichment', {
       method: 'POST',
       body: JSON.stringify(params),
     });
@@ -1128,6 +1210,7 @@ export const api = {
   politicianTradesSearch: politicianTradesSearchAPI,
   govtContractsSearch: govtContractsSearchAPI,
   govtContractsAutocomplete: govtContractsAutocompleteAPI,
+  govtContractsEnrichment: govtContractsEnrichmentAPI,
 };
 
 export default api;

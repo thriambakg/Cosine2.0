@@ -40,10 +40,28 @@ def get_cors_headers():
 
 def convert_decimal_to_float(obj: Any) -> Any:
     """
-    Recursively convert Decimal values to float for JSON serialization
+    Recursively convert Decimal values to float and bytes/Binary to appropriate types for JSON serialization
     """
+    # Handle DynamoDB Binary type (boto3.dynamodb.types.Binary)
+    try:
+        from boto3.dynamodb.types import Binary
+        if isinstance(obj, Binary):
+            obj = obj.value  # Extract the bytes value
+    except ImportError:
+        pass
+    
     if isinstance(obj, Decimal):
         return float(obj)
+    elif isinstance(obj, bytes):
+        # Handle binary bytes - convert to appropriate type
+        # is_assistance: b'\x01' = True (assistance), b'\x00' = False (contract)
+        if len(obj) == 1:
+            # Single byte - likely a boolean flag
+            return bool(obj[0])
+        else:
+            # Multiple bytes - convert to base64 string for JSON serialization
+            import base64
+            return base64.b64encode(obj).decode('utf-8')
     elif isinstance(obj, dict):
         return {key: convert_decimal_to_float(value) for key, value in obj.items()}
     elif isinstance(obj, list):
@@ -52,15 +70,15 @@ def convert_decimal_to_float(obj: Any) -> Any:
         return obj
 
 
-def fetch_award_details_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
+def fetch_oversized_award_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
     """
-    Fetch award details (transactions and subawards) from S3
+    Fetch oversized award details from S3 (when oversize_s3_key exists)
     
     Args:
-        s3_key: S3 key for the award details file (gzipped JSON)
+        s3_key: S3 key for the oversized award file (gzipped JSON)
     
     Returns:
-        Dictionary with 'transactions' and 'subawards' keys, or None if error
+        Full award dictionary, or None if error
     """
     try:
         if not s3_key:
@@ -79,10 +97,10 @@ def fetch_award_details_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
         return award_details
         
     except s3_client.exceptions.NoSuchKey:
-        logger.warning(f"Award details not found in S3: {s3_key}")
+        logger.warning(f"Oversized award not found in S3: {s3_key}")
         return None
     except Exception as e:
-        logger.error(f"Error fetching award details from S3 ({s3_key}): {str(e)}", exc_info=True)
+        logger.error(f"Error fetching oversized award from S3 ({s3_key}): {str(e)}", exc_info=True)
         return None
 
 
@@ -753,32 +771,66 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     else:
         logger.info(f"No awards found in DynamoDB table using {method}" + (f" with index {index_name}" if index_name else ""))
     
-    # Convert Decimal to float for JSON serialization
+    # Convert Decimal to float and bytes for JSON serialization
     results = [convert_decimal_to_float(item) for item in items]
     
-    # Enrich results with S3 award details (transactions and subawards)
+    # Enrich results - handle transactions/subawards and oversized items
     enriched_results = []
     s3_fetch_success_count = 0
     s3_fetch_fail_count = 0
     for award in results:
-        # Fetch award details from S3 if s3_key exists
-        s3_key = award.get('award_details_s3_key')
-        if s3_key:
-            award_details = fetch_award_details_from_s3(s3_key)
-            if award_details:
-                # Add transactions and subawards to the award record
-                award['transactions'] = award_details.get('transactions', [])
-                award['subawards'] = award_details.get('subawards', [])
+        # Check if this is an oversized item (full details in S3)
+        oversize_s3_key = award.get('oversize_s3_key')
+        if oversize_s3_key:
+            # Fetch full award details from S3
+            full_award = fetch_oversized_award_from_s3(oversize_s3_key)
+            if full_award:
+                # Replace award with full details from S3
+                award = convert_decimal_to_float(full_award)
                 s3_fetch_success_count += 1
             else:
-                # If fetch failed, initialize empty arrays
-                award['transactions'] = []
-                award['subawards'] = []
                 s3_fetch_fail_count += 1
-        else:
-            # No S3 key, initialize empty arrays
+        
+        # Transactions and subawards are now stored directly in the table
+        # Ensure they exist (may be None or missing)
+        if 'transactions' not in award or award.get('transactions') is None:
             award['transactions'] = []
+        if 'subawards' not in award or award.get('subawards') is None:
             award['subawards'] = []
+        
+        # Parse is_assistance binary byte if present (should already be converted by convert_decimal_to_float)
+        # is_assistance: b'\x01' = True (assistance), b'\x00' = False (contract)
+        # This is a safety check in case conversion didn't happen
+        if 'is_assistance' in award:
+            is_assistance_val = award['is_assistance']
+            if isinstance(is_assistance_val, bytes):
+                award['is_assistance'] = bool(is_assistance_val[0]) if len(is_assistance_val) > 0 else False
+            elif isinstance(is_assistance_val, int):
+                award['is_assistance'] = bool(is_assistance_val)
+            # If it's already bool, leave it as is
+        
+        # Calculate combined obligated amount from transactions for IDVs or when total_obligated_amount is 0
+        # This helps display the actual obligated amounts for IDVs which have obligations on child awards
+        if award.get('transactions') and isinstance(award['transactions'], list):
+            combined_obligated = 0.0
+            for transaction in award['transactions']:
+                if isinstance(transaction, dict):
+                    # Try different possible field names for obligation amount
+                    obligation = transaction.get('federal_action_obligation') or \
+                                transaction.get('total_obligated_amount') or \
+                                transaction.get('obligated_amount') or 0
+                    try:
+                        if isinstance(obligation, (int, float)):
+                            combined_obligated += float(obligation)
+                        elif isinstance(obligation, str):
+                            combined_obligated += float(obligation)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Only set combined_obligated_amount if we calculated a non-zero value
+            # and the award's total_obligated_amount is 0 or missing (common for IDVs)
+            if combined_obligated > 0 and (not award.get('total_obligated_amount') or award.get('total_obligated_amount') == 0):
+                award['combined_obligated_amount'] = combined_obligated
         
         enriched_results.append(award)
     
@@ -861,10 +913,40 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             logger.info(f"Search completed: No awards found matching the filters")
         
+        # Ensure result is fully JSON-serializable (convert any remaining bytes, Decimals, etc.)
+        def json_serializer(obj):
+            """Custom JSON serializer for types that json.dumps doesn't handle"""
+            # Handle DynamoDB Binary type
+            try:
+                from boto3.dynamodb.types import Binary
+                if isinstance(obj, Binary):
+                    # Extract bytes and convert
+                    bytes_val = obj.value
+                    if len(bytes_val) == 1:
+                        return bool(bytes_val[0])
+                    else:
+                        import base64
+                        return base64.b64encode(bytes_val).decode('utf-8')
+            except ImportError:
+                pass
+            
+            if isinstance(obj, bytes):
+                # Convert bytes to base64 string
+                import base64
+                if len(obj) == 1:
+                    return bool(obj[0])
+                else:
+                    return base64.b64encode(obj).decode('utf-8')
+            elif isinstance(obj, Decimal):
+                return float(obj)
+            elif isinstance(obj, (set, frozenset)):
+                return list(obj)
+            raise TypeError(f"Type {type(obj)} not serializable")
+        
         return {
             'statusCode': 200,
             'headers': headers,
-            'body': json.dumps(result, default=str)
+            'body': json.dumps(result, default=json_serializer)
         }
         
     except Exception as e:
