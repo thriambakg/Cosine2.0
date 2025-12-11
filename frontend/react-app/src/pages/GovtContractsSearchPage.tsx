@@ -3322,7 +3322,6 @@ const GovtContractsSearchPage: React.FC = () => {
                 const start = new Date(startDate);
                 const end = new Date(endDate);
                 const now = new Date();
-                const totalDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
                 const remainingDays = (end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
                 const yearsRemaining = Math.floor(remainingDays / 365);
                 
@@ -3558,7 +3557,6 @@ const GovtContractsSearchPage: React.FC = () => {
                     
                     // Calculate widths based on obligated amount as the full bar
                     const obligatedWidth = chartWidth;
-                    const outlayedPercent = obligatedAmount > 0 ? (outlayedAmount / obligatedAmount) * 100 : 0;
                     const outlayedWidth = obligatedAmount > 0 ? (outlayedAmount / obligatedAmount) * chartWidth : 0;
                     
                     return (
