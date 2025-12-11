@@ -316,6 +316,7 @@ def store_child_award_as_full_record(child_award_id: str, parent_idv_id: str, pa
             'last_updated': datetime.now(timezone.utc).isoformat(),
             'full_indexing_complete': True,
             'ttl': int((datetime.now(timezone.utc).timestamp() + (90 * 24 * 60 * 60))),
+            'usaspending_permalink': f'https://www.usaspending.gov/award/{child_award_id}',  # USAspending URL for frontend auto-detection
         }
         
         logger.info(f"Built child award record for {child_award_id} with {len(normalized_child_transactions)} transactions and {len(normalized_child_subawards)} subawards")

@@ -3002,7 +3002,7 @@ const GovtContractsSearchPage: React.FC = () => {
                             </TableCell>
                             {visibleColumns.includes('recipient') && (
                               <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {award.recipient_name || 'N/A'}
+                                {award.recipient_name || (award.recipient_name_normalized ? award.recipient_name_normalized.toUpperCase() : 'N/A')}
                               </TableCell>
                             )}
                             {visibleColumns.includes('awarding_agency') && (
@@ -3017,7 +3017,12 @@ const GovtContractsSearchPage: React.FC = () => {
                             )}
                             {visibleColumns.includes('amount') && (
                               <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {formatCurrency(award.total_obligated_amount || award.total_obligation)}
+                                {formatCurrency(
+                                  // For IDVs, prefer combined_obligated_amount if available
+                                  (award.is_idv_parent || award.award_or_idv_flag === 'IDV') && award.combined_obligated_amount
+                                    ? award.combined_obligated_amount
+                                    : award.total_obligated_amount || award.total_obligation
+                                )}
                               </TableCell>
                             )}
                             {visibleColumns.includes('period_start_date') && (
@@ -3208,11 +3213,6 @@ const GovtContractsSearchPage: React.FC = () => {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                 <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 600 }}>
                   {selectedAwardForDetails?.is_assistance ? 'Other Financial Assistance' : 'Contract'}
-                  {selectedAwardForDetails?.is_idv_child && (
-                    <Typography component="span" variant="caption" sx={{ color: '#94a3b8', ml: 1 }}>
-                      (Child Award)
-                    </Typography>
-                  )}
                 </Typography>
                 <Tooltip title="Refresh award data from USAspending API">
                   <IconButton
@@ -3248,7 +3248,69 @@ const GovtContractsSearchPage: React.FC = () => {
                 </Box>
               )}
             </Box>
-            <Box sx={{ textAlign: 'right' }}>
+            <Box sx={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+              {/* Parent IDV Information for Child Awards */}
+              {selectedAwardForDetails?.is_idv_child && selectedAwardForDetails?.parent_idv_id && (
+                <Box sx={{ textAlign: 'right' }}>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5, fontSize: '11px' }}>
+                    This is a child award
+                  </Typography>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      cursor: 'pointer',
+                      '&:hover': {
+                        opacity: 0.8,
+                      },
+                    }}
+                    onClick={async () => {
+                      // Store current child award as parentAwardForDetails before switching
+                      if (selectedAwardForDetails) {
+                        setParentAwardForDetails(selectedAwardForDetails);
+                      }
+                      
+                      // Try to find the parent IDV in search results first
+                      let parentAward = allSearchResults.find((a: GovtContractAward) => a.award_id === selectedAwardForDetails.parent_idv_id);
+                      
+                      // If not found, search for it specifically
+                      if (!parentAward) {
+                        try {
+                          const searchResponse = await govtContractsSearchAPI.search({
+                            filters: {} as any,
+                            limit: 100,
+                          });
+                          
+                          parentAward = searchResponse.results?.find(
+                            (a: GovtContractAward) => a.award_id === selectedAwardForDetails.parent_idv_id
+                          );
+                          
+                          // If found, add it to search results for future reference
+                          if (parentAward) {
+                            setAllSearchResults([...allSearchResults, parentAward]);
+                          }
+                        } catch (error) {
+                          console.error('Error searching for parent IDV:', error);
+                        }
+                      }
+                      
+                      // If found, navigate to parent
+                      if (parentAward) {
+                        setSelectedAwardForDetails(parentAward);
+                        setParentAwardForDetails(selectedAwardForDetails);
+                      } else {
+                        console.warn('Parent IDV not found:', selectedAwardForDetails.parent_idv_id);
+                      }
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ color: '#3b82f6', fontWeight: 600, fontFamily: 'monospace' }}>
+                      Parent: {selectedAwardForDetails.parent_idv_id}
+                    </Typography>
+                  </Box>
+                </Box>
+              )}
+              
               {(() => {
                 const startDate = selectedAwardForDetails?.period_of_performance_start_date || selectedAwardForDetails?.period_start_date;
                 // For IDVs, use ordering_period_end_date if period_of_performance_current_end_date is not available
@@ -3355,7 +3417,7 @@ const GovtContractsSearchPage: React.FC = () => {
                         Recipient
                       </Typography>
                       <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                        {selectedAwardForDetails.recipient_name || 'N/A'}
+                        {selectedAwardForDetails.recipient_name || (selectedAwardForDetails.recipient_name_normalized ? selectedAwardForDetails.recipient_name_normalized.toUpperCase() : 'N/A')}
                       </Typography>
                       {selectedAwardForDetails.recipient_city_name && (
                         <Box sx={{ mt: 1 }}>
@@ -3844,7 +3906,7 @@ const GovtContractsSearchPage: React.FC = () => {
                       Recipient Name
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                      {selectedAwardForDetails.recipient_name || 'N/A'}
+                      {selectedAwardForDetails.recipient_name || (selectedAwardForDetails.recipient_name_normalized ? selectedAwardForDetails.recipient_name_normalized.toUpperCase() : 'N/A')}
                     </Typography>
                   </Box>
                   {(selectedAwardForDetails.recipient_id || selectedAwardForDetails.recipient_uei) && (
