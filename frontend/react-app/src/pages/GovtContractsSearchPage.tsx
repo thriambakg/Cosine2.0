@@ -3553,15 +3553,14 @@ const GovtContractsSearchPage: React.FC = () => {
                     const chartHeight = 400;
                     const barHeight = 50;
                     const barY = 160;
-                    const labelOffset = 20; // Space for obligated amount label on the right
                     
                     // Calculate widths based on obligated amount as the full bar
                     const obligatedWidth = chartWidth;
                     const outlayedWidth = obligatedAmount > 0 ? (outlayedAmount / obligatedAmount) * chartWidth : 0;
                     
                     return (
-                      <Box sx={{ position: 'relative', width: '100%', height: `${chartHeight}px`, overflow: 'visible' }}>
-                        <svg width="100%" height={chartHeight} style={{ maxWidth: `${chartWidth + labelOffset}px` }}>
+                      <Box sx={{ position: 'relative', width: '100%', height: `${chartHeight}px`, overflow: 'hidden' }}>
+                        <svg width="100%" height={chartHeight} style={{ maxWidth: `${chartWidth}px` }}>
                           {/* Base rectangle (light gray background) */}
                           <rect x="0" y={barY} width={chartWidth} height={barHeight} fill="#dce4ee" rx="5" ry="5" />
                           
@@ -3604,60 +3603,27 @@ const GovtContractsSearchPage: React.FC = () => {
                             />
                           )}
                           
-                          {/* Outlayed Amount Label - positioned at bottom, pointing to the right of the line */}
-                          {outlayedAmount > 0 && (
-                            <g>
-                              {/* Horizontal line from outlayedWidth to label */}
-                              <line 
-                                x1={outlayedWidth} 
-                                y1={barY + barHeight + 20} 
-                                x2={outlayedWidth + 10} 
-                                y2={barY + barHeight + 20} 
-                                stroke="#10b981" 
-                                strokeWidth="2"
-                              />
-                              {/* Vertical line connecting to label */}
-                              <line 
-                                x1={outlayedWidth + 10} 
-                                y1={barY + barHeight + 20} 
-                                x2={outlayedWidth + 10} 
-                                y2={barY + barHeight + 50} 
-                                stroke="#10b981" 
-                                strokeWidth="2"
-                              />
-                              {/* Label positioned to the right */}
-                              <foreignObject width="200" height="70" x={outlayedWidth + 15} y={barY + barHeight + 25}>
-                                <Box sx={{ textAlign: 'left', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px' }}>
-                                  <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '18px' }}>
-                                    {formatCurrency(outlayedAmount)}
-                                  </Typography>
-                                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>Amount Paid</Typography>
-                                </Box>
-                              </foreignObject>
-                            </g>
+                          {/* Outlayed Amount Label (if outlayed > 0) */}
+                          {outlayedAmount > 0 && outlayedWidth > 50 && (
+                            <foreignObject width={outlayedWidth} height="70" x="0" y={90}>
+                              <Box sx={{ textAlign: 'left', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px', maxWidth: `${outlayedWidth}px` }}>
+                                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '18px' }}>
+                                  {formatCurrency(outlayedAmount)}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Amount Paid</Typography>
+                              </Box>
+                            </foreignObject>
                           )}
                           
-                          {/* Obligated Amount Label - positioned to the right, away from chart */}
-                          <foreignObject width="250" height="70" x={chartWidth + 15} y={90}>
-                            <Box sx={{ textAlign: 'left', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px' }}>
+                          {/* Obligated Amount Label */}
+                          <foreignObject width={chartWidth} height="70" x="-8" y={90}>
+                            <Box sx={{ float: 'right', textAlign: 'right', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px' }}>
                               <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
                                 {formatCurrency(obligatedAmount)}
                               </Typography>
                               <Typography variant="caption" sx={{ color: '#94a3b8' }}>Obligated Amount</Typography>
                             </Box>
                           </foreignObject>
-                          
-                          {/* Connecting line from obligated amount bar to label */}
-                          <line 
-                            x1={obligatedWidth} 
-                            y1={barY + barHeight / 2} 
-                            x2={chartWidth + 15} 
-                            y2={90 + 35} 
-                            stroke="#4773aa" 
-                            strokeWidth="2"
-                            strokeDasharray="4,4"
-                            opacity="0.6"
-                          />
                           
                           {/* Total Funding Label */}
                           <foreignObject width={chartWidth} height="60" x="0" y={300}>

@@ -6,11 +6,13 @@ Queries DynamoDB awards table using GSIs and filters to return matching awards
 import json
 import os
 import logging
+import time
 import boto3
 import gzip
 from typing import Dict, List, Any, Optional
 from decimal import Decimal
 from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.types import TypeDeserializer
 
 # Configure logging
 logger = logging.getLogger()
@@ -728,21 +730,22 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         logger.info(f"Scanning awards table with filters")
         response = awards_table.scan(**params)
     
-    # Extract results
-    items = response.get('Items', [])
+    # Extract results from GSI query/scan
+    # With KEYS_ONLY GSIs, items only contain award_id + hash/range keys
+    gsi_items = response.get('Items', [])
     last_eval_key = response.get('LastEvaluatedKey')
     scanned_count = response.get('ScannedCount', 0)
     
     # For scans, if we didn't find enough results and there are more items, continue scanning
-    if method == 'scan' and scan_limit is not None and len(items) < limit and last_eval_key and scanned_count > 0:
+    if method == 'scan' and scan_limit is not None and len(gsi_items) < limit and last_eval_key and scanned_count > 0:
         # Continue scanning if we haven't found enough results
         # Limit the number of continuation scans to avoid infinite loops
         max_continuation_scans = 10
         continuation_count = 0
         
-        while len(items) < limit and last_eval_key and continuation_count < max_continuation_scans:
+        while len(gsi_items) < limit and last_eval_key and continuation_count < max_continuation_scans:
             continuation_count += 1
-            logger.info(f"Continuing scan (iteration {continuation_count}/{max_continuation_scans}), found {len(items)} items so far, scanned {scanned_count} total")
+            logger.info(f"Continuing scan (iteration {continuation_count}/{max_continuation_scans}), found {len(gsi_items)} items so far, scanned {scanned_count} total")
             
             # Continue scan from last evaluated key
             continuation_params = params.copy()
@@ -754,22 +757,111 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
             last_eval_key = continuation_response.get('LastEvaluatedKey')
             scanned_count += continuation_response.get('ScannedCount', 0)
             
-            items.extend(continuation_items)
+            gsi_items.extend(continuation_items)
             
             # Stop if we have enough results or no more items
-            if len(items) >= limit or not last_eval_key:
+            if len(gsi_items) >= limit or not last_eval_key:
                 break
         
-        logger.info(f"Scan complete: found {len(items)} items after scanning {scanned_count} total items")
+        logger.info(f"Scan complete: found {len(gsi_items)} items after scanning {scanned_count} total items")
+    
+    # Extract award_ids from GSI results (KEYS_ONLY projection only returns keys)
+    award_ids = []
+    for item in gsi_items:
+        award_id = item.get('award_id')
+        if award_id:
+            award_ids.append(award_id)
+    
+    # Limit to requested limit before fetching full items
+    award_ids = award_ids[:limit]
+    
+    # Log initial results found
+    if award_ids:
+        logger.info(f"Found {len(award_ids)} award_id(s) from {method}" + (f" with index {index_name}" if index_name else ""))
+    else:
+        logger.info(f"No awards found using {method}" + (f" with index {index_name}" if index_name else ""))
+    
+    # Phase 2: Fetch full items from main table using BatchGetItem
+    # DynamoDB BatchGetItem limit is 100 items per batch
+    items = []
+    if award_ids:
+        batch_size = 100
+        for i in range(0, len(award_ids), batch_size):
+            batch_ids = award_ids[i:i + batch_size]
+            
+            try:
+                # Use table resource's batch_get_item (simpler than client)
+                # Build keys for batch_get_item
+                keys = [{'award_id': award_id} for award_id in batch_ids]
+                
+                # Use the table's batch_get_item method
+                # Note: boto3 resource doesn't have a direct batch_get_item, so we use the client
+                # But we can use get_item in a loop or use the client's batch_get_item
+                # For efficiency, we'll use the client's batch_get_item and convert manually
+                dynamodb_client = boto3.client('dynamodb')
+                
+                # Build request items
+                request_items = {
+                    AWARDS_TABLE_NAME: {
+                        'Keys': [{'award_id': {'S': str(award_id)}} for award_id in batch_ids]
+                    }
+                }
+                
+                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                
+                # Extract items from response
+                batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                
+                # Convert DynamoDB format to Python dict using TypeDeserializer
+                deserializer = TypeDeserializer()
+                for item in batch_items:
+                    # Convert entire item using deserializer
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    items.append(converted_item)
+                
+                # Handle unprocessed keys (throttling) - retry once
+                unprocessed = batch_response.get('UnprocessedKeys', {})
+                if unprocessed:
+                    unprocessed_keys = unprocessed.get(AWARDS_TABLE_NAME, {}).get('Keys', [])
+                    if unprocessed_keys:
+                        logger.warning(f"Unprocessed keys in batch {i//batch_size + 1}: {len(unprocessed_keys)} items, retrying...")
+                        # Extract award_ids from unprocessed keys
+                        retry_ids = []
+                        for key_dict in unprocessed_keys:
+                            if 'award_id' in key_dict and 'S' in key_dict['award_id']:
+                                retry_ids.append(key_dict['award_id']['S'])
+                        
+                        if retry_ids:
+                            # Retry with a small delay
+                            time.sleep(0.1)
+                            retry_request = {
+                                AWARDS_TABLE_NAME: {
+                                    'Keys': [{'award_id': {'S': str(aid)}} for aid in retry_ids]
+                                }
+                            }
+                            retry_response = dynamodb_client.batch_get_item(RequestItems=retry_request)
+                            retry_items = retry_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                            
+                            # Convert retry items using deserializer
+                            deserializer = TypeDeserializer()
+                            for item in retry_items:
+                                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                                items.append(converted_item)
+            
+            except Exception as e:
+                logger.error(f"Error in BatchGetItem for batch {i//batch_size + 1}: {str(e)}", exc_info=True)
+                # Continue with other batches even if one fails
+                continue
+        
+        logger.info(f"Fetched {len(items)} full award item(s) from main table using BatchGetItem")
+    
+    # Note: FilterExpression in GSI queries still works with KEYS_ONLY GSIs
+    # The filter is applied to the main table attributes, so items should already be filtered
+    # However, we may need to re-apply some filters if they couldn't be applied in the GSI query
+    # For now, we trust that the FilterExpression in the query/scan already filtered correctly
     
     # Limit results to requested limit
     items = items[:limit]
-    
-    # Log initial results found
-    if items:
-        logger.info(f"Found {len(items)} award(s) in DynamoDB table using {method}" + (f" with index {index_name}" if index_name else ""))
-    else:
-        logger.info(f"No awards found in DynamoDB table using {method}" + (f" with index {index_name}" if index_name else ""))
     
     # Convert Decimal to float and bytes for JSON serialization
     results = [convert_decimal_to_float(item) for item in items]

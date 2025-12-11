@@ -648,18 +648,22 @@ def convert_decimal_to_float(obj: Any) -> Any:
 
 
 def extract_gsi_fields_only(full_item: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract only GSI fields and essential metadata for DynamoDB"""
+    """Extract only GSI fields and essential metadata for DynamoDB (for KEYS_ONLY GSIs)"""
     gsi_fields = {
         'award_id': full_item.get('award_id'),
+        # GSI hash keys
         'awarding_agency_code': full_item.get('awarding_agency_code'),
         'awarding_agency_name': full_item.get('awarding_agency_name'),
-        'recipient_name_normalized': full_item.get('recipient_name_normalized'),
+        'recipient_name_normalized': full_item.get('recipient_name_normalized') or 'unknown',
         'recipient_location_state': full_item.get('recipient_location_state'),
         'award_type': full_item.get('award_type'),
+        'is_assistance': full_item.get('is_assistance'),
         'fiscal_year': full_item.get('fiscal_year'),
+        # GSI range keys
         'total_obligated_amount': full_item.get('total_obligated_amount'),
         'period_start_date': full_item.get('period_start_date') or full_item.get('period_of_performance_start_date'),
         'period_end_date': full_item.get('period_end_date') or full_item.get('period_of_performance_current_end_date'),
+        # Essential metadata
         'transaction_count': full_item.get('transaction_count', 0),
         'subaward_count': full_item.get('subaward_count', 0),
         'full_indexing_complete': full_item.get('full_indexing_complete', True),
@@ -669,10 +673,27 @@ def extract_gsi_fields_only(full_item: Dict[str, Any]) -> Dict[str, Any]:
         'api_version': full_item.get('api_version', 'api_v2'),
         'ttl': full_item.get('ttl'),
         'is_oversized': True,
+        # Preserve category if present (used for filtering)
+        'category': full_item.get('category'),
     }
     
-    # Remove None values
-    cleaned = {k: v for k, v in gsi_fields.items() if v is not None}
+    # Remove None values (but keep False/0/empty string if they're valid values)
+    cleaned = {}
+    for k, v in gsi_fields.items():
+        if v is not None:
+            # For boolean fields, keep False values
+            if k == 'is_assistance' and isinstance(v, bool):
+                cleaned[k] = v
+            # For numeric fields, keep 0 values
+            elif k in ['transaction_count', 'subaward_count', 'fiscal_year'] and v == 0:
+                cleaned[k] = v
+            # For string fields, keep non-empty strings (but allow 'unknown' for recipient_name_normalized)
+            elif isinstance(v, str) and (v or k == 'recipient_name_normalized'):
+                cleaned[k] = v
+            # For other types, include if not None
+            elif not isinstance(v, str):
+                cleaned[k] = v
+    
     return cleaned
 
 
@@ -833,6 +854,86 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
         # Prepare updated award data
         updated_award = existing_award.copy()
         
+        # Update GSI fields from fresh API response (important for KEYS_ONLY GSIs)
+        # Extract recipient information
+        if 'recipient' in award_details:
+            recipient = award_details['recipient']
+            if isinstance(recipient, dict):
+                recipient_name = recipient.get('recipient_name') or recipient.get('name', '')
+                if recipient_name:
+                    # Store raw recipient_name in uppercase (matches USAspending standard and glue job)
+                    recipient_name_upper = recipient_name.upper() if isinstance(recipient_name, str) else recipient_name
+                    updated_award['recipient_name'] = recipient_name_upper
+                    updated_award['recipient_name_normalized'] = recipient_name_upper.lower()
+                    logger.info(f"Updated recipient_name and recipient_name_normalized from API for award {award_id}")
+                elif not updated_award.get('recipient_name_normalized'):
+                    # If recipient_name is missing, set default for GSI (required field)
+                    updated_award['recipient_name_normalized'] = "unknown"
+                    logger.warning(f"Recipient name missing for award {award_id}, setting recipient_name_normalized to 'unknown'")
+                
+                # Update recipient location state (GSI field)
+                if 'location' in recipient and isinstance(recipient['location'], dict):
+                    location = recipient['location']
+                    if location.get('state_code'):
+                        updated_award['recipient_location_state'] = location.get('state_code')
+        
+        # Update agency information (GSI fields)
+        if 'awarding_agency' in award_details:
+            agency = award_details['awarding_agency']
+            if isinstance(agency, dict):
+                if agency.get('name'):
+                    updated_award['awarding_agency_name'] = agency.get('name')
+                if agency.get('id'):
+                    updated_award['awarding_agency_code'] = str(agency.get('id'))
+        
+        if 'funding_agency' in award_details:
+            agency = award_details['funding_agency']
+            if isinstance(agency, dict):
+                if agency.get('name'):
+                    updated_award['funding_agency_name'] = agency.get('name')
+                if agency.get('id'):
+                    updated_award['funding_agency_code'] = str(agency.get('id'))
+        
+        # Update award type (GSI field)
+        if award_type:
+            updated_award['award_type'] = award_type
+        if award_details.get('type_description'):
+            updated_award['award_type_description'] = award_details.get('type_description')
+        
+        # Update category and is_assistance (GSI field) from API response
+        if award_category:
+            updated_award['category'] = award_category
+            # Set is_assistance based on category (matches glue job logic)
+            # is_assistance: b'\x01' = True (assistance), b'\x00' = False (contract)
+            if award_category == 'assistance':
+                updated_award['is_assistance'] = b'\x01'
+            else:
+                updated_award['is_assistance'] = b'\x00'
+            logger.info(f"Updated category={award_category} and is_assistance from API for award {award_id}")
+        
+        # Update fiscal year from dates (GSI field)
+        if 'date_signed' in award_details:
+            try:
+                from datetime import datetime as dt
+                date_obj = dt.strptime(award_details['date_signed'], '%Y-%m-%d')
+                # Fiscal year: Oct 1 - Sep 30, so if month >= 10, fiscal year is next calendar year
+                fiscal_year = date_obj.year if date_obj.month < 10 else date_obj.year + 1
+                updated_award['fiscal_year'] = fiscal_year
+            except Exception as e:
+                logger.warning(f"Could not calculate fiscal_year from date_signed for award {award_id}: {e}")
+        
+        # Update date fields (GSI range keys)
+        if 'date_signed' in award_details:
+            updated_award['period_of_performance_start_date'] = award_details['date_signed']
+            updated_award['period_start_date'] = award_details['date_signed']
+        if 'period_of_performance_current_end_date' in award_details:
+            updated_award['period_of_performance_current_end_date'] = award_details['period_of_performance_current_end_date']
+            updated_award['period_end_date'] = award_details['period_of_performance_current_end_date']
+        
+        # Update total_obligated_amount (GSI range key)
+        if 'total_obligation' in award_details:
+            updated_award['total_obligated_amount'] = Decimal(str(award_details['total_obligation']))
+        
         # Update transactions if changed
         if transactions_changed:
             updated_award['transactions'] = convert_floats_to_decimal(normalized_transactions)
@@ -858,11 +959,11 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
                 updated_award['combined_obligated_amount'] = Decimal(str(idv_amounts['child_award_total_obligation']))
         
         # Preserve important fields from existing award that shouldn't be overwritten
-        # Preserve is_assistance (assistance vs contract) - this is critical!
-        if 'is_assistance' in existing_award:
+        # Note: is_assistance and category are already updated from API response above if available
+        # Only preserve if not updated from API
+        if 'is_assistance' not in updated_award and 'is_assistance' in existing_award:
             updated_award['is_assistance'] = existing_award['is_assistance']
-        # Preserve category if it exists
-        if 'category' in existing_award:
+        if 'category' not in updated_award and 'category' in existing_award:
             updated_award['category'] = existing_award['category']
         # Preserve award_or_idv_flag if it exists
         if 'award_or_idv_flag' in existing_award:
