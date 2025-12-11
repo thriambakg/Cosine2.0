@@ -3319,7 +3319,6 @@ const GovtContractsSearchPage: React.FC = () => {
                                 selectedAwardForDetails?.period_end_date;
                 if (!startDate || !endDate) return null;
                 
-                const start = new Date(startDate);
                 const end = new Date(endDate);
                 const now = new Date();
                 const remainingDays = (end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
