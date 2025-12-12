@@ -622,23 +622,14 @@ const GovtContractsSearchPage: React.FC = () => {
         ...searchParams,
       };
 
-      // Convert agency names to codes for API call
+      // Keep agency names as-is (backend handles both names and codes)
+      // Remove any code fields if names are present to avoid confusion
       if (filters.awarding_agency_name && filters.awarding_agency_name.length > 0) {
-        const codes = filters.awarding_agency_name.map((name: string) => {
-          const found = findOptionByName(name, 'awarding_agency');
-          return found?.code || found?.id || name;
-        }).filter(Boolean);
-        filters.awarding_agency_code = codes;
-        delete filters.awarding_agency_name;
+        delete filters.awarding_agency_code;
       }
       
       if (filters.funding_agency_name && filters.funding_agency_name.length > 0) {
-        const codes = filters.funding_agency_name.map((name: string) => {
-          const found = findOptionByName(name, 'funding_agency');
-          return found?.code || found?.id || name;
-        }).filter(Boolean);
-        filters.funding_agency_code = codes;
-        delete filters.funding_agency_name;
+        delete filters.funding_agency_code;
       }
 
       // Remove empty arrays
@@ -661,38 +652,7 @@ const GovtContractsSearchPage: React.FC = () => {
         setLastEvaluatedKey(response.last_evaluated_key || null);
         computeFiltersFromResults(results);
         
-        // Set default date ranges from results only if one date is set but not the other
-        if (results.length > 0) {
-          const dates = results
-            .map(award => award.period_start_date)
-            .filter((date): date is string => !!date)
-            .map(date => {
-              // Extract just the date part (YYYY-MM-DD) if it includes time
-              return date.split('T')[0];
-            })
-            .sort();
-          
-          if (dates.length > 0) {
-            const minDate = dates[0];
-            const maxDate = dates[dates.length - 1];
-            
-            setSearchParams((prev) => {
-              // Only set defaults if one date is set but not the other
-              const hasDateFrom = !!prev.date_from;
-              const hasDateTo = !!prev.date_to;
-              
-              // If date_from is set but date_to is not, set date_to to max
-              // If date_to is set but date_from is not, set date_from to min
-              // If both are empty, don't set either
-              if (hasDateFrom && !hasDateTo) {
-                return { ...prev, date_to: maxDate };
-              } else if (hasDateTo && !hasDateFrom) {
-                return { ...prev, date_from: minDate };
-              }
-              return prev;
-            });
-          }
-        }
+        // Note: We don't auto-populate missing date fields to avoid interfering with pagination/load more
       } else {
         setSearchError('Search failed. Please try again.');
       }
@@ -731,23 +691,14 @@ const GovtContractsSearchPage: React.FC = () => {
               // Re-run the current search to get fresh data
               const currentFilters = { ...searchParams };
               
-              // Convert agency names to codes if needed
+              // Keep agency names as-is (backend handles both names and codes)
+              // Remove any code fields if names are present to avoid confusion
               if (currentFilters.awarding_agency_name && currentFilters.awarding_agency_name.length > 0) {
-                const codes = currentFilters.awarding_agency_name.map((name: string) => {
-                  const found = findOptionByName(name, 'awarding_agency');
-                  return found?.code || found?.id || name;
-                }).filter(Boolean);
-                currentFilters.awarding_agency_code = codes;
-                delete currentFilters.awarding_agency_name;
+                delete currentFilters.awarding_agency_code;
               }
               
               if (currentFilters.funding_agency_name && currentFilters.funding_agency_name.length > 0) {
-                const codes = currentFilters.funding_agency_name.map((name: string) => {
-                  const found = findOptionByName(name, 'funding_agency');
-                  return found?.code || found?.id || name;
-                }).filter(Boolean);
-                (currentFilters as any).funding_agency_code = codes;
-                delete currentFilters.funding_agency_name;
+                delete (currentFilters as any).funding_agency_code;
               }
               
               // Remove empty arrays
@@ -835,23 +786,14 @@ const GovtContractsSearchPage: React.FC = () => {
         ...searchParams,
       };
 
-      // Convert agency names to codes for API call
+      // Keep agency names as-is (backend handles both names and codes)
+      // Remove any code fields if names are present to avoid confusion
       if (filters.awarding_agency_name && filters.awarding_agency_name.length > 0) {
-        const codes = filters.awarding_agency_name.map((name: string) => {
-          const found = findOptionByName(name, 'awarding_agency');
-          return found?.code || found?.id || name;
-        }).filter(Boolean);
-        filters.awarding_agency_code = codes;
-        delete filters.awarding_agency_name;
+        delete filters.awarding_agency_code;
       }
       
       if (filters.funding_agency_name && filters.funding_agency_name.length > 0) {
-        const codes = filters.funding_agency_name.map((name: string) => {
-          const found = findOptionByName(name, 'funding_agency');
-          return found?.code || found?.id || name;
-        }).filter(Boolean);
-        filters.funding_agency_code = codes;
-        delete filters.funding_agency_name;
+        delete filters.funding_agency_code;
       }
 
       // Remove empty arrays
@@ -876,38 +818,7 @@ const GovtContractsSearchPage: React.FC = () => {
         setLastEvaluatedKey(response.last_evaluated_key || null);
         computeFiltersFromResults(updatedResults);
         
-        // Update date ranges from all results only if one date is set but not the other
-        if (updatedResults.length > 0) {
-          const dates = updatedResults
-            .map(award => award.period_start_date)
-            .filter((date): date is string => !!date)
-            .map(date => {
-              // Extract just the date part (YYYY-MM-DD) if it includes time
-              return date.split('T')[0];
-            })
-            .sort();
-          
-          if (dates.length > 0) {
-            const minDate = dates[0];
-            const maxDate = dates[dates.length - 1];
-            
-            setSearchParams((prev) => {
-              // Only set defaults if one date is set but not the other
-              const hasDateFrom = !!prev.date_from;
-              const hasDateTo = !!prev.date_to;
-              
-              // If date_from is set but date_to is not, set date_to to max
-              // If date_to is set but date_from is not, set date_from to min
-              // If both are empty, don't set either
-              if (hasDateFrom && !hasDateTo) {
-                return { ...prev, date_to: maxDate };
-              } else if (hasDateTo && !hasDateFrom) {
-                return { ...prev, date_from: minDate };
-              }
-              return prev;
-            });
-          }
-        }
+        // Note: We don't auto-populate missing date fields to avoid interfering with pagination/load more
       }
     } catch (error: any) {
       console.error('Load more error:', error);

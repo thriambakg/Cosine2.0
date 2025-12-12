@@ -97,6 +97,13 @@ const defaultNavigationItems: NavigationItem[] = [
     category: 'government_data'
   },
   {
+    id: 'congress-bills-search',
+    label: 'Congress Bills',
+    path: '/congress-bills-search',
+    icon: 'DescriptionIcon',
+    category: 'government_data'
+  },
+  {
     id: 'news-search',
     label: 'News Search',
     path: '/news-search',

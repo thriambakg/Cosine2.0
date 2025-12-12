@@ -1216,6 +1216,84 @@ export const sessionManagementAPI = {
   },
 };
 
+// ============================================================================
+// CONGRESS BILLS SEARCH API
+// ============================================================================
+
+export interface CongressBillsSearchFilters {
+  bill_title?: string[];
+  bill_type?: string[];
+  sponsor_name?: string[];
+  introduced_date_from?: string;
+  introduced_date_to?: string;
+  congress?: number[];
+  policy_area?: string[];
+  sponsor_party?: string[];
+  sponsor_state?: string[];
+  latest_action_date_from?: string;
+  latest_action_date_to?: string;
+  bipartisan?: number;
+  bill_number?: number;
+  [key: string]: any;
+}
+
+export interface CongressBill {
+  bill_id: string;
+  bill_title?: string;
+  bill_type?: string;
+  bill_number?: number;
+  sponsor_full_name?: string;
+  sponsor_party?: string;
+  sponsor_state?: string;
+  introduced_date?: string;
+  latest_action_date?: string;
+  congress?: number;
+  bipartisan?: number;
+  policy_area?: string;
+  [key: string]: any;
+}
+
+export interface CongressBillsSearchResponse {
+  success: boolean;
+  results?: CongressBill[];
+  has_more?: boolean;
+  last_evaluated_key?: any;
+  count?: number;
+  method?: string;
+  index_used?: string;
+}
+
+export const congressBillsSearchAPI = {
+  search: async (params: {
+    filters: CongressBillsSearchFilters;
+    limit?: number;
+    last_evaluated_key?: any;
+  }): Promise<CongressBillsSearchResponse> => {
+    console.log('📋 API - Searching congress bills:', params);
+    return apiRequest<CongressBillsSearchResponse>('/congress-bills-search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
+export const congressBillsAutocompleteAPI = {
+  autocomplete: async (params: {
+    autocomplete_type: 'sponsor_name' | 'bill_title' | 'policy_area';
+    search_text: string;
+    limit?: number;
+  }): Promise<{
+    success: boolean;
+    results?: Array<{ name?: string; text?: string; value?: string; [key: string]: any }>;
+  }> => {
+    console.log('📋 API - Autocomplete congress bills:', params);
+    return apiRequest('/congress-bills-autocomplete', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
 export const api = {
   stockVolatility: stockVolatilityAPI,
   stockData: stockDataAPI,
@@ -1234,6 +1312,8 @@ export const api = {
   govtContractsSearch: govtContractsSearchAPI,
   govtContractsAutocomplete: govtContractsAutocompleteAPI,
   govtContractsEnrichment: govtContractsEnrichmentAPI,
+  congressBillsSearch: congressBillsSearchAPI,
+  congressBillsAutocomplete: congressBillsAutocompleteAPI,
 };
 
 export default api;

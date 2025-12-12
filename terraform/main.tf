@@ -185,6 +185,9 @@ module "api_gateway" {
     usaspending_enrichment = {
       path_part = "usaspending-enrichment"
     }
+    congress_bills_search = {
+      path_part = "congress-bills-search"
+    }
   }
 
   # Methods configuration
@@ -482,6 +485,16 @@ module "api_gateway" {
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
+    # POST method for Congress Bills search
+    congress_bills_search_post = {
+      resource_key            = "congress_bills_search"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.congress_bills_search_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -652,6 +665,11 @@ module "api_gateway" {
       function_arn  = module.usaspending_enrichment_lambda.function_arn
       http_method   = "POST"
       resource_path = "usaspending-enrichment"
+    }
+    congress_bills_search_post = {
+      function_arn  = module.congress_bills_search_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "congress-bills-search"
     }
   }
 
@@ -2380,6 +2398,96 @@ module "usaspending_search_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.usaspending_search_dynamodb_policy.arn,
     aws_iam_policy.usaspending_search_s3_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  tags = var.common_tags
+}
+
+# IAM Policy for Congress Bills Search Lambda to access DynamoDB bills table (read-only)
+resource "aws_iam_policy" "congress_bills_search_dynamodb_policy" {
+  name        = "${var.project_name}-congress-bills-search-dynamodb-policy-${var.environment}"
+  description = "Policy for Congress Bills Search Lambda to query DynamoDB bills table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem", # Required for KEYS_ONLY GSI two-phase fetch approach
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for Congress Bills Search Lambda to access S3 bucket (read-only)
+resource "aws_iam_policy" "congress_bills_search_s3_policy" {
+  name        = "${var.project_name}-congress-bills-search-s3-policy-${var.environment}"
+  description = "Policy for Congress Bills Search Lambda to read from S3 bucket for bill details"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Congress Bills Search Lambda Function
+module "congress_bills_search_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-congress-bills-search-${var.environment}"
+  description   = "Lambda function for searching congress bills in DynamoDB"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/congress_bills/search"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT      = var.environment
+    LOG_LEVEL        = var.environment == "development" ? "DEBUG" : "INFO"
+    BILLS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.congress_bills_table_name
+    S3_BUCKET_NAME   = data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_name
+  }
+
+  # Attach core layer
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies - Read-only access to DynamoDB bills table and S3 bucket
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.congress_bills_search_dynamodb_policy.arn,
+    aws_iam_policy.congress_bills_search_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
 

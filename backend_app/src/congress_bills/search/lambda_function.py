@@ -1,0 +1,820 @@
+"""
+Congress Bills Search Lambda Function
+Queries DynamoDB congress-bills table using GSIs and filters to return matching bills
+"""
+
+import json
+import os
+import logging
+import boto3
+import gzip
+from typing import Dict, List, Any, Optional
+from decimal import Decimal
+from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.types import TypeDeserializer
+
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO').upper())
+
+# AWS clients
+dynamodb = boto3.resource('dynamodb')
+s3_client = boto3.client('s3')
+
+# Environment variables
+BILLS_TABLE_NAME = os.environ.get('BILLS_TABLE_NAME', 'congress-bills')
+S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-congress-bills-data-production')
+
+# Get DynamoDB table
+bills_table = dynamodb.Table(BILLS_TABLE_NAME) if BILLS_TABLE_NAME else None
+
+
+def get_cors_headers():
+    """Get CORS headers for API responses"""
+    return {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+    }
+
+
+def convert_decimal_to_float(obj: Any) -> Any:
+    """Recursively convert Decimal values to float for JSON serialization"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimal_to_float(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimal_to_float(item) for item in obj]
+    else:
+        return obj
+
+
+def fetch_oversized_bill_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch oversized bill details from S3 (when oversize_s3_key exists)
+    
+    Args:
+        s3_key: S3 key for the oversized bill file (gzipped JSON)
+    
+    Returns:
+        Full bill dictionary, or None if error
+    """
+    try:
+        if not s3_key:
+            return None
+        
+        # Fetch object from S3
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        
+        # Decompress gzipped content
+        gzipped_content = response['Body'].read()
+        decompressed_content = gzip.decompress(gzipped_content)
+        
+        # Parse JSON
+        bill_details = json.loads(decompressed_content.decode('utf-8'))
+        
+        return bill_details
+        
+    except s3_client.exceptions.NoSuchKey:
+        logger.warning(f"Oversized bill not found in S3: {s3_key}")
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching oversized bill from S3 ({s3_key}): {str(e)}", exc_info=True)
+        return None
+
+
+def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
+    """
+    Apply filters to an item in Python (for post-BatchGetItem filtering with KEYS_ONLY GSIs)
+    
+    Args:
+        item: Bill item to filter
+        filters: Dictionary of filter fields
+    
+    Returns:
+        True if item matches all filters, False otherwise
+    """
+    # Sponsor name filter (OR logic within field)
+    if filters.get('sponsor_name'):
+        sponsor_names = filters['sponsor_name'] if isinstance(filters['sponsor_name'], list) else [filters['sponsor_name']]
+        sponsor_names = [n for n in sponsor_names if n and str(n).strip()]
+        if sponsor_names:
+            item_name = str(item.get('sponsor_full_name') or '').strip()
+            matches = False
+            for name in sponsor_names:
+                name_str = str(name).strip()
+                # Case-insensitive substring match
+                if item_name and name_str.lower() in item_name.lower():
+                    matches = True
+                    break
+                if item_name and item_name.lower() in name_str.lower():
+                    matches = True
+                    break
+            if not matches:
+                return False
+    
+    # Bill title filter (OR logic within field)
+    if filters.get('bill_title'):
+        bill_titles = filters['bill_title'] if isinstance(filters['bill_title'], list) else [filters['bill_title']]
+        bill_titles = [t for t in bill_titles if t and str(t).strip()]
+        if bill_titles:
+            item_title = str(item.get('bill_title') or '').strip()
+            matches = False
+            for title in bill_titles:
+                title_str = str(title).strip()
+                # Case-insensitive substring match
+                if item_title and title_str.lower() in item_title.lower():
+                    matches = True
+                    break
+            if not matches:
+                return False
+    
+    # Bill type filter (OR logic within field)
+    if filters.get('bill_type'):
+        bill_types = filters['bill_type'] if isinstance(filters['bill_type'], list) else [filters['bill_type']]
+        bill_types = [t for t in bill_types if t and str(t).strip()]
+        if bill_types:
+            item_type = str(item.get('bill_type') or '').strip()
+            if item_type not in bill_types:
+                return False
+    
+    # Sponsor party filter (OR logic within field)
+    if filters.get('sponsor_party'):
+        parties = filters['sponsor_party'] if isinstance(filters['sponsor_party'], list) else [filters['sponsor_party']]
+        parties = [p for p in parties if p and str(p).strip()]
+        if parties:
+            item_party = str(item.get('sponsor_party') or '').strip()
+            if item_party not in parties:
+                return False
+    
+    # Sponsor state filter (OR logic within field)
+    if filters.get('sponsor_state'):
+        states = filters['sponsor_state'] if isinstance(filters['sponsor_state'], list) else [filters['sponsor_state']]
+        states = [s for s in states if s and str(s).strip()]
+        if states:
+            item_state = str(item.get('sponsor_state') or '').strip()
+            if item_state not in states:
+                return False
+    
+    # Policy area filter (OR logic within field)
+    if filters.get('policy_area'):
+        policy_areas = filters['policy_area'] if isinstance(filters['policy_area'], list) else [filters['policy_area']]
+        policy_areas = [p for p in policy_areas if p and str(p).strip()]
+        if policy_areas:
+            item_area = str(item.get('policy_area') or '').strip()
+            matches = False
+            for area in policy_areas:
+                area_str = str(area).strip()
+                # Case-insensitive substring match
+                if item_area and area_str.lower() in item_area.lower():
+                    matches = True
+                    break
+            if not matches:
+                return False
+    
+    # Bipartisan filter
+    if filters.get('bipartisan') is not None:
+        bipartisan_value = filters['bipartisan']
+        item_bipartisan = item.get('bipartisan')
+        # Convert to int for comparison
+        if isinstance(item_bipartisan, bool):
+            item_bipartisan = 1 if item_bipartisan else 0
+        if item_bipartisan != bipartisan_value:
+            return False
+    
+    # Bill number filter
+    if filters.get('bill_number') is not None:
+        bill_number = filters['bill_number']
+        item_number = item.get('bill_number')
+        if item_number != bill_number:
+            return False
+    
+    # Date filters
+    if filters.get('introduced_date_from'):
+        item_date = item.get('introduced_date')
+        if not item_date or item_date < filters['introduced_date_from']:
+            return False
+    
+    if filters.get('introduced_date_to'):
+        item_date = item.get('introduced_date')
+        if not item_date or item_date > filters['introduced_date_to']:
+            return False
+    
+    if filters.get('latest_action_date_from'):
+        item_date = item.get('latest_action_date')
+        if not item_date or item_date < filters['latest_action_date_from']:
+            return False
+    
+    if filters.get('latest_action_date_to'):
+        item_date = item.get('latest_action_date')
+        if not item_date or item_date > filters['latest_action_date_to']:
+            return False
+    
+    return True
+
+
+def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Identify which filters can use GSIs and return query configurations
+    
+    Returns:
+        List of query configs, each with: filter_key, index_name, hash_key, hash_value, range_key, range_value
+    """
+    query_configs = []
+    
+    # SponsorNameDateIndex: hash_key=sponsor_full_name, range_key=introduced_date
+    if filters.get('sponsor_name'):
+        sponsor_names = filters['sponsor_name'] if isinstance(filters['sponsor_name'], list) else [filters['sponsor_name']]
+        sponsor_names = [n for n in sponsor_names if n and str(n).strip()]
+        if sponsor_names:
+            # Use first sponsor name for hash key
+            sponsor_name = sponsor_names[0].strip()
+            introduced_date = None
+            if filters.get('introduced_date_from'):
+                introduced_date = filters['introduced_date_from']
+            
+            query_configs.append({
+                'filter_key': 'sponsor_name',
+                'index_name': 'SponsorNameDateIndex',
+                'hash_key': 'sponsor_full_name',
+                'hash_value': sponsor_name,
+                'range_key': 'introduced_date' if introduced_date else None,
+                'range_value': introduced_date,
+                'range_condition': 'gte' if introduced_date else None
+            })
+    
+    # BillTitleDateIndex: hash_key=bill_title, range_key=introduced_date
+    if filters.get('bill_title'):
+        bill_titles = filters['bill_title'] if isinstance(filters['bill_title'], list) else [filters['bill_title']]
+        bill_titles = [t for t in bill_titles if t and str(t).strip()]
+        if bill_titles:
+            # Use first bill title for hash key
+            bill_title = bill_titles[0].strip()
+            introduced_date = None
+            if filters.get('introduced_date_from'):
+                introduced_date = filters['introduced_date_from']
+            
+            query_configs.append({
+                'filter_key': 'bill_title',
+                'index_name': 'BillTitleDateIndex',
+                'hash_key': 'bill_title',
+                'hash_value': bill_title,
+                'range_key': 'introduced_date' if introduced_date else None,
+                'range_value': introduced_date,
+                'range_condition': 'gte' if introduced_date else None
+            })
+    
+    # BillTypeDateIndex: hash_key=bill_type, range_key=introduced_date
+    if filters.get('bill_type'):
+        bill_types = filters['bill_type'] if isinstance(filters['bill_type'], list) else [filters['bill_type']]
+        bill_types = [t for t in bill_types if t and str(t).strip()]
+        if bill_types:
+            # Use first bill type for hash key
+            bill_type = bill_types[0].strip()
+            introduced_date = None
+            if filters.get('introduced_date_from'):
+                introduced_date = filters['introduced_date_from']
+            
+            query_configs.append({
+                'filter_key': 'bill_type',
+                'index_name': 'BillTypeDateIndex',
+                'hash_key': 'bill_type',
+                'hash_value': bill_type,
+                'range_key': 'introduced_date' if introduced_date else None,
+                'range_value': introduced_date,
+                'range_condition': 'gte' if introduced_date else None
+            })
+    
+    # SponsorPartyDateIndex: hash_key=sponsor_party, range_key=introduced_date
+    if filters.get('sponsor_party'):
+        parties = filters['sponsor_party'] if isinstance(filters['sponsor_party'], list) else [filters['sponsor_party']]
+        parties = [p for p in parties if p and str(p).strip()]
+        if parties:
+            # Use first party for hash key
+            party = parties[0].strip()
+            introduced_date = None
+            if filters.get('introduced_date_from'):
+                introduced_date = filters['introduced_date_from']
+            
+            query_configs.append({
+                'filter_key': 'sponsor_party',
+                'index_name': 'SponsorPartyDateIndex',
+                'hash_key': 'sponsor_party',
+                'hash_value': party,
+                'range_key': 'introduced_date' if introduced_date else None,
+                'range_value': introduced_date,
+                'range_condition': 'gte' if introduced_date else None
+            })
+    
+    # SponsorStateDateIndex: hash_key=sponsor_state, range_key=introduced_date
+    if filters.get('sponsor_state'):
+        states = filters['sponsor_state'] if isinstance(filters['sponsor_state'], list) else [filters['sponsor_state']]
+        states = [s for s in states if s and str(s).strip()]
+        if states:
+            # Use first state for hash key
+            state = states[0].strip()
+            introduced_date = None
+            if filters.get('introduced_date_from'):
+                introduced_date = filters['introduced_date_from']
+            
+            query_configs.append({
+                'filter_key': 'sponsor_state',
+                'index_name': 'SponsorStateDateIndex',
+                'hash_key': 'sponsor_state',
+                'hash_value': state,
+                'range_key': 'introduced_date' if introduced_date else None,
+                'range_value': introduced_date,
+                'range_condition': 'gte' if introduced_date else None
+            })
+    
+    # PolicyAreaDateIndex: hash_key=policy_area, range_key=introduced_date
+    if filters.get('policy_area'):
+        policy_areas = filters['policy_area'] if isinstance(filters['policy_area'], list) else [filters['policy_area']]
+        policy_areas = [p for p in policy_areas if p and str(p).strip()]
+        if policy_areas:
+            # Use first policy area for hash key
+            policy_area = policy_areas[0].strip()
+            introduced_date = None
+            if filters.get('introduced_date_from'):
+                introduced_date = filters['introduced_date_from']
+            
+            query_configs.append({
+                'filter_key': 'policy_area',
+                'index_name': 'PolicyAreaDateIndex',
+                'hash_key': 'policy_area',
+                'hash_value': policy_area,
+                'range_key': 'introduced_date' if introduced_date else None,
+                'range_value': introduced_date,
+                'range_condition': 'gte' if introduced_date else None
+            })
+    
+    # BipartisanDateIndex: hash_key=bipartisan, range_key=introduced_date
+    if filters.get('bipartisan') is not None:
+        bipartisan_value = filters['bipartisan']
+        introduced_date = None
+        if filters.get('introduced_date_from'):
+            introduced_date = filters['introduced_date_from']
+        
+        query_configs.append({
+            'filter_key': 'bipartisan',
+            'index_name': 'BipartisanDateIndex',
+            'hash_key': 'bipartisan',
+            'hash_value': bipartisan_value,
+            'range_key': 'introduced_date' if introduced_date else None,
+            'range_value': introduced_date,
+            'range_condition': 'gte' if introduced_date else None
+        })
+    
+    # BillNumberDateIndex: hash_key=bill_number, range_key=introduced_date
+    if filters.get('bill_number') is not None:
+        bill_number = filters['bill_number']
+        introduced_date = None
+        if filters.get('introduced_date_from'):
+            introduced_date = filters['introduced_date_from']
+        
+        query_configs.append({
+            'filter_key': 'bill_number',
+            'index_name': 'BillNumberDateIndex',
+            'hash_key': 'bill_number',
+            'hash_value': bill_number,
+            'range_key': 'introduced_date' if introduced_date else None,
+            'range_value': introduced_date,
+            'range_condition': 'gte' if introduced_date else None
+        })
+    
+    # CongressBillTypeIndex: hash_key=congress, range_key=bill_type
+    if filters.get('congress'):
+        congresses = filters['congress'] if isinstance(filters['congress'], list) else [filters['congress']]
+        congresses = [c for c in congresses if c is not None]
+        if congresses:
+            congress = congresses[0]
+            bill_type = None
+            if filters.get('bill_type'):
+                bill_types = filters['bill_type'] if isinstance(filters['bill_type'], list) else [filters['bill_type']]
+                if bill_types:
+                    bill_type = bill_types[0].strip()
+            
+            query_configs.append({
+                'filter_key': 'congress',
+                'index_name': 'CongressBillTypeIndex',
+                'hash_key': 'congress',
+                'hash_value': congress,
+                'range_key': 'bill_type' if bill_type else None,
+                'range_value': bill_type,
+                'range_condition': None
+            })
+    
+    # IntroducedDateIndex: hash_key=introduced_date, range_key=null
+    if filters.get('introduced_date_from'):
+        introduced_date = filters['introduced_date_from']
+        query_configs.append({
+            'filter_key': 'introduced_date',
+            'index_name': 'IntroducedDateIndex',
+            'hash_key': 'introduced_date',
+            'hash_value': introduced_date,
+            'range_key': None,
+            'range_value': None,
+            'range_condition': None
+        })
+    
+    # LatestActionDateIndex: hash_key=latest_action_date, range_key=null
+    if filters.get('latest_action_date_from'):
+        latest_action_date = filters['latest_action_date_from']
+        query_configs.append({
+            'filter_key': 'latest_action_date',
+            'index_name': 'LatestActionDateIndex',
+            'hash_key': 'latest_action_date',
+            'hash_value': latest_action_date,
+            'range_key': None,
+            'range_value': None,
+            'range_condition': None
+        })
+    
+    return query_configs
+
+
+def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: Any,
+                           range_key_name: Optional[str] = None, range_key_value: Any = None,
+                           range_key_condition: Optional[str] = None, limit: int = 1000,
+                           exclusive_start_key: Optional[Dict] = None, get_all: bool = False) -> tuple[List[str], Optional[Dict]]:
+    """
+    Query a GSI and return bill_ids (for KEYS_ONLY GSIs)
+    
+    Args:
+        index_name: Name of the GSI to query
+        hash_key_name: Hash key attribute name
+        hash_key_value: Hash key value
+        range_key_name: Optional range key attribute name
+        range_key_value: Optional range key value (for exact match)
+        range_key_condition: Optional range key condition ('gte', 'lte', 'between')
+        limit: Maximum number of bill_ids to return per batch
+        exclusive_start_key: Pagination token to continue from
+        get_all: If True, paginate to get all items (up to limit). If False, return single batch.
+    
+    Returns:
+        Tuple of (bill_ids list, last_evaluated_key for pagination)
+    """
+    bill_ids = []
+    last_eval_key = exclusive_start_key
+    
+    params = {
+        'IndexName': index_name,
+        'KeyConditionExpression': Key(hash_key_name).eq(hash_key_value),
+        'Limit': limit,
+        'ProjectionExpression': 'bill_id'  # Only need bill_id from KEYS_ONLY GSI
+    }
+    
+    # Add range key condition if provided
+    if range_key_name:
+        if range_key_condition == 'between' and isinstance(range_key_value, tuple):
+            params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).between(range_key_value[0], range_key_value[1])
+        elif range_key_condition == 'gte':
+            params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).gte(range_key_value)
+        elif range_key_condition == 'lte':
+            params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).lte(range_key_value)
+        elif range_key_value is not None:
+            params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).eq(range_key_value)
+    
+    # Query GSI (with pagination if get_all=True)
+    max_rounds = 100 if get_all else 1
+    round_count = 0
+    
+    while round_count < max_rounds:
+        round_count += 1
+        try:
+            if last_eval_key:
+                params['ExclusiveStartKey'] = last_eval_key
+            
+            response = bills_table.query(**params)
+            gsi_items = response.get('Items', [])
+            last_eval_key = response.get('LastEvaluatedKey')
+            
+            # Extract bill_ids
+            for item in gsi_items:
+                bill_id = item.get('bill_id')
+                if bill_id:
+                    bill_ids.append(bill_id)
+            
+            # Stop if no more items or we have enough (and not getting all)
+            if not last_eval_key:
+                break
+            if not get_all:
+                break
+            if len(bill_ids) >= limit:
+                break
+                
+        except Exception as e:
+            logger.error(f"Error querying GSI {index_name}: {str(e)}", exc_info=True)
+            break
+    
+    return bill_ids[:limit], last_eval_key
+
+
+def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
+    """
+    Search bills in DynamoDB using filters with multi-GSI intersection approach
+    
+    Strategy:
+    1. Query each filter's GSI separately to get bill_ids
+    2. Use the shortest list as source of truth (most restrictive filter)
+    3. Fetch full items for that list
+    4. Apply remaining filters in Python
+    5. Paginate until one query runs out of items
+    
+    Args:
+        filters: Dictionary of filter fields
+        limit: Maximum number of results to return
+        last_evaluated_key: Pagination token from previous request
+    
+    Returns:
+        Dictionary with search results and pagination info
+    """
+    if not bills_table:
+        raise Exception("DynamoDB bills table not initialized")
+    
+    # Identify which filters can use GSIs
+    query_configs = identify_queryable_filters(filters)
+    
+    # If we have multiple queryable filters, use intersection approach
+    if len(query_configs) > 1:
+        logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} GSIs")
+        
+        # Query each GSI to get initial batch of bill_ids (to determine shortest list)
+        gsi_results = {}
+        for config in query_configs:
+            logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
+            # Get first batch to determine which is shortest
+            bill_ids, _ = query_gsi_for_bill_ids(
+                index_name=config['index_name'],
+                hash_key_name=config['hash_key'],
+                hash_key_value=config['hash_value'],
+                range_key_name=config.get('range_key'),
+                range_key_value=config.get('range_value'),
+                range_key_condition=config.get('range_condition'),
+                limit=1000,  # Get first batch
+                get_all=False
+            )
+            gsi_results[config['filter_key']] = {
+                'bill_ids': set(bill_ids),
+                'config': config,
+                'total_count': len(bill_ids),
+                'last_eval_key': None
+            }
+            logger.info(f"Found {len(bill_ids)} bill_ids from {config['index_name']} (first batch)")
+        
+        # Find the shortest list (most restrictive filter) - this is our source of truth
+        shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['bill_ids']))
+        source_bill_ids = list(gsi_results[shortest_key]['bill_ids'])
+        source_config = gsi_results[shortest_key]['config']
+        
+        logger.info(f"Using {shortest_key} as source of truth ({len(source_bill_ids)} bill_ids)")
+        
+        # Remove the source filter from filters (we've already applied it via GSI)
+        remaining_filters = filters.copy()
+        if shortest_key in remaining_filters:
+            # For list filters, we need to handle the first value being used in GSI
+            if isinstance(remaining_filters[shortest_key], list):
+                # Remove the first value that was used in GSI, keep others for Python filtering
+                remaining_filters[shortest_key] = remaining_filters[shortest_key][1:]
+                if not remaining_filters[shortest_key]:
+                    del remaining_filters[shortest_key]
+            else:
+                del remaining_filters[shortest_key]
+        
+        logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
+        
+        # Paginate through source GSI until we have enough results or it runs out
+        all_matching_items = []
+        source_last_eval_key = None
+        max_pagination_rounds = 50
+        pagination_round = 0
+        
+        while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
+            pagination_round += 1
+            
+            # Query source GSI with pagination
+            source_bill_ids_batch, source_last_eval_key = query_gsi_for_bill_ids(
+                index_name=source_config['index_name'],
+                hash_key_name=source_config['hash_key'],
+                hash_key_value=source_config['hash_value'],
+                range_key_name=source_config.get('range_key'),
+                range_key_value=source_config.get('range_value'),
+                range_key_condition=source_config.get('range_condition'),
+                limit=1000,
+                exclusive_start_key=source_last_eval_key,
+                get_all=False
+            )
+            
+            if not source_bill_ids_batch:
+                logger.info(f"Source GSI {source_config['index_name']} ran out of items")
+                break
+            
+            logger.info(f"Pagination round {pagination_round}: Got {len(source_bill_ids_batch)} bill_ids from source GSI")
+            
+            # Fetch full items for this batch
+            items_batch = []
+            if source_bill_ids_batch:
+                batch_size = 100
+                for i in range(0, len(source_bill_ids_batch), batch_size):
+                    batch_ids = source_bill_ids_batch[i:i + batch_size]
+                    dynamodb_client = boto3.client('dynamodb')
+                    request_items = {
+                        BILLS_TABLE_NAME: {
+                            'Keys': [{'bill_id': {'S': str(bid)}} for bid in batch_ids]
+                        }
+                    }
+                    batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                    batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+                    deserializer = TypeDeserializer()
+                    for item in batch_items:
+                        converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                        items_batch.append(converted_item)
+            
+            # Apply remaining filters in Python
+            for item in items_batch:
+                if apply_python_filter(item, remaining_filters):
+                    all_matching_items.append(item)
+            
+            logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
+            
+            # Stop if source GSI ran out or we have enough results
+            if not source_last_eval_key or len(all_matching_items) >= limit:
+                break
+        
+        # Use the collected items directly
+        items = all_matching_items[:limit]
+        
+        logger.info(f"Multi-GSI intersection complete: {len(items)} items matching all filters")
+        method = 'multi_gsi_intersection'
+        index_name = f"{len(query_configs)}_GSIs"
+        
+        # Convert Decimal to float for JSON serialization
+        results = [convert_decimal_to_float(item) for item in items]
+        
+        # Enrich results - handle oversized items
+        enriched_results = []
+        s3_fetch_success_count = 0
+        s3_fetch_fail_count = 0
+        for bill in results:
+            # Check if this is an oversized item (full details in S3)
+            oversize_s3_key = bill.get('oversize_s3_key')
+            if oversize_s3_key:
+                # Fetch full bill details from S3
+                full_bill = fetch_oversized_bill_from_s3(oversize_s3_key)
+                if full_bill:
+                    # Replace bill with full details from S3
+                    bill = convert_decimal_to_float(full_bill)
+                    s3_fetch_success_count += 1
+                else:
+                    s3_fetch_fail_count += 1
+            
+            enriched_results.append(bill)
+        
+        if enriched_results:
+            logger.info(f"Enriched {len(enriched_results)} bill(s). S3 fetch: {s3_fetch_success_count} success, {s3_fetch_fail_count} failed")
+        
+        # Return results for multi-GSI intersection
+        return {
+            'success': True,
+            'results': enriched_results,
+            'count': len(enriched_results),
+            'has_more': bool(source_last_eval_key),
+            'last_evaluated_key': source_last_eval_key,
+            'method': method,
+            'index_used': index_name
+        }
+    
+    # Fall back to single GSI query or scan
+    # For now, if no queryable filters, return empty
+    if not query_configs:
+        logger.info("No queryable filters found, returning empty results")
+        return {
+            'success': True,
+            'results': [],
+            'count': 0,
+            'has_more': False,
+            'last_evaluated_key': None,
+            'method': 'scan',
+            'index_used': None
+        }
+    
+    # Use first query config for single GSI query
+    config = query_configs[0]
+    logger.info(f"Using single GSI query: {config['index_name']}")
+    
+    # Query GSI
+    bill_ids, last_eval_key = query_gsi_for_bill_ids(
+        index_name=config['index_name'],
+        hash_key_name=config['hash_key'],
+        hash_key_value=config['hash_value'],
+        range_key_name=config.get('range_key'),
+        range_key_value=config.get('range_value'),
+        range_key_condition=config.get('range_condition'),
+        limit=limit * 5,  # Fetch more to account for filtering
+        get_all=False
+    )
+    
+    # Fetch full items
+    items = []
+    if bill_ids:
+        batch_size = 100
+        for i in range(0, len(bill_ids), batch_size):
+            batch_ids = bill_ids[i:i + batch_size]
+            dynamodb_client = boto3.client('dynamodb')
+            request_items = {
+                BILLS_TABLE_NAME: {
+                    'Keys': [{'bill_id': {'S': str(bid)}} for bid in batch_ids]
+                }
+            }
+            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+            batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+            deserializer = TypeDeserializer()
+            for item in batch_items:
+                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                items.append(converted_item)
+    
+    # Apply remaining filters
+    remaining_filters = filters.copy()
+    if config['filter_key'] in remaining_filters:
+        if isinstance(remaining_filters[config['filter_key']], list):
+            remaining_filters[config['filter_key']] = remaining_filters[config['filter_key']][1:]
+            if not remaining_filters[config['filter_key']]:
+                del remaining_filters[config['filter_key']]
+        else:
+            del remaining_filters[config['filter_key']]
+    
+    filtered_items = [item for item in items if apply_python_filter(item, remaining_filters)]
+    filtered_items = filtered_items[:limit]
+    
+    # Convert and enrich
+    results = [convert_decimal_to_float(item) for item in filtered_items]
+    enriched_results = []
+    for bill in results:
+        oversize_s3_key = bill.get('oversize_s3_key')
+        if oversize_s3_key:
+            full_bill = fetch_oversized_bill_from_s3(oversize_s3_key)
+            if full_bill:
+                bill = convert_decimal_to_float(full_bill)
+        enriched_results.append(bill)
+    
+    return {
+        'success': True,
+        'results': enriched_results,
+        'count': len(enriched_results),
+        'has_more': bool(last_eval_key),
+        'last_evaluated_key': last_eval_key,
+        'method': 'query',
+        'index_used': config['index_name']
+    }
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Lambda handler for congress bills search API
+    """
+    try:
+        # Handle CORS preflight
+        if event.get('httpMethod') == 'OPTIONS':
+            return {
+                'statusCode': 200,
+                'headers': get_cors_headers(),
+                'body': json.dumps({})
+            }
+        
+        # Parse request body
+        body = event.get('body', '{}')
+        if isinstance(body, str):
+            body = json.loads(body)
+        
+        # Extract filters and pagination
+        filters = body.get('filters', {})
+        limit = body.get('limit', 100)
+        last_evaluated_key = body.get('last_evaluated_key')
+        
+        # Validate limit
+        if limit > 1000:
+            limit = 1000
+        if limit < 1:
+            limit = 100
+        
+        # Perform search
+        result = search_bills(filters, limit, last_evaluated_key)
+        
+        return {
+            'statusCode': 200,
+            'headers': get_cors_headers(),
+            'body': json.dumps(result)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in congress bills search: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'headers': get_cors_headers(),
+            'body': json.dumps({
+                'success': False,
+                'error': str(e)
+            })
+        }
