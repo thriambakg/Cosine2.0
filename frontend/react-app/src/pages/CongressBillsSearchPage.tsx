@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   TextField,
   Typography,
@@ -37,6 +37,9 @@ import {
   KeyboardArrowUp as KeyboardArrowUpIcon,
   ViewColumn as ViewColumnIcon,
   Visibility as VisibilityIcon,
+  Dashboard as AddToContextIcon,
+  Chat as SidebarChatIcon,
+  AddComment as NewChatIcon,
 } from '@mui/icons-material';
 import { 
   congressBillsSearchAPI, 
@@ -48,6 +51,7 @@ import { policyAreaSuggestionsService } from '../services/policyAreaSuggestions'
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
+import { addToContext } from '../components/tiles/common/contextManager';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -93,13 +97,12 @@ const BIPARTISAN_OPTIONS = [
   { value: 0, label: 'Not Bipartisan' }
 ];
 
-// Congress numbers (recent congresses)
-const CONGRESS_NUMBERS = Array.from({ length: 10 }, (_, i) => 118 - i); // 118 down to 109
-
-
 const CongressBillsSearchPage: React.FC = () => {
   const {} = useAuth();
   const {} = useGlobalChat();
+  
+  // Context menu state
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'congress-bills-search-page-state';
@@ -495,8 +498,8 @@ const CongressBillsSearchPage: React.FC = () => {
         }
       });
 
-      // Use larger page size for initial fetch to minimize API calls
-      const fetchPageSize = 100;
+      // Use default batch size for initial fetch
+      const fetchPageSize = 10;
       
       const response = await congressBillsSearchAPI.search({
         filters,
@@ -557,8 +560,8 @@ const CongressBillsSearchPage: React.FC = () => {
         }
       });
 
-      // Use larger page size for load more to minimize API calls
-      const fetchPageSize = 100;
+      // Use default batch size for load more
+      const fetchPageSize = 10;
       
       const response = await congressBillsSearchAPI.search({
         filters,
@@ -587,6 +590,65 @@ const CongressBillsSearchPage: React.FC = () => {
       setIsLoadingMore(false);
     }
   }, [hasMore, lastEvaluatedKey, isLoadingMore, searchParams, allSearchResults, computeFiltersFromResults]);
+
+  // Context menu handlers
+  const handleContextMenuClose = () => {
+    setContextMenuAnchor(null);
+  };
+
+  const handleAddToContext = (target: 'new' | 'sidebar') => {
+    const selectedBillObjects = currentResults.filter(bill => 
+      selectedBills.has(bill.bill_id)
+    );
+
+    if (selectedBillObjects.length === 0) return;
+
+    // Format date helper
+    const formatDate = (dateString?: string): string => {
+      if (!dateString) return '';
+      try {
+        return new Date(dateString).toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric' 
+        });
+      } catch {
+        return dateString;
+      }
+    };
+
+    // Add bills to context
+    selectedBillObjects.forEach((bill) => {
+      const billId = bill.bill_id || `bill_${Date.now()}`;
+      const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
+      const subtitle = bill.introduced_date 
+        ? `${formatDate(bill.introduced_date)}${bill.sponsor_name ? ` • ${bill.sponsor_name}` : ''}${bill.congress ? ` • ${bill.congress}th Congress` : ''}`
+        : bill.sponsor_name ? bill.sponsor_name : 'Congress Bill';
+      
+      const contextItem = {
+        id: `congress_bill_${billId}_${Date.now()}`,
+        type: 'congress_bill' as const,
+        title,
+        subtitle,
+        data: bill,
+        timestamp: Date.now(),
+      };
+
+      if (target === 'sidebar') {
+        // Add to current sidebar session's context
+        const event = new CustomEvent('add-to-sidebar-context', {
+          detail: contextItem
+        });
+        window.dispatchEvent(event);
+      } else {
+        // Add to new chat
+        addToContext(contextItem);
+      }
+    });
+
+    setSelectedBills(new Set());
+    handleContextMenuClose();
+  };
 
   // Compute available filters when results are restored from sessionStorage
   useEffect(() => {
@@ -1076,6 +1138,127 @@ const CongressBillsSearchPage: React.FC = () => {
                         <ViewColumnIcon />
                       </IconButton>
                     </Tooltip>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    {/* Add to Context Button */}
+                    {currentResults.length > 0 && (
+                      <Tooltip title={`Add ${selectedBills.size > 0 ? `${selectedBills.size} bill(s)` : 'selected bills'} to context`}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              if (selectedBills.size === 0) {
+                                alert('Please select at least one bill to add to context');
+                                return;
+                              }
+                              setContextMenuAnchor(e.currentTarget);
+                            }}
+                            disabled={selectedBills.size === 0}
+                            sx={{ 
+                              color: selectedBills.size > 0 ? '#10b981' : '#9ca3af', 
+                              '&:hover': { color: '#10b981' },
+                              '&:disabled': { color: '#4b5563' }
+                            }}
+                          >
+                            <AddToContextIcon sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                    {currentResults.length > 0 ? (
+                      <Chip
+                        label={`${currentResults.length} bill${currentResults.length !== 1 ? 's' : ''} found`}
+                        sx={{
+                          backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                          color: '#86efac',
+                          border: '1px solid #22c55e',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : isFiltered && allSearchResults.length > 0 ? (
+                      <Chip
+                        label={`0 of ${allSearchResults.length} bills match filters`}
+                        sx={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : allSearchResults.length === 0 && !isSearching ? (
+                      <Chip
+                        label="No bills found"
+                        sx={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : null}
+                    {currentResults.length > 0 && (
+                      <>
+                        <FormControl size="small" sx={{ minWidth: 120, ml: 1 }}>
+                          <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+                          <Select
+                            labelId="results-per-page-label"
+                            value={pageSize}
+                            label="Per Page"
+                            onChange={(e) => {
+                              const newPageSize = Number(e.target.value);
+                              setPageSize(newPageSize);
+                              setCurrentPage(1);
+                            }}
+                            sx={{
+                              color: '#ffffff',
+                              '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '& .MuiSelect-icon': { color: '#9ca3af' },
+                            }}
+                            MenuProps={{
+                              PaperProps: {
+                                sx: {
+                                  bgcolor: '#1f2937',
+                                  border: '1px solid #374151',
+                                  '& .MuiMenuItem-root': {
+                                    color: '#ffffff',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                    },
+                                    '&.Mui-selected': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                      '&:hover': {
+                                        backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                                      },
+                                    },
+                                  },
+                                  '&::-webkit-scrollbar': {
+                                    width: '8px',
+                                  },
+                                  '&::-webkit-scrollbar-track': {
+                                    backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb': {
+                                    backgroundColor: '#3b82f6',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb:hover': {
+                                    backgroundColor: '#2563eb',
+                                  },
+                                },
+                              },
+                            }}
+                          >
+                            <MenuItem value={10}>10</MenuItem>
+                            <MenuItem value={25}>25</MenuItem>
+                            <MenuItem value={50}>50</MenuItem>
+                            <MenuItem value={100}>100</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </>
+                    )}
                   </Box>
                 </Box>
 
@@ -2652,6 +2835,34 @@ const CongressBillsSearchPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Context Menu */}
+      <Menu
+        anchorEl={contextMenuAnchor}
+        open={Boolean(contextMenuAnchor)}
+        onClose={handleContextMenuClose}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+          }
+        }}
+      >
+        <MenuItem
+          onClick={() => handleAddToContext('new')}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
+          Add to New Chat
+        </MenuItem>
+        <MenuItem
+          onClick={() => handleAddToContext('sidebar')}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+          Add to Current Sidebar Chat
+        </MenuItem>
+      </Menu>
     </Box>
   );
 };
