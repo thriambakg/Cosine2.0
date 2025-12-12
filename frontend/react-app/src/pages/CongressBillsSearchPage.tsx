@@ -35,11 +35,7 @@ import {
   Search as SearchIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
-  Chat as SidebarChatIcon,
-  AddComment as NewChatIcon,
   ViewColumn as ViewColumnIcon,
-  Dashboard as AddToContextIcon,
-  InfoOutlined as InfoIcon,
   Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { 
@@ -154,7 +150,6 @@ const CongressBillsSearchPage: React.FC = () => {
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(savedState?.lastEvaluatedKey || null);
   const [hasMore, setHasMore] = useState<boolean>(savedState?.hasMore || false);
   const [selectedBills, setSelectedBills] = useState<Set<string>>(new Set());
-  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [selectedBillForDetails, setSelectedBillForDetails] = useState<CongressBill | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
 
@@ -375,7 +370,7 @@ const CongressBillsSearchPage: React.FC = () => {
   const [isPolicyAreaDataLoaded, setIsPolicyAreaDataLoaded] = useState<boolean>(false);
 
   // Autocomplete state for Sponsor Name and Bill Title
-  const [sponsorNameSuggestions, setSponsorNameSuggestions] = useState<string[]>([]);
+  const [, setSponsorNameSuggestions] = useState<string[]>([]);
   const [billTitleSuggestions, setBillTitleSuggestions] = useState<string[]>([]);
   const [sponsorNameLoading, setSponsorNameLoading] = useState<boolean>(false);
   const [billTitleLoading, setBillTitleLoading] = useState<boolean>(false);
