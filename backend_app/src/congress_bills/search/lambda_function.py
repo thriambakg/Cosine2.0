@@ -595,7 +595,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             pagination_round += 1
             
             # Query source GSI with pagination
-            source_bill_ids_batch, source_last_eval_key = query_gsi_for_bill_ids(
+            source_bill_ids_batch, new_last_eval_key = query_gsi_for_bill_ids(
                 index_name=source_config['index_name'],
                 hash_key_name=source_config['hash_key'],
                 hash_key_value=source_config['hash_value'],
@@ -606,6 +606,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 exclusive_start_key=source_last_eval_key,
                 get_all=False
             )
+            source_last_eval_key = new_last_eval_key
             
             if not source_bill_ids_batch:
                 logger.info(f"Source GSI {source_config['index_name']} ran out of items")
@@ -675,27 +676,80 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         if enriched_results:
             logger.info(f"Enriched {len(enriched_results)} bill(s). S3 fetch: {s3_fetch_success_count} success, {s3_fetch_fail_count} failed")
         
+        # Convert last_evaluated_key to JSON-serializable format
+        serializable_last_key = None
+        if source_last_eval_key:
+            try:
+                serializable_last_key = convert_decimal_to_float(source_last_eval_key)
+            except Exception as e:
+                logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
+                serializable_last_key = None
+        
         # Return results for multi-GSI intersection
         return {
             'success': True,
             'results': enriched_results,
             'count': len(enriched_results),
-            'has_more': bool(source_last_eval_key),
-            'last_evaluated_key': source_last_eval_key,
+            'has_more': source_last_eval_key is not None,
+            'last_evaluated_key': serializable_last_key,
             'method': method,
             'index_used': index_name
         }
     
     # Fall back to single GSI query or scan
-    # For now, if no queryable filters, return empty
+    # If no queryable filters, use table scan to return first page
     if not query_configs:
-        logger.info("No queryable filters found, returning empty results")
+        logger.info("No queryable filters found, using table scan to return first page")
+        
+        # Build scan parameters
+        scan_limit = max(limit * 10, 1000)  # Scan more items to account for potential filtering
+        params = {
+            'Limit': scan_limit
+        }
+        
+        if last_evaluated_key:
+            params['ExclusiveStartKey'] = last_evaluated_key
+        
+        logger.info(f"Scanning bills table with Limit={scan_limit} (result limit={limit})")
+        response = bills_table.scan(**params)
+        
+        # Extract items from scan
+        scanned_items = response.get('Items', [])
+        last_eval_key = response.get('LastEvaluatedKey')
+        scanned_count = response.get('ScannedCount', 0)
+        
+        logger.info(f"Scan found {len(scanned_items)} items (scanned {scanned_count} total)")
+        
+        # Apply any filters in Python (even if no GSI filters, there might be non-GSI filters)
+        filtered_items = [item for item in scanned_items if apply_python_filter(item, filters)]
+        filtered_items = filtered_items[:limit]
+        
+        # Convert and enrich
+        results = [convert_decimal_to_float(item) for item in filtered_items]
+        enriched_results = []
+        for bill in results:
+            oversize_s3_key = bill.get('oversize_s3_key')
+            if oversize_s3_key:
+                full_bill = fetch_oversized_bill_from_s3(oversize_s3_key)
+                if full_bill:
+                    bill = convert_decimal_to_float(full_bill)
+            enriched_results.append(bill)
+        
+        # Convert last_evaluated_key to JSON-serializable format
+        serializable_last_key = None
+        if last_eval_key:
+            try:
+                serializable_last_key = convert_decimal_to_float(last_eval_key)
+            except Exception as e:
+                logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
+                serializable_last_key = None
+        
         return {
             'success': True,
-            'results': [],
-            'count': 0,
-            'has_more': False,
-            'last_evaluated_key': None,
+            'results': enriched_results,
+            'count': len(enriched_results),
+            'has_more': last_eval_key is not None,
+            'last_evaluated_key': serializable_last_key,
             'method': 'scan',
             'index_used': None
         }
@@ -704,7 +758,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     config = query_configs[0]
     logger.info(f"Using single GSI query: {config['index_name']}")
     
-    # Query GSI
+    # Query GSI with pagination support
     bill_ids, last_eval_key = query_gsi_for_bill_ids(
         index_name=config['index_name'],
         hash_key_name=config['hash_key'],
@@ -713,6 +767,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         range_key_value=config.get('range_value'),
         range_key_condition=config.get('range_condition'),
         limit=limit * 5,  # Fetch more to account for filtering
+        exclusive_start_key=last_evaluated_key,  # Support pagination
         get_all=False
     )
     
@@ -759,12 +814,21 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 bill = convert_decimal_to_float(full_bill)
         enriched_results.append(bill)
     
+    # Convert last_evaluated_key to JSON-serializable format
+    serializable_last_key = None
+    if last_eval_key:
+        try:
+            serializable_last_key = convert_decimal_to_float(last_eval_key)
+        except Exception as e:
+            logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
+            serializable_last_key = None
+    
     return {
         'success': True,
         'results': enriched_results,
         'count': len(enriched_results),
-        'has_more': bool(last_eval_key),
-        'last_evaluated_key': last_eval_key,
+        'has_more': last_eval_key is not None,
+        'last_evaluated_key': serializable_last_key,
         'method': 'query',
         'index_used': config['index_name']
     }
@@ -802,10 +866,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Perform search
         result = search_bills(filters, limit, last_evaluated_key)
         
+        # Ensure result is fully JSON-serializable (convert any remaining Decimals, etc.)
+        def json_serializer(obj):
+            """Custom JSON serializer for types that json.dumps doesn't handle"""
+            if isinstance(obj, Decimal):
+                return float(obj)
+            elif isinstance(obj, (set, frozenset)):
+                return list(obj)
+            raise TypeError(f"Type {type(obj)} not serializable")
+        
         return {
             'statusCode': 200,
             'headers': get_cors_headers(),
-            'body': json.dumps(result)
+            'body': json.dumps(result, default=json_serializer)
         }
         
     except Exception as e:

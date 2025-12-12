@@ -26,6 +26,10 @@ import {
   Chip,
   Pagination,
   Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -36,6 +40,7 @@ import {
   ViewColumn as ViewColumnIcon,
   Dashboard as AddToContextIcon,
   InfoOutlined as InfoIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { 
   congressBillsSearchAPI, 
@@ -43,6 +48,7 @@ import {
   CongressBill 
 } from '../services/api';
 import { politicianSuggestionsService } from '../services/politicianSuggestions';
+import { policyAreaSuggestionsService } from '../services/policyAreaSuggestions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
@@ -149,6 +155,190 @@ const CongressBillsSearchPage: React.FC = () => {
   const [hasMore, setHasMore] = useState<boolean>(savedState?.hasMore || false);
   const [selectedBills, setSelectedBills] = useState<Set<string>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedBillForDetails, setSelectedBillForDetails] = useState<CongressBill | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
+
+  // Client-side filter state
+  const [selectedFilters, setSelectedFilters] = useState<{
+    bill_types: Set<string>;
+    sponsor_parties: Set<string>;
+    sponsor_states: Set<string>;
+    policy_areas: Set<string>;
+    congresses: Set<number>;
+    bipartisan: Set<number>;
+  }>(() => {
+    const saved = savedState?.selectedFilters;
+    if (saved) {
+      return {
+        bill_types: new Set(saved.bill_types || []),
+        sponsor_parties: new Set(saved.sponsor_parties || []),
+        sponsor_states: new Set(saved.sponsor_states || []),
+        policy_areas: new Set(saved.policy_areas || []),
+        congresses: new Set(saved.congresses || []),
+        bipartisan: new Set(saved.bipartisan || []),
+      };
+    }
+    return {
+      bill_types: new Set(),
+      sponsor_parties: new Set(),
+      sponsor_states: new Set(),
+      policy_areas: new Set(),
+      congresses: new Set(),
+      bipartisan: new Set(),
+    };
+  });
+
+  const [availableFilters, setAvailableFilters] = useState<{
+    bill_type_filters: Array<{ billType: string; count: number }>;
+    sponsor_party_filters: Array<{ party: string; count: number }>;
+    sponsor_state_filters: Array<{ state: string; count: number }>;
+    policy_area_filters: Array<{ area: string; count: number }>;
+    congress_filters: Array<{ congress: number; count: number }>;
+    bipartisan_filters: Array<{ bipartisan: number; count: number }>;
+  }>(savedState?.availableFilters || {
+    bill_type_filters: [],
+    sponsor_party_filters: [],
+    sponsor_state_filters: [],
+    policy_area_filters: [],
+    congress_filters: [],
+    bipartisan_filters: [],
+  });
+
+  const [expandedFilters, setExpandedFilters] = useState<{
+    billTypes: boolean;
+    sponsorParties: boolean;
+    sponsorStates: boolean;
+    policyAreas: boolean;
+    congresses: boolean;
+    bipartisan: boolean;
+  }>(savedState?.expandedFilters || {
+    billTypes: false,
+    sponsorParties: false,
+    sponsorStates: false,
+    policyAreas: false,
+    congresses: false,
+    bipartisan: false,
+  });
+
+  const [isFiltered, setIsFiltered] = useState<boolean>(() => {
+    const saved = savedState?.selectedFilters;
+    if (saved) {
+      return (
+        (saved.bill_types && saved.bill_types.length > 0) ||
+        (saved.sponsor_parties && saved.sponsor_parties.length > 0) ||
+        (saved.sponsor_states && saved.sponsor_states.length > 0) ||
+        (saved.policy_areas && saved.policy_areas.length > 0) ||
+        (saved.congresses && saved.congresses.length > 0) ||
+        (saved.bipartisan && saved.bipartisan.length > 0)
+      );
+    }
+    return false;
+  });
+
+  // Compute available filters from results
+  const computeFiltersFromResults = useCallback((results: CongressBill[]) => {
+    const billTypeMap = new Map<string, number>();
+    const sponsorPartyMap = new Map<string, number>();
+    const sponsorStateMap = new Map<string, number>();
+    const policyAreaMap = new Map<string, number>();
+    const congressMap = new Map<number, number>();
+    const bipartisanMap = new Map<number, number>();
+
+    results.forEach((bill) => {
+      if (bill.bill_type) {
+        billTypeMap.set(bill.bill_type, (billTypeMap.get(bill.bill_type) || 0) + 1);
+      }
+      if (bill.sponsor_party) {
+        sponsorPartyMap.set(bill.sponsor_party, (sponsorPartyMap.get(bill.sponsor_party) || 0) + 1);
+      }
+      if (bill.sponsor_state) {
+        sponsorStateMap.set(bill.sponsor_state, (sponsorStateMap.get(bill.sponsor_state) || 0) + 1);
+      }
+      if (bill.policy_area) {
+        policyAreaMap.set(bill.policy_area, (policyAreaMap.get(bill.policy_area) || 0) + 1);
+      }
+      if (bill.congress !== undefined && bill.congress !== null) {
+        congressMap.set(bill.congress, (congressMap.get(bill.congress) || 0) + 1);
+      }
+      if (bill.bipartisan !== undefined && bill.bipartisan !== null) {
+        bipartisanMap.set(bill.bipartisan, (bipartisanMap.get(bill.bipartisan) || 0) + 1);
+      }
+    });
+
+    setAvailableFilters({
+      bill_type_filters: Array.from(billTypeMap.entries())
+        .map(([billType, count]) => ({ billType, count }))
+        .sort((a, b) => b.count - a.count),
+      sponsor_party_filters: Array.from(sponsorPartyMap.entries())
+        .map(([party, count]) => ({ party, count }))
+        .sort((a, b) => b.count - a.count),
+      sponsor_state_filters: Array.from(sponsorStateMap.entries())
+        .map(([state, count]) => ({ state, count }))
+        .sort((a, b) => b.count - a.count),
+      policy_area_filters: Array.from(policyAreaMap.entries())
+        .map(([area, count]) => ({ area, count }))
+        .sort((a, b) => b.count - a.count),
+      congress_filters: Array.from(congressMap.entries())
+        .map(([congress, count]) => ({ congress, count }))
+        .sort((a, b) => b.congress - a.congress), // Sort by congress number ascending
+      bipartisan_filters: Array.from(bipartisanMap.entries())
+        .map(([bipartisan, count]) => ({ bipartisan, count }))
+        .sort((a, b) => a.bipartisan - b.bipartisan), // 0 (No) first, then 1 (Yes)
+    });
+  }, []);
+
+  // Apply client-side filters
+  const applyFilters = useCallback(() => {
+    let filtered = [...allSearchResults];
+
+    // Apply selected filters
+    if (selectedFilters.bill_types.size > 0) {
+      filtered = filtered.filter((bill) => 
+        bill.bill_type && selectedFilters.bill_types.has(bill.bill_type)
+      );
+    }
+
+    if (selectedFilters.sponsor_parties.size > 0) {
+      filtered = filtered.filter((bill) =>
+        bill.sponsor_party && selectedFilters.sponsor_parties.has(bill.sponsor_party)
+      );
+    }
+
+    if (selectedFilters.sponsor_states.size > 0) {
+      filtered = filtered.filter((bill) =>
+        bill.sponsor_state && selectedFilters.sponsor_states.has(bill.sponsor_state)
+      );
+    }
+
+    if (selectedFilters.policy_areas.size > 0) {
+      filtered = filtered.filter((bill) =>
+        bill.policy_area && selectedFilters.policy_areas.has(bill.policy_area)
+      );
+    }
+
+    if (selectedFilters.congresses.size > 0) {
+      filtered = filtered.filter((bill) =>
+        bill.congress !== undefined && bill.congress !== null && selectedFilters.congresses.has(bill.congress)
+      );
+    }
+
+    if (selectedFilters.bipartisan.size > 0) {
+      filtered = filtered.filter((bill) =>
+        bill.bipartisan !== undefined && bill.bipartisan !== null && selectedFilters.bipartisan.has(bill.bipartisan)
+      );
+    }
+
+    setCurrentResults(filtered);
+    setIsFiltered(
+      selectedFilters.bill_types.size > 0 ||
+      selectedFilters.sponsor_parties.size > 0 ||
+      selectedFilters.sponsor_states.size > 0 ||
+      selectedFilters.policy_areas.size > 0 ||
+      selectedFilters.congresses.size > 0 ||
+      selectedFilters.bipartisan.size > 0
+    );
+    setCurrentPage(1);
+  }, [allSearchResults, selectedFilters]);
   
   // Column visibility state
   const AVAILABLE_COLUMNS = [
@@ -163,6 +353,7 @@ const CongressBillsSearchPage: React.FC = () => {
     'congress',
     'bipartisan',
     'policy_area',
+    'details',
   ] as const;
   
   const DEFAULT_VISIBLE_COLUMNS = ['bill_title', 'bill_type', 'sponsor_name', 'introduced_date', 'congress'];
@@ -179,6 +370,9 @@ const CongressBillsSearchPage: React.FC = () => {
 
   // Politician data loading state (for sponsor name autocomplete)
   const [isPoliticianDataLoaded, setIsPoliticianDataLoaded] = useState<boolean>(false);
+  
+  // Policy area data loading state (for policy area autocomplete)
+  const [isPolicyAreaDataLoaded, setIsPolicyAreaDataLoaded] = useState<boolean>(false);
 
   // Autocomplete state for Sponsor Name and Bill Title
   const [sponsorNameSuggestions, setSponsorNameSuggestions] = useState<string[]>([]);
@@ -200,6 +394,21 @@ const CongressBillsSearchPage: React.FC = () => {
     };
 
     loadPoliticianData();
+  }, []);
+
+  // Load policy area data on component mount (for policy area autocomplete)
+  useEffect(() => {
+    const loadPolicyAreaData = async () => {
+      try {
+        console.log('📋 Loading policy area suggestions data for congress bills...');
+        await policyAreaSuggestionsService.loadPolicyAreas();
+        setIsPolicyAreaDataLoaded(true);
+        console.log('✅ Policy area suggestions data loaded successfully');
+      } catch (error) {
+        console.error('❌ Failed to load policy area suggestions:', error);
+      }
+    };
+    loadPolicyAreaData();
   }, []);
 
   // Autocomplete search functions - mirror politician trades approach using CSV
@@ -251,6 +460,20 @@ const CongressBillsSearchPage: React.FC = () => {
     return [];
   }, []);
 
+  // Policy area search callback - mimic security autocomplete pattern
+  const policyAreaSearch = useCallback((query: string): string[] => {
+    if (!isPolicyAreaDataLoaded) {
+      return [];
+    }
+    
+    // If empty query or short query, return all policy areas (scrollable)
+    if (!query || query.length < 1) {
+      return policyAreaSuggestionsService.getAllPolicyAreas();
+    }
+    
+    return policyAreaSuggestionsService.getSuggestions(query, 20);
+  }, [isPolicyAreaDataLoaded]);
+
   // Handle search
   const handleSearch = useCallback(async () => {
     setIsSearching(true);
@@ -277,9 +500,12 @@ const CongressBillsSearchPage: React.FC = () => {
         }
       });
 
+      // Use larger page size for initial fetch to minimize API calls
+      const fetchPageSize = 100;
+      
       const response = await congressBillsSearchAPI.search({
         filters,
-        limit: pageSize,
+        limit: fetchPageSize,
       });
 
       if (response.success) {
@@ -287,6 +513,21 @@ const CongressBillsSearchPage: React.FC = () => {
         setAllSearchResults(results);
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
+        // Compute available filters from results
+        computeFiltersFromResults(results);
+        // Only reset client-side filters when new search is performed (not when restoring from sessionStorage)
+        // This allows filters to persist when navigating away and back
+        if (!savedState?.selectedFilters) {
+          setSelectedFilters({
+            bill_types: new Set(),
+            sponsor_parties: new Set(),
+            sponsor_states: new Set(),
+            policy_areas: new Set(),
+            congresses: new Set(),
+            bipartisan: new Set(),
+          });
+          setIsFiltered(false);
+        }
       } else {
         setSearchError('Search failed. Please try again.');
       }
@@ -296,7 +537,78 @@ const CongressBillsSearchPage: React.FC = () => {
     } finally {
       setIsSearching(false);
     }
-  }, [searchParams, pageSize]);
+  }, [searchParams, pageSize, computeFiltersFromResults]);
+
+  // Load more results using cursor-based pagination
+  const handleLoadMore = useCallback(async () => {
+    if (!hasMore || !lastEvaluatedKey || isLoadingMore) return;
+    
+    setIsLoadingMore(true);
+    setSearchError(null);
+    
+    try {
+      const filters: any = {
+        ...searchParams,
+      };
+
+      // Remove empty arrays
+      Object.keys(filters).forEach((key) => {
+        const value = filters[key];
+        if (Array.isArray(value) && value.length === 0) {
+          delete filters[key];
+        }
+        if (value === '' || value === null || value === undefined) {
+          delete filters[key];
+        }
+      });
+
+      // Use larger page size for load more to minimize API calls
+      const fetchPageSize = 100;
+      
+      const response = await congressBillsSearchAPI.search({
+        filters,
+        limit: fetchPageSize,
+        last_evaluated_key: lastEvaluatedKey,
+      });
+
+      if (response.success) {
+        const newResults = response.results || [];
+        const updatedResults = [...allSearchResults, ...newResults];
+        setAllSearchResults(updatedResults);
+        setHasMore(response.has_more || false);
+        setLastEvaluatedKey(response.last_evaluated_key || null);
+        
+        // Update filters with new results
+        computeFiltersFromResults(updatedResults);
+      } else {
+        setSearchError('Load more failed. Please try again.');
+        setHasMore(false);
+      }
+    } catch (error: any) {
+      console.error('Load more error:', error);
+      setSearchError(error.message || 'An error occurred while loading more results.');
+      setHasMore(false);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, searchParams, allSearchResults, computeFiltersFromResults]);
+
+  // Compute available filters when results are restored from sessionStorage
+  useEffect(() => {
+    if (allSearchResults.length > 0 && availableFilters.bill_type_filters.length === 0) {
+      // If we have results but no available filters, compute them
+      computeFiltersFromResults(allSearchResults);
+    }
+  }, [allSearchResults, availableFilters, computeFiltersFromResults]);
+
+  // Apply filters when selectedFilters or allSearchResults change
+  useEffect(() => {
+    if (allSearchResults.length > 0) {
+      applyFilters();
+    } else {
+      setCurrentResults([]);
+    }
+  }, [allSearchResults, selectedFilters, applyFilters]);
 
   // Save state to sessionStorage
   useEffect(() => {
@@ -312,6 +624,18 @@ const CongressBillsSearchPage: React.FC = () => {
         visibleColumns,
         searchFormExpanded,
         advancedSearchExpanded,
+        // Convert Sets to arrays for JSON serialization
+        selectedFilters: {
+          bill_types: Array.from(selectedFilters.bill_types),
+          sponsor_parties: Array.from(selectedFilters.sponsor_parties),
+          sponsor_states: Array.from(selectedFilters.sponsor_states),
+          policy_areas: Array.from(selectedFilters.policy_areas),
+          congresses: Array.from(selectedFilters.congresses),
+          bipartisan: Array.from(selectedFilters.bipartisan),
+        },
+        expandedFilters,
+        availableFilters,
+        isFiltered,
       };
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
     } catch (error) {
@@ -328,13 +652,18 @@ const CongressBillsSearchPage: React.FC = () => {
     visibleColumns,
     searchFormExpanded,
     advancedSearchExpanded,
+    selectedFilters,
+    expandedFilters,
+    availableFilters,
+    isFiltered,
   ]);
 
-  // Pagination
-  const totalPages = Math.ceil(allSearchResults.length / pageSize);
+  // Pagination - use filtered results if filters are applied, otherwise use all results
+  const resultsToDisplay = isFiltered ? currentResults : allSearchResults;
+  const totalPages = Math.ceil(resultsToDisplay.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
-  const paginatedResults = allSearchResults.slice(startIndex, endIndex);
+  const paginatedResults = resultsToDisplay.slice(startIndex, endIndex);
 
   // Format date helper
   const formatDate = (dateString?: string) => {
@@ -354,19 +683,17 @@ const CongressBillsSearchPage: React.FC = () => {
           Congress Bills Search
         </Typography>
 
-        {/* Main Layout: Filters on Left when no results, Top Right when results exist */}
-        {allSearchResults.length === 0 ? (
-          /* No Results: Filters on Left */
-          <Box sx={{ display: 'flex', gap: 3 }}>
-            {/* Left Sidebar - Search Filters */}
-            <GlassCard sx={{ 
-              minWidth: 320, 
-              maxWidth: 380,
-              height: 'fit-content',
-              position: 'sticky',
-              top: 20,
-              alignSelf: 'flex-start',
-            }}>
+        {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
+        <Box sx={{ display: 'flex', gap: 3 }}>
+          {/* Left Sidebar - Search Filters (Always visible) */}
+          <GlassCard sx={{ 
+            minWidth: 320, 
+            maxWidth: 380,
+            height: 'fit-content',
+            position: 'sticky',
+            top: 20,
+            alignSelf: 'flex-start',
+          }}>
             <Box sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
@@ -514,6 +841,24 @@ const CongressBillsSearchPage: React.FC = () => {
                     }}
                   />
 
+                  {/* Policy Area - Dropdown multi-select with autocomplete */}
+                  <MultiSelectField<string>
+                    label="Policy Area"
+                    selectedItems={searchParams.policy_area || []}
+                    onItemsChange={(areas) => {
+                      setSearchParams((prev) => ({ ...prev, policy_area: areas }));
+                    }}
+                    suggestions={isPolicyAreaDataLoaded ? 
+                      policyAreaSuggestionsService.getAllPolicyAreas().slice(0, 50) : 
+                      []
+                    }
+                    onSearch={policyAreaSearch}
+                    renderItem={(area) => area}
+                    placeholder="Select policy areas..."
+                    allowCustomInput={false}
+                    isLoading={!isPolicyAreaDataLoaded}
+                  />
+
                   {/* Advanced Search Section */}
                   <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #374151' }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -530,19 +875,6 @@ const CongressBillsSearchPage: React.FC = () => {
                     </Box>
                     <Collapse in={advancedSearchExpanded}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        {/* Policy Area - Free text multi-select */}
-                        <MultiSelectField<string>
-                          label="Policy Area"
-                          selectedItems={searchParams.policy_area || []}
-                          onItemsChange={(areas) => {
-                            setSearchParams((prev) => ({ ...prev, policy_area: areas }));
-                          }}
-                          suggestions={[]}
-                          onSearch={() => []}
-                          renderItem={(area) => area}
-                          placeholder="Enter policy areas..."
-                        />
-
                         {/* Sponsor Party - Dropdown multi-select */}
                         <MultiSelectField<string>
                           label="Sponsor Party"
@@ -725,7 +1057,7 @@ const CongressBillsSearchPage: React.FC = () => {
             </Box>
           </GlassCard>
 
-          {/* Main Content Area - Empty State */}
+          {/* Middle - Results Table */}
           <Box sx={{ flex: 1, minWidth: 0 }}>
             {/* Error Alert */}
             {searchError && (
@@ -733,380 +1065,10 @@ const CongressBillsSearchPage: React.FC = () => {
                 {searchError}
               </Alert>
             )}
-          </Box>
-        </Box>
-        ) : (
-          /* Results Exist: Filters on Top Right */
-          <Box>
-            {/* Error Alert */}
-            {searchError && (
-              <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
-                {searchError}
-              </Alert>
-            )}
 
-            {/* Results Header with Filters on Top Right */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3, gap: 3 }}>
-              {/* Results Title */}
-              <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                Results ({allSearchResults.length})
-              </Typography>
-
-              {/* Filter Box on Top Right */}
-              <GlassCard sx={{ 
-                minWidth: 280, 
-                maxWidth: 320,
-                height: 'fit-content',
-              }}>
-                <Box sx={{ p: 2 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.9rem' }}>
-                      Search Filters
-                    </Typography>
-                    <IconButton
-                      onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-                      sx={{ color: '#94a3b8' }}
-                      size="small"
-                    >
-                      {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                    </IconButton>
-                  </Box>
-                  <Collapse in={searchFormExpanded}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {/* Sponsor Name */}
-                      <MultiSelectField<string>
-                        label="Sponsor Name"
-                        selectedItems={(() => {
-                          const names = Array.isArray(searchParams.sponsor_name) ? searchParams.sponsor_name : (searchParams.sponsor_name ? [searchParams.sponsor_name] : []);
-                          if (!isPoliticianDataLoaded) return names;
-                          return names.map(name => {
-                            const politician = politicianSuggestionsService.getAllPoliticians().find(p => p.fullName === name);
-                            return politician ? politician.displayText : name;
-                          });
-                        })()}
-                        onItemsChange={(sponsors) => {
-                          const actualNames = sponsors.map(sponsorDisplay => {
-                            const nameMatch = sponsorDisplay.match(/^([^(]+)/);
-                            return nameMatch ? nameMatch[1].trim() : sponsorDisplay;
-                          });
-                          setSearchParams((prev) => ({ ...prev, sponsor_name: actualNames }));
-                        }}
-                        suggestions={isPoliticianDataLoaded ? 
-                          politicianSuggestionsService.getAllPoliticians().map(p => p.fullName) : 
-                          []
-                        }
-                        onSearch={sponsorNameSearch}
-                        renderItem={(sponsorDisplay) => sponsorDisplay}
-                        renderOptionCustom={(sponsorDisplay) => {
-                          const nameMatch = sponsorDisplay.match(/^([^(]+)/);
-                          const name = nameMatch ? nameMatch[1].trim() : sponsorDisplay;
-                          const details = sponsorDisplay.replace(name, '').trim();
-                          return (
-                            <Box sx={{ width: '100%' }}>
-                              <Typography variant="body2" sx={{ fontWeight: 600, color: '#ffffff', fontSize: '0.9rem' }}>
-                                {name}
-                              </Typography>
-                              {details && (
-                                <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-                                  {details}
-                                </Typography>
-                              )}
-                            </Box>
-                          );
-                        }}
-                        getItemKey={(sponsor) => sponsor}
-                        placeholder="Search sponsor names..."
-                        allowCustomInput={false}
-                        isLoading={!isPoliticianDataLoaded || sponsorNameLoading}
-                      />
-
-                      {/* Bill Title */}
-                      <MultiSelectField<string>
-                        label="Bill Title"
-                        selectedItems={searchParams.bill_title || []}
-                        onItemsChange={(titles) => {
-                          setSearchParams((prev) => ({ ...prev, bill_title: titles }));
-                        }}
-                        suggestions={billTitleSuggestions}
-                        onSearch={billTitleSearch}
-                        renderItem={(title) => title}
-                        placeholder="Search bill titles..."
-                        allowCustomInput={true}
-                        isLoading={billTitleLoading}
-                      />
-
-                      {/* Bill Type */}
-                      <MultiSelectField<string>
-                        label="Bill Type"
-                        selectedItems={searchParams.bill_type || []}
-                        onItemsChange={(types) => {
-                          setSearchParams((prev) => ({ ...prev, bill_type: types }));
-                        }}
-                        suggestions={BILL_TYPES}
-                        renderItem={(type) => type}
-                        placeholder="Select bill types..."
-                      />
-
-                      {/* Introduced Date From */}
-                      <TextField
-                        label="Introduced Date From"
-                        type="date"
-                        value={searchParams.introduced_date_from || ''}
-                        onChange={(e) => {
-                          setSearchParams((prev) => ({
-                            ...prev,
-                            introduced_date_from: e.target.value || undefined,
-                          }));
-                        }}
-                        InputLabelProps={{ shrink: true }}
-                        fullWidth
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                            color: '#e2e8f0',
-                            '& fieldset': { borderColor: '#475569' },
-                            '&:hover fieldset': { borderColor: '#64748b' },
-                            '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                          },
-                          '& .MuiInputLabel-root': { color: '#94a3b8' },
-                        }}
-                      />
-
-                      {/* Introduced Date To */}
-                      <TextField
-                        label="Introduced Date To"
-                        type="date"
-                        value={searchParams.introduced_date_to || ''}
-                        onChange={(e) => {
-                          setSearchParams((prev) => ({
-                            ...prev,
-                            introduced_date_to: e.target.value || undefined,
-                          }));
-                        }}
-                        InputLabelProps={{ shrink: true }}
-                        fullWidth
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                            color: '#e2e8f0',
-                            '& fieldset': { borderColor: '#475569' },
-                            '&:hover fieldset': { borderColor: '#64748b' },
-                            '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                          },
-                          '& .MuiInputLabel-root': { color: '#94a3b8' },
-                        }}
-                      />
-
-                      {/* Advanced Search Section */}
-                      <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #374151' }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                          <Typography variant="h6" sx={{ color: '#e2e8f0', fontSize: '0.9rem' }}>
-                            Advanced Search
-                          </Typography>
-                          <IconButton
-                            onClick={() => setAdvancedSearchExpanded(!advancedSearchExpanded)}
-                            sx={{ color: '#94a3b8' }}
-                            size="small"
-                          >
-                            {advancedSearchExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                          </IconButton>
-                        </Box>
-                        <Collapse in={advancedSearchExpanded}>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            {/* Policy Area */}
-                            <MultiSelectField<string>
-                              label="Policy Area"
-                              selectedItems={searchParams.policy_area || []}
-                              onItemsChange={(areas) => {
-                                setSearchParams((prev) => ({ ...prev, policy_area: areas }));
-                              }}
-                              suggestions={[]}
-                              onSearch={() => []}
-                              renderItem={(area) => area}
-                              placeholder="Enter policy areas..."
-                            />
-
-                            {/* Sponsor Party */}
-                            <MultiSelectField<string>
-                              label="Sponsor Party"
-                              selectedItems={searchParams.sponsor_party || []}
-                              onItemsChange={(parties) => {
-                                setSearchParams((prev) => ({ ...prev, sponsor_party: parties }));
-                              }}
-                              suggestions={PARTIES}
-                              renderItem={(party) => party}
-                              placeholder="Select parties..."
-                            />
-
-                            {/* Sponsor State */}
-                            <MultiSelectField<string>
-                              label="Sponsor State"
-                              selectedItems={searchParams.sponsor_state || []}
-                              onItemsChange={(states) => {
-                                setSearchParams((prev) => ({ ...prev, sponsor_state: states }));
-                              }}
-                              suggestions={US_STATES}
-                              renderItem={(state) => state}
-                              placeholder="Select states..."
-                            />
-
-                            {/* Bipartisan */}
-                            <FormControl fullWidth>
-                              <InputLabel sx={{ color: '#94a3b8' }}>Bipartisan</InputLabel>
-                              <Select
-                                value={searchParams.bipartisan !== undefined ? searchParams.bipartisan : ''}
-                                onChange={(e) => {
-                                  setSearchParams((prev) => ({
-                                    ...prev,
-                                    bipartisan: e.target.value === '' ? undefined : Number(e.target.value),
-                                  }));
-                                }}
-                                label="Bipartisan"
-                                sx={{
-                                  backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                                  color: '#e2e8f0',
-                                  '& .MuiOutlinedInput-notchedOutline': { borderColor: '#475569' },
-                                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#64748b' },
-                                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                                }}
-                              >
-                                <MenuItem value="">All</MenuItem>
-                                {BIPARTISAN_OPTIONS.map((option) => (
-                                  <MenuItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </MenuItem>
-                                ))}
-                              </Select>
-                            </FormControl>
-
-                            {/* Bill Number */}
-                            <TextField
-                              label="Bill Number"
-                              type="number"
-                              value={searchParams.bill_number || ''}
-                              onChange={(e) => {
-                                setSearchParams((prev) => ({
-                                  ...prev,
-                                  bill_number: e.target.value ? Number(e.target.value) : undefined,
-                                }));
-                              }}
-                              fullWidth
-                              sx={{
-                                '& .MuiOutlinedInput-root': {
-                                  backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                                  color: '#e2e8f0',
-                                  '& fieldset': { borderColor: '#475569' },
-                                  '&:hover fieldset': { borderColor: '#64748b' },
-                                  '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                                },
-                                '& .MuiInputLabel-root': { color: '#94a3b8' },
-                              }}
-                            />
-
-                            {/* Latest Action Date From */}
-                            <TextField
-                              label="Latest Action Date From"
-                              type="date"
-                              value={searchParams.latest_action_date_from || ''}
-                              onChange={(e) => {
-                                setSearchParams((prev) => ({
-                                  ...prev,
-                                  latest_action_date_from: e.target.value || undefined,
-                                }));
-                              }}
-                              InputLabelProps={{ shrink: true }}
-                              fullWidth
-                              sx={{
-                                '& .MuiOutlinedInput-root': {
-                                  backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                                  color: '#e2e8f0',
-                                  '& fieldset': { borderColor: '#475569' },
-                                  '&:hover fieldset': { borderColor: '#64748b' },
-                                  '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                                },
-                                '& .MuiInputLabel-root': { color: '#94a3b8' },
-                              }}
-                            />
-
-                            {/* Latest Action Date To */}
-                            <TextField
-                              label="Latest Action Date To"
-                              type="date"
-                              value={searchParams.latest_action_date_to || ''}
-                              onChange={(e) => {
-                                setSearchParams((prev) => ({
-                                  ...prev,
-                                  latest_action_date_to: e.target.value || undefined,
-                                }));
-                              }}
-                              InputLabelProps={{ shrink: true }}
-                              fullWidth
-                              sx={{
-                                '& .MuiOutlinedInput-root': {
-                                  backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                                  color: '#e2e8f0',
-                                  '& fieldset': { borderColor: '#475569' },
-                                  '&:hover fieldset': { borderColor: '#64748b' },
-                                  '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                                },
-                                '& .MuiInputLabel-root': { color: '#94a3b8' },
-                              }}
-                            />
-                          </Box>
-                        </Collapse>
-                      </Box>
-
-                      {/* Search and Clear Buttons */}
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
-                        <Button
-                          variant="contained"
-                          onClick={handleSearch}
-                          disabled={isSearching}
-                          startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
-                          fullWidth
-                          sx={{
-                            background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                            color: '#ffffff',
-                            '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
-                            '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
-                          }}
-                        >
-                          {isSearching ? 'Searching...' : 'Search'}
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          onClick={() => {
-                            setSearchParams({
-                              bill_title: [],
-                              bill_type: [],
-                              sponsor_name: [],
-                              introduced_date_from: '',
-                              introduced_date_to: '',
-                              policy_area: [],
-                              sponsor_party: [],
-                              sponsor_state: [],
-                              latest_action_date_from: '',
-                              latest_action_date_to: '',
-                            });
-                          }}
-                          fullWidth
-                          sx={{
-                            borderColor: '#475569',
-                            color: '#94a3b8',
-                            '&:hover': { borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.1)' },
-                          }}
-                        >
-                          Clear
-                        </Button>
-                      </Box>
-                    </Box>
-                  </Collapse>
-                </Box>
-              </GlassCard>
-            </Box>
-
-            {/* Results Table */}
-            <GlassCard>
+            {/* Results */}
+            {allSearchResults.length > 0 ? (
+              <GlassCard>
               <Box sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                   <Box sx={{ display: 'flex', gap: 1 }}>
@@ -1302,17 +1264,70 @@ const CongressBillsSearchPage: React.FC = () => {
                           {bill.policy_area || 'N/A'}
                         </TableCell>
                       )}
+                      {visibleColumns.includes('details') && (
+                        <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                          <Tooltip title="View full bill details">
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setSelectedBillForDetails(bill);
+                                setDetailsDialogOpen(true);
+                              }}
+                              sx={{
+                                color: '#3b82f6',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                },
+                              }}
+                            >
+                              <VisibilityIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
                   </Table>
                 </TableContainer>
 
+                {/* Load More Button */}
+                {!isFiltered && hasMore && lastEvaluatedKey && allSearchResults.length > 0 && (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                    <Button
+                      variant="outlined"
+                      onClick={handleLoadMore}
+                      disabled={isLoadingMore}
+                      sx={{
+                        color: '#3b82f6',
+                        borderColor: '#3b82f6',
+                        '&:hover': {
+                          borderColor: '#60a5fa',
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        },
+                        '&:disabled': {
+                          borderColor: '#4b5563',
+                          color: '#6b7280',
+                        },
+                      }}
+                    >
+                      {isLoadingMore ? (
+                        <>
+                          <CircularProgress size={20} sx={{ mr: 1 }} />
+                          Loading...
+                        </>
+                      ) : (
+                        `Load More (${allSearchResults.length} loaded)`
+                      )}
+                    </Button>
+                  </Box>
+                )}
+
                 {/* Pagination */}
                 {totalPages > 1 && (
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3 }}>
                     <Typography sx={{ color: '#94a3b8' }}>
-                      Showing {startIndex + 1}-{Math.min(endIndex, allSearchResults.length)} of {allSearchResults.length} results
+                      Showing {startIndex + 1}-{Math.min(endIndex, resultsToDisplay.length)} of {resultsToDisplay.length} results
                     </Typography>
                     <Pagination
                       count={totalPages}
@@ -1332,9 +1347,1316 @@ const CongressBillsSearchPage: React.FC = () => {
                 )}
               </Box>
             </GlassCard>
+            ) : (
+              <Box sx={{ textAlign: 'center', py: 8 }}>
+                <Typography variant="h6" sx={{ color: '#9ca3af', mb: 2 }}>
+                  No results found
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#6b7280' }}>
+                  Try adjusting your search filters
+                </Typography>
+              </Box>
+            )}
           </Box>
-        )}
+
+          {/* Right Sidebar - Client-side Filter Box (Only when results exist) */}
+          {allSearchResults.length > 0 && (
+            <GlassCard sx={{ 
+              p: 2, 
+              minWidth: 280, 
+              maxWidth: 320,
+              height: 'fit-content',
+              position: 'sticky',
+              top: 20,
+              alignSelf: 'flex-start',
+            }}>
+              <Typography
+                variant="h6"
+                sx={{
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  mb: 2,
+                  fontSize: '1rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                Refine search results by:
+              </Typography>
+              
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#9ca3af',
+                  mb: 2,
+                  display: 'block',
+                  fontSize: '0.75rem',
+                }}
+              >
+                Click headings to show top filters.
+                <br />
+                Bill counts shown in <Chip label="#" size="small" sx={{ 
+                  height: 18, 
+                  fontSize: '0.7rem',
+                  backgroundColor: 'rgba(107, 114, 128, 0.3)',
+                  color: '#9ca3af',
+                  border: '1px solid #6b7280',
+                }} />
+              </Typography>
+
+              {/* Selected Filters Box */}
+              {(selectedFilters.bill_types.size > 0 ||
+                selectedFilters.sponsor_parties.size > 0 ||
+                selectedFilters.sponsor_states.size > 0 ||
+                selectedFilters.policy_areas.size > 0 ||
+                selectedFilters.congresses.size > 0 ||
+                selectedFilters.bipartisan.size > 0) && (
+                <Box sx={{ 
+                  mb: 2, 
+                  p: 2, 
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  border: '1px solid #3b82f6',
+                  borderRadius: '4px',
+                }}>
+                  <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600 }}>
+                    Selected Filters:
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+                    {Array.from(selectedFilters.bill_types).map((type, idx) => (
+                      <Chip
+                        key={`bill-type-${idx}`}
+                        label={type}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.bill_types);
+                            newSet.delete(type);
+                            const hasAnyFilters = 
+                              newSet.size > 0 ||
+                              prev.sponsor_parties.size > 0 ||
+                              prev.sponsor_states.size > 0 ||
+                              prev.policy_areas.size > 0 ||
+                              prev.congresses.size > 0 ||
+                              prev.bipartisan.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, bill_types: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.sponsor_parties).map((party, idx) => (
+                      <Chip
+                        key={`sponsor-party-${idx}`}
+                        label={party}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.sponsor_parties);
+                            newSet.delete(party);
+                            const hasAnyFilters = 
+                              prev.bill_types.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.sponsor_states.size > 0 ||
+                              prev.policy_areas.size > 0 ||
+                              prev.congresses.size > 0 ||
+                              prev.bipartisan.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, sponsor_parties: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.sponsor_states).map((state, idx) => (
+                      <Chip
+                        key={`sponsor-state-${idx}`}
+                        label={state}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.sponsor_states);
+                            newSet.delete(state);
+                            const hasAnyFilters = 
+                              prev.bill_types.size > 0 ||
+                              prev.sponsor_parties.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.policy_areas.size > 0 ||
+                              prev.congresses.size > 0 ||
+                              prev.bipartisan.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, sponsor_states: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.policy_areas).map((area, idx) => (
+                      <Chip
+                        key={`policy-area-${idx}`}
+                        label={area}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.policy_areas);
+                            newSet.delete(area);
+                            const hasAnyFilters = 
+                              prev.bill_types.size > 0 ||
+                              prev.sponsor_parties.size > 0 ||
+                              prev.sponsor_states.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.congresses.size > 0 ||
+                              prev.bipartisan.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, policy_areas: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.congresses).map((congress, idx) => (
+                      <Chip
+                        key={`congress-${idx}`}
+                        label={`Congress ${congress}`}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.congresses);
+                            newSet.delete(congress);
+                            const hasAnyFilters = 
+                              prev.bill_types.size > 0 ||
+                              prev.sponsor_parties.size > 0 ||
+                              prev.sponsor_states.size > 0 ||
+                              prev.policy_areas.size > 0 ||
+                              newSet.size > 0 ||
+                              prev.bipartisan.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, congresses: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {Array.from(selectedFilters.bipartisan).map((bipartisan, idx) => (
+                      <Chip
+                        key={`bipartisan-${idx}`}
+                        label={bipartisan === 1 ? 'Bipartisan' : 'Not Bipartisan'}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newSet = new Set(prev.bipartisan);
+                            newSet.delete(bipartisan);
+                            const hasAnyFilters = 
+                              prev.bill_types.size > 0 ||
+                              prev.sponsor_parties.size > 0 ||
+                              prev.sponsor_states.size > 0 ||
+                              prev.policy_areas.size > 0 ||
+                              prev.congresses.size > 0 ||
+                              newSet.size > 0;
+                            setIsFiltered(hasAnyFilters);
+                            return { ...prev, bipartisan: newSet };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                  </Box>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setSelectedFilters({
+                        bill_types: new Set(),
+                        sponsor_parties: new Set(),
+                        sponsor_states: new Set(),
+                        policy_areas: new Set(),
+                        congresses: new Set(),
+                        bipartisan: new Set(),
+                      });
+                      setIsFiltered(false);
+                    }}
+                    sx={{
+                      color: '#93c5fd',
+                      fontSize: '0.75rem',
+                      textTransform: 'none',
+                      mt: 1,
+                      '&:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                      },
+                    }}
+                  >
+                    Clear All Filters
+                  </Button>
+                </Box>
+              )}
+
+              {/* Bill Types Filter */}
+              {availableFilters.bill_type_filters && availableFilters.bill_type_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, billTypes: !prev.billTypes }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Bill Types
+                    </Typography>
+                    {expandedFilters.billTypes ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.billTypes}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.bill_type_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.bill_types.has(filter.billType);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.bill_types.has(filter.billType);
+                                if (exists) {
+                                  const newSet = new Set(prev.bill_types);
+                                  newSet.delete(filter.billType);
+                                  return { ...prev, bill_types: newSet };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    bill_types: new Set([...prev.bill_types, filter.billType]),
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.billType}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Sponsor Parties Filter */}
+              {availableFilters.sponsor_party_filters && availableFilters.sponsor_party_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, sponsorParties: !prev.sponsorParties }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Sponsor Parties
+                    </Typography>
+                    {expandedFilters.sponsorParties ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.sponsorParties}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.sponsor_party_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.sponsor_parties.has(filter.party);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.sponsor_parties.has(filter.party);
+                                if (exists) {
+                                  const newSet = new Set(prev.sponsor_parties);
+                                  newSet.delete(filter.party);
+                                  return { ...prev, sponsor_parties: newSet };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    sponsor_parties: new Set([...prev.sponsor_parties, filter.party]),
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.party}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Sponsor States Filter */}
+              {availableFilters.sponsor_state_filters && availableFilters.sponsor_state_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, sponsorStates: !prev.sponsorStates }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Sponsor States
+                    </Typography>
+                    {expandedFilters.sponsorStates ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.sponsorStates}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.sponsor_state_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.sponsor_states.has(filter.state);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.sponsor_states.has(filter.state);
+                                if (exists) {
+                                  const newSet = new Set(prev.sponsor_states);
+                                  newSet.delete(filter.state);
+                                  return { ...prev, sponsor_states: newSet };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    sponsor_states: new Set([...prev.sponsor_states, filter.state]),
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.state}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Policy Areas Filter */}
+              {availableFilters.policy_area_filters && availableFilters.policy_area_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, policyAreas: !prev.policyAreas }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Policy Areas
+                    </Typography>
+                    {expandedFilters.policyAreas ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.policyAreas}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.policy_area_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.policy_areas.has(filter.area);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.policy_areas.has(filter.area);
+                                if (exists) {
+                                  const newSet = new Set(prev.policy_areas);
+                                  newSet.delete(filter.area);
+                                  return { ...prev, policy_areas: newSet };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    policy_areas: new Set([...prev.policy_areas, filter.area]),
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.area}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Congress Filter */}
+              {availableFilters.congress_filters && availableFilters.congress_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, congresses: !prev.congresses }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Congress
+                    </Typography>
+                    {expandedFilters.congresses ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.congresses}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.congress_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.congresses.has(filter.congress);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.congresses.has(filter.congress);
+                                if (exists) {
+                                  const newSet = new Set(prev.congresses);
+                                  newSet.delete(filter.congress);
+                                  return { ...prev, congresses: newSet };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    congresses: new Set([...prev.congresses, filter.congress]),
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              Congress {filter.congress}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Bipartisan Filter */}
+              {availableFilters.bipartisan_filters && availableFilters.bipartisan_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, bipartisan: !prev.bipartisan }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Bipartisan
+                    </Typography>
+                    {expandedFilters.bipartisan ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.bipartisan}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.bipartisan_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.bipartisan.has(filter.bipartisan);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.bipartisan.has(filter.bipartisan);
+                                if (exists) {
+                                  const newSet = new Set(prev.bipartisan);
+                                  newSet.delete(filter.bipartisan);
+                                  return { ...prev, bipartisan: newSet };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    bipartisan: new Set([...prev.bipartisan, filter.bipartisan]),
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.bipartisan === 1 ? 'Bipartisan' : 'Not Bipartisan'}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+            </GlassCard>
+          )}
+        </Box>
       </Container>
+
+      {/* Bill Details Dialog */}
+      <Dialog
+        open={detailsDialogOpen}
+        onClose={() => {
+          setDetailsDialogOpen(false);
+          setSelectedBillForDetails(null);
+        }}
+        maxWidth="xl"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.98)',
+            border: '2px solid #374151',
+            color: '#ffffff',
+            maxHeight: '90vh',
+          },
+        }}
+      >
+        <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151', pb: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 600, mb: 1 }}>
+                {selectedBillForDetails?.bill_title || 'Bill Details'}
+              </Typography>
+              {selectedBillForDetails?.bill_id && (
+                <Typography variant="body2" sx={{ color: '#94a3b8', fontFamily: 'monospace' }}>
+                  {selectedBillForDetails.bill_id}
+                </Typography>
+              )}
+            </Box>
+          </Box>
+        </DialogTitle>
+        <DialogContent
+          sx={{
+            mt: 2,
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#3b82f6',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: '#2563eb',
+            },
+          }}
+        >
+          {selectedBillForDetails && (
+            <Box>
+              {/* Bill Overview Section */}
+              <Box sx={{ mb: 4, borderBottom: '1px solid #374151', pb: 3 }}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                  {/* Left Column: Sponsor & Bill Info */}
+                  <Box>
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                        Sponsor
+                      </Typography>
+                      <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                        {selectedBillForDetails.sponsor_full_name || 'N/A'}
+                      </Typography>
+                      {selectedBillForDetails.sponsor_party && selectedBillForDetails.sponsor_state && (
+                        <Typography variant="body2" sx={{ color: '#94a3b8', mt: 0.5 }}>
+                          {selectedBillForDetails.sponsor_party} - {selectedBillForDetails.sponsor_state}
+                        </Typography>
+                      )}
+                    </Box>
+                    
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                        Bill Information
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {selectedBillForDetails.bill_type && selectedBillForDetails.bill_number && (
+                          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                            <strong>Type:</strong> {selectedBillForDetails.bill_type}.{selectedBillForDetails.bill_number}
+                          </Typography>
+                        )}
+                        {selectedBillForDetails.congress && (
+                          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                            <strong>Congress:</strong> {selectedBillForDetails.congress}
+                          </Typography>
+                        )}
+                        {selectedBillForDetails.policy_area && (
+                          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                            <strong>Policy Area:</strong> {selectedBillForDetails.policy_area}
+                          </Typography>
+                        )}
+                        {selectedBillForDetails.bipartisan !== undefined && selectedBillForDetails.bipartisan !== null && (
+                          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                            <strong>Bipartisan:</strong> {selectedBillForDetails.bipartisan === 1 ? 'Yes' : 'No'}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  </Box>
+                  
+                  {/* Right Column: Dates & Actions */}
+                  <Box>
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                        Dates
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {selectedBillForDetails.introduced_date && (
+                          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                            <strong>Introduced:</strong> {formatDate(selectedBillForDetails.introduced_date)}
+                          </Typography>
+                        )}
+                        {selectedBillForDetails.latest_action_date && (
+                          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                            <strong>Latest Action:</strong> {formatDate(selectedBillForDetails.latest_action_date)}
+                          </Typography>
+                        )}
+                        {(selectedBillForDetails as any).update_date && (
+                          <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                            <strong>Last Updated:</strong> {formatDate((selectedBillForDetails as any).update_date)}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                    
+                    {(selectedBillForDetails as any).action_count !== undefined && (
+                      <Box>
+                        <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                          Actions
+                        </Typography>
+                        <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                          {(selectedBillForDetails as any).action_count || 0} action(s)
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                </Box>
+              </Box>
+
+              {/* Summary Section */}
+              {(selectedBillForDetails as any).summary_text && (
+                <Box sx={{ mb: 4, p: 3, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                  <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                    Summary
+                  </Typography>
+                  <Typography 
+                    variant="body1" 
+                    sx={{ 
+                      color: '#e2e8f0', 
+                      lineHeight: 1.6,
+                      whiteSpace: 'pre-wrap',
+                    }}
+                    dangerouslySetInnerHTML={{ 
+                      __html: (selectedBillForDetails as any).summary_text?.replace(/\n/g, '<br />') || '' 
+                    }}
+                  />
+                </Box>
+              )}
+
+              {/* Cosponsors Section */}
+              {(selectedBillForDetails as any).cosponsor_count > 0 && (
+                <Box sx={{ mb: 4 }}>
+                  <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                    Cosponsors ({(selectedBillForDetails as any).cosponsor_count})
+                  </Typography>
+                  {(selectedBillForDetails as any).cosponsors_json && (() => {
+                    try {
+                      const cosponsors = JSON.parse((selectedBillForDetails as any).cosponsors_json);
+                      return (
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                          {Array.isArray(cosponsors) && cosponsors.map((cosponsor: any, idx: number) => (
+                            <Chip
+                              key={idx}
+                              label={`${cosponsor.fullName || cosponsor.name || 'Unknown'} (${cosponsor.party || ''}-${cosponsor.state || ''})`}
+                              sx={{
+                                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                color: '#93c5fd',
+                                border: '1px solid #3b82f6',
+                              }}
+                            />
+                          ))}
+                        </Box>
+                      );
+                    } catch (e) {
+                      const cosponsorsStr = (selectedBillForDetails as any).cosponsors;
+                      if (cosponsorsStr) {
+                        return (
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                            {cosponsorsStr.split('|').map((name: string, idx: number) => (
+                              <Chip
+                                key={idx}
+                                label={name}
+                                sx={{
+                                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                  color: '#93c5fd',
+                                  border: '1px solid #3b82f6',
+                                }}
+                              />
+                            ))}
+                          </Box>
+                        );
+                      }
+                      return null;
+                    }
+                  })()}
+                </Box>
+              )}
+
+              {/* Actions Section */}
+              {(selectedBillForDetails as any).actions_json && (() => {
+                try {
+                  const actions = JSON.parse((selectedBillForDetails as any).actions_json);
+                  if (Array.isArray(actions) && actions.length > 0) {
+                    return (
+                      <Box sx={{ mb: 4 }}>
+                        <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                          Actions ({(selectedBillForDetails as any).action_count || actions.length})
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {actions.map((action: any, idx: number) => (
+                            <Box
+                              key={idx}
+                              sx={{
+                                p: 2,
+                                backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                                borderRadius: '4px',
+                                border: '1px solid #374151',
+                              }}
+                            >
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                                <Typography variant="body2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                                  {action.actionDate && formatDate(action.actionDate)}
+                                </Typography>
+                                {action.type && (
+                                  <Chip
+                                    label={action.type}
+                                    size="small"
+                                    sx={{
+                                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                      color: '#93c5fd',
+                                      border: '1px solid #3b82f6',
+                                    }}
+                                  />
+                                )}
+                              </Box>
+                              {action.text && (
+                                <Typography variant="body1" sx={{ color: '#e2e8f0', mt: 1 }}>
+                                  {action.text}
+                                </Typography>
+                              )}
+                              {action.committees && Array.isArray(action.committees) && action.committees.length > 0 && (
+                                <Box sx={{ mt: 1 }}>
+                                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                                    Committees:
+                                  </Typography>
+                                  {action.committees.map((committee: any, cIdx: number) => (
+                                    <Typography key={cIdx} variant="body2" sx={{ color: '#e2e8f0', ml: 1 }}>
+                                      • {committee.name || committee.systemCode}
+                                    </Typography>
+                                  ))}
+                                </Box>
+                              )}
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    );
+                  }
+                } catch (e) {
+                  // If parsing fails, show the summary text
+                  if ((selectedBillForDetails as any).actions_summary) {
+                    return (
+                      <Box sx={{ mb: 4 }}>
+                        <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                          Actions Summary
+                        </Typography>
+                        <Typography variant="body1" sx={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>
+                          {(selectedBillForDetails as any).actions_summary}
+                        </Typography>
+                      </Box>
+                    );
+                  }
+                }
+                return null;
+              })()}
+
+              {/* Additional Details */}
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                  Additional Information
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                  {(selectedBillForDetails as any).origin_chamber && (
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                        Origin Chamber
+                      </Typography>
+                      <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                        {(selectedBillForDetails as any).origin_chamber}
+                      </Typography>
+                    </Box>
+                  )}
+                  {(selectedBillForDetails as any).amendment_count !== undefined && (
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                        Amendments
+                      </Typography>
+                      <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                        {(selectedBillForDetails as any).amendment_count || 0}
+                      </Typography>
+                    </Box>
+                  )}
+                  {(selectedBillForDetails as any).bill_url && (
+                    <Box sx={{ gridColumn: 'span 2' }}>
+                      <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                        Bill URL
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        component="a"
+                        href={(selectedBillForDetails as any).bill_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        sx={{
+                          color: '#3b82f6',
+                          textDecoration: 'none',
+                          '&:hover': { textDecoration: 'underline' },
+                        }}
+                      >
+                        {(selectedBillForDetails as any).bill_url}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+          <Button
+            onClick={() => {
+              setDetailsDialogOpen(false);
+              setSelectedBillForDetails(null);
+            }}
+            sx={{
+              color: '#94a3b8',
+              '&:hover': {
+                backgroundColor: 'rgba(71, 85, 105, 0.1)',
+              },
+            }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
