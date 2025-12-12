@@ -818,3 +818,4 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'error': str(e)
             })
         }
+
