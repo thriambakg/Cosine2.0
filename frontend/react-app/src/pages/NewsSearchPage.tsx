@@ -134,6 +134,8 @@ const NewsSearchPage: React.FC = () => {
     categories?: string[];
     countries?: string[];
     dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
+    dateFrom?: string;
+    dateTo?: string;
   }>(
     savedState?.searchParams || {
       keywords: [],
@@ -141,6 +143,8 @@ const NewsSearchPage: React.FC = () => {
       categories: [],
       countries: [],
       dateRange: 'all',
+      dateFrom: '',
+      dateTo: '',
     }
   );
   
@@ -338,6 +342,8 @@ const NewsSearchPage: React.FC = () => {
             : undefined,
         },
         dateRange: searchParams.dateRange || 'all',
+        dateFrom: searchParams.dateFrom || undefined,
+        dateTo: searchParams.dateTo || undefined,
         limit: fetchPageSize,
       };
       
@@ -400,6 +406,8 @@ const NewsSearchPage: React.FC = () => {
             : undefined,
         },
         dateRange: searchParams.dateRange || 'all',
+        dateFrom: searchParams.dateFrom || undefined,
+        dateTo: searchParams.dateTo || undefined,
         limit: fetchPageSize,
         lastEvaluatedKey: lastEvaluatedKey, // Cursor for pagination
       };
@@ -528,58 +536,39 @@ const NewsSearchPage: React.FC = () => {
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
-        <Box sx={{ display: 'flex', gap: 3 }}>
-          {/* Main Content */}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            {/* Header */}
-            <Box sx={{ mb: 4 }}>
-              <Typography
-                variant="h4"
-                sx={{
-                  color: '#ffffff',
-                  fontWeight: 700,
-                  mb: 1,
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                }}
-              >
-                News Articles Search
-              </Typography>
-              <Typography
-                variant="body1"
-                sx={{
-                  color: '#9ca3af',
-                  fontSize: '1rem',
-                }}
-              >
-                Search news articles with advanced filters
-              </Typography>
-            </Box>
+        <Typography variant="h4" sx={{ color: '#ffffff', mb: 4, fontWeight: 600 }}>
+          News Articles Search
+        </Typography>
 
-            {/* Search Form */}
-            <GlassCard sx={{ mb: 4 }}>
-              <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: searchFormExpanded ? '1px solid rgba(55, 65, 81, 0.5)' : 'none' }}>
-                <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 'bold' }}>
-                  Search Parameters
+        {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
+        <Box sx={{ display: 'flex', gap: 3 }}>
+          {/* Left Sidebar - Search Filters (Always visible) */}
+          <GlassCard sx={{ 
+            minWidth: 320, 
+            maxWidth: 380,
+            height: 'fit-content',
+            position: 'sticky',
+            top: 20,
+            alignSelf: 'flex-start',
+          }}>
+            <Box sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                  Search Filters
                 </Typography>
                 <IconButton
                   onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-                  sx={{ color: '#9ca3af' }}
+                  sx={{ color: '#94a3b8' }}
                   size="small"
                 >
                   {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
                 </IconButton>
               </Box>
               <Collapse in={searchFormExpanded}>
-                <Box sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
-                  Keywords are sent to the backend. Sources, categories, and countries are used for client-side filtering after results are received.
-                </Typography>
-                
-                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Keywords Search Parameter */}
                   <MultiSelectField<string>
-                    label="Keywords (Search Parameter)"
+                    label="Keywords"
                     selectedItems={searchParams.keywords || []}
                     onItemsChange={(keywords) => {
                       setSearchParams(prev => ({ ...prev, keywords }));
@@ -590,105 +579,30 @@ const NewsSearchPage: React.FC = () => {
                     }}
                     renderItem={(keyword) => keyword}
                     placeholder="Enter keywords to search..."
-                    helperText="Search by keywords in article titles (e.g., AI, technology, politics)"
+                    allowCustomInput={true}
                   />
 
-                  {/* Sources Search Parameter */}
-                  <MultiSelectField<string>
-                    label="Sources (Search Parameter)"
-                    selectedItems={searchParams.sources || []}
-                    onItemsChange={(sources) => {
-                      setSearchParams(prev => ({ ...prev, sources }));
-                    }}
-                    suggestions={[]}
-                    onSearch={() => {
-                      return [];
-                    }}
-                    renderItem={(source) => source}
-                    placeholder="Enter source names..."
-                    helperText="Search by news source (e.g., Reuters, BBC, CNN)"
-                  />
-
-                  {/* Categories Search Parameter */}
-                  <FormControl size="small">
-                    <Autocomplete
-                      multiple
-                      options={CATEGORY_OPTIONS}
-                      value={searchParams.categories || []}
-                      onChange={(_, newValue) => {
-                        setSearchParams(prev => ({ ...prev, categories: newValue }));
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label="Categories (Search Parameter)"
-                          sx={{
-                            '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
-                            '& .MuiInputLabel-root': { color: '#94a3b8' },
-                          }}
-                        />
-                      )}
-                      renderTags={(value, getTagProps) =>
-                        value.map((option, index) => (
-                          <Chip
-                            {...getTagProps({ index })}
-                            key={option}
-                            label={option}
-                            size="small"
-                            sx={{ backgroundColor: '#475569', color: '#ffffff' }}
-                          />
-                        ))
-                      }
-                    />
-                  </FormControl>
-
-                  {/* Countries Search Parameter */}
-                  <FormControl size="small">
-                    <Autocomplete
-                      multiple
-                      options={COUNTRY_OPTIONS}
-                      value={searchParams.countries || []}
-                      onChange={(_, newValue) => {
-                        setSearchParams(prev => ({ ...prev, countries: newValue }));
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label="Countries (Search Parameter)"
-                          sx={{
-                            '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
-                            '& .MuiInputLabel-root': { color: '#94a3b8' },
-                          }}
-                        />
-                      )}
-                      renderTags={(value, getTagProps) =>
-                        value.map((option, index) => (
-                          <Chip
-                            {...getTagProps({ index })}
-                            key={option}
-                            label={option}
-                            size="small"
-                            sx={{ backgroundColor: '#475569', color: '#ffffff' }}
-                          />
-                        ))
-                      }
-                    />
-                  </FormControl>
-
-                  {/* Date Range */}
-                  <FormControl size="small" fullWidth>
-                    <InputLabel sx={{ color: '#94a3b8' }}>Date Range</InputLabel>
+                  {/* Date Range Preset */}
+                  <FormControl fullWidth>
+                    <InputLabel sx={{ color: '#94a3b8' }}>Date Range (Preset)</InputLabel>
                     <Select
                       value={searchParams.dateRange || 'all'}
                       onChange={(e) => {
                         setSearchParams(prev => ({ 
                           ...prev, 
-                          dateRange: e.target.value as '12h' | '24h' | '7d' | '30d' | 'all' 
+                          dateRange: e.target.value as '12h' | '24h' | '7d' | '30d' | 'all',
+                          // Clear custom dates when using preset
+                          dateFrom: '',
+                          dateTo: '',
                         }));
                       }}
+                      label="Date Range (Preset)"
                       sx={{
-                        backgroundColor: '#334155',
-                        color: '#ffffff',
+                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                        color: '#e2e8f0',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: '#475569' },
+                        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#64748b' },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
                         '& .MuiSelect-icon': { color: '#94a3b8' },
                       }}
                       MenuProps={{
@@ -711,683 +625,266 @@ const NewsSearchPage: React.FC = () => {
                       <MenuItem value="all">All Time</MenuItem>
                     </Select>
                   </FormControl>
-                </Box>
 
-                {/* Search Button */}
-                <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
-                <Button
-                  variant="outlined"
-                  onClick={() => {
-                    setSearchParams({
-                      keywords: [],
-                      sources: [],
-                      categories: [],
-                      countries: [],
-                      dateRange: 'all',
-                    });
-                    setSelectedFilters({
-                      sources: [],
-                      categories: [],
-                      countries: [],
-                    });
-                    setAllSearchResults([]);
-                    setTotalFound(0);
-                    setSelectedArticles(new Set());
-                  }}
-                  sx={{
-                    color: '#9ca3af',
-                    borderColor: '#374151',
-                    '&:hover': { borderColor: '#6b7280', backgroundColor: 'rgba(55, 65, 81, 0.3)' },
-                  }}
-                >
-                  Clear
-                </Button>
-                <Button
-                  variant="contained"
-                  onClick={handleSearch}
-                  disabled={isSearching}
-                  startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
-                  sx={{
-                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                    color: '#ffffff',
-                    '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
-                    '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
-                  }}
-                >
-                  {isSearching ? 'Searching...' : 'Search'}
-                </Button>
-              </Box>
+                  {/* Custom Date Range */}
+                  <Typography variant="body2" sx={{ color: '#9ca3af', mt: 1, mb: 1 }}>
+                    Or specify custom date range:
+                  </Typography>
+                  
+                  <TextField
+                    label="Date From"
+                    type="date"
+                    value={searchParams.dateFrom || ''}
+                    onChange={(e) => {
+                      setSearchParams(prev => ({ 
+                        ...prev, 
+                        dateFrom: e.target.value,
+                        // Clear preset when using custom dates
+                        dateRange: e.target.value ? undefined : (prev.dateRange || 'all'),
+                      }));
+                    }}
+                    InputLabelProps={{
+                      shrink: true,
+                    }}
+                    fullWidth
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                        color: '#e2e8f0',
+                        '& fieldset': { borderColor: '#475569' },
+                        '&:hover fieldset': { borderColor: '#64748b' },
+                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                      },
+                      '& .MuiInputLabel-root': { color: '#94a3b8' },
+                    }}
+                  />
+
+                  <TextField
+                    label="Date To"
+                    type="date"
+                    value={searchParams.dateTo || ''}
+                    onChange={(e) => {
+                      setSearchParams(prev => ({ 
+                        ...prev, 
+                        dateTo: e.target.value,
+                        // Clear preset when using custom dates
+                        dateRange: e.target.value ? undefined : (prev.dateRange || 'all'),
+                      }));
+                    }}
+                    InputLabelProps={{
+                      shrink: true,
+                    }}
+                    fullWidth
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                        color: '#e2e8f0',
+                        '& fieldset': { borderColor: '#475569' },
+                        '&:hover fieldset': { borderColor: '#64748b' },
+                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                      },
+                      '& .MuiInputLabel-root': { color: '#94a3b8' },
+                    }}
+                  />
+
+                  {/* Search and Clear Buttons */}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
+                    <Button
+                      variant="contained"
+                      onClick={handleSearch}
+                      disabled={isSearching}
+                      startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
+                      fullWidth
+                      sx={{
+                        background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                        color: '#ffffff',
+                        '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+                        '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
+                      }}
+                    >
+                      {isSearching ? 'Searching...' : 'Search'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        setSearchParams({
+                          keywords: [],
+                          sources: [],
+                          categories: [],
+                          countries: [],
+                          dateRange: 'all',
+                          dateFrom: '',
+                          dateTo: '',
+                        });
+                        setSelectedFilters({
+                          sources: [],
+                          categories: [],
+                          countries: [],
+                        });
+                        setAllSearchResults([]);
+                        setTotalFound(0);
+                        setSelectedArticles(new Set());
+                        setIsFiltered(false);
+                      }}
+                      fullWidth
+                      sx={{
+                        borderColor: '#475569',
+                        color: '#94a3b8',
+                        '&:hover': { borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.1)' },
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </Box>
                 </Box>
               </Collapse>
-            </GlassCard>
-          
+            </Box>
+          </GlassCard>
+
+          {/* Middle - Results Table */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
             {/* Error Alert */}
             {searchError && (
               <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
                 {searchError}
               </Alert>
             )}
-            
+
             {/* Results */}
-            {allSearchResults.length > 0 && (
-              <Box sx={{ display: 'flex', gap: 3 }}>
-                {/* Sidebar Filters */}
-                <GlassCard sx={{ 
-                  p: 2, 
-                  minWidth: 280, 
-                  maxWidth: 320,
-                  height: 'fit-content',
-                  position: 'sticky',
-                  top: 20,
-                  alignSelf: 'flex-start',
-                }}>
-                  <Typography
-                    variant="h6"
-                    sx={{
-                      color: '#ffffff',
-                      fontWeight: 600,
-                      mb: 2,
-                      fontSize: '1rem',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                    }}
-                  >
-                    Refine search results by:
-                  </Typography>
-                  
-                  <Typography
-                    variant="caption"
-                    sx={{
-                      color: '#9ca3af',
-                      mb: 2,
-                      display: 'block',
-                      fontSize: '0.75rem',
-                    }}
-                  >
-                    Click headings to show top filters.
-                    <br />
-                    Document counts shown in <Chip label="#" size="small" sx={{ 
-                      height: 18, 
-                      fontSize: '0.7rem',
-                      backgroundColor: 'rgba(107, 114, 128, 0.3)',
-                      color: '#9ca3af',
-                      border: '1px solid #6b7280',
-                    }} />
-                  </Typography>
-
-                  {/* Selected Filters Box */}
-                  {(selectedFilters.sources.length > 0 ||
-                    selectedFilters.categories.length > 0 ||
-                    selectedFilters.countries.length > 0) && (
-                    <Box sx={{ 
-                      mb: 2, 
-                      p: 2, 
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                      border: '1px solid #3b82f6',
-                      borderRadius: '4px',
-                    }}>
-                      <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600 }}>
-                        Selected Filters:
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
-                        {selectedFilters.sources.map((source, idx) => (
-                          <Chip
-                            key={`source-${idx}`}
-                            label={source}
-                            onDelete={() => {
-                              setSelectedFilters(prev => ({
-                                ...prev,
-                                sources: prev.sources.filter((_, i) => i !== idx),
-                              }));
-                              setIsFiltered(true);
-                            }}
+            {allSearchResults.length > 0 ? (
+              <GlassCard>
+              <Box sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    {/* Left side can be used for other controls if needed */}
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    {/* Add to Context Button */}
+                    {currentResults.length > 0 && (
+                      <Tooltip title={`Add ${selectedArticles.size > 0 ? `${selectedArticles.size} article(s)` : 'selected articles'} to context`}>
+                        <span>
+                          <IconButton
                             size="small"
-                            sx={{
-                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                              color: '#93c5fd',
-                              border: '1px solid #3b82f6',
-                              '& .MuiChip-deleteIcon': {
-                                color: '#93c5fd',
-                                '&:hover': { color: '#ffffff' },
-                              },
+                            onClick={handleContextMenuClick}
+                            disabled={selectedArticles.size === 0}
+                            sx={{ 
+                              color: selectedArticles.size > 0 ? '#10b981' : '#9ca3af', 
+                              '&:hover': { color: '#10b981' },
+                              '&:disabled': { color: '#4b5563' }
                             }}
-                          />
-                        ))}
-                        {selectedFilters.categories.map((category, idx) => (
-                          <Chip
-                            key={`category-${idx}`}
-                            label={category}
-                            onDelete={() => {
-                              setSelectedFilters(prev => ({
-                                ...prev,
-                                categories: prev.categories.filter((_, i) => i !== idx),
-                              }));
-                              setIsFiltered(true);
-                            }}
-                            size="small"
-                            sx={{
-                              backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                              color: '#86efac',
-                              border: '1px solid #10b981',
-                              '& .MuiChip-deleteIcon': {
-                                color: '#86efac',
-                                '&:hover': { color: '#ffffff' },
-                              },
-                            }}
-                          />
-                        ))}
-                        {selectedFilters.countries.map((country, idx) => (
-                          <Chip
-                            key={`country-${idx}`}
-                            label={country}
-                            onDelete={() => {
-                              setSelectedFilters(prev => ({
-                                ...prev,
-                                countries: prev.countries.filter((_, i) => i !== idx),
-                              }));
-                              setIsFiltered(true);
-                            }}
-                            size="small"
-                            sx={{
-                              backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                              color: '#fbbf24',
-                              border: '1px solid #f59e0b',
-                              '& .MuiChip-deleteIcon': {
-                                color: '#fbbf24',
-                                '&:hover': { color: '#ffffff' },
-                              },
-                            }}
-                          />
-                        ))}
-                      </Box>
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          setSelectedFilters({
-                            sources: [],
-                            categories: [],
-                            countries: [],
-                          });
-                          setIsFiltered(false);
-                        }}
+                          >
+                            <AddToContextIcon sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                    {currentResults.length > 0 ? (
+                      <Chip
+                        label={`${currentResults.length} article${currentResults.length !== 1 ? 's' : ''} found`}
                         sx={{
-                          color: '#93c5fd',
-                          fontSize: '0.75rem',
-                          textTransform: 'none',
-                          '&:hover': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          },
+                          backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                          color: '#86efac',
+                          border: '1px solid #22c55e',
+                          fontWeight: 600,
                         }}
-                      >
-                        Clear All Filters
-                      </Button>
-                    </Box>
-                  )}
-
-                  {/* Sources Filter */}
-                  {availableFilters.source_filters && availableFilters.source_filters.length > 0 && (
-                    <Box sx={{ mb: 2 }}>
-                      <Box
-                        onClick={() => setExpandedFilters(prev => ({ ...prev, sources: !prev.sources }))}
+                      />
+                    ) : isFiltered && allSearchResults.length > 0 ? (
+                      <Chip
+                        label={`0 of ${allSearchResults.length} articles match filters`}
                         sx={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          cursor: 'pointer',
-                          p: 1.5,
-                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                          borderRadius: '4px',
-                          '&:hover': {
-                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
-                          },
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
                         }}
-                      >
-                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                          Sources
-                        </Typography>
-                        {expandedFilters.sources ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
-                      </Box>
-                      <Collapse in={expandedFilters.sources}>
-                        <Box sx={{ 
-                          mt: 1, 
-                          maxHeight: 300, 
-                          overflowY: 'auto',
-                          '&::-webkit-scrollbar': {
-                            width: '6px',
-                          },
-                          '&::-webkit-scrollbar-track': {
-                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                          },
-                          '&::-webkit-scrollbar-thumb': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                            borderRadius: '3px',
-                          },
-                          '&::-webkit-scrollbar-thumb:hover': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                          },
-                        }}>
-                          {availableFilters.source_filters.map((filter, idx) => {
-                            const isSelected = selectedFilters.sources.includes(filter.source);
-                            return (
-                              <Box
-                                key={idx}
-                                onClick={() => {
-                                  setSelectedFilters(prev => {
-                                    const exists = prev.sources.includes(filter.source);
-                                    if (exists) {
-                                      return {
-                                        ...prev,
-                                        sources: prev.sources.filter(s => s !== filter.source),
-                                      };
-                                    } else {
-                                      return {
-                                        ...prev,
-                                        sources: [...prev.sources, filter.source],
-                                      };
-                                    }
-                                  });
-                                  setIsFiltered(true);
-                                }}
-                                sx={{
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  p: 1,
-                                  cursor: 'pointer',
-                                  borderRadius: '4px',
-                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
-                                  '&:hover': {
-                                    backgroundColor: isSelected 
-                                      ? 'rgba(59, 130, 246, 0.3)' 
-                                      : 'rgba(59, 130, 246, 0.1)',
-                                  },
-                                }}
-                              >
-                                <Typography variant="body2" sx={{ 
-                                  color: isSelected ? '#93c5fd' : '#ffffff', 
-                                  fontSize: '0.875rem', 
-                                  flex: 1,
-                                  fontWeight: isSelected ? 600 : 400,
-                                }}>
-                                  {filter.source}
-                                </Typography>
-                                <Chip
-                                  label={filter.count}
-                                  size="small"
-                                  sx={{
-                                    height: 20,
-                                    fontSize: '0.7rem',
-                                    backgroundColor: isSelected 
-                                      ? 'rgba(59, 130, 246, 0.3)' 
-                                      : 'rgba(107, 114, 128, 0.3)',
-                                    color: isSelected ? '#93c5fd' : '#9ca3af',
-                                    border: isSelected 
-                                      ? '1px solid #3b82f6' 
-                                      : '1px solid #6b7280',
-                                  }}
-                                />
-                              </Box>
-                            );
-                          })}
-                        </Box>
-                      </Collapse>
-                    </Box>
-                  )}
-
-                  {/* Categories Filter */}
-                  {availableFilters.category_filters && availableFilters.category_filters.length > 0 && (
-                    <Box sx={{ mb: 2 }}>
-                      <Box
-                        onClick={() => setExpandedFilters(prev => ({ ...prev, categories: !prev.categories }))}
+                      />
+                    ) : allSearchResults.length === 0 && !isSearching ? (
+                      <Chip
+                        label="No articles found"
                         sx={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          cursor: 'pointer',
-                          p: 1.5,
-                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                          borderRadius: '4px',
-                          '&:hover': {
-                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
-                          },
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
                         }}
-                      >
-                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                          Categories
-                        </Typography>
-                        {expandedFilters.categories ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
-                      </Box>
-                      <Collapse in={expandedFilters.categories}>
-                        <Box sx={{ 
-                          mt: 1, 
-                          maxHeight: 300, 
-                          overflowY: 'auto',
-                          '&::-webkit-scrollbar': {
-                            width: '6px',
-                          },
-                          '&::-webkit-scrollbar-track': {
-                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                          },
-                          '&::-webkit-scrollbar-thumb': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                            borderRadius: '3px',
-                          },
-                          '&::-webkit-scrollbar-thumb:hover': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                          },
-                        }}>
-                          {availableFilters.category_filters.map((filter, idx) => {
-                            const isSelected = selectedFilters.categories.includes(filter.category);
-                            return (
-                              <Box
-                                key={idx}
-                                onClick={() => {
-                                  setSelectedFilters(prev => {
-                                    const exists = prev.categories.includes(filter.category);
-                                    if (exists) {
-                                      return {
-                                        ...prev,
-                                        categories: prev.categories.filter(c => c !== filter.category),
-                                      };
-                                    } else {
-                                      return {
-                                        ...prev,
-                                        categories: [...prev.categories, filter.category],
-                                      };
-                                    }
-                                  });
-                                  setIsFiltered(true);
-                                }}
-                                sx={{
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  p: 1,
-                                  cursor: 'pointer',
-                                  borderRadius: '4px',
-                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
-                                  '&:hover': {
-                                    backgroundColor: isSelected 
-                                      ? 'rgba(59, 130, 246, 0.3)' 
-                                      : 'rgba(59, 130, 246, 0.1)',
-                                  },
-                                }}
-                              >
-                                <Typography variant="body2" sx={{ 
-                                  color: isSelected ? '#93c5fd' : '#ffffff', 
-                                  fontSize: '0.875rem', 
-                                  flex: 1,
-                                  fontWeight: isSelected ? 600 : 400,
-                                }}>
-                                  {filter.category}
-                                </Typography>
-                                <Chip
-                                  label={filter.count}
-                                  size="small"
-                                  sx={{
-                                    height: 20,
-                                    fontSize: '0.7rem',
-                                    backgroundColor: isSelected 
-                                      ? 'rgba(59, 130, 246, 0.3)' 
-                                      : 'rgba(107, 114, 128, 0.3)',
-                                    color: isSelected ? '#93c5fd' : '#9ca3af',
-                                    border: isSelected 
-                                      ? '1px solid #3b82f6' 
-                                      : '1px solid #6b7280',
-                                  }}
-                                />
-                              </Box>
-                            );
-                          })}
-                        </Box>
-                      </Collapse>
-                    </Box>
-                  )}
-
-                  {/* Countries Filter */}
-                  {availableFilters.country_filters && availableFilters.country_filters.length > 0 && (
-                    <Box sx={{ mb: 2 }}>
-                      <Box
-                        onClick={() => setExpandedFilters(prev => ({ ...prev, countries: !prev.countries }))}
-                        sx={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          cursor: 'pointer',
-                          p: 1.5,
-                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                          borderRadius: '4px',
-                          '&:hover': {
-                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
-                          },
-                        }}
-                      >
-                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                          Countries
-                        </Typography>
-                        {expandedFilters.countries ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
-                      </Box>
-                      <Collapse in={expandedFilters.countries}>
-                        <Box sx={{ 
-                          mt: 1, 
-                          maxHeight: 300, 
-                          overflowY: 'auto',
-                          '&::-webkit-scrollbar': {
-                            width: '6px',
-                          },
-                          '&::-webkit-scrollbar-track': {
-                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                          },
-                          '&::-webkit-scrollbar-thumb': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                            borderRadius: '3px',
-                          },
-                          '&::-webkit-scrollbar-thumb:hover': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                          },
-                        }}>
-                          {availableFilters.country_filters.map((filter, idx) => {
-                            const isSelected = selectedFilters.countries.includes(filter.country);
-                            return (
-                              <Box
-                                key={idx}
-                                onClick={() => {
-                                  setSelectedFilters(prev => {
-                                    const exists = prev.countries.includes(filter.country);
-                                    if (exists) {
-                                      return {
-                                        ...prev,
-                                        countries: prev.countries.filter(c => c !== filter.country),
-                                      };
-                                    } else {
-                                      return {
-                                        ...prev,
-                                        countries: [...prev.countries, filter.country],
-                                      };
-                                    }
-                                  });
-                                  setIsFiltered(true);
-                                }}
-                                sx={{
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  p: 1,
-                                  cursor: 'pointer',
-                                  borderRadius: '4px',
-                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
-                                  '&:hover': {
-                                    backgroundColor: isSelected 
-                                      ? 'rgba(59, 130, 246, 0.3)' 
-                                      : 'rgba(59, 130, 246, 0.1)',
-                                  },
-                                }}
-                              >
-                                <Typography variant="body2" sx={{ 
-                                  color: isSelected ? '#93c5fd' : '#ffffff', 
-                                  fontSize: '0.875rem', 
-                                  flex: 1,
-                                  fontWeight: isSelected ? 600 : 400,
-                                }}>
-                                  {filter.country}
-                                </Typography>
-                                <Chip
-                                  label={filter.count}
-                                  size="small"
-                                  sx={{
-                                    height: 20,
-                                    fontSize: '0.7rem',
-                                    backgroundColor: isSelected 
-                                      ? 'rgba(59, 130, 246, 0.3)' 
-                                      : 'rgba(107, 114, 128, 0.3)',
-                                    color: isSelected ? '#93c5fd' : '#9ca3af',
-                                    border: isSelected 
-                                      ? '1px solid #3b82f6' 
-                                      : '1px solid #6b7280',
-                                  }}
-                                />
-                              </Box>
-                            );
-                          })}
-                        </Box>
-                      </Collapse>
-                    </Box>
-                  )}
-                </GlassCard>
-
-                {/* Results Table */}
-                <GlassCard sx={{ flex: 1, p: 4 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                    <Typography
-                      variant="h6"
-                      sx={{
-                        color: '#ffffff',
-                        fontWeight: 600,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
-                      }}
-                    >
-                      Search Results
-                    </Typography>
-                    
-                    {/* Status Indicator and Add to Context Button */}
-                    {allSearchResults.length > 0 || isSearching ? (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        {/* Add to Context Button */}
-                        {currentResults.length > 0 && (
-                          <Tooltip title={`Add ${selectedArticles.size > 0 ? `${selectedArticles.size} article(s)` : 'selected articles'} to context`}>
-                            <span>
-                              <IconButton
-                                size="small"
-                                onClick={handleContextMenuClick}
-                                disabled={selectedArticles.size === 0}
-                                sx={{ 
-                                  color: selectedArticles.size > 0 ? '#10b981' : '#9ca3af', 
-                                  '&:hover': { color: '#10b981' },
-                                  '&:disabled': { color: '#4b5563' }
-                                }}
-                              >
-                                <AddToContextIcon sx={{ fontSize: 18 }} />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {allSearchResults.length > 0 ? (
-                          <Chip
-                            label={`${allSearchResults.length} article${allSearchResults.length !== 1 ? 's' : ''} found`}
-                            sx={{
-                              backgroundColor: 'rgba(34, 197, 94, 0.2)',
-                              color: '#86efac',
-                              border: '1px solid #22c55e',
-                              fontWeight: 600,
+                      />
+                    ) : null}
+                    {currentResults.length > 0 && (
+                      <>
+                        <FormControl size="small" sx={{ minWidth: 120, ml: 1 }}>
+                          <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+                          <Select
+                            labelId="results-per-page-label"
+                            value={pageSize}
+                            label="Per Page"
+                            onChange={(e) => {
+                              const newPageSize = Number(e.target.value);
+                              setPageSize(newPageSize);
+                              setCurrentPage(1);
                             }}
-                          />
-                        ) : isFiltered && allSearchResults.length > 0 ? (
-                          <Chip
-                            label={`0 of ${allSearchResults.length} articles match filters`}
                             sx={{
-                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                              color: '#fca5a5',
-                              border: '1px solid #ef4444',
-                              fontWeight: 600,
+                              color: '#ffffff',
+                              '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '& .MuiSelect-icon': { color: '#9ca3af' },
                             }}
-                          />
-                        ) : allSearchResults.length === 0 && !isSearching ? (
-                          <Chip
-                            label="No articles found"
-                            sx={{
-                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                              color: '#fca5a5',
-                              border: '1px solid #ef4444',
-                              fontWeight: 600,
-                            }}
-                          />
-                        ) : null}
-                        {/* Results per page selector */}
-                        {currentResults.length > 0 && (
-                          <FormControl size="small" sx={{ minWidth: 120 }}>
-                            <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
-                            <Select
-                              labelId="results-per-page-label"
-                              value={pageSize}
-                              label="Per Page"
-                              onChange={(e) => {
-                                const newPageSize = Number(e.target.value);
-                                setPageSize(newPageSize);
-                                setCurrentPage(1);
-                              }}
-                              sx={{
-                                color: '#ffffff',
-                                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                                '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                                '& .MuiSelect-icon': { color: '#9ca3af' },
-                              }}
-                              MenuProps={{
-                                PaperProps: {
-                                  sx: {
-                                    bgcolor: '#1f2937',
-                                    border: '1px solid #374151',
-                                    '& .MuiMenuItem-root': {
-                                      color: '#ffffff',
+                            MenuProps={{
+                              PaperProps: {
+                                sx: {
+                                  bgcolor: '#1f2937',
+                                  border: '1px solid #374151',
+                                  '& .MuiMenuItem-root': {
+                                    color: '#ffffff',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                    },
+                                    '&.Mui-selected': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
                                       '&:hover': {
-                                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                      },
-                                      '&.Mui-selected': {
-                                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                                        '&:hover': {
-                                          backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                                        },
+                                        backgroundColor: 'rgba(59, 130, 246, 0.3)',
                                       },
                                     },
                                   },
+                                  '&::-webkit-scrollbar': {
+                                    width: '8px',
+                                  },
+                                  '&::-webkit-scrollbar-track': {
+                                    backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb': {
+                                    backgroundColor: '#3b82f6',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb:hover': {
+                                    backgroundColor: '#2563eb',
+                                  },
                                 },
-                              }}
-                            >
-                              <MenuItem value={10}>10</MenuItem>
-                              <MenuItem value={25}>25</MenuItem>
-                              <MenuItem value={50}>50</MenuItem>
-                              <MenuItem value={100}>100</MenuItem>
-                            </Select>
-                          </FormControl>
-                        )}
-                      </Box>
-                    ) : null}
+                              },
+                            }}
+                          >
+                            <MenuItem value={10}>10</MenuItem>
+                            <MenuItem value={25}>25</MenuItem>
+                            <MenuItem value={50}>50</MenuItem>
+                            <MenuItem value={100}>100</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </>
+                    )}
                   </Box>
+                </Box>
 
-                  {/* Results Table */}
-                  {currentResults.length > 0 ? (
-                    <>
-                      <TableContainer sx={{ 
+                {/* Results Table */}
+                {currentResults.length > 0 ? (
+                  <>
+                  <TableContainer sx={{ 
                         backgroundColor: 'transparent',
                         borderRadius: 0,
                         boxShadow: 'none',
                         border: 'none',
-                        maxHeight: '70vh',
                         overflow: 'auto',
+                        width: '100%',
                         '&::-webkit-scrollbar': {
                           width: '6px',
                           height: '6px',
@@ -1775,7 +1272,7 @@ const NewsSearchPage: React.FC = () => {
                           </Button>
                         </Box>
                       )}
-                    </>
+                  </>
                   ) : (
                     <Box sx={{ textAlign: 'center', py: 6 }}>
                       <Typography variant="body2" color="#9ca3af">
@@ -1785,10 +1282,521 @@ const NewsSearchPage: React.FC = () => {
                       </Typography>
                     </Box>
                   )}
-                </GlassCard>
               </Box>
-            )}
+              </GlassCard>
+            ) : null}
           </Box>
+
+          {/* Right Sidebar - Client-side Filter Box (Only when results exist) */}
+          {allSearchResults.length > 0 && (
+                <GlassCard sx={{ 
+                  p: 2, 
+                  minWidth: 280, 
+                  maxWidth: 320,
+                  height: 'fit-content',
+                  position: 'sticky',
+                  top: 20,
+                  alignSelf: 'flex-start',
+                }}>
+                  <Typography
+                    variant="h6"
+                    sx={{
+                      color: '#ffffff',
+                      fontWeight: 600,
+                      mb: 2,
+                      fontSize: '1rem',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                    }}
+                  >
+                    Refine search results by:
+                  </Typography>
+                  
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: '#9ca3af',
+                      mb: 2,
+                      display: 'block',
+                      fontSize: '0.75rem',
+                    }}
+                  >
+                    Click headings to show top filters.
+                    <br />
+                    Article counts shown in <Chip label="#" size="small" sx={{ 
+                      height: 18, 
+                      fontSize: '0.7rem',
+                      backgroundColor: 'rgba(107, 114, 128, 0.3)',
+                      color: '#9ca3af',
+                      border: '1px solid #6b7280',
+                    }} />
+                  </Typography>
+
+                  {/* Selected Filters Box */}
+                  {(selectedFilters.sources.length > 0 ||
+                    selectedFilters.categories.length > 0 ||
+                    selectedFilters.countries.length > 0) && (
+                    <Box sx={{ 
+                      mb: 2, 
+                      p: 2, 
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      border: '1px solid #3b82f6',
+                      borderRadius: '4px',
+                    }}>
+                      <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600 }}>
+                        Selected Filters:
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+                        {selectedFilters.sources.map((source, idx) => (
+                          <Chip
+                            key={`source-${idx}`}
+                            label={source}
+                            onDelete={() => {
+                              setSelectedFilters(prev => {
+                                const newSources = prev.sources.filter((_, i) => i !== idx);
+                                const hasAnyFilters = 
+                                  newSources.length > 0 ||
+                                  prev.categories.length > 0 ||
+                                  prev.countries.length > 0;
+                                setIsFiltered(hasAnyFilters);
+                                return {
+                                  ...prev,
+                                  sources: newSources,
+                                };
+                              });
+                            }}
+                            size="small"
+                            sx={{
+                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                              color: '#93c5fd',
+                              border: '1px solid #3b82f6',
+                              '& .MuiChip-deleteIcon': {
+                                color: '#93c5fd',
+                                '&:hover': { color: '#ffffff' },
+                              },
+                            }}
+                          />
+                        ))}
+                        {selectedFilters.categories.map((category, idx) => (
+                          <Chip
+                            key={`category-${idx}`}
+                            label={category}
+                            onDelete={() => {
+                              setSelectedFilters(prev => {
+                                const newCategories = prev.categories.filter((_, i) => i !== idx);
+                                const hasAnyFilters = 
+                                  prev.sources.length > 0 ||
+                                  newCategories.length > 0 ||
+                                  prev.countries.length > 0;
+                                setIsFiltered(hasAnyFilters);
+                                return {
+                                  ...prev,
+                                  categories: newCategories,
+                                };
+                              });
+                            }}
+                            size="small"
+                            sx={{
+                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                              color: '#93c5fd',
+                              border: '1px solid #3b82f6',
+                              '& .MuiChip-deleteIcon': {
+                                color: '#93c5fd',
+                                '&:hover': { color: '#ffffff' },
+                              },
+                            }}
+                          />
+                        ))}
+                        {selectedFilters.countries.map((country, idx) => (
+                          <Chip
+                            key={`country-${idx}`}
+                            label={country}
+                            onDelete={() => {
+                              setSelectedFilters(prev => {
+                                const newCountries = prev.countries.filter((_, i) => i !== idx);
+                                const hasAnyFilters = 
+                                  prev.sources.length > 0 ||
+                                  prev.categories.length > 0 ||
+                                  newCountries.length > 0;
+                                setIsFiltered(hasAnyFilters);
+                                return {
+                                  ...prev,
+                                  countries: newCountries,
+                                };
+                              });
+                            }}
+                            size="small"
+                            sx={{
+                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                              color: '#93c5fd',
+                              border: '1px solid #3b82f6',
+                              '& .MuiChip-deleteIcon': {
+                                color: '#93c5fd',
+                                '&:hover': { color: '#ffffff' },
+                              },
+                            }}
+                          />
+                        ))}
+                      </Box>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setSelectedFilters({
+                            sources: [],
+                            categories: [],
+                            countries: [],
+                          });
+                          setIsFiltered(false);
+                        }}
+                        sx={{
+                          color: '#93c5fd',
+                          fontSize: '0.75rem',
+                          textTransform: 'none',
+                          mt: 1,
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          },
+                        }}
+                      >
+                        Clear All Filters
+                      </Button>
+                    </Box>
+                  )}
+
+                  {/* Sources Filter */}
+                  {availableFilters.source_filters && availableFilters.source_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, sources: !prev.sources }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          Sources
+                        </Typography>
+                        {expandedFilters.sources ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.sources}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.source_filters.map((filter, idx) => {
+                            const isSelected = selectedFilters.sources.includes(filter.source);
+                            return (
+                              <Box
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.sources.includes(filter.source);
+                                    if (exists) {
+                                      return {
+                                        ...prev,
+                                        sources: prev.sources.filter(s => s !== filter.source),
+                                      };
+                                    } else {
+                                      return {
+                                        ...prev,
+                                        sources: [...prev.sources, filter.source],
+                                      };
+                                    }
+                                  });
+                                  setIsFiltered(true);
+                                }}
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  p: 1,
+                                  cursor: 'pointer',
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                }}
+                              >
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.source}
+                                </Typography>
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      </Collapse>
+                    </Box>
+                  )}
+
+                  {/* Categories Filter */}
+                  {availableFilters.category_filters && availableFilters.category_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, categories: !prev.categories }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          Categories
+                        </Typography>
+                        {expandedFilters.categories ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.categories}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.category_filters.map((filter, idx) => {
+                            const isSelected = selectedFilters.categories.includes(filter.category);
+                            return (
+                              <Box
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.categories.includes(filter.category);
+                                    if (exists) {
+                                      return {
+                                        ...prev,
+                                        categories: prev.categories.filter(c => c !== filter.category),
+                                      };
+                                    } else {
+                                      return {
+                                        ...prev,
+                                        categories: [...prev.categories, filter.category],
+                                      };
+                                    }
+                                  });
+                                  setIsFiltered(true);
+                                }}
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  p: 1,
+                                  cursor: 'pointer',
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                }}
+                              >
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.category}
+                                </Typography>
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      </Collapse>
+                    </Box>
+                  )}
+
+                  {/* Countries Filter */}
+                  {availableFilters.country_filters && availableFilters.country_filters.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Box
+                        onClick={() => setExpandedFilters(prev => ({ ...prev, countries: !prev.countries }))}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          p: 1.5,
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                          },
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          Countries
+                        </Typography>
+                        {expandedFilters.countries ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      </Box>
+                      <Collapse in={expandedFilters.countries}>
+                        <Box sx={{ 
+                          mt: 1, 
+                          maxHeight: 300, 
+                          overflowY: 'auto',
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                          },
+                        }}>
+                          {availableFilters.country_filters.map((filter, idx) => {
+                            const isSelected = selectedFilters.countries.includes(filter.country);
+                            return (
+                              <Box
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedFilters(prev => {
+                                    const exists = prev.countries.includes(filter.country);
+                                    if (exists) {
+                                      return {
+                                        ...prev,
+                                        countries: prev.countries.filter(c => c !== filter.country),
+                                      };
+                                    } else {
+                                      return {
+                                        ...prev,
+                                        countries: [...prev.countries, filter.country],
+                                      };
+                                    }
+                                  });
+                                  setIsFiltered(true);
+                                }}
+                                sx={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  p: 1,
+                                  cursor: 'pointer',
+                                  borderRadius: '4px',
+                                  backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                                  border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                  '&:hover': {
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                }}
+                              >
+                                <Typography variant="body2" sx={{ 
+                                  color: isSelected ? '#93c5fd' : '#ffffff', 
+                                  fontSize: '0.875rem', 
+                                  flex: 1,
+                                  fontWeight: isSelected ? 600 : 400,
+                                }}>
+                                  {filter.country}
+                                </Typography>
+                                <Chip
+                                  label={filter.count}
+                                  size="small"
+                                  sx={{
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    backgroundColor: isSelected 
+                                      ? 'rgba(59, 130, 246, 0.3)' 
+                                      : 'rgba(107, 114, 128, 0.3)',
+                                    color: isSelected ? '#93c5fd' : '#9ca3af',
+                                    border: isSelected 
+                                      ? '1px solid #3b82f6' 
+                                      : '1px solid #6b7280',
+                                  }}
+                                />
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      </Collapse>
+                    </Box>
+                  )}
+                </GlassCard>
+              )}
         </Box>
       </Container>
 

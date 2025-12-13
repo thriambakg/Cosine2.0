@@ -67,12 +67,52 @@ def convert_to_dynamodb_format(value: Any) -> Any:
     return value
 
 
-def calculate_date_filter(date_range: str) -> Optional[str]:
-    """Calculate date filter based on date range string"""
+def calculate_date_filter(date_range: str = None, date_from: str = None, date_to: str = None) -> Optional[tuple]:
+    """
+    Calculate date filter based on date range string or explicit date_from/date_to.
+    
+    Args:
+        date_range: Date range string ('12h', '24h', '7d', '30d', 'all')
+        date_from: Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
+        date_to: End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
+    
+    Returns:
+        Tuple of (start_date, end_date) in ISO format strings, or (None, None) if no filter
+    """
+    # If explicit date_from/date_to provided, use those
+    if date_from or date_to:
+        start_date_str = date_from
+        end_date_str = date_to
+        
+        # If only one is provided, set defaults
+        if date_from and not date_to:
+            # If only start date, no end date filter
+            end_date_str = None
+        elif date_to and not date_from:
+            # If only end date, set start to a very early date
+            start_date_str = '1970-01-01T00:00:00Z'
+        
+        # Ensure dates are in ISO format with Z suffix
+        if start_date_str and not start_date_str.endswith('Z'):
+            if 'T' in start_date_str:
+                start_date_str = start_date_str + 'Z'
+            else:
+                start_date_str = start_date_str + 'T00:00:00Z'
+        
+        if end_date_str and not end_date_str.endswith('Z'):
+            if 'T' in end_date_str:
+                end_date_str = end_date_str + 'Z'
+            else:
+                end_date_str = end_date_str + 'T23:59:59Z'
+        
+        return (start_date_str, end_date_str)
+    
+    # Otherwise, use date_range string
     if not date_range or date_range == 'all':
-        return None
+        return (None, None)
     
     now = datetime.utcnow()
+    start_date = None
     
     if date_range == '1h':
         start_date = now - timedelta(hours=1)
@@ -85,19 +125,19 @@ def calculate_date_filter(date_range: str) -> Optional[str]:
     elif date_range == '30d':
         start_date = now - timedelta(days=30)
     else:
-        return None
+        return (None, None)
     
-    return start_date.isoformat() + 'Z'
+    return (start_date.isoformat() + 'Z', None)  # No end date for preset ranges
 
 
-def search_by_keyword(keyword: str, date_filter: Optional[str], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def search_by_keyword(keyword: str, date_filter: Optional[tuple], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Search articles by keyword using GSI5 query.
     GSI5PK = 'TITLE_SEARCH' for all articles.
     
     Args:
         keyword: Search keyword (lowercase)
-        date_filter: Optional date filter (ISO format string)
+        date_filter: Optional tuple of (start_date, end_date) in ISO format strings
         limit: Maximum number of results to return
         last_evaluated_key: DynamoDB LastEvaluatedKey for pagination
     
@@ -119,7 +159,18 @@ def search_by_keyword(keyword: str, date_filter: Optional[str], limit: int, last
         
         # Add date filter if provided
         if date_filter:
-            query_params['FilterExpression'] = Attr('published_date').gte(date_filter)
+            start_date, end_date = date_filter
+            filter_conditions = []
+            if start_date:
+                filter_conditions.append(Attr('published_date').gte(start_date))
+            if end_date:
+                filter_conditions.append(Attr('published_date').lte(end_date))
+            
+            if filter_conditions:
+                if len(filter_conditions) == 1:
+                    query_params['FilterExpression'] = filter_conditions[0]
+                else:
+                    query_params['FilterExpression'] = filter_conditions[0] & filter_conditions[1]
         
         # Use cursor if provided
         if last_evaluated_key:
@@ -178,14 +229,14 @@ def search_by_keyword(keyword: str, date_filter: Optional[str], limit: int, last
         }
 
 
-def search_multiple_keywords(keywords: List[str], date_filter: Optional[str], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def search_multiple_keywords(keywords: List[str], date_filter: Optional[tuple], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Search articles across multiple keywords using individual GSI queries and union results.
     Similar to search_multiple_politicians in politician trades search.
     
     Args:
         keywords: List of keywords to search for
-        date_filter: Optional date filter (ISO format string)
+        date_filter: Optional tuple of (start_date, end_date) in ISO format strings
         limit: Maximum number of results to return
         last_evaluated_key: Cursor for pagination (contains published_date and SK)
     
@@ -276,12 +327,12 @@ def search_multiple_keywords(keywords: List[str], date_filter: Optional[str], li
     }
 
 
-def scan_all_articles(date_filter: Optional[str], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def scan_all_articles(date_filter: Optional[tuple], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Scan all articles with date filter, only fetching a limited batch for pagination.
     
     Args:
-        date_filter: Optional date filter (ISO format string)
+        date_filter: Optional tuple of (start_date, end_date) in ISO format strings
         limit: Maximum number of results to return
         last_evaluated_key: DynamoDB LastEvaluatedKey for pagination (must have PK and SK)
     
@@ -297,10 +348,21 @@ def scan_all_articles(date_filter: Optional[str], limit: int, last_evaluated_key
             # Scans don't support ordering - results are returned in arbitrary order
         }
         
+        filter_conditions = [Attr('PK').exists()]
         if date_filter:
-            scan_params['FilterExpression'] = Attr('published_date').gte(date_filter) & Attr('PK').exists()
-        else:
-            scan_params['FilterExpression'] = Attr('PK').exists()
+            start_date, end_date = date_filter
+            if start_date:
+                filter_conditions.append(Attr('published_date').gte(start_date))
+            if end_date:
+                filter_conditions.append(Attr('published_date').lte(end_date))
+        
+        if len(filter_conditions) == 1:
+            scan_params['FilterExpression'] = filter_conditions[0]
+        elif len(filter_conditions) > 1:
+            combined = filter_conditions[0]
+            for condition in filter_conditions[1:]:
+                combined = combined & condition
+            scan_params['FilterExpression'] = combined
         
         # Use cursor if provided - must be in table format (PK, SK)
         if last_evaluated_key:
@@ -443,6 +505,8 @@ def extract_terms_from_query_node(node: Any) -> List[str]:
 def search_articles(
     query_filters: Dict[str, Any],
     date_range: str = '12h',
+    date_from: str = None,
+    date_to: str = None,
     limit: int = 200,
     last_evaluated_key: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
@@ -451,7 +515,9 @@ def search_articles(
     
     Args:
         query_filters: Dictionary with 'keywords' key (list of strings or complex query structure)
-        date_range: Date range filter ('12h', '24h', '7d', '30d', 'all')
+        date_range: Date range filter ('12h', '24h', '7d', '30d', 'all') - used if date_from/date_to not provided
+        date_from: Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
+        date_to: End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
         limit: Maximum number of results to return
         last_evaluated_key: Cursor for pagination
     
@@ -481,10 +547,10 @@ def search_articles(
         Dictionary with results and metadata including last_evaluated_key for next page
     """
     try:
-        logger.info(f"🔍 Starting search_articles with filters: {json.dumps(query_filters, default=str)}, date_range: {date_range}, limit: {limit}")
+        logger.info(f"🔍 Starting search_articles with filters: {json.dumps(query_filters, default=str)}, date_range: {date_range}, date_from: {date_from}, date_to: {date_to}, limit: {limit}")
         
-        # Calculate date filter
-        date_filter = calculate_date_filter(date_range)
+        # Calculate date filter (returns tuple of (start_date, end_date))
+        date_filter = calculate_date_filter(date_range=date_range, date_from=date_from, date_to=date_to)
         
         # Extract keywords from filters
         keywords = extract_keywords_from_query(query_filters)
@@ -581,14 +647,17 @@ def lambda_handler(event, context):
             query_filters = {}
         
         date_range = body.get('dateRange', '12h')
+        date_from = body.get('dateFrom') or body.get('date_from')  # Support both camelCase and snake_case
+        date_to = body.get('dateTo') or body.get('date_to')  # Support both camelCase and snake_case
         limit = min(int(body.get('limit', 200)), MAX_RESULTS)
         last_evaluated_key = body.get('lastEvaluatedKey')  # Cursor for "load more" pagination
         
         logger.info(f"📄 Pagination - limit: {limit}, has_cursor: {last_evaluated_key is not None}")
         logger.info(f"📋 Query filters type: {type(query_filters)}, value: {json.dumps(query_filters, default=str)}")
+        logger.info(f"📅 Date filters - date_range: {date_range}, date_from: {date_from}, date_to: {date_to}")
         
         # Perform search
-        result = search_articles(query_filters, date_range, limit, last_evaluated_key)
+        result = search_articles(query_filters, date_range, date_from, date_to, limit, last_evaluated_key)
         
         logger.info(f"✅ Search complete - success: {result.get('success')}, results_count: {len(result.get('articles', []))}, total: {result.get('total', 0)}")
         

@@ -388,6 +388,8 @@ export const stockScreenerAPI = {
 // ============================================================================
 
 export interface NewsSearchRequest {
+  dateFrom?: string;
+  dateTo?: string;
   query: {
     keywords?: string[]; // Simplified: just array of keywords
   };

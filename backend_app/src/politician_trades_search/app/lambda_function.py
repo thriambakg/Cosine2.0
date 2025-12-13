@@ -95,6 +95,41 @@ def parse_amount_range_filter(amount_range: str) -> tuple:
         return None
 
 
+def map_amount_range_to_standard_ranges(user_min: int, user_max: Optional[int]) -> List[tuple]:
+    """
+    Map a user-selected amount range to all STANDARD_PTR_RANGES that overlap with it.
+    
+    A standard range overlaps with the user range if:
+    - The standard range's min <= user_max (if user_max exists) AND
+    - The standard range's max >= user_min (or is None for open-ended ranges)
+    
+    Args:
+        user_min: Minimum amount from user selection
+        user_max: Maximum amount from user selection (None for open-ended)
+        
+    Returns:
+        List of (min, max) tuples from STANDARD_PTR_RANGES that overlap with the user range
+    """
+    matching_ranges = []
+    
+    for std_min, std_max in STANDARD_PTR_RANGES:
+        # Check if ranges overlap
+        # Ranges overlap if: std_min <= user_max AND (std_max >= user_min OR std_max is None)
+        if user_max is None:
+            # User selected open-ended range (e.g., "$1000+")
+            # Match if standard range's max >= user_min OR standard range is open-ended
+            if std_max is None or std_max >= user_min:
+                matching_ranges.append((std_min, std_max))
+        else:
+            # User selected bounded range (e.g., "$1000-$50000")
+            # Ranges overlap if: std_min <= user_max AND (std_max >= user_min OR std_max is None)
+            if std_min <= user_max and (std_max is None or std_max >= user_min):
+                matching_ranges.append((std_min, std_max))
+    
+    logger.info(f"🔍 Mapped user range ({user_min}, {user_max}) to {len(matching_ranges)} standard ranges: {matching_ranges}")
+    return matching_ranges
+
+
 class DecimalEncoder(json.JSONEncoder):
     """JSON encoder for Decimal types"""
     def default(self, obj):
@@ -246,43 +281,75 @@ def build_query_params(
         
         if isinstance(amount_ranges, list):
             if len(amount_ranges) == 1:
-                # Single amount range - can use GSI
+                # Single amount range - map to standard ranges and use GSI if possible
                 amount_range_tuple = parse_amount_range_filter(amount_ranges[0])
                 if amount_range_tuple:
-                    index_name = GSI_NAMES['amountMin']
-                    amount_min, amount_max = amount_range_tuple
+                    user_min, user_max = amount_range_tuple
+                    # Map user range to all overlapping standard ranges
+                    matching_ranges = map_amount_range_to_standard_ranges(user_min, user_max)
                     
-                    if amount_max is None:
-                        # "Over X" case - no upper bound
-                        key_condition = Key('amountMin').gte(Decimal(str(amount_min)))
+                    if matching_ranges:
+                        # If only one matching range, use GSI directly
+                        if len(matching_ranges) == 1:
+                            std_min, std_max = matching_ranges[0]
+                            index_name = GSI_NAMES['amountMin']
+                            if std_max is None:
+                                key_condition = Key('amountMin').gte(Decimal(str(std_min)))
+                                logger.info(f"✅ Selected GSI: {index_name} for amount range: >= {std_min}")
+                            else:
+                                key_condition = Key('amountMin').between(Decimal(str(std_min)), Decimal(str(std_max)))
+                                logger.info(f"✅ Selected GSI: {index_name} for amount range: {std_min} - {std_max}")
+                        else:
+                            # Multiple matching ranges - cannot use single GSI efficiently, fall back to scan
+                            logger.info(f"⚠️ User range ({user_min}, {user_max}) maps to {len(matching_ranges)} standard ranges, falling back to scan")
+                            index_name = None
+                            key_condition = None
                     else:
-                        # Standard range
-                        key_condition = Key('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
-                    
-                    logger.info(f"✅ Selected GSI: {index_name} for single amount range: {amount_ranges[0]} -> ({amount_min}, {amount_max})")
+                        logger.warning(f"⚠️ No matching standard ranges for user range: {amount_ranges[0]}")
+                        index_name = None
+                        key_condition = None
                 else:
                     logger.warning(f"⚠️ Failed to parse amount range: {amount_ranges[0]}")
+                    index_name = None
+                    key_condition = None
             else:
                 # Multiple amount ranges - use scan with filter
                 logger.info(f"🔍 Multiple amount ranges ({len(amount_ranges)} items) will use scan with filter")
+                index_name = None
+                key_condition = None
         else:
             # Single string - parse the amount range filter (e.g., "$1,001-$15,000")
             logger.info(f"🔍 Processing single amount range string: '{amount_ranges}'")
             amount_range_tuple = parse_amount_range_filter(amount_ranges)
             if amount_range_tuple:
-                index_name = GSI_NAMES['amountMin']
-                amount_min, amount_max = amount_range_tuple
+                user_min, user_max = amount_range_tuple
+                # Map user range to all overlapping standard ranges
+                matching_ranges = map_amount_range_to_standard_ranges(user_min, user_max)
                 
-                if amount_max is None:
-                    # "Over X" case - no upper bound
-                    key_condition = Key('amountMin').gte(Decimal(str(amount_min)))
-                    logger.info(f"✅ Selected GSI: {index_name} for amount range >= {amount_min}")
+                if matching_ranges:
+                    # If only one matching range, use GSI directly
+                    if len(matching_ranges) == 1:
+                        std_min, std_max = matching_ranges[0]
+                        index_name = GSI_NAMES['amountMin']
+                        if std_max is None:
+                            key_condition = Key('amountMin').gte(Decimal(str(std_min)))
+                            logger.info(f"✅ Selected GSI: {index_name} for amount range: >= {std_min}")
+                        else:
+                            key_condition = Key('amountMin').between(Decimal(str(std_min)), Decimal(str(std_max)))
+                            logger.info(f"✅ Selected GSI: {index_name} for amount range: {std_min} - {std_max}")
+                    else:
+                        # Multiple matching ranges - cannot use single GSI efficiently, fall back to scan
+                        logger.info(f"⚠️ User range ({user_min}, {user_max}) maps to {len(matching_ranges)} standard ranges, falling back to scan")
+                        index_name = None
+                        key_condition = None
                 else:
-                    # Standard range
-                    key_condition = Key('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
-                    logger.info(f"✅ Selected GSI: {index_name} for amount range: {amount_min} - {amount_max}")
+                    logger.warning(f"⚠️ No matching standard ranges for user range: {amount_ranges}")
+                    index_name = None
+                    key_condition = None
             else:
                 logger.warning(f"⚠️ Failed to parse amount range: '{amount_ranges}'")
+                index_name = None
+                key_condition = None
     elif filters.get('stateDistrict'):
         index_name = GSI_NAMES['stateDistrict']
         state_district_value = filters['stateDistrict']
@@ -507,33 +574,50 @@ def build_query_params(
                 # Single amount range
                 amount_range_tuple = parse_amount_range_filter(amount_ranges[0])
                 if amount_range_tuple:
-                    amount_min, amount_max = amount_range_tuple
-                    if amount_max is None:
-                        # "Over X" case
-                        filter_conditions.append(Attr('amountMin').gte(Decimal(str(amount_min))))
-                        logger.info(f"🔍 Added amount range filter: >= {amount_min}")
-                    else:
-                        # Standard range
-                        filter_conditions.append(Attr('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max))))
-                        logger.info(f"🔍 Added amount range filter: {amount_min} - {amount_max}")
+                    user_min, user_max = amount_range_tuple
+                    # Map user range to all overlapping standard ranges
+                    matching_ranges = map_amount_range_to_standard_ranges(user_min, user_max)
+                    
+                    if matching_ranges:
+                        # Create OR condition for all matching standard ranges
+                        range_filter = None
+                        for std_min, std_max in matching_ranges:
+                            if std_max is None:
+                                # Open-ended range (e.g., "$50,000,001+")
+                                range_condition = Attr('amountMin').gte(Decimal(str(std_min)))
+                            else:
+                                # Bounded range - check if amountMin falls within the standard range
+                                # A trade's amountMin is in the range if: std_min <= amountMin <= std_max
+                                range_condition = Attr('amountMin').between(Decimal(str(std_min)), Decimal(str(std_max)))
+                            
+                            if range_filter is None:
+                                range_filter = range_condition
+                            else:
+                                range_filter = range_filter | range_condition
+                        
+                        if range_filter is not None:
+                            filter_conditions.append(range_filter)
+                            logger.info(f"🔍 Added amount range filter mapping ({user_min}, {user_max}) to {len(matching_ranges)} standard ranges")
             elif len(amount_ranges) > 1:
                 # Multiple amount ranges - use OR condition
                 range_filter = None
                 for amount_range in amount_ranges:
                     amount_range_tuple = parse_amount_range_filter(amount_range)
                     if amount_range_tuple:
-                        amount_min, amount_max = amount_range_tuple
-                        if amount_max is None:
-                            # "Over X" case
-                            range_condition = Attr('amountMin').gte(Decimal(str(amount_min)))
-                        else:
-                            # Standard range
-                            range_condition = Attr('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max)))
+                        user_min, user_max = amount_range_tuple
+                        # Map user range to all overlapping standard ranges
+                        matching_ranges = map_amount_range_to_standard_ranges(user_min, user_max)
                         
-                        if range_filter is None:
-                            range_filter = range_condition
-                        else:
-                            range_filter = range_filter | range_condition
+                        for std_min, std_max in matching_ranges:
+                            if std_max is None:
+                                range_condition = Attr('amountMin').gte(Decimal(str(std_min)))
+                            else:
+                                range_condition = Attr('amountMin').between(Decimal(str(std_min)), Decimal(str(std_max)))
+                            
+                            if range_filter is None:
+                                range_filter = range_condition
+                            else:
+                                range_filter = range_filter | range_condition
                 
                 if range_filter is not None:
                     filter_conditions.append(range_filter)
@@ -542,15 +626,27 @@ def build_query_params(
             # Single string
             amount_range_tuple = parse_amount_range_filter(amount_ranges)
             if amount_range_tuple:
-                amount_min, amount_max = amount_range_tuple
-                if amount_max is None:
-                    # "Over X" case
-                    filter_conditions.append(Attr('amountMin').gte(Decimal(str(amount_min))))
-                    logger.info(f"🔍 Added amount range filter: >= {amount_min}")
-                else:
-                    # Standard range
-                    filter_conditions.append(Attr('amountMin').between(Decimal(str(amount_min)), Decimal(str(amount_max))))
-                    logger.info(f"🔍 Added amount range filter: {amount_min} - {amount_max}")
+                user_min, user_max = amount_range_tuple
+                # Map user range to all overlapping standard ranges
+                matching_ranges = map_amount_range_to_standard_ranges(user_min, user_max)
+                
+                if matching_ranges:
+                    # Create OR condition for all matching standard ranges
+                    range_filter = None
+                    for std_min, std_max in matching_ranges:
+                        if std_max is None:
+                            range_condition = Attr('amountMin').gte(Decimal(str(std_min)))
+                        else:
+                            range_condition = Attr('amountMin').between(Decimal(str(std_min)), Decimal(str(std_max)))
+                        
+                        if range_filter is None:
+                            range_filter = range_condition
+                        else:
+                            range_filter = range_filter | range_condition
+                    
+                    if range_filter is not None:
+                        filter_conditions.append(range_filter)
+                        logger.info(f"🔍 Added amount range filter mapping ({user_min}, {user_max}) to {len(matching_ranges)} standard ranges")
     
     # Filing date range filter (filingDate is stored as YYYY-MM-DD string)
     if filters.get('filingDateFrom') or filters.get('filingDateTo'):

@@ -923,57 +923,44 @@ const GovtContractsSearchPage: React.FC = () => {
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
+        <Typography variant="h4" sx={{ color: '#ffffff', mb: 4, fontWeight: 600 }}>
+          Government Contracts Search
+        </Typography>
+
+        {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
         <Box sx={{ display: 'flex', gap: 3 }}>
-          {/* Main Content */}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            {/* Header */}
-            <Box sx={{ mb: 4 }}>
-              <Typography
-                variant="h4"
-                sx={{
-                  color: '#ffffff',
-                  fontWeight: 700,
-                  mb: 1,
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                }}
-              >
-                Government Contracts Search
-              </Typography>
-              <Typography
-                variant="body1"
-                sx={{
-                  color: '#9ca3af',
-                  fontSize: '1rem',
-                }}
-              >
-                Search government contracts with advanced filters
-              </Typography>
-            </Box>
-
-        {/* Search Form */}
-        <GlassCard sx={{ mb: 4 }}>
-          <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: searchFormExpanded ? '1px solid rgba(55, 65, 81, 0.5)' : 'none' }}>
-            <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 'bold' }}>
-              Search Parameters
-            </Typography>
-            <IconButton
-              onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-              sx={{ color: '#9ca3af' }}
-              size="small"
-            >
-              {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-            </IconButton>
-          </Box>
-          <Collapse in={searchFormExpanded}>
-            <Box sx={{ p: 4 }}>
-
-              {/* Basic Search Section */}
-              <Box sx={{ mb: 4 }}>
-                <Typography variant="h6" sx={{ color: '#e2e8f0', mb: 2 }}>
-                  Basic Search
+          {/* Left Sidebar - Search Filters (Always visible) */}
+          <GlassCard sx={{ 
+            minWidth: 320, 
+            maxWidth: 380,
+            height: 'fit-content',
+            position: 'sticky',
+            top: 20,
+            alignSelf: 'flex-start',
+          }}>
+            <Box sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                  Search Filters
                 </Typography>
-                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
+                <IconButton
+                  onClick={() => setSearchFormExpanded(!searchFormExpanded)}
+                  sx={{ color: '#94a3b8' }}
+                  size="small"
+                >
+                  {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                </IconButton>
+              </Box>
+              <Collapse in={searchFormExpanded}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {/* Basic Search Section */}
+
+                  {/* Basic Search Section */}
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="h6" sx={{ color: '#e2e8f0', mb: 2, fontSize: '1rem' }}>
+                      Basic Search
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Awarding Agency */}
                   <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
                     label="Awarding Agency"
@@ -1092,8 +1079,8 @@ const GovtContractsSearchPage: React.FC = () => {
                   />
                 </Box>
 
-                {/* Min/Max Obligation Row */}
-                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, mt: 2 }}>
+                    {/* Min/Max Obligation */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3, mb: 3 }}>
                   {/* Min Obligation */}
                   <TextField
                     label="Min Obligation ($)"
@@ -1165,8 +1152,8 @@ const GovtContractsSearchPage: React.FC = () => {
                   />
                 </Box>
 
-                {/* Date Range Row */}
-                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, mt: 2 }}>
+                    {/* Date Range */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Date From */}
                   <TextField
                     label="Date From"
@@ -1221,22 +1208,22 @@ const GovtContractsSearchPage: React.FC = () => {
                 </Box>
               </Box>
 
-              {/* Advanced Search Section */}
-              <Box sx={{ mt: 4 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="h6" sx={{ color: '#e2e8f0' }}>
-                    Advanced Search
-                  </Typography>
-                  <IconButton
-                    onClick={() => setAdvancedSearchExpanded(!advancedSearchExpanded)}
-                    sx={{ color: '#94a3b8' }}
-                    size="small"
-                  >
-                    {advancedSearchExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                  </IconButton>
-                </Box>
-                <Collapse in={advancedSearchExpanded}>
-                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
+                  {/* Advanced Search Section */}
+                  <Box sx={{ mt: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="h6" sx={{ color: '#e2e8f0', fontSize: '1rem' }}>
+                        Advanced Search
+                      </Typography>
+                      <IconButton
+                        onClick={() => setAdvancedSearchExpanded(!advancedSearchExpanded)}
+                        sx={{ color: '#94a3b8' }}
+                        size="small"
+                      >
+                        {advancedSearchExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                      </IconButton>
+                    </Box>
+                    <Collapse in={advancedSearchExpanded}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Award Type */}
                   <MultiSelectField<string>
                     label="Award Type"
@@ -1304,64 +1291,627 @@ const GovtContractsSearchPage: React.FC = () => {
                 </Collapse>
               </Box>
 
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3, gap: 2 }}>
-                <Button
-                  variant="outlined"
-                  onClick={() => {
-                    setSearchParams({
-                      keywords: [],
-                      award_type: [],
-                      awarding_agency_name: [],
-                      funding_agency_name: [],
-                      recipient_id: [],
-                      recipient_name: [],
-                      recipient_location_state: [],
-                      recipient_location_country: [],
-                      naics_code: [],
-                      psc_code: [],
-                      cfda_number: [],
-                      date_from: '',
-                      date_to: '',
-                    });
-                  }}
-                  sx={{
-                    borderColor: '#475569',
-                    color: '#94a3b8',
-                    '&:hover': { borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.1)' },
-                  }}
-                >
-                  Clear
-                </Button>
-                <Button
-                  variant="contained"
-                  onClick={handleSearch}
-                  disabled={isSearching}
-                  startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
-                  sx={{
-                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                    color: '#ffffff',
-                    '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
-                    '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
-                  }}
-                >
-                  {isSearching ? 'Searching...' : 'Search'}
-                </Button>
-              </Box>
+                    {/* Search and Clear Buttons */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
+                      <Button
+                        variant="contained"
+                        onClick={handleSearch}
+                        disabled={isSearching}
+                        startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
+                        fullWidth
+                        sx={{
+                          background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                          color: '#ffffff',
+                          '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+                          '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
+                        }}
+                      >
+                        {isSearching ? 'Searching...' : 'Search'}
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={() => {
+                          setSearchParams({
+                            keywords: [],
+                            award_type: [],
+                            awarding_agency_name: [],
+                            funding_agency_name: [],
+                            recipient_id: [],
+                            recipient_name: [],
+                            recipient_location_state: [],
+                            recipient_location_country: [],
+                            naics_code: [],
+                            psc_code: [],
+                            cfda_number: [],
+                            date_from: '',
+                            date_to: '',
+                          });
+                        }}
+                        fullWidth
+                        sx={{
+                          borderColor: '#475569',
+                          color: '#94a3b8',
+                          '&:hover': { borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.1)' },
+                        }}
+                      >
+                        Clear
+                      </Button>
+                    </Box>
+                  </Box>
+              </Collapse>
             </Box>
-          </Collapse>
-        </GlassCard>
-      
-        {/* Error Alert */}
-        {searchError && (
-          <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
-            {searchError}
-          </Alert>
-        )}
-        
-        {/* Results */}
-        {allSearchResults.length > 0 && (
-          <Box sx={{ display: 'flex', gap: 3 }}>
-            {/* Sidebar Filters */}
+          </GlassCard>
+
+          {/* Middle - Results Table */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            {/* Error Alert */}
+            {searchError && (
+              <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
+                {searchError}
+              </Alert>
+            )}
+
+            {/* Results */}
+            {allSearchResults.length > 0 ? (
+              <GlassCard>
+              <Box sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Tooltip title="Select columns to display">
+                      <IconButton
+                        onClick={(e) => setColumnMenuAnchor(e.currentTarget)}
+                        sx={{ color: '#94a3b8' }}
+                        size="small"
+                      >
+                        <ViewColumnIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    {/* Add to Context Button */}
+                    {currentResults.length > 0 && (
+                      <Tooltip title={`Add ${selectedAwards.size > 0 ? `${selectedAwards.size} award(s)` : 'selected awards'} to context`}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              if (selectedAwards.size === 0) {
+                                alert('Please select at least one award to add to context');
+                                return;
+                              }
+                              setContextMenuAnchor(e.currentTarget);
+                            }}
+                            disabled={selectedAwards.size === 0}
+                            sx={{ 
+                              color: selectedAwards.size > 0 ? '#10b981' : '#9ca3af', 
+                              '&:hover': { color: '#10b981' },
+                              '&:disabled': { color: '#4b5563' }
+                            }}
+                          >
+                            <AddToContextIcon sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                    {currentResults.length > 0 ? (
+                      <Chip
+                        label={`${currentResults.length} award${currentResults.length !== 1 ? 's' : ''} found`}
+                        sx={{
+                          backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                          color: '#86efac',
+                          border: '1px solid #22c55e',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : isFiltered && allSearchResults.length > 0 ? (
+                      <Chip
+                        label={`0 of ${allSearchResults.length} awards match filters`}
+                        sx={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : allSearchResults.length === 0 && !isSearching ? (
+                      <Chip
+                        label="No awards found"
+                        sx={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : null}
+                    {currentResults.length > 0 && (
+                      <>
+                        <FormControl size="small" sx={{ minWidth: 120, ml: 1 }}>
+                          <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+                          <Select
+                            labelId="results-per-page-label"
+                            value={pageSize}
+                            label="Per Page"
+                            onChange={(e) => {
+                              const newPageSize = Number(e.target.value);
+                              setPageSize(newPageSize);
+                              setCurrentPage(1);
+                            }}
+                            sx={{
+                              color: '#ffffff',
+                              '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                              '& .MuiSelect-icon': { color: '#9ca3af' },
+                            }}
+                            MenuProps={{
+                              PaperProps: {
+                                sx: {
+                                  bgcolor: '#1f2937',
+                                  border: '1px solid #374151',
+                                  '& .MuiMenuItem-root': {
+                                    color: '#ffffff',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                    },
+                                    '&.Mui-selected': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                      '&:hover': {
+                                        backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                                      },
+                                    },
+                                  },
+                                  '&::-webkit-scrollbar': {
+                                    width: '8px',
+                                  },
+                                  '&::-webkit-scrollbar-track': {
+                                    backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb': {
+                                    backgroundColor: '#3b82f6',
+                                    borderRadius: '4px',
+                                  },
+                                  '&::-webkit-scrollbar-thumb:hover': {
+                                    backgroundColor: '#2563eb',
+                                  },
+                                },
+                              },
+                            }}
+                          >
+                            <MenuItem value={10}>10</MenuItem>
+                            <MenuItem value={25}>25</MenuItem>
+                            <MenuItem value={50}>50</MenuItem>
+                            <MenuItem value={100}>100</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </>
+                    )}
+                  </Box>
+                </Box>
+
+                  {/* Column Menu */}
+                  <Menu
+                    anchorEl={columnMenuAnchor}
+                    open={columnMenuOpen}
+                    onClose={() => setColumnMenuAnchor(null)}
+                    PaperProps={{
+                      sx: {
+                        backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                        border: '2px solid #374151',
+                        color: '#ffffff',
+                      },
+                    }}
+                  >
+                    {AVAILABLE_COLUMNS.map((column) => {
+                      const columnLabels: Record<string, string> = {
+                        recipient: 'Recipient',
+                        awarding_agency: 'Awarding Agency',
+                        funding_agency: 'Funding Agency',
+                        amount: 'Amount',
+                        period_start_date: 'Period Start Date',
+                        period_end_date: 'Period End Date',
+                        naics_code: 'NAICS Code',
+                        psc_code: 'PSC Code',
+                        last_updated: 'Last Updated',
+                      };
+                      return (
+                        <MenuItem
+                          key={column}
+                          onClick={() => handleColumnToggle(column)}
+                          sx={{
+                            color: visibleColumns.includes(column) ? '#3b82f6' : '#94a3b8',
+                          }}
+                        >
+                          <Checkbox
+                            checked={visibleColumns.includes(column)}
+                            sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
+                          />
+                          {columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                        </MenuItem>
+                      );
+                    })}
+                  </Menu>
+
+                {/* Results Table */}
+                {currentResults.length > 0 ? (
+                  <>
+                  <TableContainer sx={{ 
+                        backgroundColor: 'transparent',
+                        borderRadius: 0,
+                        boxShadow: 'none',
+                        border: 'none',
+                        overflow: 'auto',
+                        width: '100%',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                        },
+                      }}>
+                        <Table size="small" sx={{ 
+                          tableLayout: 'fixed',
+                          width: 'max-content',
+                          minWidth: '100%',
+                          '& .MuiTableCell-root': {
+                            borderBottom: '1px solid rgba(55, 65, 81, 0.3)',
+                            padding: '12px',
+                            overflow: 'hidden',
+                            wordBreak: 'break-word',
+                            verticalAlign: 'top',
+                          },
+                          '& .MuiTableHead-root .MuiTableCell-root': {
+                            borderBottom: '2px solid rgba(59, 130, 246, 0.5)',
+                            backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                            padding: '8px 12px',
+                          },
+                          '& .MuiTableRow-root:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.05)',
+                          },
+                          '& .MuiTableRow-root': {
+                            height: 'auto',
+                            minHeight: '100px',
+                          },
+                        }}>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ 
+                                color: '#9ca3af', 
+                                fontWeight: 600, 
+                                fontSize: '0.875rem',
+                                width: 50,
+                                minWidth: 50,
+                                maxWidth: 50,
+                              }}>
+                                <Checkbox
+                                  size="small"
+                                  indeterminate={selectedAwards.size > 0 && selectedAwards.size < paginatedResults.length}
+                                  checked={paginatedResults.length > 0 && selectedAwards.size === paginatedResults.length}
+                                  onChange={() => {
+                                    if (selectedAwards.size === paginatedResults.length) {
+                                      const newSelected = new Set(selectedAwards);
+                                      paginatedResults.forEach(award => newSelected.delete(award.award_id));
+                                      setSelectedAwards(newSelected);
+                                    } else {
+                                      const newSelected = new Set(selectedAwards);
+                                      paginatedResults.forEach(award => newSelected.add(award.award_id));
+                                      setSelectedAwards(newSelected);
+                                    }
+                                  }}
+                                  sx={{ 
+                                    color: '#9ca3af', 
+                                    '&.Mui-checked': { color: '#10b981' }, 
+                                    '&.MuiCheckbox-indeterminate': { color: '#10b981' } 
+                                  }}
+                                />
+                              </TableCell>
+                              {visibleColumns.includes('recipient') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>Recipient</TableCell>
+                              )}
+                              {visibleColumns.includes('awarding_agency') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>Awarding Agency</TableCell>
+                              )}
+                              {visibleColumns.includes('funding_agency') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>Funding Agency</TableCell>
+                              )}
+                              {visibleColumns.includes('amount') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>Amount</TableCell>
+                              )}
+                              {visibleColumns.includes('period_start_date') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>Period Start Date</TableCell>
+                              )}
+                              {visibleColumns.includes('period_end_date') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>Period End Date</TableCell>
+                              )}
+                              {visibleColumns.includes('naics_code') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>NAICS Code</TableCell>
+                              )}
+                              {visibleColumns.includes('psc_code') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>PSC Code</TableCell>
+                              )}
+                              {visibleColumns.includes('last_updated') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>Last Updated</TableCell>
+                              )}
+                              <TableCell sx={{ 
+                                color: '#9ca3af', 
+                                fontWeight: 600, 
+                                fontSize: '0.875rem',
+                              }}>Actions</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {paginatedResults.map((award) => (
+                              <TableRow
+                                key={award.award_id}
+                                sx={{
+                                  backgroundColor: selectedAwards.has(award.award_id) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                                  '&:hover': {
+                                    backgroundColor: selectedAwards.has(award.award_id) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
+                                  },
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <TableCell sx={{ 
+                                  padding: '8px 12px',
+                                  width: 50,
+                                  minWidth: 50,
+                                  maxWidth: 50,
+                                }}>
+                                  <Checkbox
+                                    size="small"
+                                    checked={selectedAwards.has(award.award_id)}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      const newSet = new Set(selectedAwards);
+                                      if (e.target.checked) {
+                                        newSet.add(award.award_id);
+                                      } else {
+                                        newSet.delete(award.award_id);
+                                      }
+                                      setSelectedAwards(newSet);
+                                    }}
+                                    sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
+                                  />
+                                </TableCell>
+                                {visibleColumns.includes('recipient') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {award.recipient_name || (award.recipient_name_normalized ? award.recipient_name_normalized.toUpperCase() : 'N/A')}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('awarding_agency') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {award.awarding_agency_name || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('funding_agency') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {award.funding_agency_name || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('amount') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {formatCurrency(
+                                      (award.is_idv_parent || award.award_or_idv_flag === 'IDV') && award.combined_obligated_amount
+                                        ? award.combined_obligated_amount
+                                        : award.total_obligated_amount || award.total_obligation
+                                    )}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('period_start_date') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {formatDate(award.period_start_date)}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('period_end_date') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {formatDate(award.period_of_performance_current_end_date || award.period_end_date)}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('naics_code') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {award.naics_code || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('psc_code') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {award.psc_code || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('last_updated') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {formatLastUpdated(award.last_updated)}
+                                  </TableCell>
+                                )}
+                                <TableCell sx={{ 
+                                  fontSize: '0.875rem',
+                                  padding: '12px',
+                                }}>
+                                  <Button
+                                    variant="outlined"
+                                    size="small"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedAwardForDetails(award);
+                                      setParentAwardForDetails(null);
+                                      setDetailsDialogOpen(true);
+                                    }}
+                                    sx={{
+                                      borderColor: '#3b82f6',
+                                      color: '#3b82f6',
+                                      fontSize: '0.7rem',
+                                      '&:hover': {
+                                        borderColor: '#60a5fa',
+                                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                      },
+                                    }}
+                                  >
+                                    View More
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+
+                      {/* Pagination */}
+                      {totalPages > 1 && (
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, pt: 2, borderTop: '1px solid rgba(55, 65, 81, 0.3)' }}>
+                          <Typography variant="caption" color="#6b7280" sx={{ fontSize: '0.75rem' }}>
+                            Showing {startIndex + 1}-{Math.min(endIndex, currentResults.length)} of {currentResults.length} results
+                          </Typography>
+                          <Pagination
+                            count={totalPages}
+                            page={currentPage}
+                            onChange={(_: React.ChangeEvent<unknown>, page: number) => setCurrentPage(page)}
+                            color="primary"
+                            size="small"
+                            sx={{
+                              '& .MuiPaginationItem-root': {
+                                color: '#9ca3af',
+                                fontSize: '0.875rem',
+                              },
+                              '& .Mui-selected': {
+                                backgroundColor: '#3b82f6',
+                                color: 'white',
+                              },
+                              '& .MuiPaginationItem-root:hover': {
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          />
+                        </Box>
+                      )}
+
+                      {/* Load More Button */}
+                      {!isFiltered && hasMore && lastEvaluatedKey && allSearchResults.length > 0 && (
+                        <Box sx={{ 
+                          display: 'flex', 
+                          justifyContent: 'center', 
+                          mt: 2, 
+                          pt: 2, 
+                          borderTop: totalPages > 1 ? 'none' : '1px solid rgba(55, 65, 81, 0.3)' 
+                        }}>
+                          <Button
+                            variant="outlined"
+                            onClick={handleLoadMore}
+                            disabled={isLoadingMore || isSearching}
+                            size="small"
+                            sx={{
+                              color: '#3b82f6',
+                              borderColor: '#3b82f6',
+                              fontSize: '0.75rem',
+                              '&:hover': {
+                                borderColor: '#60a5fa',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                              },
+                              '&:disabled': {
+                                borderColor: '#4b5563',
+                                color: '#6b7280',
+                              },
+                            }}
+                          >
+                            {isLoadingMore ? 'Loading...' : `Load More (${allSearchResults.length} loaded)`}
+                          </Button>
+                        </Box>
+                      )}
+                    </>
+                  ) : (
+                    <Box sx={{ textAlign: 'center', py: 6 }}>
+                      <Typography variant="body2" color="#9ca3af">
+                        {isFiltered && allSearchResults.length > 0
+                          ? 'No awards match the selected filters. Try adjusting your filters.'
+                          : 'No awards found. Try adjusting your search parameters.'}
+                      </Typography>
+                    </Box>
+                  )}
+              </Box>
+              </GlassCard>
+            ) : null}
+          </Box>
+
+          {/* Right Sidebar - Client-side Filter Box (Only when results exist) */}
+          {allSearchResults.length > 0 && (
             <GlassCard sx={{ 
               p: 2, 
               minWidth: 280, 
@@ -2600,428 +3150,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     </Box>
                   )}
             </GlassCard>
-
-            {/* Results Table */}
-            <GlassCard sx={{ flex: 1 }}>
-              <Box sx={{ p: 3 }}>
-                {/* Results Header */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                      Results
-                    </Typography>
-                    {currentResults.length > 0 && (
-                      <IconButton
-                        onClick={(e) => setColumnMenuAnchor(e.currentTarget)}
-                        size="small"
-                        sx={{
-                          color: '#9ca3af',
-                          '&:hover': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            color: '#3b82f6',
-                          },
-                        }}
-                        title="Select columns to display"
-                      >
-                        <ViewColumnIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                  </Box>
-                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                    {/* Add to Context Button */}
-                    {currentResults.length > 0 && (
-                      <Tooltip title={`Add ${selectedAwards.size > 0 ? `${selectedAwards.size} award(s)` : 'selected awards'} to context`}>
-                        <span>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              if (selectedAwards.size === 0) {
-                                alert('Please select at least one award to add to context');
-                                return;
-                              }
-                              setContextMenuAnchor(e.currentTarget);
-                            }}
-                            disabled={selectedAwards.size === 0}
-                            sx={{ 
-                              color: selectedAwards.size > 0 ? '#10b981' : '#9ca3af', 
-                              '&:hover': { color: '#10b981' },
-                              '&:disabled': { color: '#4b5563' }
-                            }}
-                          >
-                            <AddToContextIcon sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                    )}
-                    {currentResults.length > 0 ? (
-                      <Chip
-                        label={`${currentResults.length} award${currentResults.length !== 1 ? 's' : ''} found`}
-                        sx={{
-                          backgroundColor: 'rgba(34, 197, 94, 0.2)',
-                          color: '#86efac',
-                          border: '1px solid #22c55e',
-                          fontWeight: 600,
-                        }}
-                      />
-                    ) : isFiltered && allSearchResults.length > 0 ? (
-                      <Chip
-                        label={`0 of ${allSearchResults.length} awards match filters`}
-                        sx={{
-                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                          color: '#fca5a5',
-                          border: '1px solid #ef4444',
-                          fontWeight: 600,
-                        }}
-                      />
-                    ) : allSearchResults.length === 0 && !isSearching ? (
-                      <Chip
-                        label="No awards found"
-                        sx={{
-                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                          color: '#fca5a5',
-                          border: '1px solid #ef4444',
-                          fontWeight: 600,
-                        }}
-                      />
-                    ) : null}
-                    {currentResults.length > 0 && (
-                      <>
-                        <Menu
-                          anchorEl={columnMenuAnchor}
-                          open={columnMenuOpen}
-                          onClose={() => setColumnMenuAnchor(null)}
-                          PaperProps={{
-                            sx: {
-                              bgcolor: '#1f2937',
-                              border: '1px solid #374151',
-                              mt: 1,
-                            },
-                          }}
-                        >
-                          <Box sx={{ p: 1, minWidth: 200 }}>
-                            <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, px: 1 }}>
-                              Select Columns
-                            </Typography>
-                            <FormGroup>
-                              {AVAILABLE_COLUMNS.map((col) => {
-                                const columnLabels: Record<string, string> = {
-                                  recipient: 'Recipient',
-                                  awarding_agency: 'Awarding Agency',
-                                  funding_agency: 'Funding Agency',
-                                  amount: 'Amount',
-                                  period_start_date: 'Period Start Date',
-                                  period_end_date: 'Period End Date',
-                                  naics_code: 'NAICS Code',
-                                  psc_code: 'PSC Code',
-                                  last_updated: 'Last Updated',
-                                };
-                                return (
-                                  <FormControlLabel
-                                    key={col}
-                                    control={
-                                      <Checkbox
-                                        checked={visibleColumns.includes(col)}
-                                        onChange={() => handleColumnToggle(col)}
-                                        sx={{
-                                          color: '#9ca3af',
-                                          '&.Mui-checked': { color: '#3b82f6' },
-                                        }}
-                                      />
-                                    }
-                                    label={columnLabels[col] || col}
-                                    sx={{
-                                      color: '#e2e8f0',
-                                      '& .MuiFormControlLabel-label': { fontSize: '0.875rem' },
-                                    }}
-                                  />
-                                );
-                              })}
-                            </FormGroup>
-                          </Box>
-                        </Menu>
-                        <FormControl size="small" sx={{ minWidth: 120, ml: 1 }}>
-                          <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
-                          <Select
-                            labelId="results-per-page-label"
-                            value={pageSize}
-                            label="Per Page"
-                            onChange={(e) => {
-                              const newPageSize = Number(e.target.value);
-                              setPageSize(newPageSize);
-                              setCurrentPage(1);
-                            }}
-                            sx={{
-                              color: '#ffffff',
-                              '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                              '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                              '& .MuiSelect-icon': { color: '#9ca3af' },
-                            }}
-                            MenuProps={{
-                              PaperProps: {
-                                sx: {
-                                  bgcolor: '#1f2937',
-                                  border: '1px solid #374151',
-                                  '& .MuiMenuItem-root': {
-                                    color: '#ffffff',
-                                    '&:hover': {
-                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                    },
-                                    '&.Mui-selected': {
-                                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                                      '&:hover': {
-                                        backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                                      },
-                                    },
-                                  },
-                                  '&::-webkit-scrollbar': {
-                                    width: '8px',
-                                  },
-                                  '&::-webkit-scrollbar-track': {
-                                    backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                                    borderRadius: '4px',
-                                  },
-                                  '&::-webkit-scrollbar-thumb': {
-                                    backgroundColor: '#3b82f6',
-                                    borderRadius: '4px',
-                                  },
-                                  '&::-webkit-scrollbar-thumb:hover': {
-                                    backgroundColor: '#2563eb',
-                                  },
-                                },
-                              },
-                            }}
-                          >
-                            <MenuItem value={10}>10</MenuItem>
-                            <MenuItem value={25}>25</MenuItem>
-                            <MenuItem value={50}>50</MenuItem>
-                            <MenuItem value={100}>100</MenuItem>
-                          </Select>
-                        </FormControl>
-                      </>
-                    )}
-                  </Box>
-                </Box>
-                <TableContainer
-                  sx={{
-                    '&::-webkit-scrollbar': {
-                      width: '6px',
-                    },
-                    '&::-webkit-scrollbar-track': {
-                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                    },
-                    '&::-webkit-scrollbar-thumb': {
-                      backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                      borderRadius: '3px',
-                    },
-                    '&::-webkit-scrollbar-thumb:hover': {
-                      backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                    },
-                  }}
-                >
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>
-                          <Checkbox
-                            checked={selectedAwards.size === paginatedResults.length && paginatedResults.length > 0}
-                            indeterminate={
-                              selectedAwards.size > 0 && selectedAwards.size < paginatedResults.length
-                            }
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedAwards(new Set(paginatedResults.map((a) => a.award_id)));
-                              } else {
-                                setSelectedAwards(new Set());
-                              }
-                            }}
-                            sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
-                          />
-                        </TableCell>
-                        {visibleColumns.includes('recipient') && (
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Recipient</TableCell>
-                        )}
-                        {visibleColumns.includes('awarding_agency') && (
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Awarding Agency</TableCell>
-                        )}
-                        {visibleColumns.includes('funding_agency') && (
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Funding Agency</TableCell>
-                        )}
-                        {visibleColumns.includes('amount') && (
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Amount</TableCell>
-                        )}
-                        {visibleColumns.includes('period_start_date') && (
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Period Start Date</TableCell>
-                        )}
-                        {visibleColumns.includes('period_end_date') && (
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Period End Date</TableCell>
-                        )}
-                        {visibleColumns.includes('naics_code') && (
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>NAICS Code</TableCell>
-                        )}
-                        {visibleColumns.includes('psc_code') && (
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>PSC Code</TableCell>
-                        )}
-                        {visibleColumns.includes('last_updated') && (
-                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Last Updated</TableCell>
-                        )}
-                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                      <TableBody>
-                        {paginatedResults.map((award) => (
-                          <TableRow key={award.award_id} sx={{ '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.05)' } }}>
-                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                              <Checkbox
-                                checked={selectedAwards.has(award.award_id)}
-                                onChange={(e) => {
-                                  const newSet = new Set(selectedAwards);
-                                  if (e.target.checked) {
-                                    newSet.add(award.award_id);
-                                  } else {
-                                    newSet.delete(award.award_id);
-                                  }
-                                  setSelectedAwards(newSet);
-                                }}
-                                sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
-                              />
-                            </TableCell>
-                            {visibleColumns.includes('recipient') && (
-                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {award.recipient_name || (award.recipient_name_normalized ? award.recipient_name_normalized.toUpperCase() : 'N/A')}
-                              </TableCell>
-                            )}
-                            {visibleColumns.includes('awarding_agency') && (
-                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {award.awarding_agency_name || 'N/A'}
-                              </TableCell>
-                            )}
-                            {visibleColumns.includes('funding_agency') && (
-                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {award.funding_agency_name || 'N/A'}
-                              </TableCell>
-                            )}
-                            {visibleColumns.includes('amount') && (
-                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {formatCurrency(
-                                  // For IDVs, prefer combined_obligated_amount if available
-                                  (award.is_idv_parent || award.award_or_idv_flag === 'IDV') && award.combined_obligated_amount
-                                    ? award.combined_obligated_amount
-                                    : award.total_obligated_amount || award.total_obligation
-                                )}
-                              </TableCell>
-                            )}
-                            {visibleColumns.includes('period_start_date') && (
-                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {formatDate(award.period_start_date)}
-                              </TableCell>
-                            )}
-                            {visibleColumns.includes('period_end_date') && (
-                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {formatDate(award.period_of_performance_current_end_date || award.period_end_date)}
-                              </TableCell>
-                            )}
-                            {visibleColumns.includes('naics_code') && (
-                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {award.naics_code || 'N/A'}
-                              </TableCell>
-                            )}
-                            {visibleColumns.includes('psc_code') && (
-                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {award.psc_code || 'N/A'}
-                              </TableCell>
-                            )}
-                            {visibleColumns.includes('last_updated') && (
-                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                {formatLastUpdated(award.last_updated)}
-                              </TableCell>
-                            )}
-                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                              <Button
-                                variant="outlined"
-                                size="small"
-                                onClick={() => {
-                                  setSelectedAwardForDetails(award);
-                                  setParentAwardForDetails(null);  // Clear parent when opening from table
-                                  setDetailsDialogOpen(true);
-                                }}
-                                sx={{
-                                  borderColor: '#3b82f6',
-                                  color: '#3b82f6',
-                                  '&:hover': {
-                                    borderColor: '#2563eb',
-                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                  },
-                                }}
-                              >
-                                View More
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-
-                {/* Pagination */}
-                {totalPages > 1 && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3 }}>
-                    <Typography sx={{ color: '#94a3b8' }}>
-                      Showing {startIndex + 1}-{Math.min(endIndex, currentResults.length)} of {currentResults.length} results
-                    </Typography>
-                    <Pagination
-                      count={totalPages}
-                      page={currentPage}
-                      onChange={(_, page) => setCurrentPage(page)}
-                      sx={{
-                        '& .MuiPaginationItem-root': {
-                          color: '#94a3b8',
-                          '&.Mui-selected': {
-                            backgroundColor: '#3b82f6',
-                            color: '#fff',
-                          },
-                        },
-                      }}
-                    />
-                  </Box>
-                )}
-
-                {/* Load More Button */}
-                {!isFiltered && hasMore && lastEvaluatedKey && allSearchResults.length > 0 && (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-                    <Button
-                      variant="outlined"
-                      onClick={handleLoadMore}
-                      disabled={isLoadingMore}
-                      sx={{
-                        color: '#3b82f6',
-                        borderColor: '#3b82f6',
-                        '&:hover': {
-                          borderColor: '#60a5fa',
-                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        },
-                        '&:disabled': {
-                          borderColor: '#4b5563',
-                          color: '#6b7280',
-                        },
-                      }}
-                    >
-                      {isLoadingMore ? (
-                        <>
-                          <CircularProgress size={20} sx={{ mr: 1 }} />
-                          Loading...
-                        </>
-                      ) : (
-                        `Load More (${allSearchResults.length} loaded)`
-                      )}
-                    </Button>
-                  </Box>
-                )}
-              </Box>
-            </GlassCard>
-          </Box>
-        )}
-          </Box>
+          )}
         </Box>
       </Container>
 

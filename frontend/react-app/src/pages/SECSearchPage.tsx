@@ -1794,215 +1794,207 @@ const SECSearchPage: React.FC = () => {
 
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
-      <Container maxWidth="xl">
-        <Box sx={{ display: 'flex', gap: 3 }}>
-          {/* Main Content */}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-        {/* Header */}
-        <Box sx={{ mb: 4 }}>
-          <Typography
-            variant="h4"
-            sx={{
-              color: '#ffffff',
-              fontWeight: 700,
-              mb: 1,
-              textTransform: 'uppercase',
-              letterSpacing: '1px',
-            }}
-          >
+      <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+          <Typography variant="h4" sx={{ color: '#ffffff', fontWeight: 600 }}>
             SEC EDGAR Search
           </Typography>
-          <Typography
-            variant="body1"
+          <Button
+            component="a"
+            href="https://www.sec.gov/edgar/search/"
+            target="_blank"
+            rel="noopener noreferrer"
+            variant="outlined"
+            startIcon={<VerifiedUserIcon />}
             sx={{
-              color: '#9ca3af',
-              fontSize: '1rem',
+              color: '#3b82f6',
+              borderColor: '#3b82f6',
+              '&:hover': {
+                borderColor: '#2563eb',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              },
+              textTransform: 'none',
+              fontSize: '0.875rem',
             }}
           >
-            Search SEC filings with advanced filters and access document links
-          </Typography>
+            Verify on Official Sources
+          </Button>
         </Box>
 
-        {/* Search Form */}
-        <GlassCard sx={{ mb: 4 }}>
-          <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: searchFormExpanded ? '1px solid rgba(55, 65, 81, 0.5)' : 'none' }}>
-            <Typography variant="h6" sx={{ color: '#ffffff', fontSize: '1.1rem', fontWeight: 600 }}>
-              Search Parameters (Applied when you click Search)
-            </Typography>
-            <IconButton
-              onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-              sx={{ color: '#9ca3af' }}
-              size="small"
-            >
-              {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-            </IconButton>
-          </Box>
-          <Collapse in={searchFormExpanded}>
-            <Box sx={{ p: 4 }}>
-          {/* Search Parameters */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 3 }}>
-            {/* Row 1: Filers and Keywords - Multi-Select */}
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-              {/* Multi-Select Filers */}
-              <MultiSelectField<SECAutocompleteSuggestion>
-                label="Filers (Companies/Individuals)"
-                selectedItems={selectedFilers}
-                onItemsChange={setSelectedFilers}
-                suggestions={companySuggestions}
-                renderItem={(filer) => `${filer.name} (${filer.ticker || 'N/A'}) - CIK: ${filer.cik}`}
-                getItemKey={(filer) => filer.cik}
-                placeholder="Add company, CIK, or individual name..."
-                helperText="Select filers to search for (applied when you click Search)"
-                allowCustomInput={false}
-                isLoading={autocompleteLoading}
-                onSearch={handleFilerSearch}
-              />
+        {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
+        <Box sx={{ display: 'flex', gap: 3 }}>
+          {/* Left Sidebar - Search Filters (Always visible) */}
+          <GlassCard sx={{ 
+            minWidth: 320, 
+            maxWidth: 380,
+            height: 'fit-content',
+            position: 'sticky',
+            top: 20,
+            alignSelf: 'flex-start',
+          }}>
+            <Box sx={{ p: 3 }}>
+              <Typography variant="h6" sx={{ color: '#ffffff', mb: 3, fontSize: '1.1rem', fontWeight: 600 }}>
+                Search Parameters
+              </Typography>
 
-              {/* Multi-Select Keywords */}
-              <MultiSelectField<string>
-                label="Keywords"
-                selectedItems={selectedKeywords}
-                onItemsChange={setSelectedKeywords}
-                suggestions={[]}
-                renderItem={(keyword) => keyword}
-                getItemKey={(keyword) => keyword}
-                placeholder="Type keyword and press Enter to add..."
-                helperText="Add keywords for search (applied when you click Search)"
-                allowCustomInput={true}
-                isLoading={false}
-              />
-            </Box>
+              {/* Search Parameters - Vertical Layout */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {/* Multi-Select Filers */}
+                <MultiSelectField<SECAutocompleteSuggestion>
+                  label="Filers (Companies/Individuals)"
+                  selectedItems={selectedFilers}
+                  onItemsChange={setSelectedFilers}
+                  suggestions={companySuggestions}
+                  renderItem={(filer) => `${filer.name} (${filer.ticker || 'N/A'}) - CIK: ${filer.cik}`}
+                  getItemKey={(filer) => filer.cik}
+                  placeholder="Add company, CIK, or individual name..."
+                  allowCustomInput={false}
+                  isLoading={autocompleteLoading}
+                  onSearch={handleFilerSearch}
+                />
 
-            {/* Row 2: Filing Category, Location, and Date Range */}
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
-              {/* Form Types - Button to open modal */}
-              <Box>
-                <TextField
-                  label="Filing category"
-                  value={
-                    searchParams.formTypes && searchParams.formTypes.length > 0
-                      ? `${searchParams.formTypes.length} form${searchParams.formTypes.length > 1 ? 's' : ''} selected`
-                      : 'View all'
-                  }
-                  onClick={() => setFormTypesModalOpen(true)}
-                  InputProps={{
-                    readOnly: true,
-                    endAdornment: <ExpandMoreIcon sx={{ color: '#9ca3af' }} />,
-                  }}
-                  variant="outlined"
+                {/* Multi-Select Keywords */}
+                <MultiSelectField<string>
+                  label="Keywords"
+                  selectedItems={selectedKeywords}
+                  onItemsChange={setSelectedKeywords}
+                  suggestions={[]}
+                  renderItem={(keyword) => keyword}
+                  getItemKey={(keyword) => keyword}
+                  placeholder="Type keyword and press Enter to add..."
+                  allowCustomInput={true}
+                  isLoading={false}
+                />
+
+                {/* Form Types - Button to open modal */}
+                <Box>
+                  <TextField
+                    label="Filing category"
+                    value={
+                      searchParams.formTypes && searchParams.formTypes.length > 0
+                        ? `${searchParams.formTypes.length} form${searchParams.formTypes.length > 1 ? 's' : ''} selected`
+                        : 'View all'
+                    }
+                    onClick={() => setFormTypesModalOpen(true)}
+                    InputProps={{
+                      readOnly: true,
+                      endAdornment: <ExpandMoreIcon sx={{ color: '#9ca3af' }} />,
+                    }}
+                    variant="outlined"
+                    fullWidth
+                    sx={{
+                      cursor: 'pointer',
+                      '& .MuiOutlinedInput-root': {
+                        '& fieldset': { borderColor: '#374151' },
+                        '&:hover fieldset': { borderColor: '#3b82f6' },
+                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                      },
+                      '& .MuiInputLabel-root': { color: '#9ca3af' },
+                      '& .MuiInputBase-input': { color: '#ffffff', cursor: 'pointer' },
+                    }}
+                  />
+                  {searchParams.formTypes && searchParams.formTypes.length > 0 && (
+                    <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {searchParams.formTypes.slice(0, 3).map((formType) => (
+                        <Chip
+                          key={formType}
+                          label={formType}
+                          size="small"
+                          onDelete={() => handleFormTypeToggle(formType)}
+                          sx={{
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            color: '#93c5fd',
+                            border: '1px solid #3b82f6',
+                            '& .MuiChip-deleteIcon': { color: '#93c5fd' },
+                          }}
+                        />
+                      ))}
+                      {searchParams.formTypes.length > 3 && (
+                        <Chip
+                          label={`+${searchParams.formTypes.length - 3} more`}
+                          size="small"
+                          sx={{
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            color: '#93c5fd',
+                            border: '1px solid #3b82f6',
+                          }}
+                        />
+                      )}
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Location Filter */}
+                <FormControl 
+                  variant="outlined" 
+                  size="medium"
+                  fullWidth
                   sx={{
-                    cursor: 'pointer',
                     '& .MuiOutlinedInput-root': {
                       '& fieldset': { borderColor: '#374151' },
                       '&:hover fieldset': { borderColor: '#3b82f6' },
                       '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                     },
                     '& .MuiInputLabel-root': { color: '#9ca3af' },
-                    '& .MuiInputBase-input': { color: '#ffffff', cursor: 'pointer' },
-                  }}
-                />
-                {searchParams.formTypes && searchParams.formTypes.length > 0 && (
-                  <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                    {searchParams.formTypes.slice(0, 3).map((formType) => (
-                      <Chip
-                        key={formType}
-                        label={formType}
-                        size="small"
-                        onDelete={() => handleFormTypeToggle(formType)}
-                        sx={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#93c5fd',
-                          border: '1px solid #3b82f6',
-                          '& .MuiChip-deleteIcon': { color: '#93c5fd' },
-                        }}
-                      />
-                    ))}
-                    {searchParams.formTypes.length > 3 && (
-                      <Chip
-                        label={`+${searchParams.formTypes.length - 3} more`}
-                        size="small"
-                        sx={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                          color: '#93c5fd',
-                          border: '1px solid #3b82f6',
-                        }}
-                      />
-                    )}
-                  </Box>
-                )}
-              </Box>
-
-              {/* Location Filter */}
-              <FormControl 
-                variant="outlined" 
-                size="medium"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiSelect-select': { color: '#ffffff' },
-                }}
-              >
-                <InputLabel id="located-label">Located</InputLabel>
-                <Select
-                  labelId="located-label"
-                  value={searchParams.located || 'all'}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setSearchParams(prev => ({ 
-                      ...prev, 
-                      located: value === 'all' ? undefined : value 
-                    }));
-                  }}
-                  label="Located"
-                  MenuProps={{
-                    PaperProps: {
-                      sx: {
-                        bgcolor: '#1f2937',
-                        border: '1px solid #374151',
-                        '& .MuiMenuItem-root': {
-                          color: '#ffffff',
-                          '&:hover': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                          },
-                          '&.Mui-selected': {
-                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                            '&:hover': {
-                              backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                            },
-                          },
-                        },
-                        '&::-webkit-scrollbar': {
-                          width: '8px',
-                        },
-                        '&::-webkit-scrollbar-track': {
-                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                          borderRadius: '4px',
-                        },
-                        '&::-webkit-scrollbar-thumb': {
-                          backgroundColor: '#3b82f6',
-                          borderRadius: '4px',
-                        },
-                        '&::-webkit-scrollbar-thumb:hover': {
-                          backgroundColor: '#2563eb',
-                        },
-                      },
-                    },
+                    '& .MuiSelect-select': { color: '#ffffff' },
                   }}
                 >
-                  {LOCATION_OPTIONS.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {option.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+                  <InputLabel id="located-label">Located</InputLabel>
+                  <Select
+                    labelId="located-label"
+                    value={searchParams.located || 'all'}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSearchParams(prev => ({ 
+                        ...prev, 
+                        located: value === 'all' ? undefined : value 
+                      }));
+                    }}
+                    label="Located"
+                    MenuProps={{
+                      PaperProps: {
+                        sx: {
+                          bgcolor: '#1f2937',
+                          border: '1px solid #374151',
+                          '& .MuiMenuItem-root': {
+                            color: '#ffffff',
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            },
+                            '&.Mui-selected': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                              '&:hover': {
+                                backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                              },
+                            },
+                          },
+                          '&::-webkit-scrollbar': {
+                            width: '8px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                            borderRadius: '4px',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: '#3b82f6',
+                            borderRadius: '4px',
+                          },
+                          '&::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: '#2563eb',
+                          },
+                        },
+                      },
+                    }}
+                  >
+                    {LOCATION_OPTIONS.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
 
-              {/* Date Range */}
-              <Box sx={{ display: 'flex', gap: 2 }}>
+                {/* Date Range */}
                 <TextField
                   label="Filed from"
                   type="date"
@@ -2014,8 +2006,8 @@ const SECSearchPage: React.FC = () => {
                     max: new Date().toISOString().split('T')[0],
                   }}
                   variant="outlined"
+                  fullWidth
                   sx={{
-                    flex: 1,
                     '& .MuiOutlinedInput-root': {
                       '& fieldset': { borderColor: '#374151' },
                       '&:hover fieldset': { borderColor: '#3b82f6' },
@@ -2036,8 +2028,8 @@ const SECSearchPage: React.FC = () => {
                     max: new Date().toISOString().split('T')[0],
                   }}
                   variant="outlined"
+                  fullWidth
                   sx={{
-                    flex: 1,
                     '& .MuiOutlinedInput-root': {
                       '& fieldset': { borderColor: '#374151' },
                       '&:hover fieldset': { borderColor: '#3b82f6' },
@@ -2047,108 +2039,89 @@ const SECSearchPage: React.FC = () => {
                     '& .MuiInputBase-input': { color: '#ffffff' },
                   }}
                 />
+
+                {/* Search Button and Stop Button */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Button
+                    variant="contained"
+                    onClick={() => handleSearch()}
+                    disabled={searchLoading || searchState.isSearching}
+                    startIcon={(searchLoading || searchState.isSearching) ? <CircularProgress size={20} /> : <SearchIcon />}
+                    sx={{
+                      background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                      color: '#ffffff',
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '1px',
+                      py: 1.5,
+                      width: '100%',
+                      '&:hover': {
+                        background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
+                      },
+                      '&:disabled': {
+                        background: 'rgba(59, 130, 246, 0.3)',
+                      },
+                    }}
+                  >
+                    {searchState.isSearching
+                      ? searchState.totalPages 
+                        ? `Fetching page ${searchState.currentPage} of ${searchState.totalPages}...`
+                        : `Fetching page ${searchState.currentPage}...`
+                      : (searchLoading || searchState.isSearching)
+                        ? 'Searching...'
+                        : 'Search SEC Filings'}
+                  </Button>
+                  
+                  {/* Stop Button - red border, clear background, red square icon, only show when search is in progress */}
+                  {searchState.isSearching && (
+                    <Button
+                      variant="outlined"
+                      onClick={handleStopSearch}
+                      sx={{
+                        borderColor: '#ef4444',
+                        backgroundColor: 'transparent',
+                        color: '#ef4444',
+                        width: '100%',
+                        py: 1.5,
+                        '&:hover': {
+                          borderColor: '#dc2626',
+                          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        },
+                      }}
+                    >
+                      Stop Search
+                    </Button>
+                  )}
+                </Box>
+
+                {/* Column Selection */}
+                <Box sx={{ p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px' }}>
+                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
+                    Select columns to display:
+                  </Typography>
+                  <FormGroup>
+                    {DEFAULT_COLUMNS.map((col) => (
+                      <FormControlLabel
+                        key={col}
+                        control={
+                          <Checkbox
+                            checked={selectedColumns.length === 0 || selectedColumns.includes(col)}
+                            onChange={() => handleColumnToggle(col)}
+                            sx={{
+                              color: '#9ca3af',
+                              '&.Mui-checked': { color: '#3b82f6' },
+                            }}
+                          />
+                        }
+                        label={col}
+                        sx={{ color: '#9ca3af', '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                      />
+                    ))}
+                  </FormGroup>
+                </Box>
               </Box>
             </Box>
-          </Box>
-
-
-
-          {/* Search Button and Stop Button */}
-          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
-            <Button
-              variant="contained"
-              onClick={() => handleSearch()}
-              disabled={searchLoading || searchState.isSearching}
-              startIcon={(searchLoading || searchState.isSearching) ? <CircularProgress size={20} /> : <SearchIcon />}
-              sx={{
-                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                color: '#ffffff',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '1px',
-                py: 1.5,
-                px: 4,
-                minWidth: 200,
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
-                },
-                '&:disabled': {
-                  background: 'rgba(59, 130, 246, 0.3)',
-                },
-              }}
-            >
-              {searchState.isSearching
-                ? searchState.totalPages 
-                  ? `Fetching page ${searchState.currentPage} of ${searchState.totalPages}...`
-                  : `Fetching page ${searchState.currentPage}...`
-                : (searchLoading || searchState.isSearching)
-                  ? 'Searching...'
-                  : 'Search SEC Filings'}
-            </Button>
-            
-            {/* Stop Button - red border, clear background, red square icon, only show when search is in progress */}
-            {searchState.isSearching && (
-              <Button
-                variant="outlined"
-                onClick={handleStopSearch}
-                sx={{
-                  borderColor: '#ef4444',
-                  backgroundColor: 'transparent',
-                  color: '#ef4444',
-                  minWidth: 48,
-                  width: 48,
-                  height: 48,
-                  borderRadius: '4px', // Match search button border radius
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  '&:hover': {
-                    borderColor: '#dc2626',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                  },
-                }}
-              >
-                <Box
-                  sx={{
-                    width: 16,
-                    height: 16,
-                    backgroundColor: '#ef4444',
-                    borderRadius: '2px',
-                  }}
-                />
-              </Button>
-            )}
-          </Box>
-
-          {/* Column Selection - Move to Advanced or keep separate */}
-          <Box sx={{ mt: 3, p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px' }}>
-            <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
-              Select columns to display:
-            </Typography>
-            <FormGroup row>
-              {DEFAULT_COLUMNS.map((col) => (
-                <FormControlLabel
-                  key={col}
-                  control={
-                    <Checkbox
-                      checked={selectedColumns.length === 0 || selectedColumns.includes(col)}
-                      onChange={() => handleColumnToggle(col)}
-                      sx={{
-                        color: '#9ca3af',
-                        '&.Mui-checked': { color: '#3b82f6' },
-                      }}
-                    />
-                  }
-                  label={col}
-                  sx={{ color: '#9ca3af', '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
-                />
-              ))}
-            </FormGroup>
-          </Box>
-            </Box>
-          </Collapse>
-        </GlassCard>
+          </GlassCard>
 
         {/* Form Types Selection Modal */}
         <Dialog
@@ -2370,698 +2343,10 @@ const SECSearchPage: React.FC = () => {
           </GlassCard>
         )}
 
-        {/* Results with Sidebar */}
-        {allSearchResults.length > 0 && (
-          <Box sx={{ display: 'flex', gap: 3 }}>
-            {/* Sidebar Filters */}
-            <GlassCard sx={{ 
-              p: 2, 
-              minWidth: 280, 
-              maxWidth: 320,
-              height: 'fit-content',
-              position: 'sticky',
-              top: 20,
-              alignSelf: 'flex-start',
-            }}>
-              <Typography
-                variant="h6"
-                sx={{
-                  color: '#ffffff',
-                  fontWeight: 600,
-                  mb: 2,
-                  fontSize: '1.1rem',
-                }}
-              >
-                Result Filters (Applied Immediately)
-              </Typography>
-              
-              <Typography
-                variant="caption"
-                sx={{
-                  color: '#9ca3af',
-                  mb: 2,
-                  display: 'block',
-                  fontSize: '0.75rem',
-                }}
-              >
-                Filter current search results without re-running the search.
-                <br />
-                Document counts shown in <Chip label="#" size="small" sx={{ 
-                  height: 18, 
-                  fontSize: '0.7rem',
-                  backgroundColor: 'rgba(107, 114, 128, 0.3)',
-                  color: '#9ca3af',
-                  border: '1px solid #6b7280',
-                }} />
-              </Typography>
-
-              {/* Selected Filters Box */}
-              {(selectedFilters.entities.length > 0 || 
-                selectedFilters.forms.length > 0 || 
-                selectedFilters.locations.length > 0 || 
-                selectedFilters.incorporationStates.length > 0) && (
-                <Box sx={{ 
-                  mb: 2, 
-                  p: 2, 
-                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  border: '1px solid #3b82f6',
-                  borderRadius: '4px',
-                }}>
-                  <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600 }}>
-                    Selected Filters:
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
-                    {/* Entity chips */}
-                    {selectedFilters.entities.map((entity, idx) => (
-                      <Chip
-                        key={`entity-${idx}`}
-                        label={entity.entity}
-                        onDelete={() => {
-                          setSelectedFilters((prev: typeof selectedFilters) => ({
-                            ...prev,
-                            entities: prev.entities.filter((_, i) => i !== idx),
-                          }));
-                        }}
-                        size="small"
-                        sx={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#93c5fd',
-                          border: '1px solid #3b82f6',
-                          '& .MuiChip-deleteIcon': {
-                            color: '#93c5fd',
-                            '&:hover': { color: '#ffffff' },
-                          },
-                        }}
-                      />
-                    ))}
-                    {/* Form chips */}
-                    {selectedFilters.forms.map((form, idx) => (
-                      <Chip
-                        key={`form-${idx}`}
-                        label={form}
-                        onDelete={() => {
-                          setSelectedFilters((prev: typeof selectedFilters) => ({
-                            ...prev,
-                            forms: prev.forms.filter((_, i) => i !== idx),
-                          }));
-                        }}
-                        size="small"
-                        sx={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#93c5fd',
-                          border: '1px solid #3b82f6',
-                          '& .MuiChip-deleteIcon': {
-                            color: '#93c5fd',
-                            '&:hover': { color: '#ffffff' },
-                          },
-                        }}
-                      />
-                    ))}
-                    {/* Location chips */}
-                    {selectedFilters.locations.map((location, idx) => (
-                      <Chip
-                        key={`location-${idx}`}
-                        label={location}
-                        onDelete={() => {
-                          setSelectedFilters((prev: typeof selectedFilters) => ({
-                            ...prev,
-                            locations: prev.locations.filter((_, i) => i !== idx),
-                          }));
-                        }}
-                        size="small"
-                        sx={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#93c5fd',
-                          border: '1px solid #3b82f6',
-                          '& .MuiChip-deleteIcon': {
-                            color: '#93c5fd',
-                            '&:hover': { color: '#ffffff' },
-                          },
-                        }}
-                      />
-                    ))}
-                    {/* Incorporation state chips */}
-                    {selectedFilters.incorporationStates.map((state, idx) => (
-                      <Chip
-                        key={`inc-${idx}`}
-                        label={state}
-                        onDelete={() => {
-                          setSelectedFilters((prev: typeof selectedFilters) => ({
-                            ...prev,
-                            incorporationStates: prev.incorporationStates.filter((_, i) => i !== idx),
-                          }));
-                        }}
-                        size="small"
-                        sx={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#93c5fd',
-                          border: '1px solid #3b82f6',
-                          '& .MuiChip-deleteIcon': {
-                            color: '#93c5fd',
-                            '&:hover': { color: '#ffffff' },
-                          },
-                        }}
-                      />
-                    ))}
-                  </Box>
-                  <Button
-                    variant="outlined"
-                    onClick={() => {
-                      setSelectedFilters({
-                        entities: [],
-                        forms: [],
-                        locations: [],
-                        incorporationStates: [],
-                      });
-                    }}
-                    sx={{
-                      color: '#9ca3af',
-                      borderColor: '#374151',
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                      py: 0.75,
-                      px: 2,
-                      fontSize: '0.75rem',
-                      width: '100%',
-                      '&:hover': { 
-                        borderColor: '#6b7280', 
-                        backgroundColor: 'rgba(55, 65, 81, 0.3)' 
-                      },
-                    }}
-                  >
-                    Clear All Filters
-                  </Button>
-                </Box>
-              )}
-
-              {/* Entity Filter */}
-              {availableFilters.entity_filters && availableFilters.entity_filters.length > 0 && (
-                <Box sx={{ mb: 2 }}>
-                  <Box
-                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, entity: !prev.entity }))}
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer',
-                      p: 1.5,
-                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      borderRadius: '4px',
-                      '&:hover': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
-                      },
-                    }}
-                  >
-                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                      Entity
-                    </Typography>
-                    {expandedFilters.entity ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
-                  </Box>
-                  <Collapse in={expandedFilters.entity}>
-                    <Box sx={{ 
-                      mt: 1, 
-                      maxHeight: 300, 
-                      overflowY: 'auto',
-                      '&::-webkit-scrollbar': {
-                        width: '6px',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                        borderRadius: '3px',
-                      },
-                      '&::-webkit-scrollbar-thumb:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                      },
-                    }}>
-                      {availableFilters.entity_filters.map((filter, idx) => {
-                        // Check if this entity is selected
-                        const match = filter.entity.match(/^(.+?)\s*\(CIK\s+(\d+)\)$/);
-                        let entityObj;
-                        if (match) {
-                          const [, name, cik] = match;
-                          entityObj = { entity: name.trim(), cik: cik };
-                        } else {
-                          entityObj = { entity: filter.entity.trim() };
-                        }
-                        
-                        const isSelected = selectedFilters.entities.some(
-                          e => e.entity === entityObj.entity && 
-                               (entityObj.cik ? e.cik === entityObj.cik : !e.cik)
-                        );
-                        
-                        return (
-                          <Box
-                            key={idx}
-                            onClick={() => {
-                              setSelectedFilters((prev: typeof selectedFilters) => {
-                                const exists = prev.entities.some(
-                                  e => e.entity === entityObj.entity && 
-                                       (entityObj.cik ? e.cik === entityObj.cik : !e.cik)
-                                );
-                                if (exists) {
-                                  // Remove if already selected
-                                  return {
-                                    ...prev,
-                                    entities: prev.entities.filter(
-                                      e => !(e.entity === entityObj.entity && 
-                                            (entityObj.cik ? e.cik === entityObj.cik : !e.cik))
-                                    ),
-                                  };
-                                } else {
-                                  // Add if not selected
-                                  return {
-                                    ...prev,
-                                    entities: [...prev.entities, entityObj],
-                                  };
-                                }
-                              });
-                            }}
-                            sx={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              p: 1,
-                              cursor: 'pointer',
-                              borderRadius: '4px',
-                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
-                              '&:hover': {
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(59, 130, 246, 0.1)',
-                              },
-                            }}
-                          >
-                            <Typography variant="body2" sx={{ 
-                              color: isSelected ? '#93c5fd' : '#ffffff', 
-                              fontSize: '0.875rem', 
-                              flex: 1,
-                              fontWeight: isSelected ? 600 : 400,
-                            }}>
-                              {filter.entity}
-                            </Typography>
-                            <Chip
-                              label={filter.count}
-                              size="small"
-                              sx={{
-                                height: 20,
-                                fontSize: '0.7rem',
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(107, 114, 128, 0.3)',
-                                color: isSelected ? '#93c5fd' : '#9ca3af',
-                                border: isSelected 
-                                  ? '1px solid #3b82f6' 
-                                  : '1px solid #6b7280',
-                              }}
-                            />
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  </Collapse>
-                </Box>
-              )}
-
-              {/* Form Filter */}
-              {availableFilters.form_filters && availableFilters.form_filters.length > 0 && (
-                <Box sx={{ mb: 2 }}>
-                  <Box
-                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, form: !prev.form }))}
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer',
-                      p: 1.5,
-                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      borderRadius: '4px',
-                      '&:hover': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
-                      },
-                    }}
-                  >
-                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                      Form
-                    </Typography>
-                    {expandedFilters.form ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
-                  </Box>
-                  <Collapse in={expandedFilters.form}>
-                    <Box sx={{ 
-                      mt: 1, 
-                      maxHeight: 300, 
-                      overflowY: 'auto',
-                      '&::-webkit-scrollbar': {
-                        width: '6px',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                        borderRadius: '3px',
-                      },
-                      '&::-webkit-scrollbar-thumb:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                      },
-                    }}>
-                      {availableFilters.form_filters.map((filter, idx) => {
-                        const isSelected = selectedFilters.forms.includes(filter.form);
-                        
-                        return (
-                          <Box
-                            key={idx}
-                            onClick={() => {
-                              setSelectedFilters((prev: typeof selectedFilters) => {
-                                const exists = prev.forms.includes(filter.form);
-                                if (exists) {
-                                  // Remove if already selected
-                                  return {
-                                    ...prev,
-                                    forms: prev.forms.filter(f => f !== filter.form),
-                                  };
-                                } else {
-                                  // Add if not selected
-                                  return {
-                                    ...prev,
-                                    forms: [...prev.forms, filter.form],
-                                  };
-                                }
-                              });
-                            }}
-                            sx={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              p: 1,
-                              cursor: 'pointer',
-                              borderRadius: '4px',
-                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
-                              '&:hover': {
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(59, 130, 246, 0.1)',
-                              },
-                            }}
-                          >
-                            <Typography variant="body2" sx={{ 
-                              color: isSelected ? '#93c5fd' : '#ffffff', 
-                              fontSize: '0.875rem', 
-                              flex: 1,
-                              fontWeight: isSelected ? 600 : 400,
-                            }}>
-                              {filter.form}
-                            </Typography>
-                            <Chip
-                              label={filter.count}
-                              size="small"
-                              sx={{
-                                height: 20,
-                                fontSize: '0.7rem',
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(107, 114, 128, 0.3)',
-                                color: isSelected ? '#93c5fd' : '#9ca3af',
-                                border: isSelected 
-                                  ? '1px solid #3b82f6' 
-                                  : '1px solid #6b7280',
-                              }}
-                            />
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  </Collapse>
-                </Box>
-              )}
-
-              {/* Location Filter */}
-              {availableFilters.location_filters && availableFilters.location_filters.length > 0 && (
-                <Box sx={{ mb: 2 }}>
-                  <Box
-                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, location: !prev.location }))}
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer',
-                      p: 1.5,
-                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      borderRadius: '4px',
-                      '&:hover': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
-                      },
-                    }}
-                  >
-                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                      Principal executive offices located in
-                    </Typography>
-                    {expandedFilters.location ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
-                  </Box>
-                  <Collapse in={expandedFilters.location}>
-                    <Box sx={{ 
-                      mt: 1, 
-                      maxHeight: 300, 
-                      overflowY: 'auto',
-                      '&::-webkit-scrollbar': {
-                        width: '6px',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                        borderRadius: '3px',
-                      },
-                      '&::-webkit-scrollbar-thumb:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                      },
-                    }}>
-                      {availableFilters.location_filters.map((filter, idx) => {
-                        // Extract state code from location string (e.g., "Austin, TX" -> "TX", "California" -> "CA")
-                        const getStateCode = (location: string): string => {
-                          // If it's already a 2-letter code, return it
-                          if (/^[A-Z]{2}$/.test(location.trim())) {
-                            return location.trim();
-                          }
-                          // If it contains a comma, extract the state code after the comma
-                          const commaMatch = location.match(/,\s*([A-Z]{2})$/);
-                          if (commaMatch) {
-                            return commaMatch[1];
-                          }
-                          // Try to map full state name to code (basic mapping)
-                          const stateNameToCode: { [key: string]: string } = {
-                            'California': 'CA', 'Texas': 'TX', 'New York': 'NY', 'Florida': 'FL',
-                            'Illinois': 'IL', 'Pennsylvania': 'PA', 'Ohio': 'OH', 'Georgia': 'GA',
-                            'North Carolina': 'NC', 'Michigan': 'MI', 'New Jersey': 'NJ', 'Virginia': 'VA',
-                            'Washington': 'WA', 'Arizona': 'AZ', 'Massachusetts': 'MA', 'Tennessee': 'TN',
-                            'Indiana': 'IN', 'Missouri': 'MO', 'Maryland': 'MD', 'Wisconsin': 'WI',
-                            'Colorado': 'CO', 'Minnesota': 'MN', 'South Carolina': 'SC', 'Alabama': 'AL',
-                            'Louisiana': 'LA', 'Kentucky': 'KY', 'Oregon': 'OR', 'Oklahoma': 'OK',
-                            'Connecticut': 'CT', 'Utah': 'UT', 'Iowa': 'IA', 'Nevada': 'NV',
-                            'Arkansas': 'AR', 'Mississippi': 'MS', 'Kansas': 'KS', 'New Mexico': 'NM',
-                            'Nebraska': 'NE', 'West Virginia': 'WV', 'Idaho': 'ID', 'Hawaii': 'HI',
-                            'New Hampshire': 'NH', 'Maine': 'ME', 'Montana': 'MT', 'Rhode Island': 'RI',
-                            'Delaware': 'DE', 'South Dakota': 'SD', 'North Dakota': 'ND', 'Alaska': 'AK',
-                            'Vermont': 'VT', 'Wyoming': 'WY', 'District of Columbia': 'DC',
-                          };
-                          return stateNameToCode[location] || location; // Return original if no match
-                        };
-                        
-                        const stateCode = getStateCode(filter.location);
-                        const isSelected = selectedFilters.locations.includes(stateCode);
-                        
-                        return (
-                          <Box
-                            key={idx}
-                            onClick={() => {
-                              setSelectedFilters((prev: typeof selectedFilters) => {
-                                const exists = prev.locations.includes(stateCode);
-                                if (exists) {
-                                  // Remove if already selected
-                                  return {
-                                    ...prev,
-                                    locations: prev.locations.filter(l => l !== stateCode),
-                                  };
-                                } else {
-                                  // Add if not selected
-                                  return {
-                                    ...prev,
-                                    locations: [...prev.locations, stateCode],
-                                  };
-                                }
-                              });
-                            }}
-                            sx={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              p: 1,
-                              cursor: 'pointer',
-                              borderRadius: '4px',
-                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
-                              '&:hover': {
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(59, 130, 246, 0.1)',
-                              },
-                            }}
-                          >
-                            <Typography variant="body2" sx={{ 
-                              color: isSelected ? '#93c5fd' : '#ffffff', 
-                              fontSize: '0.875rem', 
-                              flex: 1,
-                              fontWeight: isSelected ? 600 : 400,
-                            }}>
-                              {filter.location}
-                            </Typography>
-                            <Chip
-                              label={filter.count}
-                              size="small"
-                              sx={{
-                                height: 20,
-                                fontSize: '0.7rem',
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(107, 114, 128, 0.3)',
-                                color: isSelected ? '#93c5fd' : '#9ca3af',
-                                border: isSelected 
-                                  ? '1px solid #3b82f6' 
-                                  : '1px solid #6b7280',
-                              }}
-                            />
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  </Collapse>
-                </Box>
-              )}
-
-              {/* Incorporation Filter */}
-              {availableFilters.incorporation_filters && availableFilters.incorporation_filters.length > 0 && (
-                <Box sx={{ mb: 2 }}>
-                  <Box
-                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, incorporation: !prev.incorporation }))}
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer',
-                      p: 1.5,
-                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      borderRadius: '4px',
-                      '&:hover': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
-                      },
-                    }}
-                  >
-                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                      Incorporated in
-                    </Typography>
-                    {expandedFilters.incorporation ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
-                  </Box>
-                  <Collapse in={expandedFilters.incorporation}>
-                    <Box sx={{ 
-                      mt: 1, 
-                      maxHeight: 300, 
-                      overflowY: 'auto',
-                      '&::-webkit-scrollbar': {
-                        width: '6px',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                        borderRadius: '3px',
-                      },
-                      '&::-webkit-scrollbar-thumb:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                      },
-                    }}>
-                      {availableFilters.incorporation_filters.map((filter, idx) => {
-                        const isSelected = selectedFilters.incorporationStates.includes(filter.state);
-                        
-                        return (
-                          <Box
-                            key={idx}
-                            onClick={() => {
-                              setSelectedFilters((prev: typeof selectedFilters) => {
-                                const exists = prev.incorporationStates.includes(filter.state);
-                                if (exists) {
-                                  // Remove if already selected
-                                  return {
-                                    ...prev,
-                                    incorporationStates: prev.incorporationStates.filter(s => s !== filter.state),
-                                  };
-                                } else {
-                                  // Add if not selected
-                                  return {
-                                    ...prev,
-                                    incorporationStates: [...prev.incorporationStates, filter.state],
-                                  };
-                                }
-                              });
-                            }}
-                            sx={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              p: 1,
-                              cursor: 'pointer',
-                              borderRadius: '4px',
-                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
-                              '&:hover': {
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(59, 130, 246, 0.1)',
-                              },
-                            }}
-                          >
-                            <Typography variant="body2" sx={{ 
-                              color: isSelected ? '#93c5fd' : '#ffffff', 
-                              fontSize: '0.875rem', 
-                              flex: 1,
-                              fontWeight: isSelected ? 600 : 400,
-                            }}>
-                              {filter.state}
-                            </Typography>
-                            <Chip
-                              label={filter.count}
-                              size="small"
-                              sx={{
-                                height: 20,
-                                fontSize: '0.7rem',
-                                backgroundColor: isSelected 
-                                  ? 'rgba(59, 130, 246, 0.3)' 
-                                  : 'rgba(107, 114, 128, 0.3)',
-                                color: isSelected ? '#93c5fd' : '#9ca3af',
-                                border: isSelected 
-                                  ? '1px solid #3b82f6' 
-                                  : '1px solid #6b7280',
-                              }}
-                            />
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  </Collapse>
-                </Box>
-              )}
-            </GlassCard>
-
-            {/* Results Table */}
-            <Box sx={{ flex: 1 }}>
-              <GlassCard sx={{ p: 4 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          {/* Middle Section - Results Table */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <GlassCard sx={{ p: 4 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
                   <Typography
                     variant="h6"
                     sx={{
@@ -3074,9 +2359,34 @@ const SECSearchPage: React.FC = () => {
                     Search Results
                   </Typography>
                   
-                  {/* Status Indicator and Add to Context Button */}
-                  {allSearchResults.length > 0 || searchState.isSearching ? (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  {/* Column Selection, Status Indicator, and Add to Context Button */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    {/* Column Selection - Always visible */}
+                    <Box sx={{ p: 1.5, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px' }}>
+                      <FormGroup row>
+                        {DEFAULT_COLUMNS.map((col) => (
+                          <FormControlLabel
+                            key={col}
+                            control={
+                              <Checkbox
+                                checked={selectedColumns.length === 0 || selectedColumns.includes(col)}
+                                onChange={() => handleColumnToggle(col)}
+                                sx={{
+                                  color: '#9ca3af',
+                                  '&.Mui-checked': { color: '#3b82f6' },
+                                }}
+                              />
+                            }
+                            label={col}
+                            sx={{ color: '#9ca3af', '& .MuiFormControlLabel-label': { fontSize: '0.75rem', ml: 0.5 } }}
+                          />
+                        ))}
+                      </FormGroup>
+                    </Box>
+                    
+                    {/* Status Indicator and Add to Context Button */}
+                    {allSearchResults.length > 0 || searchState.isSearching ? (
+                      <>
                       {/* Add to Context Button */}
                       {currentResults.length > 0 && (
                         <Tooltip title={`Add ${selectedFilings.size > 0 ? `${selectedFilings.size} filing(s)` : 'selected filings'} to context`}>
@@ -3196,9 +2506,10 @@ const SECSearchPage: React.FC = () => {
                           </Select>
                         </FormControl>
                       )}
-                    </Box>
-                  ) : null}
-                </Box>
+                      </>
+                    ) : null}
+                  </Box>
+              </Box>
                 
                 {totalFound > 0 ? (
                   <Typography
@@ -3446,74 +2757,676 @@ const SECSearchPage: React.FC = () => {
             )}
               </GlassCard>
             </Box>
-          </Box>
-        )}
-          </Box>
 
-          {/* Right Sidebar - Verification Links */}
-          <Box sx={{ width: '280px', flexShrink: 0 }}>
-            <GlassCard sx={{ p: 2, position: 'sticky', top: 20 }}>
+          {/* Right Sidebar - Client-side Filters */}
+          {allSearchResults.length > 0 && (
+            <GlassCard sx={{ 
+              p: 2, 
+              minWidth: 280, 
+              maxWidth: 320,
+              height: 'fit-content',
+              position: 'sticky',
+              top: 20,
+              alignSelf: 'flex-start',
+            }}>
               <Typography
                 variant="h6"
                 sx={{
                   color: '#ffffff',
                   fontWeight: 600,
                   mb: 2,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
+                  fontSize: '1.1rem',
                 }}
               >
-                <VerifiedUserIcon sx={{ fontSize: '1.5rem', color: '#3b82f6' }} />
-                Verify on Official Sources
+                Result Filters (Applied Immediately)
               </Typography>
-              <Typography
-                variant="body2"
-                sx={{
-                  color: '#9ca3af',
-                  mb: 2,
-                  fontSize: '0.875rem',
-                }}
-              >
-                Cross-reference findings with the official SEC EDGAR database:
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                <Button
-                  component="a"
-                  href="https://www.sec.gov/edgar/search/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  variant="outlined"
-                  startIcon={<OpenInNewIcon />}
-                  sx={{
-                    color: '#3b82f6',
-                    borderColor: '#3b82f6',
-                    '&:hover': {
-                      borderColor: '#2563eb',
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                    justifyContent: 'flex-start',
-                    textTransform: 'none',
-                    fontSize: '0.875rem',
-                  }}
-                >
-                  SEC EDGAR Search
-                </Button>
-              </Box>
+              
               <Typography
                 variant="caption"
                 sx={{
-                  color: '#6b7280',
-                  mt: 2,
+                  color: '#9ca3af',
+                  mb: 2,
                   display: 'block',
                   fontSize: '0.75rem',
-                  lineHeight: 1.5,
                 }}
               >
-                Note: This link opens the official SEC website where you can verify the accuracy of filing data.
+                Filter current search results without re-running the search.
+                <br />
+                Document counts shown in <Chip label="#" size="small" sx={{ 
+                  height: 18, 
+                  fontSize: '0.7rem',
+                  backgroundColor: 'rgba(107, 114, 128, 0.3)',
+                  color: '#9ca3af',
+                  border: '1px solid #6b7280',
+                }} />
               </Typography>
+
+              {/* Selected Filters Box */}
+              {(selectedFilters.entities.length > 0 || 
+                selectedFilters.forms.length > 0 || 
+                selectedFilters.locations.length > 0 || 
+                selectedFilters.incorporationStates.length > 0) && (
+                <Box sx={{ 
+                  mb: 2, 
+                  p: 2, 
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  border: '1px solid #3b82f6',
+                  borderRadius: '4px',
+                }}>
+                  <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600 }}>
+                    Selected Filters:
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+                    {selectedFilters.entities.map((entity, idx) => (
+                      <Chip
+                        key={`entity-${idx}`}
+                        label={entity.entity}
+                        onDelete={() => {
+                          setSelectedFilters((prev: typeof selectedFilters) => ({
+                            ...prev,
+                            entities: prev.entities.filter((_, i) => i !== idx),
+                          }));
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {selectedFilters.forms.map((form, idx) => (
+                      <Chip
+                        key={`form-${idx}`}
+                        label={form}
+                        onDelete={() => {
+                          setSelectedFilters((prev: typeof selectedFilters) => ({
+                            ...prev,
+                            forms: prev.forms.filter((_, i) => i !== idx),
+                          }));
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {selectedFilters.locations.map((location, idx) => (
+                      <Chip
+                        key={`location-${idx}`}
+                        label={location}
+                        onDelete={() => {
+                          setSelectedFilters((prev: typeof selectedFilters) => ({
+                            ...prev,
+                            locations: prev.locations.filter((_, i) => i !== idx),
+                          }));
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {selectedFilters.incorporationStates.map((state, idx) => (
+                      <Chip
+                        key={`inc-${idx}`}
+                        label={state}
+                        onDelete={() => {
+                          setSelectedFilters((prev: typeof selectedFilters) => ({
+                            ...prev,
+                            incorporationStates: prev.incorporationStates.filter((_, i) => i !== idx),
+                          }));
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                  </Box>
+                  <Button
+                    variant="outlined"
+                    onClick={() => {
+                      setSelectedFilters({
+                        entities: [],
+                        forms: [],
+                        locations: [],
+                        incorporationStates: [],
+                      });
+                    }}
+                    sx={{
+                      color: '#9ca3af',
+                      borderColor: '#374151',
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      py: 0.75,
+                      px: 2,
+                      fontSize: '0.75rem',
+                      width: '100%',
+                      '&:hover': { 
+                        borderColor: '#6b7280', 
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)' 
+                      },
+                    }}
+                  >
+                    Clear All Filters
+                  </Button>
+                </Box>
+              )}
+
+              {/* Entity Filter */}
+              {availableFilters.entity_filters && availableFilters.entity_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, entity: !prev.entity }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Entity
+                    </Typography>
+                    {expandedFilters.entity ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.entity}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.entity_filters.map((filter, idx) => {
+                        const match = filter.entity.match(/^(.+?)\s*\(CIK\s+(\d+)\)$/);
+                        let entityObj;
+                        if (match) {
+                          const [, name, cik] = match;
+                          entityObj = { entity: name.trim(), cik: cik };
+                        } else {
+                          entityObj = { entity: filter.entity.trim() };
+                        }
+                        
+                        const isSelected = selectedFilters.entities.some(
+                          e => e.entity === entityObj.entity && 
+                               (entityObj.cik ? e.cik === entityObj.cik : !e.cik)
+                        );
+                        
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters((prev: typeof selectedFilters) => {
+                                const exists = prev.entities.some(
+                                  e => e.entity === entityObj.entity && 
+                                       (entityObj.cik ? e.cik === entityObj.cik : !e.cik)
+                                );
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    entities: prev.entities.filter(
+                                      e => !(e.entity === entityObj.entity && 
+                                            (entityObj.cik ? e.cik === entityObj.cik : !e.cik))
+                                    ),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    entities: [...prev.entities, entityObj],
+                                  };
+                                }
+                              });
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.entity}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Form Filter */}
+              {availableFilters.form_filters && availableFilters.form_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, form: !prev.form }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Form
+                    </Typography>
+                    {expandedFilters.form ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.form}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.form_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.forms.includes(filter.form);
+                        
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters((prev: typeof selectedFilters) => {
+                                const exists = prev.forms.includes(filter.form);
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    forms: prev.forms.filter(f => f !== filter.form),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    forms: [...prev.forms, filter.form],
+                                  };
+                                }
+                              });
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.form}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Location Filter */}
+              {availableFilters.location_filters && availableFilters.location_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, location: !prev.location }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Principal executive offices located in
+                    </Typography>
+                    {expandedFilters.location ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.location}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.location_filters.map((filter, idx) => {
+                        const getStateCode = (location: string): string => {
+                          if (/^[A-Z]{2}$/.test(location.trim())) {
+                            return location.trim();
+                          }
+                          const commaMatch = location.match(/,\s*([A-Z]{2})$/);
+                          if (commaMatch) {
+                            return commaMatch[1];
+                          }
+                          const stateNameToCode: { [key: string]: string } = {
+                            'California': 'CA', 'Texas': 'TX', 'New York': 'NY', 'Florida': 'FL',
+                            'Illinois': 'IL', 'Pennsylvania': 'PA', 'Ohio': 'OH', 'Georgia': 'GA',
+                            'North Carolina': 'NC', 'Michigan': 'MI', 'New Jersey': 'NJ', 'Virginia': 'VA',
+                            'Washington': 'WA', 'Arizona': 'AZ', 'Massachusetts': 'MA', 'Tennessee': 'TN',
+                            'Indiana': 'IN', 'Missouri': 'MO', 'Maryland': 'MD', 'Wisconsin': 'WI',
+                            'Colorado': 'CO', 'Minnesota': 'MN', 'South Carolina': 'SC', 'Alabama': 'AL',
+                            'Louisiana': 'LA', 'Kentucky': 'KY', 'Oregon': 'OR', 'Oklahoma': 'OK',
+                            'Connecticut': 'CT', 'Utah': 'UT', 'Iowa': 'IA', 'Nevada': 'NV',
+                            'Arkansas': 'AR', 'Mississippi': 'MS', 'Kansas': 'KS', 'New Mexico': 'NM',
+                            'Nebraska': 'NE', 'West Virginia': 'WV', 'Idaho': 'ID', 'Hawaii': 'HI',
+                            'New Hampshire': 'NH', 'Maine': 'ME', 'Montana': 'MT', 'Rhode Island': 'RI',
+                            'Delaware': 'DE', 'South Dakota': 'SD', 'North Dakota': 'ND', 'Alaska': 'AK',
+                            'Vermont': 'VT', 'Wyoming': 'WY', 'District of Columbia': 'DC',
+                          };
+                          return stateNameToCode[location] || location;
+                        };
+                        
+                        const stateCode = getStateCode(filter.location);
+                        const isSelected = selectedFilters.locations.includes(stateCode);
+                        
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters((prev: typeof selectedFilters) => {
+                                const exists = prev.locations.includes(stateCode);
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    locations: prev.locations.filter(l => l !== stateCode),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    locations: [...prev.locations, stateCode],
+                                  };
+                                }
+                              });
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.location}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Incorporation Filter */}
+              {availableFilters.incorporation_filters && availableFilters.incorporation_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters((prev: typeof expandedFilters) => ({ ...prev, incorporation: !prev.incorporation }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Incorporated in
+                    </Typography>
+                    {expandedFilters.incorporation ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.incorporation}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.incorporation_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.incorporationStates.includes(filter.state);
+                        
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters((prev: typeof selectedFilters) => {
+                                const exists = prev.incorporationStates.includes(filter.state);
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    incorporationStates: prev.incorporationStates.filter(s => s !== filter.state),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    incorporationStates: [...prev.incorporationStates, filter.state],
+                                  };
+                                }
+                              });
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.state}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
             </GlassCard>
-          </Box>
+          )}
         </Box>
       </Container>
 

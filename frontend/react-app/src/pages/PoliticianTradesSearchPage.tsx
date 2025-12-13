@@ -34,8 +34,6 @@ import {
   Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
   Download as DownloadIcon,
-  OpenInNew as OpenInNewIcon,
-  VerifiedUser as VerifiedUserIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   AddComment as NewChatIcon,
@@ -157,6 +155,12 @@ const PoliticianTradesSearchPage: React.FC = () => {
       // amountRange is a single string, not array
     }
   );
+  
+  // Local state for amount min/max (will be converted to amountRange for API)
+  const [amountMin, setAmountMin] = useState<number | ''>(savedState?.amountMin || '');
+  const [amountMax, setAmountMax] = useState<number | ''>(savedState?.amountMax || '');
+  const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== undefined ? savedState.advancedSearchExpanded : false);
+  const [amountRangeError, setAmountRangeError] = useState<string | null>(null);
   
   const [allSearchResults, setAllSearchResults] = useState<PoliticianTrade[]>(
     savedState?.allSearchResults || []
@@ -290,6 +294,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
         lastEvaluatedKey,
         hasMore,
         searchFormExpanded,
+        advancedSearchExpanded,
+        amountMin,
+        amountMax,
       };
       
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
@@ -310,6 +317,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
     lastEvaluatedKey,
     hasMore,
     searchFormExpanded,
+    advancedSearchExpanded,
+    amountMin,
+    amountMax,
   ]);
   
   // Compute filters from search results
@@ -423,8 +433,76 @@ const PoliticianTradesSearchPage: React.FC = () => {
     }
   };
   
+  // Convert amountMin/amountMax to amountRange string for API
+  const convertAmountRangeToAPI = (min: number | '', max: number | ''): string | undefined => {
+    if (min === '' && max === '') return undefined;
+    if (min === '' && max !== '') {
+      // If only max is set, find the matching standard range
+      const maxVal = typeof max === 'number' ? max : 0;
+      for (const range of AMOUNT_RANGES) {
+        const rangeStr = range.value;
+        if (rangeStr === '$50,000,001+') {
+          if (maxVal >= 50000001) return rangeStr;
+        } else {
+          const match = rangeStr.match(/\$([0-9,]+)-\$([0-9,]+)/);
+          if (match) {
+            const rangeMax = parseInt(match[2].replace(/,/g, ''));
+            if (maxVal <= rangeMax) return rangeStr;
+          }
+        }
+      }
+      return `$0-$${max.toLocaleString('en-US')}`;
+    }
+    if (min !== '' && max === '') {
+      // If only min is set, find the matching standard range
+      const minVal = typeof min === 'number' ? min : 0;
+      for (const range of AMOUNT_RANGES) {
+        const rangeStr = range.value;
+        if (rangeStr === '$50,000,001+') {
+          if (minVal >= 50000001) return rangeStr;
+        } else {
+          const match = rangeStr.match(/\$([0-9,]+)-\$([0-9,]+)/);
+          if (match) {
+            const rangeMin = parseInt(match[1].replace(/,/g, ''));
+            const rangeMax = parseInt(match[2].replace(/,/g, ''));
+            if (minVal >= rangeMin && minVal <= rangeMax) return rangeStr;
+          }
+        }
+      }
+      return `$${min.toLocaleString('en-US')}+`;
+    }
+    if (min !== '' && max !== '') {
+      // Try to find a matching standard range first
+      const minVal = typeof min === 'number' ? min : 0;
+      const maxVal = typeof max === 'number' ? max : 0;
+      for (const range of AMOUNT_RANGES) {
+        const rangeStr = range.value;
+        if (rangeStr === '$50,000,001+') {
+          if (minVal >= 50000001) return rangeStr;
+        } else {
+          const match = rangeStr.match(/\$([0-9,]+)-\$([0-9,]+)/);
+          if (match) {
+            const rangeMin = parseInt(match[1].replace(/,/g, ''));
+            const rangeMax = parseInt(match[2].replace(/,/g, ''));
+            if (minVal >= rangeMin && maxVal <= rangeMax) return rangeStr;
+          }
+        }
+      }
+      // If no standard range matches, create custom range string
+      return `$${min.toLocaleString('en-US')}-$${max.toLocaleString('en-US')}`;
+    }
+    return undefined;
+  };
+  
   // Perform search - fetch first batch of results (load more available)
   const handleSearch = async () => {
+    // Validate amount range
+    if (amountMin !== '' && amountMax !== '' && typeof amountMin === 'number' && typeof amountMax === 'number' && amountMax < amountMin) {
+      setAmountRangeError('Max amount cannot be less than min amount');
+      return;
+    }
+    
+    setAmountRangeError(null);
     setIsSearching(true);
     setSearchError(null);
     setCurrentPage(1);
@@ -436,9 +514,13 @@ const PoliticianTradesSearchPage: React.FC = () => {
     try {
       const fetchPageSize = 100; // Use large page size to minimize API calls
       
+      // Convert amountMin/amountMax to amountRange for API
+      const amountRange = convertAmountRangeToAPI(amountMin, amountMax);
+      
       // Build search parameters using ONLY searchParams (never include filters)
       const searchRequest = {
         ...searchParams,
+        amountRange: amountRange,
         page: 1,
         pageSize: fetchPageSize,
       };
@@ -488,9 +570,13 @@ const PoliticianTradesSearchPage: React.FC = () => {
     try {
       const fetchPageSize = 100; // Use same page size as initial search
       
+      // Convert amountMin/amountMax to amountRange for API
+      const amountRange = convertAmountRangeToAPI(amountMin, amountMax);
+      
       // Build search parameters using ONLY searchParams with cursor
       const searchRequest = {
         ...searchParams,
+        amountRange: amountRange,
         page: 1, // Not used when lastEvaluatedKey is provided
         pageSize: fetchPageSize,
         lastEvaluatedKey: lastEvaluatedKey, // Cursor for pagination
@@ -908,162 +994,131 @@ const PoliticianTradesSearchPage: React.FC = () => {
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
-        <Box sx={{ display: 'flex', gap: 3 }}>
-          {/* Main Content */}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            {/* Header */}
-            <Box sx={{ mb: 4 }}>
-              <Typography
-                variant="h4"
-                sx={{
-                  color: '#ffffff',
-                  fontWeight: 700,
-                  mb: 1,
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                }}
-              >
-                Politician Trades Search
-              </Typography>
-              <Typography
-                variant="body1"
-                sx={{
-                  color: '#9ca3af',
-                  fontSize: '1rem',
-                }}
-              >
-                Search politician trades with advanced filters
-              </Typography>
-            </Box>
-
-        {/* Search Form */}
-        <GlassCard sx={{ mb: 4 }}>
-          <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: searchFormExpanded ? '1px solid rgba(55, 65, 81, 0.5)' : 'none' }}>
-            <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 'bold' }}>
-              Search Parameters
-            </Typography>
-            <IconButton
-              onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-              sx={{ color: '#9ca3af' }}
-              size="small"
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+          <Typography variant="h4" sx={{ color: '#ffffff', fontWeight: 600 }}>
+            Politician Trades Search
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <Button
+              component="a"
+              href="https://efdsearch.senate.gov/search/home/"
+              target="_blank"
+              rel="noopener noreferrer"
+              variant="outlined"
+              startIcon={<LaunchIcon />}
+              sx={{
+                color: '#3b82f6',
+                borderColor: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+                textTransform: 'none',
+                fontSize: '0.875rem',
+              }}
             >
-              {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-            </IconButton>
+              Verify Senate EFD
+            </Button>
+            <Button
+              component="a"
+              href="https://disclosures-clerk.house.gov/FinancialDisclosure"
+              target="_blank"
+              rel="noopener noreferrer"
+              variant="outlined"
+              startIcon={<LaunchIcon />}
+              sx={{
+                color: '#3b82f6',
+                borderColor: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#2563eb',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+                textTransform: 'none',
+                fontSize: '0.875rem',
+              }}
+            >
+              Verify House Clerk
+            </Button>
           </Box>
-          <Collapse in={searchFormExpanded}>
-            <Box sx={{ p: 4 }}>
-          {/* Date Range Parameters */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 3 }}>
-            {/* Date Range Fields */}
-            {/* Transaction Date Range */}
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <TextField
-                label="Transaction Date From"
-                type="date"
-                value={searchParams.dateFrom || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
-                InputLabelProps={{ shrink: true }}
-                inputProps={{
-                  min: '2001-01-01',
-                  max: new Date().toISOString().split('T')[0],
-                }}
-                variant="outlined"
-                sx={{
-                  flex: 1,
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
-              />
-              <TextField
-                label="Transaction Date To"
-                type="date"
-                value={searchParams.dateTo || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
-                InputLabelProps={{ shrink: true }}
-                inputProps={{
-                  min: '2001-01-01',
-                  max: new Date().toISOString().split('T')[0],
-                }}
-                variant="outlined"
-                sx={{
-                  flex: 1,
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
-              />
-            </Box>
+        </Box>
 
-            {/* Filing Date Range */}
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <TextField
-                label="Filing Date From"
-                type="date"
-                value={searchParams.filingDateFrom || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, filingDateFrom: e.target.value || undefined }))}
-                InputLabelProps={{ shrink: true }}
-                inputProps={{
-                  min: '2001-01-01',
-                  max: new Date().toISOString().split('T')[0],
-                }}
-                variant="outlined"
-                sx={{
-                  flex: 1,
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
-              />
-              <TextField
-                label="Filing Date To"
-                type="date"
-                value={searchParams.filingDateTo || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, filingDateTo: e.target.value || undefined }))}
-                InputLabelProps={{ shrink: true }}
-                inputProps={{
-                  min: '2001-01-01',
-                  max: new Date().toISOString().split('T')[0],
-                }}
-                variant="outlined"
-                sx={{
-                  flex: 1,
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': { borderColor: '#374151' },
-                    '&:hover fieldset': { borderColor: '#3b82f6' },
-                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                  },
-                  '& .MuiInputLabel-root': { color: '#9ca3af' },
-                  '& .MuiInputBase-input': { color: '#ffffff' },
-                }}
-              />
-            </Box>
-            
-            {/* Advanced Search Parameters */}
-            <Box sx={{ mt: 3 }}>
-              <Typography variant="h6" sx={{ color: '#ffffff', mb: 2, fontWeight: 'bold' }}>
-                Advanced Search Parameters
-              </Typography>
-              <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
-                These parameters will be sent to the backend to search for trades. Click "Search" to apply them.
-              </Typography>
-              
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
-                {/* Politicians Search Parameter - Top Priority */}
-                <MultiSelectField<string>
-                  label="Politicians (Search Parameter)"
+        {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
+        <Box sx={{ display: 'flex', gap: 3 }}>
+          {/* Left Sidebar - Search Filters (Always visible) */}
+          <GlassCard sx={{ 
+            minWidth: 320, 
+            maxWidth: 380,
+            height: 'fit-content',
+            position: 'sticky',
+            top: 20,
+            alignSelf: 'flex-start',
+          }}>
+            <Box sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                  Search Filters
+                </Typography>
+                <IconButton
+                  onClick={() => setSearchFormExpanded(!searchFormExpanded)}
+                  sx={{ color: '#94a3b8' }}
+                  size="small"
+                >
+                  {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                </IconButton>
+              </Box>
+              <Collapse in={searchFormExpanded}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {/* Transaction Date Range */}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <TextField
+                      label="Transaction Date From"
+                      type="date"
+                      value={searchParams.dateFrom || ''}
+                      onChange={(e) => setSearchParams(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{
+                        min: '2001-01-01',
+                        max: new Date().toISOString().split('T')[0],
+                      }}
+                      variant="outlined"
+                      sx={{
+                        flex: 1,
+                        '& .MuiOutlinedInput-root': {
+                          '& fieldset': { borderColor: '#374151' },
+                          '&:hover fieldset': { borderColor: '#3b82f6' },
+                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#9ca3af' },
+                        '& .MuiInputBase-input': { color: '#ffffff' },
+                      }}
+                    />
+                    <TextField
+                      label="Transaction Date To"
+                      type="date"
+                      value={searchParams.dateTo || ''}
+                      onChange={(e) => setSearchParams(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{
+                        min: '2001-01-01',
+                        max: new Date().toISOString().split('T')[0],
+                      }}
+                      variant="outlined"
+                      sx={{
+                        flex: 1,
+                        '& .MuiOutlinedInput-root': {
+                          '& fieldset': { borderColor: '#374151' },
+                          '&:hover fieldset': { borderColor: '#3b82f6' },
+                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#9ca3af' },
+                        '& .MuiInputBase-input': { color: '#ffffff' },
+                      }}
+                    />
+                  </Box>
+
+                  {/* Politicians Search */}
+                  <MultiSelectField<string>
+                    label="Politicians"
                   selectedItems={(() => {
                     const names = Array.isArray(searchParams.politicianName) ? searchParams.politicianName : (searchParams.politicianName ? [searchParams.politicianName] : []);
                     if (!isPoliticianDataLoaded) return names;
@@ -1119,15 +1174,14 @@ const PoliticianTradesSearchPage: React.FC = () => {
                     );
                   }}
                   getItemKey={(politician) => politician}
-                  placeholder="Search politicians to include in search..."
-                  helperText="Politicians to search for in the backend database (shows party, jurisdiction, position)"
+                  placeholder="Search politicians..."
                   allowCustomInput={false}
                   isLoading={!isPoliticianDataLoaded}
                 />
 
-                {/* Securities Search Parameter - Top Priority */}
-                <MultiSelectField<string>
-                  label="Securities (Search Parameter)"
+                  {/* Securities Search */}
+                  <MultiSelectField<string>
+                    label="Securities"
                   selectedItems={(() => {
                     const symbols = Array.isArray(searchParams.security) ? searchParams.security : (searchParams.security ? [searchParams.security] : []);
                     if (!isSecurityDataLoaded) return symbols;
@@ -1223,133 +1277,941 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   }}
                   getItemKey={(security) => security}
                   placeholder="Search for stocks by ticker or company name..."
-                  helperText="Securities from StockList database (High/Mid/Low cap classification)"
                   allowCustomInput={false}
                 />
 
-                {/* Positions Search Parameter - Fixed Dropdown Only */}
-                <MultiSelectField<string>
-                  label="Positions (Search Parameter)"
-                  selectedItems={Array.isArray(searchParams.position) ? searchParams.position : (searchParams.position ? [searchParams.position] : [])}
-                  onItemsChange={(positions) => {
-                    setSearchParams(prev => ({ ...prev, position: positions }));
+                  {/* Amount Range - Two Separate Dropdowns */}
+                  <Box>
+                    <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
+                      Amount Range
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                      <FormControl fullWidth size="small">
+                        <InputLabel id="amount-min-label" sx={{ color: '#9ca3af' }}>Min Amount</InputLabel>
+                        <Select
+                          labelId="amount-min-label"
+                          value={amountMin === '' ? '' : amountMin}
+                          label="Min Amount"
+                          onChange={(e) => {
+                            const newMin = e.target.value === '' ? '' : Number(e.target.value);
+                            setAmountMin(newMin);
+                            // Clear error when user changes value
+                            if (amountRangeError) {
+                              setAmountRangeError(null);
+                            }
+                            // Validate immediately if both values are set
+                            if (newMin !== '' && amountMax !== '' && typeof newMin === 'number' && typeof amountMax === 'number' && amountMax < newMin) {
+                              setAmountRangeError('Max amount cannot be less than min amount');
+                            } else if (amountRangeError) {
+                              setAmountRangeError(null);
+                            }
+                          }}
+                          error={!!amountRangeError}
+                          sx={{
+                            color: '#ffffff',
+                            '& .MuiOutlinedInput-notchedOutline': { 
+                              borderColor: amountRangeError ? '#ef4444' : '#374151' 
+                            },
+                            '&:hover .MuiOutlinedInput-notchedOutline': { 
+                              borderColor: amountRangeError ? '#ef4444' : '#3b82f6' 
+                            },
+                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { 
+                              borderColor: amountRangeError ? '#ef4444' : '#3b82f6' 
+                            },
+                            '& .MuiSelect-icon': { color: '#9ca3af' },
+                          }}
+                          MenuProps={{
+                            PaperProps: {
+                              sx: {
+                                bgcolor: '#1f2937',
+                                border: '1px solid #374151',
+                                maxHeight: 300,
+                                '& .MuiMenuItem-root': {
+                                  color: '#ffffff',
+                                  '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                                  '&.Mui-selected': {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                    '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.3)' },
+                                  },
+                                },
+                                '&::-webkit-scrollbar': {
+                                  width: '8px',
+                                },
+                                '&::-webkit-scrollbar-track': {
+                                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb': {
+                                  backgroundColor: '#3b82f6',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb:hover': {
+                                  backgroundColor: '#2563eb',
+                                },
+                              },
+                            },
+                          }}
+                        >
+                          {[0, 1000, 15000, 50000, 100000, 250000, 500000, 1000000, 5000000, 25000000, 50000000].map((val) => (
+                            <MenuItem key={val} value={val}>
+                              ${val.toLocaleString('en-US')}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      <FormControl fullWidth size="small">
+                        <InputLabel id="amount-max-label" sx={{ color: '#9ca3af' }}>Max Amount</InputLabel>
+                        <Select
+                          labelId="amount-max-label"
+                          value={amountMax === '' ? '' : amountMax}
+                          label="Max Amount"
+                          onChange={(e) => {
+                            const newMax = e.target.value === '' ? '' : Number(e.target.value);
+                            setAmountMax(newMax);
+                            // Clear error when user changes value
+                            if (amountRangeError) {
+                              setAmountRangeError(null);
+                            }
+                            // Validate immediately if both values are set
+                            if (newMax !== '' && amountMin !== '' && typeof newMax === 'number' && typeof amountMin === 'number' && newMax < amountMin) {
+                              setAmountRangeError('Max amount cannot be less than min amount');
+                            } else if (amountRangeError) {
+                              setAmountRangeError(null);
+                            }
+                          }}
+                          error={!!amountRangeError}
+                          sx={{
+                            color: '#ffffff',
+                            '& .MuiOutlinedInput-notchedOutline': { 
+                              borderColor: amountRangeError ? '#ef4444' : '#374151' 
+                            },
+                            '&:hover .MuiOutlinedInput-notchedOutline': { 
+                              borderColor: amountRangeError ? '#ef4444' : '#3b82f6' 
+                            },
+                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { 
+                              borderColor: amountRangeError ? '#ef4444' : '#3b82f6' 
+                            },
+                            '& .MuiSelect-icon': { color: '#9ca3af' },
+                          }}
+                          MenuProps={{
+                            PaperProps: {
+                              sx: {
+                                bgcolor: '#1f2937',
+                                border: '1px solid #374151',
+                                maxHeight: 300,
+                                '& .MuiMenuItem-root': {
+                                  color: '#ffffff',
+                                  '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                                  '&.Mui-selected': {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                    '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.3)' },
+                                  },
+                                },
+                                '&::-webkit-scrollbar': {
+                                  width: '8px',
+                                },
+                                '&::-webkit-scrollbar-track': {
+                                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb': {
+                                  backgroundColor: '#3b82f6',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb:hover': {
+                                  backgroundColor: '#2563eb',
+                                },
+                              },
+                            },
+                          }}
+                        >
+                          {[1000, 15000, 50000, 100000, 250000, 500000, 1000000, 5000000, 25000000, 50000000, 100000000].map((val) => (
+                            <MenuItem key={val} value={val}>
+                              ${val.toLocaleString('en-US')}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Box>
+                    {amountRangeError && (
+                      <Typography variant="body2" sx={{ color: '#ef4444', mt: 1, fontSize: '0.875rem' }}>
+                        {amountRangeError}
+                      </Typography>
+                    )}
+                  </Box>
+            
+                  {/* Advanced Search Parameters */}
+                  <Box sx={{ mt: 2 }}>
+                    <Box
+                      onClick={() => setAdvancedSearchExpanded(!advancedSearchExpanded)}
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        cursor: 'pointer',
+                        p: 1.5,
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                        borderRadius: '4px',
+                        '&:hover': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                        },
+                      }}
+                    >
+                      <Typography variant="h6" sx={{ color: '#e2e8f0', fontSize: '1rem' }}>
+                        Advanced Search
+                      </Typography>
+                      {advancedSearchExpanded ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                    </Box>
+                    <Collapse in={advancedSearchExpanded}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+                        {/* Filing Date Range */}
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <TextField
+                            label="Filing Date From"
+                            type="date"
+                            value={searchParams.filingDateFrom || ''}
+                            onChange={(e) => setSearchParams(prev => ({ ...prev, filingDateFrom: e.target.value || undefined }))}
+                            InputLabelProps={{ shrink: true }}
+                            inputProps={{
+                              min: '2001-01-01',
+                              max: new Date().toISOString().split('T')[0],
+                            }}
+                            variant="outlined"
+                            sx={{
+                              flex: 1,
+                              '& .MuiOutlinedInput-root': {
+                                '& fieldset': { borderColor: '#374151' },
+                                '&:hover fieldset': { borderColor: '#3b82f6' },
+                                '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                              },
+                              '& .MuiInputLabel-root': { color: '#9ca3af' },
+                              '& .MuiInputBase-input': { color: '#ffffff' },
+                            }}
+                          />
+                          <TextField
+                            label="Filing Date To"
+                            type="date"
+                            value={searchParams.filingDateTo || ''}
+                            onChange={(e) => setSearchParams(prev => ({ ...prev, filingDateTo: e.target.value || undefined }))}
+                            InputLabelProps={{ shrink: true }}
+                            inputProps={{
+                              min: '2001-01-01',
+                              max: new Date().toISOString().split('T')[0],
+                            }}
+                            variant="outlined"
+                            sx={{
+                              flex: 1,
+                              '& .MuiOutlinedInput-root': {
+                                '& fieldset': { borderColor: '#374151' },
+                                '&:hover fieldset': { borderColor: '#3b82f6' },
+                                '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                              },
+                              '& .MuiInputLabel-root': { color: '#9ca3af' },
+                              '& .MuiInputBase-input': { color: '#ffffff' },
+                            }}
+                          />
+                        </Box>
+
+                        {/* Positions - Checkbox Multiselect */}
+                        <Box>
+                          <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
+                            Positions
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            {POSITION_OPTIONS.map((position) => {
+                              const isSelected = Array.isArray(searchParams.position) 
+                                ? searchParams.position.includes(position)
+                                : searchParams.position === position;
+                              return (
+                                <Box
+                                  key={position}
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    p: 1,
+                                    borderRadius: '4px',
+                                    backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                                    border: isSelected ? '1px solid #3b82f6' : '1px solid #374151',
+                                    cursor: 'pointer',
+                                    '&:hover': {
+                                      backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'rgba(55, 65, 81, 0.3)',
+                                    },
+                                  }}
+                                  onClick={() => {
+                                    setSearchParams(prev => {
+                                      const currentPositions = Array.isArray(prev.position) ? prev.position : (prev.position ? [prev.position] : []);
+                                      if (isSelected) {
+                                        const newPositions = currentPositions.filter(p => p !== position);
+                                        return { ...prev, position: newPositions.length > 0 ? newPositions : [] };
+                                      } else {
+                                        return { ...prev, position: [...currentPositions, position] };
+                                      }
+                                    });
+                                  }}
+                                >
+                                  <Checkbox
+                                    checked={isSelected}
+                                    sx={{
+                                      color: '#9ca3af',
+                                      '&.Mui-checked': { color: '#3b82f6' },
+                                      p: 0.5,
+                                    }}
+                                  />
+                                  <Typography sx={{ color: '#ffffff', fontSize: '0.875rem', flex: 1 }}>
+                                    {position}
+                                  </Typography>
+                                </Box>
+                              );
+                            })}
+                          </Box>
+                        </Box>
+
+                        {/* Political Parties */}
+                        <MultiSelectField<string>
+                          label="Political Parties"
+                          selectedItems={Array.isArray(searchParams.party) ? searchParams.party : (searchParams.party ? [searchParams.party] : [])}
+                          onItemsChange={(parties) => 
+                            setSearchParams(prev => ({ ...prev, party: parties }))
+                          }
+                          suggestions={PARTIES}
+                          placeholder="Select parties..."
+                          allowCustomInput={false}
+                        />
+
+                        {/* Transaction Types */}
+                        <MultiSelectField<string>
+                          label="Transaction Types"
+                          selectedItems={Array.isArray(searchParams.transactionType) ? searchParams.transactionType : (searchParams.transactionType ? [searchParams.transactionType] : [])}
+                          onItemsChange={(types) => 
+                            setSearchParams(prev => ({ ...prev, transactionType: types }))
+                          }
+                          suggestions={TRANSACTION_TYPES}
+                          placeholder="Select transaction types..."
+                          allowCustomInput={false}
+                        />
+                      </Box>
+                    </Collapse>
+                  </Box>
+
+
+
+                  {/* Search and Clear Buttons */}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
+                    <Button
+                      variant="contained"
+                      onClick={handleSearch}
+                      disabled={isSearching}
+                      startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
+                      fullWidth
+                      sx={{
+                        background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                        color: '#ffffff',
+                        '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+                        '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
+                      }}
+                    >
+                      {isSearching ? 'Searching...' : 'Search'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        setSearchParams({
+                          dateFrom: '2020-01-01',
+                          dateTo: new Date().toISOString().split('T')[0],
+                          politicianName: [],
+                          party: [],
+                          position: [],
+                          security: [],
+                          transactionType: [],
+                          stateDistrict: [],
+                        });
+                        setAmountMin('');
+                        setAmountMax('');
+                        setSelectedFilters({
+                          politicians: [],
+                          parties: [],
+                          positions: [],
+                          securities: [],
+                          transactionTypes: [],
+                          stateDistricts: [],
+                          amountRanges: [],
+                        });
+                        setAllSearchResults([]);
+                        setTotalFound(0);
+                        setSelectedTrades(new Set());
+                      }}
+                      fullWidth
+                      sx={{
+                        borderColor: '#475569',
+                        color: '#94a3b8',
+                        '&:hover': { borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.1)' },
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </Box>
+                </Box>
+              </Collapse>
+            </Box>
+          </GlassCard>
+
+          {/* Middle - Results Table */}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            {/* Error Alert */}
+            {searchError && (
+              <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
+                {searchError}
+              </Alert>
+            )}
+
+            {/* Results */}
+            {allSearchResults.length > 0 ? (
+              <GlassCard>
+              <Box sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Box sx={{ display: 'flex', gap: 1 }}>{/* Left side can be used for other controls if needed */}</Box>
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    {/* Add to Context Button */}
+                    {currentResults.length > 0 && (
+                      <Tooltip title={`Add ${selectedTrades.size > 0 ? `${selectedTrades.size} trade(s)` : 'selected trades'} to context`}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              if (selectedTrades.size === 0) {
+                                alert('Please select at least one trade to add to context');
+                                return;
+                              }
+                              setContextMenuAnchor(e.currentTarget);
+                            }}
+                            disabled={selectedTrades.size === 0}
+                            sx={{ 
+                              color: selectedTrades.size > 0 ? '#10b981' : '#9ca3af', 
+                              '&:hover': { color: '#10b981' },
+                              '&:disabled': { color: '#4b5563' }
+                            }}
+                          >
+                            <AddToContextIcon sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
+                    {totalFound > 0 ? (
+                      <Chip
+                        label={`${totalFound} trade${totalFound !== 1 ? 's' : ''} found`}
+                        sx={{
+                          backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                          color: '#86efac',
+                          border: '1px solid #22c55e',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : isFiltered && allSearchResults.length > 0 ? (
+                      <Chip
+                        label={`0 of ${allSearchResults.length} trades match filters`}
+                        sx={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : allSearchResults.length === 0 && !isSearching ? (
+                      <Chip
+                        label="No trades found"
+                        sx={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                          color: '#fca5a5',
+                          border: '1px solid #ef4444',
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : null}
+                    {/* Results per page selector */}
+                    {totalFound > 0 && (
+                      <FormControl size="small" sx={{ minWidth: 120, ml: 1 }}>
+                        <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+                        <Select
+                          labelId="results-per-page-label"
+                          value={pageSize}
+                          label="Per Page"
+                          onChange={(e) => {
+                            const newPageSize = Number(e.target.value);
+                            setPageSize(newPageSize);
+                            setCurrentPage(1);
+                          }}
+                          sx={{
+                            color: '#ffffff',
+                            '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                            '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
+                            '& .MuiSelect-icon': { color: '#9ca3af' },
+                          }}
+                          MenuProps={{
+                            PaperProps: {
+                              sx: {
+                                bgcolor: '#1f2937',
+                                border: '1px solid #374151',
+                                '& .MuiMenuItem-root': {
+                                  color: '#ffffff',
+                                  '&:hover': {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                  },
+                                  '&.Mui-selected': {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                                    },
+                                  },
+                                },
+                                '&::-webkit-scrollbar': {
+                                  width: '8px',
+                                },
+                                '&::-webkit-scrollbar-track': {
+                                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb': {
+                                  backgroundColor: '#3b82f6',
+                                  borderRadius: '4px',
+                                },
+                                '&::-webkit-scrollbar-thumb:hover': {
+                                  backgroundColor: '#2563eb',
+                                },
+                              },
+                            },
+                          }}
+                        >
+                          <MenuItem value={10}>10</MenuItem>
+                          <MenuItem value={25}>25</MenuItem>
+                          <MenuItem value={50}>50</MenuItem>
+                          <MenuItem value={100}>100</MenuItem>
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Box>
+                </Box>
+
+                {/* Context Menu */}
+                <Menu
+                  anchorEl={contextMenuAnchor}
+                  open={Boolean(contextMenuAnchor)}
+                  onClose={() => setContextMenuAnchor(null)}
+                  PaperProps={{
+                    sx: {
+                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                      border: '1px solid #374151',
+                    }
                   }}
-                  suggestions={POSITION_OPTIONS}
-                  placeholder="Select positions to search for..."
-                  helperText="Political positions to search for in the backend database"
-                  allowCustomInput={false}
-                />
+                >
+                  <MenuItem
+                    onClick={() => handleAddToContext('new')}
+                    sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+                  >
+                    <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
+                    Add to New Chat
+                  </MenuItem>
+                  <MenuItem
+                    onClick={() => handleAddToContext('sidebar')}
+                    sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+                  >
+                    <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+                    Add to Current Sidebar Chat
+                  </MenuItem>
+                </Menu>
 
-                {/* Political Parties Search Parameter - Fixed Dropdown Only */}
-                <MultiSelectField<string>
-                  label="Political Parties (Search Parameter)"
-                  selectedItems={Array.isArray(searchParams.party) ? searchParams.party : (searchParams.party ? [searchParams.party] : [])}
-                  onItemsChange={(parties) => 
-                    setSearchParams(prev => ({ ...prev, party: parties }))
-                  }
-                  suggestions={PARTIES}
-                  placeholder="Select parties to search for..."
-                  helperText="Political parties to search for in the backend database"
-                  allowCustomInput={false}
-                />
+                {currentResults.length > 0 ? (
+                  <>
+                  <TableContainer sx={{ 
+                    backgroundColor: 'transparent',
+                    borderRadius: 0,
+                    boxShadow: 'none',
+                    border: 'none',
+                    overflow: 'auto',
+                    width: '100%',
+                    '&::-webkit-scrollbar': {
+                      width: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                      borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                    },
+                  }}>
+                    <Table size="small" sx={{ 
+                      tableLayout: 'fixed',
+                      width: 'max-content',
+                      minWidth: '100%',
+                      '& .MuiTableCell-root': {
+                        borderBottom: '1px solid rgba(55, 65, 81, 0.3)',
+                        padding: '12px',
+                        overflow: 'hidden',
+                        wordBreak: 'break-word',
+                        verticalAlign: 'top',
+                      },
+                      '& .MuiTableHead-root .MuiTableCell-root': {
+                        borderBottom: '2px solid rgba(59, 130, 246, 0.5)',
+                        backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                        padding: '8px 12px',
+                      },
+                      '& .MuiTableRow-root:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.05)',
+                      },
+                      '& .MuiTableRow-root': {
+                        height: 'auto',
+                        minHeight: '100px',
+                      },
+                    }}>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                            width: 50,
+                            minWidth: 50,
+                            maxWidth: 50,
+                          }}>
+                            <Checkbox
+                              size="small"
+                              indeterminate={selectedTrades.size > 0 && selectedTrades.size < currentResults.length}
+                              checked={currentResults.length > 0 && selectedTrades.size === currentResults.length}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  selectAllTrades();
+                                } else {
+                                  deselectAllTrades();
+                                }
+                              }}
+                              sx={{ 
+                                color: '#9ca3af', 
+                                '&.Mui-checked': { color: '#10b981' }, 
+                                '&.MuiCheckbox-indeterminate': { color: '#10b981' } 
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                          }}>Politician</TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                          }}>Position</TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                          }}>Party</TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                          }}>Jurisdiction</TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                          }}>Security</TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                          }}>Transaction</TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                          }}>Transaction Date</TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                          }}>Filing Date</TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                          }}>Amount</TableCell>
+                          <TableCell sx={{ 
+                            color: '#9ca3af', 
+                            fontWeight: 600, 
+                            fontSize: '0.875rem',
+                            width: '80px',
+                          }}>File</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {currentResults.map((trade) => (
+                          <TableRow
+                            key={trade.tradeId}
+                            sx={{
+                              backgroundColor: selectedTrades.has(trade.tradeId) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                              '&:hover': {
+                                backgroundColor: selectedTrades.has(trade.tradeId) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
+                              },
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => toggleTradeSelection(trade.tradeId)}
+                          >
+                            <TableCell sx={{ 
+                              padding: '8px 12px',
+                              width: 50,
+                              minWidth: 50,
+                              maxWidth: 50,
+                            }}>
+                              <Checkbox
+                                size="small"
+                                checked={selectedTrades.has(trade.tradeId)}
+                                onChange={() => toggleTradeSelection(trade.tradeId)}
+                                onClick={(e) => e.stopPropagation()}
+                                sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ 
+                              color: '#ffffff', 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              {trade.websiteUrl ? (
+                                <Tooltip title="Click to visit politician's website" arrow>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <Link
+                                      href={trade.websiteUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      sx={{
+                                        color: '#3b82f6',
+                                        textDecoration: 'none',
+                                        fontWeight: 500,
+                                        fontSize: '0.875rem',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 0.5,
+                                        '&:hover': {
+                                          color: '#60a5fa',
+                                          textDecoration: 'underline',
+                                        },
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      {trade.politicianName || 'N/A'}
+                                      <LaunchIcon sx={{ fontSize: '0.75rem' }} />
+                                    </Link>
+                                  </Box>
+                                </Tooltip>
+                              ) : (
+                                <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                  {trade.politicianName || 'N/A'}
+                                </Typography>
+                              )}
+                            </TableCell>
+                            <TableCell sx={{ 
+                              color: '#ffffff', 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              {trade.position || 'N/A'}
+                            </TableCell>
+                            <TableCell sx={{ 
+                              color: '#ffffff', 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              {trade.party || 'N/A'}
+                            </TableCell>
+                            <TableCell sx={{ 
+                              color: '#ffffff', 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              {trade.stateDistrict || 'N/A'}
+                            </TableCell>
+                            <TableCell sx={{ 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              <Box>
+                                <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.875rem' }}>
+                                  {trade.securitySymbol || 'N/A'}
+                                </Typography>
+                                {trade.securityName && (
+                                  <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                                    {trade.securityName}
+                                  </Typography>
+                                )}
+                              </Box>
+                            </TableCell>
+                            <TableCell sx={{ 
+                              color: '#ffffff', 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              {trade.transactionType || 'N/A'}
+                            </TableCell>
+                            <TableCell sx={{ 
+                              color: '#ffffff', 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              {formatTransactionDate(trade.transactionDate)}
+                            </TableCell>
+                            <TableCell sx={{ 
+                              color: '#ffffff', 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              {formatFilingDate(trade.filingDate)}
+                            </TableCell>
+                            <TableCell sx={{ 
+                              color: '#ffffff', 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              {formatAmountRange(trade)}
+                            </TableCell>
+                            <TableCell sx={{ 
+                              fontSize: '0.875rem',
+                              padding: '12px',
+                            }}>
+                              {trade.formS3Key && (
+                                <IconButton
+                                  size="small"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDownload(trade);
+                                  }}
+                                  sx={{
+                                    color: '#3b82f6',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                    },
+                                  }}
+                                >
+                                  <DownloadIcon fontSize="small" />
+                                </IconButton>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
 
-                {/* Transaction Types Search Parameter - Fixed Dropdown Only */}
-                <MultiSelectField<string>
-                  label="Transaction Types (Search Parameter)"
-                  selectedItems={Array.isArray(searchParams.transactionType) ? searchParams.transactionType : (searchParams.transactionType ? [searchParams.transactionType] : [])}
-                  onItemsChange={(types) => 
-                    setSearchParams(prev => ({ ...prev, transactionType: types }))
-                  }
-                  suggestions={TRANSACTION_TYPES}
-                  placeholder="Select transaction types to search for..."
-                  helperText="Transaction types to search for in the backend database"
-                  allowCustomInput={false}
-                />
+                  {/* Pagination */}
+                  {filteredResults.length > pageSize && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, pt: 2, borderTop: '1px solid rgba(55, 65, 81, 0.3)' }}>
+                      <Typography variant="caption" color="#6b7280" sx={{ fontSize: '0.75rem' }}>
+                        Page {currentPage} of {Math.ceil(filteredResults.length / pageSize)}
+                        {' '}(Showing {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, filteredResults.length)} of {filteredResults.length} results)
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                          variant="outlined"
+                          onClick={() => handlePageChange(currentPage - 1)}
+                          disabled={currentPage === 1 || isSearching}
+                          startIcon={<ChevronLeftIcon />}
+                          size="small"
+                          sx={{
+                            color: '#9ca3af',
+                            borderColor: '#374151',
+                            fontSize: '0.75rem',
+                            '&:hover': {
+                              borderColor: '#3b82f6',
+                              color: '#3b82f6',
+                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            },
+                            '&:disabled': {
+                              borderColor: '#374151',
+                              color: '#6b7280',
+                            },
+                          }}
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          onClick={() => handlePageChange(currentPage + 1)}
+                          disabled={currentPage >= Math.ceil(filteredResults.length / pageSize) || isSearching}
+                          endIcon={<ChevronRightIcon />}
+                          size="small"
+                          sx={{
+                            color: '#9ca3af',
+                            borderColor: '#374151',
+                            fontSize: '0.75rem',
+                            '&:hover': {
+                              borderColor: '#3b82f6',
+                              color: '#3b82f6',
+                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            },
+                            '&:disabled': {
+                              borderColor: '#374151',
+                              color: '#6b7280',
+                            },
+                          }}
+                        >
+                          Next
+                        </Button>
+                      </Box>
+                    </Box>
+                  )}
 
-                {/* Amount Ranges Search Parameter - Fixed Dropdown Only */}
-                <MultiSelectField<string>
-                  label="Amount Ranges (Search Parameter)"
-                  selectedItems={searchParams.amountRange ? [searchParams.amountRange] : []}
-                  onItemsChange={(ranges) => 
-                    setSearchParams(prev => ({ ...prev, amountRange: ranges.length > 0 ? ranges[0] : undefined }))
-                  }
-                  suggestions={AMOUNT_RANGES.map(range => range.value)}
-                  placeholder="Select amount ranges to search for..."
-                  helperText="Amount ranges to search for in the backend database"
-                  allowCustomInput={false}
-                />
+                  {/* Load More Button */}
+                  {!isFiltered && hasMore && lastEvaluatedKey && allSearchResults.length > 0 && (
+                    <Box sx={{ 
+                      display: 'flex', 
+                      justifyContent: 'center', 
+                      mt: 2, 
+                      pt: 2, 
+                      borderTop: filteredResults.length > pageSize ? 'none' : '1px solid rgba(55, 65, 81, 0.3)' 
+                    }}>
+                      <Button
+                        variant="outlined"
+                        onClick={handleLoadMore}
+                        disabled={isLoadingMore || isSearching}
+                        size="small"
+                        sx={{
+                          color: '#3b82f6',
+                          borderColor: '#3b82f6',
+                          fontSize: '0.75rem',
+                          '&:hover': {
+                            borderColor: '#60a5fa',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          },
+                          '&:disabled': {
+                            borderColor: '#4b5563',
+                            color: '#6b7280',
+                          },
+                        }}
+                      >
+                        {isLoadingMore ? 'Loading...' : `Load More (${allSearchResults.length} loaded)`}
+                      </Button>
+                    </Box>
+                  )}
+                </>
+              ) : (
+                <Box sx={{ textAlign: 'center', py: 6 }}>
+                  <Typography variant="body2" color="#9ca3af">
+                    {isFiltered && allSearchResults.length > 0
+                      ? 'No trades match the selected filters. Try adjusting your filters.'
+                      : 'No trades found. Try adjusting your search parameters.'}
+                  </Typography>
+                </Box>
+              )}
               </Box>
-            </Box>
+              </GlassCard>
+            ) : null}
           </Box>
 
-
-
-          {/* Search Button */}
-          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setSearchParams({
-                  dateFrom: '2020-01-01',
-                  dateTo: new Date().toISOString().split('T')[0],
-                  politicianName: [],
-                  party: [],
-                  position: [],
-                  security: [],
-                  transactionType: [],
-                  stateDistrict: [],
-                });
-                setSelectedFilters({
-                  politicians: [],
-                  parties: [],
-                  positions: [],
-                  securities: [],
-                  transactionTypes: [],
-                  stateDistricts: [],
-                  amountRanges: [],
-                });
-                setAllSearchResults([]);
-                setTotalFound(0);
-                setSelectedTrades(new Set());
-              }}
-              sx={{
-                color: '#9ca3af',
-                borderColor: '#374151',
-                '&:hover': { borderColor: '#6b7280', backgroundColor: 'rgba(55, 65, 81, 0.3)' },
-              }}
-            >
-              Clear
-            </Button>
-            <Button
-              variant="contained"
-              onClick={handleSearch}
-              disabled={isSearching}
-              startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
-              sx={{
-                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                color: '#ffffff',
-                '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
-                '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
-              }}
-            >
-              {isSearching ? 'Searching...' : 'Search'}
-            </Button>
-          </Box>
-            </Box>
-          </Collapse>
-        </GlassCard>
-      
-        {/* Error Alert */}
-        {searchError && (
-          <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
-            {searchError}
-          </Alert>
-        )}
-        
-        {/* Results */}
-        {allSearchResults.length > 0 && (
-          <Box sx={{ display: 'flex', gap: 3 }}>
-            {/* Sidebar Filters */}
+          {/* Right Sidebar - Client-side Filter Box (Only when results exist) */}
+          {allSearchResults.length > 0 && (
             <GlassCard sx={{ 
               p: 2, 
               minWidth: 280, 
@@ -1550,7 +2412,6 @@ const PoliticianTradesSearchPage: React.FC = () => {
                         }}
                       />
                     ))}
-
                     {selectedFilters.amountRanges.map((range, idx) => (
                       <Chip
                         key={`amount-${idx}`}
@@ -1593,6 +2454,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                       color: '#93c5fd',
                       fontSize: '0.75rem',
                       textTransform: 'none',
+                      mt: 1,
                       '&:hover': {
                         backgroundColor: 'rgba(59, 130, 246, 0.2)',
                       },
@@ -1603,7 +2465,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 </Box>
               )}
 
-              {/* Politician Filter (for filtering search results) */}
+              {/* Politician Filter */}
               {availableFilters.politician_filters && availableFilters.politician_filters.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Box
@@ -2383,538 +3245,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 </Box>
               )}
             </GlassCard>
-
-            {/* Results Table */}
-            <GlassCard sx={{ flex: 1, p: 4 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Typography
-                  variant="h6"
-                  sx={{
-                    color: '#ffffff',
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  Search Results
-                </Typography>
-                
-                {/* Status Indicator and Add to Context Button */}
-                {allSearchResults.length > 0 || isSearching ? (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    {/* Add to Context Button */}
-                    {currentResults.length > 0 && (
-                      <Tooltip title={`Add ${selectedTrades.size > 0 ? `${selectedTrades.size} trade(s)` : 'selected trades'} to context`}>
-                        <span>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              if (selectedTrades.size === 0) {
-                                alert('Please select at least one trade to add to context');
-                                return;
-                              }
-                              setContextMenuAnchor(e.currentTarget);
-                            }}
-                            disabled={selectedTrades.size === 0}
-                            sx={{ 
-                              color: selectedTrades.size > 0 ? '#10b981' : '#9ca3af', 
-                              '&:hover': { color: '#10b981' },
-                              '&:disabled': { color: '#4b5563' }
-                            }}
-                          >
-                            <AddToContextIcon sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                    )}
-                    {totalFound > 0 ? (
-                      <Chip
-                        label={`${totalFound} trade${totalFound !== 1 ? 's' : ''} found`}
-                        sx={{
-                          backgroundColor: 'rgba(34, 197, 94, 0.2)',
-                          color: '#86efac',
-                          border: '1px solid #22c55e',
-                          fontWeight: 600,
-                        }}
-                      />
-                    ) : isFiltered && allSearchResults.length > 0 ? (
-                      <Chip
-                        label={`0 of ${allSearchResults.length} trades match filters`}
-                        sx={{
-                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                          color: '#fca5a5',
-                          border: '1px solid #ef4444',
-                          fontWeight: 600,
-                        }}
-                      />
-                    ) : allSearchResults.length === 0 && !isSearching ? (
-                      <Chip
-                        label="No trades found"
-                        sx={{
-                          backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                          color: '#fca5a5',
-                          border: '1px solid #ef4444',
-                          fontWeight: 600,
-                        }}
-                      />
-                    ) : null}
-                    {/* Results per page selector */}
-                    {totalFound > 0 && (
-                      <FormControl size="small" sx={{ minWidth: 120 }}>
-                        <InputLabel id="results-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
-                        <Select
-                          labelId="results-per-page-label"
-                          value={pageSize}
-                          label="Per Page"
-                    onChange={(e) => {
-                      const newPageSize = Number(e.target.value);
-                      setPageSize(newPageSize);
-                      setCurrentPage(1);
-                      // No need to trigger new search - just recalculate pagination
-                    }}
-                          sx={{
-                            color: '#ffffff',
-                            '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
-                            '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                            '& .MuiSelect-icon': { color: '#9ca3af' },
-                          }}
-                          MenuProps={{
-                            PaperProps: {
-                              sx: {
-                                bgcolor: '#1f2937',
-                                border: '1px solid #374151',
-                                '& .MuiMenuItem-root': {
-                                  color: '#ffffff',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                  },
-                                  '&.Mui-selected': {
-                                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                                    '&:hover': {
-                                      backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                                    },
-                                  },
-                                },
-                                '&::-webkit-scrollbar': {
-                                  width: '8px',
-                                },
-                                '&::-webkit-scrollbar-track': {
-                                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                                  borderRadius: '4px',
-                                },
-                                '&::-webkit-scrollbar-thumb': {
-                                  backgroundColor: '#3b82f6',
-                                  borderRadius: '4px',
-                                },
-                                '&::-webkit-scrollbar-thumb:hover': {
-                                  backgroundColor: '#2563eb',
-                                },
-                              },
-                            },
-                          }}
-                        >
-                          <MenuItem value={10}>10</MenuItem>
-                          <MenuItem value={25}>25</MenuItem>
-                          <MenuItem value={50}>50</MenuItem>
-                          <MenuItem value={100}>100</MenuItem>
-                        </Select>
-                      </FormControl>
-                    )}
-                  </Box>
-                ) : null}
-              </Box>
-              
-              <Menu
-                anchorEl={contextMenuAnchor}
-                open={Boolean(contextMenuAnchor)}
-                onClose={() => setContextMenuAnchor(null)}
-                PaperProps={{
-                  sx: {
-                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                    border: '1px solid #374151',
-                  }
-                }}
-              >
-                <MenuItem
-                  onClick={() => handleAddToContext('new')}
-                  sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-                >
-                  <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-                  Add to New Chat
-                </MenuItem>
-                <MenuItem
-                  onClick={() => handleAddToContext('sidebar')}
-                  sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-                >
-                  <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-                  Add to Current Sidebar Chat
-                </MenuItem>
-              </Menu>
-          
-          {currentResults.length > 0 ? (
-            <TableContainer
-              sx={{
-                '&::-webkit-scrollbar': {
-                  width: '6px',
-                },
-                '&::-webkit-scrollbar-track': {
-                  backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                  borderRadius: '3px',
-                },
-                '&::-webkit-scrollbar-thumb:hover': {
-                  backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                },
-              }}
-            >
-              <Table>
-                <TableHead>
-                  <TableRow sx={{ backgroundColor: 'rgba(31, 41, 55, 0.5)' }}>
-                    <TableCell padding="checkbox" sx={{ py: 1 }}>
-                      <Checkbox
-                        checked={selectedTrades.size === currentResults.length && currentResults.length > 0}
-                        indeterminate={selectedTrades.size > 0 && selectedTrades.size < currentResults.length}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          selectAllTrades();
-                        } else {
-                          deselectAllTrades();
-                        }
-                      }}
-                      sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Politician</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Position</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Party</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Jurisdiction</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Security</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Transaction</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Transaction Date</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Filing Date</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem' }}>Amount</TableCell>
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600, py: 1, fontSize: '0.875rem', width: '80px' }}>File</TableCell>
-                </TableRow>
-              </TableHead>
-                <TableBody>
-                  {currentResults.map((trade) => (
-                  <TableRow
-                    key={trade.tradeId}
-                    sx={{
-                      '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => toggleTradeSelection(trade.tradeId)}
-                  >
-                    <TableCell padding="checkbox" sx={{ py: 1 }}>
-                      <Checkbox
-                        checked={selectedTrades.has(trade.tradeId)}
-                        onChange={() => toggleTradeSelection(trade.tradeId)}
-                        onClick={(e) => e.stopPropagation()}
-                        sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {trade.websiteUrl ? (
-                        <Tooltip title="Click to visit politician's website" arrow>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Link
-                              href={trade.websiteUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              sx={{
-                                color: '#3b82f6',
-                                textDecoration: 'none',
-                                fontWeight: 500,
-                                fontSize: '0.875rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 0.5,
-                                '&:hover': {
-                                  color: '#60a5fa',
-                                  textDecoration: 'underline',
-                                },
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {trade.politicianName || 'N/A'}
-                              <LaunchIcon sx={{ fontSize: '0.75rem' }} />
-                            </Link>
-                          </Box>
-                        </Tooltip>
-                      ) : (
-                        <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                          {trade.politicianName || 'N/A'}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {trade.position || 'N/A'}
-                    </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {trade.party || 'N/A'}
-                    </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {trade.stateDistrict || 'N/A'}
-                    </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      <Box>
-                        <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.875rem' }}>
-                          {trade.securitySymbol || 'N/A'}
-                        </Typography>
-                        {trade.securityName && (
-                          <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-                            {trade.securityName}
-                          </Typography>
-                        )}
-                      </Box>
-                    </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {trade.transactionType || 'N/A'}
-                    </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {formatTransactionDate(trade.transactionDate)}
-                    </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {formatFilingDate(trade.filingDate)}
-                    </TableCell>
-                    <TableCell sx={{ color: '#ffffff', py: 1, fontSize: '0.875rem' }}>
-                      {formatAmountRange(trade)}
-                    </TableCell>
-                    <TableCell sx={{ py: 1 }}>
-                      {trade.formS3Key && (
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDownload(trade);
-                          }}
-                          sx={{
-                            color: '#3b82f6',
-                            '&:hover': {
-                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            },
-                          }}
-                        >
-                          <DownloadIcon fontSize="small" />
-                        </IconButton>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : null}
-          
-          {/* Empty State for Filtered Results */}
-          {isFiltered && currentResults.length === 0 && allSearchResults.length > 0 && (
-            <Box sx={{ p: 4, textAlign: 'center' }}>
-              <Alert 
-                severity="info" 
-                sx={{ 
-                  backgroundColor: 'rgba(59, 130, 246, 0.1)', 
-                  border: '1px solid #3b82f6',
-                  color: '#93c5fd',
-                  '& .MuiAlert-icon': { color: '#3b82f6' },
-                }}
-              >
-                No trades match the selected filters. Your original search found {allSearchResults.length} trade{allSearchResults.length !== 1 ? 's' : ''}. 
-                Remove filters to see them again.
-              </Alert>
-            </Box>
           )}
-
-          {/* Pagination */}
-          {filteredResults.length > pageSize && (
-            <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #374151' }}>
-              <Typography variant="body2" sx={{ color: '#9ca3af' }}>
-                Page {currentPage} of {Math.ceil(filteredResults.length / pageSize)}
-                {' '}(Showing {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, filteredResults.length)} of {filteredResults.length} results)
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  variant="outlined"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1 || isSearching}
-                  startIcon={<ChevronLeftIcon />}
-                  sx={{
-                    color: '#9ca3af',
-                    borderColor: '#374151',
-                    '&:hover': {
-                      borderColor: '#3b82f6',
-                      color: '#3b82f6',
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                    '&:disabled': {
-                      borderColor: '#374151',
-                      color: '#6b7280',
-                    },
-                  }}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={() => handlePageChange(currentPage + 1)}
-                        disabled={currentPage >= Math.ceil(filteredResults.length / pageSize) || isSearching}
-                  endIcon={<ChevronRightIcon />}
-                  sx={{
-                    color: '#9ca3af',
-                    borderColor: '#374151',
-                    '&:hover': {
-                      borderColor: '#3b82f6',
-                      color: '#3b82f6',
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                    '&:disabled': {
-                      borderColor: '#374151',
-                      color: '#6b7280',
-                    },
-                  }}
-                >
-                  Next
-                </Button>
-              </Box>
-            </Box>
-          )}
-
-          {/* Load More Button - only show when not filtered and has more results */}
-          {!isFiltered && hasMore && allSearchResults.length > 0 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-              <Button
-                variant="outlined"
-                onClick={handleLoadMore}
-                disabled={isLoadingMore || isSearching}
-                sx={{
-                  color: '#3b82f6',
-                  borderColor: '#3b82f6',
-                  '&:hover': {
-                    borderColor: '#60a5fa',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  },
-                  '&:disabled': {
-                    borderColor: '#4b5563',
-                    color: '#6b7280',
-                  },
-                }}
-              >
-                {isLoadingMore ? 'Loading...' : `Load More (${allSearchResults.length} of ${totalFound > 0 ? totalFound : 'many'} loaded)`}
-              </Button>
-            </Box>
-          )}
-        </GlassCard>
-          </Box>
-        )}
-      
-        {/* Empty State */}
-        {!isSearching && allSearchResults.length === 0 && totalFound === 0 && !searchError && (
-          <GlassCard>
-            <Box sx={{ p: 6, textAlign: 'center' }}>
-              <Typography variant="h5" sx={{ color: '#9ca3af', mb: 2, fontWeight: 600 }}>
-                No results found
-              </Typography>
-              <Typography variant="body1" sx={{ color: '#6b7280', mb: 3 }}>
-                Try adjusting your search criteria or date range to find politician trades.
-              </Typography>
-              <Typography variant="body2" sx={{ color: '#6b7280' }}>
-                Enter search criteria and click "Search" to find politician trades
-              </Typography>
-            </Box>
-          </GlassCard>
-        )}
-          </Box>
-          
-          {/* Right Sidebar - Verification Links */}
-          <Box sx={{ width: '280px', flexShrink: 0 }}>
-            <GlassCard sx={{ p: 2, position: 'sticky', top: 20 }}>
-              <Typography
-                variant="h6"
-                sx={{
-                  color: '#ffffff',
-                  fontWeight: 600,
-                  mb: 2,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                }}
-              >
-                <VerifiedUserIcon sx={{ fontSize: '1.5rem', color: '#3b82f6' }} />
-                Verify on Official Sources
-              </Typography>
-              <Typography
-                variant="body2"
-                sx={{
-                  color: '#9ca3af',
-                  mb: 2,
-                  fontSize: '0.875rem',
-                }}
-              >
-                Cross-reference findings with official government disclosure databases:
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                <Button
-                  component="a"
-                  href="https://efdsearch.senate.gov/search/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  variant="outlined"
-                  startIcon={<OpenInNewIcon />}
-                  sx={{
-                    color: '#3b82f6',
-                    borderColor: '#3b82f6',
-                    '&:hover': {
-                      borderColor: '#2563eb',
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                    justifyContent: 'flex-start',
-                    textTransform: 'none',
-                    fontSize: '0.875rem',
-                  }}
-                >
-                  Senate EFD Search
-                </Button>
-                <Button
-                  component="a"
-                  href="https://disclosures-clerk.house.gov/FinancialDisclosure"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  variant="outlined"
-                  startIcon={<OpenInNewIcon />}
-                  sx={{
-                    color: '#3b82f6',
-                    borderColor: '#3b82f6',
-                    '&:hover': {
-                      borderColor: '#2563eb',
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                    justifyContent: 'flex-start',
-                    textTransform: 'none',
-                    fontSize: '0.875rem',
-                  }}
-                >
-                  House Clerk Financial Disclosure
-                </Button>
-              </Box>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: '#6b7280',
-                  mt: 2,
-                  display: 'block',
-                  fontSize: '0.75rem',
-                  lineHeight: 1.5,
-                }}
-              >
-                Note: These links open the official government websites where you can verify the accuracy of trade data.
-              </Typography>
-            </GlassCard>
-          </Box>
         </Box>
       </Container>
     </Box>
