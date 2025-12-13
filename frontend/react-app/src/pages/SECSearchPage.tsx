@@ -746,7 +746,6 @@ const SECSearchPage: React.FC = () => {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>(
     savedState?.selectedCategoryFilter || 'all'
   );
-  const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== undefined ? savedState.searchFormExpanded : true);
   
   // Store all results from current search for client-side filtering
   const [allSearchResults, setAllSearchResults] = useState<SECSearchResult[]>(
@@ -928,7 +927,6 @@ const SECSearchPage: React.FC = () => {
         selectedCategoryFilter,
         selectedColumns,
         isFiltered,
-        searchFormExpanded,
         // Save search state in legacy format for compatibility
         isFetchingAll: searchState.isSearching,
         fetchProgress: searchState.isSearching 
@@ -955,7 +953,6 @@ const SECSearchPage: React.FC = () => {
     selectedCategoryFilter,
     selectedColumns,
     isFiltered,
-    searchFormExpanded,
     searchState,
     searchStartTime,
     isRestoringState,

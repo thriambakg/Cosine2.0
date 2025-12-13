@@ -26,7 +26,6 @@ import {
   Chip,
   Tooltip,
   Link,
-  Autocomplete,
   Pagination,
   Dialog,
   DialogTitle,
@@ -70,31 +69,6 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => {
     </Card>
   );
 };
-
-// Category and country options
-const CATEGORY_OPTIONS = [
-  'business',
-  'technology',
-  'politics',
-  'science',
-  'health',
-  'finance',
-  'energy',
-  'automotive',
-  'pharmaceuticals',
-  'retail',
-];
-
-const COUNTRY_OPTIONS = [
-  'us',
-  'uk',
-  'eu',
-  'china',
-  'japan',
-  'canada',
-  'australia',
-  'global',
-];
 
 // Filter expand state interface
 interface ExpandedFiltersState {
