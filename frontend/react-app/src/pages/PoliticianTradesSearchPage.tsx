@@ -38,6 +38,7 @@ import {
   KeyboardArrowUp as KeyboardArrowUpIcon,
   AddComment as NewChatIcon,
   Launch as LaunchIcon,
+  ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
 import { politicianSuggestionsService } from '../services/politicianSuggestions';
@@ -161,6 +162,27 @@ const PoliticianTradesSearchPage: React.FC = () => {
   const [amountMax, setAmountMax] = useState<number | ''>(savedState?.amountMax || '');
   const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== undefined ? savedState.advancedSearchExpanded : false);
   const [amountRangeError, setAmountRangeError] = useState<string | null>(null);
+  
+  // Column visibility state
+  const AVAILABLE_COLUMNS = [
+    'Politician',
+    'Position',
+    'Party',
+    'Jurisdiction',
+    'Security',
+    'Transaction',
+    'Transaction Date',
+    'Filing Date',
+    'Amount',
+    'File',
+  ] as const;
+  
+  const DEFAULT_VISIBLE_COLUMNS = ['Politician', 'Position', 'Party', 'Security', 'Transaction', 'Transaction Date', 'Amount', 'File'];
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(
+    savedState?.visibleColumns || DEFAULT_VISIBLE_COLUMNS
+  );
+  const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
+  const columnMenuOpen = Boolean(columnMenuAnchor);
   
   const [allSearchResults, setAllSearchResults] = useState<PoliticianTrade[]>(
     savedState?.allSearchResults || []
@@ -297,6 +319,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
         advancedSearchExpanded,
         amountMin,
         amountMax,
+        visibleColumns,
       };
       
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
@@ -1006,7 +1029,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
               rel="noopener noreferrer"
               variant="outlined"
               startIcon={<LaunchIcon />}
-              sx={{
+                sx={{
                 color: '#3b82f6',
                 borderColor: '#3b82f6',
                 '&:hover': {
@@ -1026,7 +1049,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
               rel="noopener noreferrer"
               variant="outlined"
               startIcon={<LaunchIcon />}
-              sx={{
+                sx={{
                 color: '#3b82f6',
                 borderColor: '#3b82f6',
                 '&:hover': {
@@ -1040,7 +1063,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
               Verify House Clerk
             </Button>
           </Box>
-        </Box>
+            </Box>
 
         {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
         <Box sx={{ display: 'flex', gap: 3 }}>
@@ -1057,67 +1080,67 @@ const PoliticianTradesSearchPage: React.FC = () => {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
                   Search Filters
-                </Typography>
-                <IconButton
-                  onClick={() => setSearchFormExpanded(!searchFormExpanded)}
+            </Typography>
+            <IconButton
+              onClick={() => setSearchFormExpanded(!searchFormExpanded)}
                   sx={{ color: '#94a3b8' }}
-                  size="small"
-                >
-                  {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                </IconButton>
-              </Box>
-              <Collapse in={searchFormExpanded}>
+              size="small"
+            >
+              {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+            </IconButton>
+          </Box>
+          <Collapse in={searchFormExpanded}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {/* Transaction Date Range */}
+            {/* Transaction Date Range */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <TextField
-                      label="Transaction Date From"
-                      type="date"
-                      value={searchParams.dateFrom || ''}
-                      onChange={(e) => setSearchParams(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
-                      InputLabelProps={{ shrink: true }}
-                      inputProps={{
-                        min: '2001-01-01',
-                        max: new Date().toISOString().split('T')[0],
-                      }}
-                      variant="outlined"
-                      sx={{
-                        flex: 1,
-                        '& .MuiOutlinedInput-root': {
-                          '& fieldset': { borderColor: '#374151' },
-                          '&:hover fieldset': { borderColor: '#3b82f6' },
-                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                        },
-                        '& .MuiInputLabel-root': { color: '#9ca3af' },
-                        '& .MuiInputBase-input': { color: '#ffffff' },
-                      }}
-                    />
-                    <TextField
-                      label="Transaction Date To"
-                      type="date"
-                      value={searchParams.dateTo || ''}
-                      onChange={(e) => setSearchParams(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
-                      InputLabelProps={{ shrink: true }}
-                      inputProps={{
-                        min: '2001-01-01',
-                        max: new Date().toISOString().split('T')[0],
-                      }}
-                      variant="outlined"
-                      sx={{
-                        flex: 1,
-                        '& .MuiOutlinedInput-root': {
-                          '& fieldset': { borderColor: '#374151' },
-                          '&:hover fieldset': { borderColor: '#3b82f6' },
-                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                        },
-                        '& .MuiInputLabel-root': { color: '#9ca3af' },
-                        '& .MuiInputBase-input': { color: '#ffffff' },
-                      }}
-                    />
-                  </Box>
+              <TextField
+                label="Transaction Date From"
+                type="date"
+                value={searchParams.dateFrom || ''}
+                onChange={(e) => setSearchParams(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{
+                  min: '2001-01-01',
+                  max: new Date().toISOString().split('T')[0],
+                }}
+                variant="outlined"
+                sx={{
+                  flex: 1,
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: '#374151' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
+                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                  },
+                  '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
+                }}
+              />
+              <TextField
+                label="Transaction Date To"
+                type="date"
+                value={searchParams.dateTo || ''}
+                onChange={(e) => setSearchParams(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{
+                  min: '2001-01-01',
+                  max: new Date().toISOString().split('T')[0],
+                }}
+                variant="outlined"
+                sx={{
+                  flex: 1,
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: '#374151' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
+                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                  },
+                  '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiInputBase-input': { color: '#ffffff' },
+                }}
+              />
+            </Box>
 
                   {/* Politicians Search */}
-                  <MultiSelectField<string>
+                <MultiSelectField<string>
                     label="Politicians"
                   selectedItems={(() => {
                     const names = Array.isArray(searchParams.politicianName) ? searchParams.politicianName : (searchParams.politicianName ? [searchParams.politicianName] : []);
@@ -1180,7 +1203,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 />
 
                   {/* Securities Search */}
-                  <MultiSelectField<string>
+                <MultiSelectField<string>
                     label="Securities"
                   selectedItems={(() => {
                     const symbols = Array.isArray(searchParams.security) ? searchParams.security : (searchParams.security ? [searchParams.security] : []);
@@ -1567,31 +1590,31 @@ const PoliticianTradesSearchPage: React.FC = () => {
                         </Box>
 
                         {/* Political Parties */}
-                        <MultiSelectField<string>
+                <MultiSelectField<string>
                           label="Political Parties"
-                          selectedItems={Array.isArray(searchParams.party) ? searchParams.party : (searchParams.party ? [searchParams.party] : [])}
-                          onItemsChange={(parties) => 
-                            setSearchParams(prev => ({ ...prev, party: parties }))
-                          }
-                          suggestions={PARTIES}
+                  selectedItems={Array.isArray(searchParams.party) ? searchParams.party : (searchParams.party ? [searchParams.party] : [])}
+                  onItemsChange={(parties) => 
+                    setSearchParams(prev => ({ ...prev, party: parties }))
+                  }
+                  suggestions={PARTIES}
                           placeholder="Select parties..."
-                          allowCustomInput={false}
-                        />
+                  allowCustomInput={false}
+                />
 
                         {/* Transaction Types */}
-                        <MultiSelectField<string>
+                <MultiSelectField<string>
                           label="Transaction Types"
-                          selectedItems={Array.isArray(searchParams.transactionType) ? searchParams.transactionType : (searchParams.transactionType ? [searchParams.transactionType] : [])}
-                          onItemsChange={(types) => 
-                            setSearchParams(prev => ({ ...prev, transactionType: types }))
-                          }
-                          suggestions={TRANSACTION_TYPES}
+                  selectedItems={Array.isArray(searchParams.transactionType) ? searchParams.transactionType : (searchParams.transactionType ? [searchParams.transactionType] : [])}
+                  onItemsChange={(types) => 
+                    setSearchParams(prev => ({ ...prev, transactionType: types }))
+                  }
+                  suggestions={TRANSACTION_TYPES}
                           placeholder="Select transaction types..."
-                          allowCustomInput={false}
-                        />
-                      </Box>
+                  allowCustomInput={false}
+                />
+              </Box>
                     </Collapse>
-                  </Box>
+          </Box>
 
 
 
@@ -1612,64 +1635,74 @@ const PoliticianTradesSearchPage: React.FC = () => {
                     >
                       {isSearching ? 'Searching...' : 'Search'}
                     </Button>
-                    <Button
-                      variant="outlined"
-                      onClick={() => {
-                        setSearchParams({
-                          dateFrom: '2020-01-01',
-                          dateTo: new Date().toISOString().split('T')[0],
-                          politicianName: [],
-                          party: [],
-                          position: [],
-                          security: [],
-                          transactionType: [],
-                          stateDistrict: [],
-                        });
+            <Button
+              variant="outlined"
+              onClick={() => {
+                setSearchParams({
+                  dateFrom: '2020-01-01',
+                  dateTo: new Date().toISOString().split('T')[0],
+                  politicianName: [],
+                  party: [],
+                  position: [],
+                  security: [],
+                  transactionType: [],
+                  stateDistrict: [],
+                });
                         setAmountMin('');
                         setAmountMax('');
-                        setSelectedFilters({
-                          politicians: [],
-                          parties: [],
-                          positions: [],
-                          securities: [],
-                          transactionTypes: [],
-                          stateDistricts: [],
-                          amountRanges: [],
-                        });
-                        setAllSearchResults([]);
-                        setTotalFound(0);
-                        setSelectedTrades(new Set());
-                      }}
+                setSelectedFilters({
+                  politicians: [],
+                  parties: [],
+                  positions: [],
+                  securities: [],
+                  transactionTypes: [],
+                  stateDistricts: [],
+                  amountRanges: [],
+                });
+                setAllSearchResults([]);
+                setTotalFound(0);
+                setSelectedTrades(new Set());
+              }}
                       fullWidth
-                      sx={{
+              sx={{
                         borderColor: '#475569',
                         color: '#94a3b8',
                         '&:hover': { borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.1)' },
-                      }}
-                    >
-                      Clear
-                    </Button>
-                  </Box>
-                </Box>
-              </Collapse>
+              }}
+            >
+              Clear
+            </Button>
+          </Box>
             </Box>
-          </GlassCard>
-
+          </Collapse>
+            </Box>
+        </GlassCard>
+      
           {/* Middle - Results Table */}
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            {/* Error Alert */}
-            {searchError && (
-              <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
-                {searchError}
-              </Alert>
-            )}
-
-            {/* Results */}
+        {/* Error Alert */}
+        {searchError && (
+          <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
+            {searchError}
+          </Alert>
+        )}
+        
+        {/* Results */}
             {allSearchResults.length > 0 ? (
               <GlassCard>
               <Box sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Box sx={{ display: 'flex', gap: 1 }}>{/* Left side can be used for other controls if needed */}</Box>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                    <Tooltip title="Select columns to display">
+                      <IconButton
+                        onClick={(e) => setColumnMenuAnchor(e.currentTarget)}
+                        sx={{ color: '#94a3b8' }}
+                        size="small"
+                      >
+                        <ViewColumnIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                   <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                     {/* Add to Context Button */}
                     {currentResults.length > 0 && (
@@ -1820,6 +1853,45 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   </MenuItem>
                 </Menu>
 
+                {/* Column Selection Menu */}
+                <Menu
+                  anchorEl={columnMenuAnchor}
+                  open={columnMenuOpen}
+                  onClose={() => setColumnMenuAnchor(null)}
+                  PaperProps={{
+                    sx: {
+                      backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                      border: '2px solid #374151',
+                      color: '#ffffff',
+                    },
+                  }}
+                >
+                  {AVAILABLE_COLUMNS.map((column) => (
+                    <MenuItem
+                      key={column}
+                      onClick={() => {
+                        setVisibleColumns((prev) => {
+                          if (prev.includes(column)) {
+                            const newCols = prev.filter((c) => c !== column);
+                            return newCols.length === 0 ? DEFAULT_VISIBLE_COLUMNS : newCols;
+                          } else {
+                            return [...prev, column];
+                          }
+                        });
+                      }}
+                      sx={{
+                        color: visibleColumns.includes(column) ? '#3b82f6' : '#94a3b8',
+                      }}
+                    >
+                      <Checkbox
+                        checked={visibleColumns.includes(column)}
+                        sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
+                      />
+                      {column}
+                    </MenuItem>
+                  ))}
+                </Menu>
+
                 {currentResults.length > 0 ? (
                   <>
                   <TableContainer sx={{ 
@@ -1895,57 +1967,77 @@ const PoliticianTradesSearchPage: React.FC = () => {
                               }}
                             />
                           </TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                          }}>Politician</TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                          }}>Position</TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                          }}>Party</TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                          }}>Jurisdiction</TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                          }}>Security</TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                          }}>Transaction</TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                          }}>Transaction Date</TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                          }}>Filing Date</TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                          }}>Amount</TableCell>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                            width: '80px',
-                          }}>File</TableCell>
+                          {visibleColumns.includes('Politician') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                            }}>Politician</TableCell>
+                          )}
+                          {visibleColumns.includes('Position') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                            }}>Position</TableCell>
+                          )}
+                          {visibleColumns.includes('Party') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                            }}>Party</TableCell>
+                          )}
+                          {visibleColumns.includes('Jurisdiction') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                            }}>Jurisdiction</TableCell>
+                          )}
+                          {visibleColumns.includes('Security') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                            }}>Security</TableCell>
+                          )}
+                          {visibleColumns.includes('Transaction') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                            }}>Transaction</TableCell>
+                          )}
+                          {visibleColumns.includes('Transaction Date') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                            }}>Transaction Date</TableCell>
+                          )}
+                          {visibleColumns.includes('Filing Date') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                            }}>Filing Date</TableCell>
+                          )}
+                          {visibleColumns.includes('Amount') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                            }}>Amount</TableCell>
+                          )}
+                          {visibleColumns.includes('File') && (
+                            <TableCell sx={{ 
+                              color: '#9ca3af', 
+                              fontWeight: 600, 
+                              fontSize: '0.875rem',
+                              width: '80px',
+                            }}>File</TableCell>
+                          )}
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -1975,130 +2067,150 @@ const PoliticianTradesSearchPage: React.FC = () => {
                                 sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
                               />
                             </TableCell>
-                            <TableCell sx={{ 
-                              color: '#ffffff', 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              {trade.websiteUrl ? (
-                                <Tooltip title="Click to visit politician's website" arrow>
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                    <Link
-                                      href={trade.websiteUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      sx={{
-                                        color: '#3b82f6',
-                                        textDecoration: 'none',
-                                        fontWeight: 500,
-                                        fontSize: '0.875rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 0.5,
-                                        '&:hover': {
-                                          color: '#60a5fa',
-                                          textDecoration: 'underline',
-                                        },
-                                        cursor: 'pointer',
-                                      }}
-                                    >
-                                      {trade.politicianName || 'N/A'}
-                                      <LaunchIcon sx={{ fontSize: '0.75rem' }} />
-                                    </Link>
-                                  </Box>
-                                </Tooltip>
-                              ) : (
-                                <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {trade.politicianName || 'N/A'}
-                                </Typography>
-                              )}
-                            </TableCell>
-                            <TableCell sx={{ 
-                              color: '#ffffff', 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              {trade.position || 'N/A'}
-                            </TableCell>
-                            <TableCell sx={{ 
-                              color: '#ffffff', 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              {trade.party || 'N/A'}
-                            </TableCell>
-                            <TableCell sx={{ 
-                              color: '#ffffff', 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              {trade.stateDistrict || 'N/A'}
-                            </TableCell>
-                            <TableCell sx={{ 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              <Box>
-                                <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.875rem' }}>
-                                  {trade.securitySymbol || 'N/A'}
-                                </Typography>
-                                {trade.securityName && (
-                                  <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-                                    {trade.securityName}
+                            {visibleColumns.includes('Politician') && (
+                              <TableCell sx={{ 
+                                color: '#ffffff', 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                {trade.websiteUrl ? (
+                                  <Tooltip title="Click to visit politician's website" arrow>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                      <Link
+                                        href={trade.websiteUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        sx={{
+                                          color: '#3b82f6',
+                                          textDecoration: 'none',
+                                          fontWeight: 500,
+                                          fontSize: '0.875rem',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: 0.5,
+                                          '&:hover': {
+                                            color: '#60a5fa',
+                                            textDecoration: 'underline',
+                                          },
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        {trade.politicianName || 'N/A'}
+                                        <LaunchIcon sx={{ fontSize: '0.75rem' }} />
+                                      </Link>
+                                    </Box>
+                                  </Tooltip>
+                                ) : (
+                                  <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                    {trade.politicianName || 'N/A'}
                                   </Typography>
                                 )}
-                              </Box>
-                            </TableCell>
-                            <TableCell sx={{ 
-                              color: '#ffffff', 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              {trade.transactionType || 'N/A'}
-                            </TableCell>
-                            <TableCell sx={{ 
-                              color: '#ffffff', 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              {formatTransactionDate(trade.transactionDate)}
-                            </TableCell>
-                            <TableCell sx={{ 
-                              color: '#ffffff', 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              {formatFilingDate(trade.filingDate)}
-                            </TableCell>
-                            <TableCell sx={{ 
-                              color: '#ffffff', 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              {formatAmountRange(trade)}
-                            </TableCell>
-                            <TableCell sx={{ 
-                              fontSize: '0.875rem',
-                              padding: '12px',
-                            }}>
-                              {trade.formS3Key && (
-                                <IconButton
-                                  size="small"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDownload(trade);
-                                  }}
-                                  sx={{
-                                    color: '#3b82f6',
-                                    '&:hover': {
-                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                    },
-                                  }}
-                                >
-                                  <DownloadIcon fontSize="small" />
-                                </IconButton>
-                              )}
-                            </TableCell>
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('Position') && (
+                              <TableCell sx={{ 
+                                color: '#ffffff', 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                {trade.position || 'N/A'}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('Party') && (
+                              <TableCell sx={{ 
+                                color: '#ffffff', 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                {trade.party || 'N/A'}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('Jurisdiction') && (
+                              <TableCell sx={{ 
+                                color: '#ffffff', 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                {trade.stateDistrict || 'N/A'}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('Security') && (
+                              <TableCell sx={{ 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                <Box>
+                                  <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.875rem' }}>
+                                    {trade.securitySymbol || 'N/A'}
+                                  </Typography>
+                                  {trade.securityName && (
+                                    <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                                      {trade.securityName}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('Transaction') && (
+                              <TableCell sx={{ 
+                                color: '#ffffff', 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                {trade.transactionType || 'N/A'}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('Transaction Date') && (
+                              <TableCell sx={{ 
+                                color: '#ffffff', 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                {formatTransactionDate(trade.transactionDate)}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('Filing Date') && (
+                              <TableCell sx={{ 
+                                color: '#ffffff', 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                {formatFilingDate(trade.filingDate)}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('Amount') && (
+                              <TableCell sx={{ 
+                                color: '#ffffff', 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                {formatAmountRange(trade)}
+                              </TableCell>
+                            )}
+                            {visibleColumns.includes('File') && (
+                              <TableCell sx={{ 
+                                fontSize: '0.875rem',
+                                padding: '12px',
+                              }}>
+                                {trade.formS3Key && (
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDownload(trade);
+                                    }}
+                                    sx={{
+                                      color: '#3b82f6',
+                                      '&:hover': {
+                                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                      },
+                                    }}
+                                  >
+                                    <DownloadIcon fontSize="small" />
+                                  </IconButton>
+                                )}
+                              </TableCell>
+                            )}
                           </TableRow>
                         ))}
                       </TableBody>
@@ -2211,7 +2323,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
           </Box>
 
           {/* Right Sidebar - Client-side Filter Box (Only when results exist) */}
-          {allSearchResults.length > 0 && (
+        {allSearchResults.length > 0 && (
             <GlassCard sx={{ 
               p: 2, 
               minWidth: 280, 

@@ -51,6 +51,7 @@ import {
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   VerifiedUser as VerifiedUserIcon,
+  ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
@@ -738,6 +739,8 @@ const SECSearchPage: React.FC = () => {
   const [selectedColumns, setSelectedColumns] = useState<string[]>(
     savedState?.selectedColumns || DEFAULT_COLUMNS
   );
+  const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
+  const columnMenuOpen = Boolean(columnMenuAnchor);
 
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
   const [currentResults, setCurrentResults] = useState<SECSearchResult[]>([]);
@@ -2344,46 +2347,32 @@ const SECSearchPage: React.FC = () => {
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <GlassCard sx={{ p: 4 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                  <Typography
-                    variant="h6"
-                    sx={{
-                      color: '#ffffff',
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                    }}
-                  >
-                    Search Results
-                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                    <Tooltip title="Select columns to display">
+                      <IconButton
+                        onClick={(e) => setColumnMenuAnchor(e.currentTarget)}
+                        sx={{ color: '#94a3b8' }}
+                        size="small"
+                      >
+                        <ViewColumnIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Typography
+                      variant="h6"
+                      sx={{
+                        color: '#ffffff',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px',
+                      }}
+                    >
+                      Search Results
+                    </Typography>
+                  </Box>
                   
-                  {/* Column Selection, Status Indicator, and Add to Context Button */}
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    {/* Column Selection - Always visible */}
-                    <Box sx={{ p: 1.5, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px' }}>
-                      <FormGroup row>
-                        {DEFAULT_COLUMNS.map((col) => (
-                          <FormControlLabel
-                            key={col}
-                            control={
-                              <Checkbox
-                                checked={selectedColumns.length === 0 || selectedColumns.includes(col)}
-                                onChange={() => handleColumnToggle(col)}
-                                sx={{
-                                  color: '#9ca3af',
-                                  '&.Mui-checked': { color: '#3b82f6' },
-                                }}
-                              />
-                            }
-                            label={col}
-                            sx={{ color: '#9ca3af', '& .MuiFormControlLabel-label': { fontSize: '0.75rem', ml: 0.5 } }}
-                          />
-                        ))}
-                      </FormGroup>
-                    </Box>
-                    
-                    {/* Status Indicator and Add to Context Button */}
-                    {allSearchResults.length > 0 || searchState.isSearching ? (
-                      <>
+                  {/* Status Indicator and Add to Context Button */}
+                  {allSearchResults.length > 0 || searchState.isSearching ? (
+                    <>
                       {/* Add to Context Button */}
                       {currentResults.length > 0 && (
                         <Tooltip title={`Add ${selectedFilings.size > 0 ? `${selectedFilings.size} filing(s)` : 'selected filings'} to context`}>
@@ -2506,7 +2495,36 @@ const SECSearchPage: React.FC = () => {
                       </>
                     ) : null}
                   </Box>
-              </Box>
+
+              {/* Column Selection Menu */}
+              <Menu
+                anchorEl={columnMenuAnchor}
+                open={columnMenuOpen}
+                onClose={() => setColumnMenuAnchor(null)}
+                PaperProps={{
+                  sx: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                    border: '2px solid #374151',
+                    color: '#ffffff',
+                  },
+                }}
+              >
+                {DEFAULT_COLUMNS.map((column) => (
+                  <MenuItem
+                    key={column}
+                    onClick={() => handleColumnToggle(column)}
+                    sx={{
+                      color: selectedColumns.length === 0 || selectedColumns.includes(column) ? '#3b82f6' : '#94a3b8',
+                    }}
+                  >
+                    <Checkbox
+                      checked={selectedColumns.length === 0 || selectedColumns.includes(column)}
+                      sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
+                    />
+                    {column}
+                  </MenuItem>
+                ))}
+              </Menu>
                 
                 {totalFound > 0 ? (
                   <Typography
