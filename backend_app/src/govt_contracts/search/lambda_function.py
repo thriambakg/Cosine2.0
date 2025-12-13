@@ -436,6 +436,41 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
                         combined = combined | cond
                     conditions.append(combined)
     
+    # Awarding agency name filter (separate from code)
+    # Only process if awarding_agency_code wasn't already processed (to avoid duplication)
+    if filters.get('awarding_agency_name') and not filters.get('awarding_agency_code'):
+        values = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
+        values = [v for v in values if v and str(v).strip()]
+        if values:
+            name_conditions = []
+            for name in values:
+                name_str = str(name).strip()
+                if name_str:
+                    # Use contains for partial matching (case-sensitive in DynamoDB)
+                    # Try both original case and lowercase for case-insensitive matching
+                    variations = [name_str]
+                    if name_str.lower() != name_str:
+                        variations.append(name_str.lower())
+                    
+                    # Create OR condition for variations
+                    if len(variations) == 1:
+                        name_conditions.append(Attr('awarding_agency_name').contains(variations[0]))
+                    else:
+                        combined = Attr('awarding_agency_name').contains(variations[0])
+                        for var in variations[1:]:
+                            combined = combined | Attr('awarding_agency_name').contains(var)
+                        name_conditions.append(combined)
+            
+            if name_conditions:
+                if len(name_conditions) == 1:
+                    conditions.extend(name_conditions)
+                else:
+                    # Multiple names: combine with OR
+                    combined = name_conditions[0]
+                    for cond in name_conditions[1:]:
+                        combined = combined | cond
+                    conditions.append(combined)
+    
     if filters.get('funding_agency_code'):
         values = filters['funding_agency_code'] if isinstance(filters['funding_agency_code'], list) else [filters['funding_agency_code']]
         # Filter out empty strings
@@ -590,6 +625,26 @@ def determine_query_method(filters: Dict[str, Any]) -> tuple[str, Optional[str],
         key_condition: Dict with hash_key and range_key conditions
     """
     # Check for GSI-optimized queries
+    
+    # AwardingAgencyNameFiscalYearIndex: hash_key=awarding_agency_name, range_key=fiscal_year
+    # Check awarding_agency_name first (preferred when frontend sends names)
+    if filters.get('awarding_agency_name'):
+        values = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
+        values = [v for v in values if v and str(v).strip()]
+        if values:
+            # Use first agency name for hash key (exact match required for GSI)
+            agency_name = values[0].strip()
+            fiscal_year = None
+            if filters.get('fiscal_year'):
+                fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
+                if fiscal_years:
+                    fiscal_year = fiscal_years[0]
+            
+            key_condition = {
+                'hash_key': ('awarding_agency_name', agency_name),
+                'range_key': ('fiscal_year', fiscal_year) if fiscal_year else None
+            }
+            return ('query', 'AwardingAgencyNameFiscalYearIndex', key_condition)
     
     # AwardingAgencyCodeFiscalYearIndex: hash_key=awarding_agency_code, range_key=fiscal_year
     if filters.get('awarding_agency_code'):
@@ -844,8 +899,33 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     query_configs = []
     
+    # AwardingAgencyNameFiscalYearIndex: hash_key=awarding_agency_name, range_key=fiscal_year
+    # Check awarding_agency_name first (preferred when frontend sends names)
+    if filters.get('awarding_agency_name'):
+        values = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
+        values = [v for v in values if v and str(v).strip()]
+        if values:
+            # Use first agency name for hash key (exact match required for GSI)
+            agency_name = values[0].strip()
+            fiscal_year = None
+            if filters.get('fiscal_year'):
+                fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
+                if fiscal_years:
+                    fiscal_year = fiscal_years[0]
+            
+            query_configs.append({
+                'filter_key': 'awarding_agency_name',
+                'index_name': 'AwardingAgencyNameFiscalYearIndex',
+                'hash_key': 'awarding_agency_name',
+                'hash_value': agency_name,
+                'range_key': 'fiscal_year' if fiscal_year else None,
+                'range_value': fiscal_year,
+                'range_condition': None
+            })
+    
     # AwardingAgencyCodeFiscalYearIndex: hash_key=awarding_agency_code, range_key=fiscal_year
-    if filters.get('awarding_agency_code'):
+    # Only use code if name wasn't already added (name takes precedence)
+    if not any(c['filter_key'] == 'awarding_agency_name' for c in query_configs) and filters.get('awarding_agency_code'):
         values = filters['awarding_agency_code'] if isinstance(filters['awarding_agency_code'], list) else [filters['awarding_agency_code']]
         values = [v for v in values if v and str(v).strip()]
         if values:
@@ -1090,7 +1170,12 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         # Remove the source filter from filters (we've already applied it via GSI)
         # Keep all other filters to apply in Python
         remaining_filters = filters.copy()
-        if shortest_key == 'awarding_agency_code':
+        if shortest_key == 'awarding_agency_name':
+            del remaining_filters['awarding_agency_name']
+            # Also remove awarding_agency_code if present (name takes precedence when using GSI)
+            if 'awarding_agency_code' in remaining_filters:
+                del remaining_filters['awarding_agency_code']
+        elif shortest_key == 'awarding_agency_code':
             del remaining_filters['awarding_agency_code']
             # Also remove awarding_agency_name if present (code takes precedence when using GSI)
             if 'awarding_agency_name' in remaining_filters:
@@ -1318,12 +1403,24 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         
         # Remove hash key from filter - it's already in KeyConditionExpression
         # This is critical: DynamoDB doesn't allow primary key attributes in FilterExpression
-        if hash_key_name == 'awarding_agency_code' or hash_key_name == 'awarding_agency_name':
+        if hash_key_name == 'awarding_agency_name':
+            # Remove awarding_agency_name from filters since we're using it as hash key
+            # Note: We can't filter for multiple agency names when using GSI query
+            # The first one is used for the hash key, others would need to be filtered client-side
+            if 'awarding_agency_name' in filter_filters:
+                del filter_filters['awarding_agency_name']
+            # Also remove awarding_agency_code if present (name takes precedence)
+            if 'awarding_agency_code' in filter_filters:
+                del filter_filters['awarding_agency_code']
+        elif hash_key_name == 'awarding_agency_code':
             # Remove awarding_agency_code from filters since we're using it as hash key
-            # Note: We can't filter for multiple agency codes/names when using GSI query
+            # Note: We can't filter for multiple agency codes when using GSI query
             # The first one is used for the hash key, others would need to be filtered client-side
             if 'awarding_agency_code' in filter_filters:
                 del filter_filters['awarding_agency_code']
+            # Also remove awarding_agency_name if present (code takes precedence when using GSI)
+            if 'awarding_agency_name' in filter_filters:
+                del filter_filters['awarding_agency_name']
         elif hash_key_name == 'recipient_name_normalized':
             # Remove recipient_name from filters since we're using it as hash key
             if 'recipient_name' in filter_filters:

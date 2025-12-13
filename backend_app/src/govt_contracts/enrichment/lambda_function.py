@@ -588,12 +588,27 @@ def get_existing_award(award_id: str) -> Optional[Dict[str, Any]]:
         if not item:
             return None
         
+        # Convert is_assistance from bytes to number if needed (for GSI compatibility)
+        if 'is_assistance' in item:
+            is_assistance_val = item['is_assistance']
+            if isinstance(is_assistance_val, bytes):
+                item['is_assistance'] = 1 if is_assistance_val == b'\x01' else 0
+            elif isinstance(is_assistance_val, bool):
+                item['is_assistance'] = 1 if is_assistance_val else 0
+        
         # If this is an oversized award, fetch full data from S3
         oversize_s3_key = item.get('oversize_s3_key')
         if oversize_s3_key:
             logger.info(f"Fetching full award data from S3 for oversized award {award_id}")
             full_award = fetch_oversized_award_from_s3(oversize_s3_key)
             if full_award:
+                # Convert is_assistance in S3 data too if needed
+                if 'is_assistance' in full_award:
+                    is_assistance_val = full_award['is_assistance']
+                    if isinstance(is_assistance_val, bytes):
+                        full_award['is_assistance'] = 1 if is_assistance_val == b'\x01' else 0
+                    elif isinstance(is_assistance_val, bool):
+                        full_award['is_assistance'] = 1 if is_assistance_val else 0
                 # Merge S3 data with DynamoDB GSI fields (S3 data takes precedence)
                 full_award.update(item)
                 return full_award
@@ -681,9 +696,17 @@ def extract_gsi_fields_only(full_item: Dict[str, Any]) -> Dict[str, Any]:
     cleaned = {}
     for k, v in gsi_fields.items():
         if v is not None:
-            # For boolean fields, keep False values
-            if k == 'is_assistance' and isinstance(v, bool):
-                cleaned[k] = v
+            # Convert is_assistance to number (N type) for GSI compatibility
+            if k == 'is_assistance':
+                if isinstance(v, bytes):
+                    # Convert bytes to number (legacy format)
+                    cleaned[k] = 1 if v == b'\x01' else 0
+                elif isinstance(v, bool):
+                    # Convert bool to number
+                    cleaned[k] = 1 if v else 0
+                else:
+                    # Already a number, use as-is
+                    cleaned[k] = v
             # For numeric fields, keep 0 values
             elif k in ['transaction_count', 'subaward_count', 'fiscal_year'] and v == 0:
                 cleaned[k] = v
@@ -904,11 +927,11 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
         if award_category:
             updated_award['category'] = award_category
             # Set is_assistance based on category (matches glue job logic)
-            # is_assistance: b'\x01' = True (assistance), b'\x00' = False (contract)
-            if award_category == 'assistance':
-                updated_award['is_assistance'] = b'\x01'
+            # is_assistance: 1 = True (assistance), 0 = False (contract) - must be number (N) for GSI
+            if award_category == 'assistance' or award_category == 'grant':
+                updated_award['is_assistance'] = 1
             else:
-                updated_award['is_assistance'] = b'\x00'
+                updated_award['is_assistance'] = 0
             logger.info(f"Updated category={award_category} and is_assistance from API for award {award_id}")
         
         # Update fiscal year from dates (GSI field)
@@ -962,7 +985,15 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
         # Note: is_assistance and category are already updated from API response above if available
         # Only preserve if not updated from API
         if 'is_assistance' not in updated_award and 'is_assistance' in existing_award:
-            updated_award['is_assistance'] = existing_award['is_assistance']
+            existing_is_assistance = existing_award['is_assistance']
+            # Convert bytes to number if needed (legacy data might have bytes)
+            if isinstance(existing_is_assistance, bytes):
+                updated_award['is_assistance'] = 1 if existing_is_assistance == b'\x01' else 0
+            elif isinstance(existing_is_assistance, bool):
+                updated_award['is_assistance'] = 1 if existing_is_assistance else 0
+            else:
+                # Already a number, use as-is
+                updated_award['is_assistance'] = existing_is_assistance
         if 'category' not in updated_award and 'category' in existing_award:
             updated_award['category'] = existing_award['category']
         # Preserve award_or_idv_flag if it exists
@@ -996,9 +1027,16 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
             gsi_only_item['oversize_s3_key'] = oversize_s3_key
             gsi_only_item['is_oversized'] = True
             
-            # Preserve is_assistance in GSI item if it exists
+            # Preserve is_assistance in GSI item if it exists (ensure it's a number)
             if 'is_assistance' in updated_award:
-                gsi_only_item['is_assistance'] = updated_award['is_assistance']
+                is_assistance_val = updated_award['is_assistance']
+                # Convert to number if needed
+                if isinstance(is_assistance_val, bytes):
+                    gsi_only_item['is_assistance'] = 1 if is_assistance_val == b'\x01' else 0
+                elif isinstance(is_assistance_val, bool):
+                    gsi_only_item['is_assistance'] = 1 if is_assistance_val else 0
+                else:
+                    gsi_only_item['is_assistance'] = is_assistance_val
             if 'category' in updated_award:
                 gsi_only_item['category'] = updated_award['category']
             
