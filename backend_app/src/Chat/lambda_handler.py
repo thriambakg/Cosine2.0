@@ -5,6 +5,7 @@ Resource configuration handled by Terraform
 Updated for container deployment
 """
 
+
 import json
 import os
 import logging
