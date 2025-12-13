@@ -388,7 +388,7 @@ module "api_gateway" {
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.file_upload_lambda.function_arn
+      lambda_arn              = aws_lambda_function.chat_agent.arn
       request_parameters      = {}
     }
     # POST method for file downloads (fresh presigned URLs)
@@ -612,7 +612,7 @@ module "api_gateway" {
       resource_path = "news"
     }
     files_upload_post = {
-      function_arn  = module.file_upload_lambda.function_arn
+      function_arn  = aws_lambda_function.chat_agent.arn
       http_method   = "POST"
       resource_path = "files"
     }
@@ -937,21 +937,7 @@ resource "aws_iam_policy" "lambda_sqs_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sqs:ReceiveMessage",
-          "sqs:DeleteMessage",
-          "sqs:GetQueueAttributes",
-          "sqs:ChangeMessageVisibility"
-        ]
-        Resource = [
-          module.agent_logs_sqs_queue.queue_arn,
-          module.agent_logs_sqs_queue.dlq_arn,
-          module.chat_response_sqs_queue.queue_arn,
-          module.chat_response_sqs_queue.dlq_arn
-        ]
-      }
+      # SQS permissions removed - using direct WebSocket delivery instead
     ]
   })
 
@@ -1246,6 +1232,12 @@ resource "aws_iam_role_policy_attachment" "chat_agent_lambda_invoke_policy" {
   policy_arn = aws_iam_policy.lambda_invoke_policy.arn
 }
 
+# Attach WebSocket policy for chat agent (for direct WebSocket message delivery)
+resource "aws_iam_role_policy_attachment" "chat_agent_websocket_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.lambda_websocket_policy.arn
+}
+
 # SQS policy for chat agent to send logs and responses
 resource "aws_iam_policy" "chat_agent_sqs_policy" {
   name        = "${var.project_name}-chat-agent-sqs-policy-${var.environment}"
@@ -1254,17 +1246,7 @@ resource "aws_iam_policy" "chat_agent_sqs_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sqs:SendMessage",
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = [
-          module.agent_logs_sqs_queue.queue_arn,
-          module.chat_response_sqs_queue.queue_arn
-        ]
-      }
+      # SQS permissions removed - using direct WebSocket delivery instead
     ]
   })
 
@@ -1392,11 +1374,9 @@ resource "aws_lambda_function" "chat_agent" {
       # Agent Files Processor Lambda Function Name for direct invocation
       AGENT_FILES_PROCESSOR_FUNCTION_NAME = module.agent_files_processor_lambda.function_name
 
-      # SQS Queue for agent log streaming
-      AGENT_LOGS_SQS_QUEUE_URL = module.agent_logs_sqs_queue.queue_url
-
-      # SQS Queue for chat response delivery
-      CHAT_RESPONSE_SQS_QUEUE_URL = module.chat_response_sqs_queue.queue_url
+      # WebSocket API Gateway endpoint for direct message delivery
+      WEBSOCKET_ENDPOINT = module.websocket_api.stage_url
+      WEBSOCKET_API_ID   = module.websocket_api.api_id
     }
   }
 
@@ -1446,48 +1426,8 @@ module "websocket_connection_lambda" {
   tags = var.common_tags
 }
 
-# WebSocket Message Processor Lambda Function
-module "websocket_message_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-websocket-message-${var.environment}"
-  description   = "Lambda function for WebSocket message processing"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 900 # 15 minutes to match chat agent timeout
-  memory_size   = 512
-
-  # Source directory
-  source_dir = "../backend_app/src/websocket/message_processor/app"
-
-  # Environment variables
-  environment_variables = {
-    CHAT_CONNECTIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name
-    CHAT_SESSIONS_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    CHAT_AGENT_FUNCTION_NAME    = "${var.project_name}-chat-agent-${var.environment}"
-    WEBSOCKET_ENDPOINT          = module.websocket_api.stage_url
-    WEBSOCKET_API_ID            = module.websocket_api.api_id
-    CHAT_FILES_BUCKET_NAME      = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
-    ENVIRONMENT                 = var.environment
-    LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
-    # SQS Queue for agent log streaming
-    AGENT_LOGS_SQS_QUEUE_URL = module.agent_logs_sqs_queue.queue_url
-  }
-
-  # Attach core layer
-  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn,
-    aws_iam_policy.lambda_invoke_policy.arn,
-    aws_iam_policy.lambda_websocket_policy.arn,
-    aws_iam_policy.lambda_sqs_policy.arn
-  ]
-
-  tags = var.common_tags
-}
+# WebSocket Message Processor Lambda Function - REMOVED
+# Functionality consolidated into chat_agent container
 
 # WebSocket API Gateway
 module "websocket_api" {
@@ -1499,185 +1439,18 @@ module "websocket_api" {
 
   connection_lambda_arn  = module.websocket_connection_lambda.function_arn
   connection_lambda_name = module.websocket_connection_lambda.function_name
-  message_lambda_arn     = module.websocket_message_lambda.function_arn
-  message_lambda_name    = module.websocket_message_lambda.function_name
+  message_lambda_arn     = aws_lambda_function.chat_agent.arn
+  message_lambda_name    = aws_lambda_function.chat_agent.function_name
 
   tags = var.common_tags
 }
 
 # ============================================================================
-# SQS QUEUE FOR AGENT LOGS
+# SQS QUEUES REMOVED - Direct WebSocket delivery used instead
 # ============================================================================
 
-# SQS Queue for agent log streaming (replaces SNS for high-volume logs)
-module "agent_logs_sqs_queue" {
-  source = "./modules/sqs"
-
-  project_name = var.project_name
-  environment  = var.environment
-  queue_name   = "agent-logs"
-  purpose      = "High-volume agent log streaming to WebSocket"
-
-  # Queue configuration
-  message_retention_seconds  = 345600 # 4 days
-  visibility_timeout_seconds = 1200   # 20 minutes (must be > Lambda timeout of 900s)
-  receive_wait_time_seconds  = 20     # Long polling
-  max_receive_count          = 3
-
-  # Dead letter queue configuration
-  enable_dlq                     = true
-  dlq_message_retention_seconds  = 1209600 # 14 days
-  dlq_visibility_timeout_seconds = 30
-
-  # KMS encryption - extract key ID from ARN if needed
-  kms_key_id                        = data.terraform_remote_state.base_infra.outputs.kms_key_arn
-  kms_data_key_reuse_period_seconds = 300
-
-  tags = var.common_tags
-}
-
-# SQS Queue Policy - Allow Lambda service and chat agent role to access agent logs queue
-resource "aws_sqs_queue_policy" "agent_logs_queue_policy" {
-  queue_url = module.agent_logs_sqs_queue.queue_id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-        Action = [
-          "sqs:ReceiveMessage",
-          "sqs:DeleteMessage",
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = module.agent_logs_sqs_queue.queue_arn
-        Condition = {
-          ArnEquals = {
-            "aws:SourceArn" = module.websocket_message_lambda.function_arn
-          }
-        }
-      },
-      {
-        Effect = "Allow"
-        Principal = {
-          AWS = aws_iam_role.chat_agent_execution_role.arn
-        }
-        Action = [
-          "sqs:SendMessage",
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = module.agent_logs_sqs_queue.queue_arn
-      }
-    ]
-  })
-}
-
-# Event source mapping for SQS to trigger WebSocket message lambda
-resource "aws_lambda_event_source_mapping" "agent_logs_sqs_trigger" {
-  event_source_arn                   = module.agent_logs_sqs_queue.queue_arn
-  function_name                      = module.websocket_message_lambda.function_arn
-  batch_size                         = 10 # Process up to 10 messages per invocation
-  maximum_batching_window_in_seconds = 5  # Wait up to 5 seconds to batch
-
-  # Enable partial batch failure reporting
-  function_response_types = ["ReportBatchItemFailures"]
-
-  depends_on = [
-    aws_sqs_queue_policy.agent_logs_queue_policy,
-    module.websocket_message_lambda,
-    aws_iam_policy.lambda_sqs_policy
-  ]
-}
-
-# ============================================================================
-# SQS QUEUE FOR CHAT RESPONSES
-# ============================================================================
-
-# SQS Queue for chat response delivery (replaces SNS)
-module "chat_response_sqs_queue" {
-  source = "./modules/sqs"
-
-  project_name = var.project_name
-  environment  = var.environment
-  queue_name   = "chat-response"
-  purpose      = "Async chat response delivery to WebSocket"
-
-  # Queue configuration
-  message_retention_seconds  = 345600 # 4 days
-  visibility_timeout_seconds = 1200   # 20 minutes (must be > Lambda timeout of 900s)
-  receive_wait_time_seconds  = 20     # Long polling
-  max_receive_count          = 3
-
-  # Dead letter queue configuration
-  enable_dlq                     = true
-  dlq_message_retention_seconds  = 1209600 # 14 days
-  dlq_visibility_timeout_seconds = 30
-
-  # KMS encryption
-  kms_key_id                        = data.terraform_remote_state.base_infra.outputs.kms_key_arn
-  kms_data_key_reuse_period_seconds = 300
-
-  tags = var.common_tags
-}
-
-# SQS Queue Policy - Allow Lambda service and chat agent role to access queue
-resource "aws_sqs_queue_policy" "chat_response_queue_policy" {
-  queue_url = module.chat_response_sqs_queue.queue_id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-        Action = [
-          "sqs:ReceiveMessage",
-          "sqs:DeleteMessage",
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = module.chat_response_sqs_queue.queue_arn
-        Condition = {
-          ArnEquals = {
-            "aws:SourceArn" = module.websocket_message_lambda.function_arn
-          }
-        }
-      },
-      {
-        Effect = "Allow"
-        Principal = {
-          AWS = aws_iam_role.chat_agent_execution_role.arn
-        }
-        Action = [
-          "sqs:SendMessage",
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = module.chat_response_sqs_queue.queue_arn
-      }
-    ]
-  })
-}
-
-# Event source mapping for SQS to trigger WebSocket message lambda for chat responses
-resource "aws_lambda_event_source_mapping" "chat_response_sqs_trigger" {
-  event_source_arn                   = module.chat_response_sqs_queue.queue_arn
-  function_name                      = module.websocket_message_lambda.function_arn
-  batch_size                         = 10 # Process up to 10 messages per invocation
-  maximum_batching_window_in_seconds = 5  # Wait up to 5 seconds to batch
-
-  # Enable partial batch failure reporting
-  function_response_types = ["ReportBatchItemFailures"]
-
-  depends_on = [
-    aws_sqs_queue_policy.chat_response_queue_policy,
-    module.websocket_message_lambda,
-    aws_iam_policy.lambda_sqs_policy
-  ]
-}
+# Agent logs and chat responses are now sent directly to WebSocket
+# No SQS queues needed - reduced latency and complexity
 
 # ============================================================================
 # API GATEWAY RESOURCES AND INTEGRATIONS - Handled by module
@@ -2101,42 +1874,8 @@ module "news_search_lambda" {
   tags = var.common_tags
 }
 
-# File Upload Lambda Function
-module "file_upload_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-file-upload-${var.environment}"
-  description   = "Lambda function for handling file uploads to S3"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 30
-  memory_size   = 512
-
-  # Source directory
-  source_dir = "../backend_app/src/file_upload/app"
-
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT                       = var.environment
-    LOG_LEVEL                         = var.environment == "development" ? "DEBUG" : "INFO"
-    CHAT_FILES_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
-    CHAT_SESSIONS_TABLE_NAME          = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    WEBSOCKET_PROCESSOR_FUNCTION_NAME = module.websocket_message_lambda.function_name
-  }
-
-  # Attach core layer
-  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn,
-    aws_iam_policy.lambda_invoke_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
-  ]
-
-  tags = var.common_tags
-}
+# File Upload Lambda Function - REMOVED
+# Functionality consolidated into chat_agent container
 
 # Agent Files Processor Lambda Function
 module "agent_files_processor_lambda" {
@@ -2158,7 +1897,7 @@ module "agent_files_processor_lambda" {
     LOG_LEVEL                         = var.environment == "development" ? "DEBUG" : "INFO"
     CHAT_FILES_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
     CHAT_SESSIONS_TABLE_NAME          = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    WEBSOCKET_PROCESSOR_FUNCTION_NAME = module.websocket_message_lambda.function_name
+    WEBSOCKET_PROCESSOR_FUNCTION_NAME = aws_lambda_function.chat_agent.function_name
   }
 
   # Attach core layer only

@@ -1,0 +1,817 @@
+"""
+WebSocket Handler for Chat Agent
+Handles WebSocket message processing, connection management, and direct message delivery
+Consolidated from websocket/message_processor for improved performance
+"""
+
+import json
+import os
+import logging
+import uuid
+import boto3
+from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import List, Dict, Any, Optional
+from boto3.dynamodb.conditions import Key, Attr
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Import context builder for enriching messages with context
+try:
+    from context_builder import build_context_prompt, extract_context_summary
+    logger.info("✅ Successfully imported context_builder")
+    CONTEXT_BUILDER_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import context_builder: {e}")
+    CONTEXT_BUILDER_AVAILABLE = False
+    # Fallback functions if import fails
+    def build_context_prompt(user_message, context_items):
+        return user_message
+    def extract_context_summary(context_items):
+        return {'total_items': len(context_items) if context_items else 0}
+
+# Initialize AWS clients
+dynamodb = boto3.resource('dynamodb')
+
+def json_dumps_safe(obj):
+    """JSON dumps with Decimal support for DynamoDB"""
+    def decimal_default(obj):
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+    
+    return json.dumps(obj, default=decimal_default)
+
+def convert_floats_to_decimal(obj):
+    """
+    Recursively convert all float values to Decimal for DynamoDB compatibility
+    """
+    if isinstance(obj, list):
+        return [convert_floats_to_decimal(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_floats_to_decimal(value) for key, value in obj.items()}
+    elif isinstance(obj, float):
+        # Handle special float values (inf, nan)
+        if obj != obj:  # NaN check
+            return None
+        elif obj == float('inf'):
+            return Decimal('999999999')
+        elif obj == float('-inf'):
+            return Decimal('-999999999')
+        else:
+            return Decimal(str(obj))
+    elif isinstance(obj, int):
+        return obj
+    else:
+        return obj
+
+
+class WebSocketHandler:
+    """
+    Handles WebSocket message processing and direct message delivery
+    """
+    
+    def __init__(self):
+        # Get WebSocket API Gateway endpoint from environment
+        websocket_endpoint = os.environ.get('WEBSOCKET_ENDPOINT')
+        if not websocket_endpoint:
+            # Fallback: construct from API Gateway ID
+            api_gateway_id = os.environ.get('WEBSOCKET_API_ID')
+            if api_gateway_id:
+                websocket_endpoint = f"https://{api_gateway_id}.execute-api.us-east-1.amazonaws.com/production"
+            else:
+                # Default fallback
+                websocket_endpoint = "https://xem3y35uzd.execute-api.us-east-1.amazonaws.com/production"
+        
+        # Convert wss:// to https:// for the API Gateway Management API
+        if websocket_endpoint.startswith('wss://'):
+            websocket_endpoint = websocket_endpoint.replace('wss://', 'https://')
+        
+        self.api_gateway = boto3.client(
+            'apigatewaymanagementapi',
+            endpoint_url=websocket_endpoint
+        )
+        
+        # DynamoDB tables
+        self.chat_connections_table = dynamodb.Table(os.environ['CHAT_CONNECTIONS_TABLE_NAME'])
+        self.chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
+    
+    def get_connection_info(self, connection_id: str) -> Optional[Dict[str, Any]]:
+        """Get connection information from DynamoDB"""
+        try:
+            response = self.chat_connections_table.get_item(
+                Key={'connection_id': connection_id}
+            )
+            return response.get('Item')
+        except Exception as e:
+            logger.error(f"Error getting connection info: {str(e)}")
+            return None
+    
+    def update_connection_session(self, connection_id: str, session_id: str):
+        """Update connection record with session ID"""
+        try:
+            self.chat_connections_table.update_item(
+                Key={'connection_id': connection_id},
+                UpdateExpression='SET session_id = :session_id',
+                ExpressionAttributeValues={':session_id': session_id}
+            )
+            logger.info(f"Updated connection {connection_id} with session_id {session_id}")
+        except Exception as e:
+            logger.error(f"Error updating connection session: {str(e)}")
+    
+    def get_active_connections_for_user_session(self, user_id: str, session_id: str) -> List[str]:
+        """Get active WebSocket connections for a specific user and session"""
+        try:
+            current_time = int(datetime.now().timestamp())
+            
+            # Query connections for this user and session
+            response = self.chat_connections_table.query(
+                IndexName='UserConnectionsIndex',
+                KeyConditionExpression=Key('user_id').eq(user_id),
+                FilterExpression=Attr('session_id').eq(session_id) & Attr('expires_at').gt(current_time)
+            )
+            
+            connection_ids = [item['connection_id'] for item in response['Items']]
+            logger.info(f"Found {len(connection_ids)} active connections for user {user_id}, session {session_id}")
+            
+            return connection_ids
+        except Exception as e:
+            logger.error(f"Failed to get active connections: {str(e)}")
+            return []
+    
+    def send_to_client(self, connection_id: str, message: Dict[str, Any]) -> bool:
+        """Send message to WebSocket client"""
+        try:
+            self.api_gateway.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json_dumps_safe(message)
+            )
+            return True
+        except Exception as e:
+            if 'GoneException' in str(e) or 'gone' in str(e).lower():
+                logger.warning(f"Connection {connection_id} was closed")
+            else:
+                logger.error(f"Error sending to connection {connection_id}: {str(e)}")
+            return False
+    
+    def send_agent_log(self, user_id: str, session_id: str, log_message: Dict[str, Any]):
+        """
+        Send agent log directly to WebSocket connections.
+        Called directly from agent_logger (no SQS queue needed!)
+        """
+        try:
+            # Get active connections for this user/session
+            connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
+            
+            if not connection_ids:
+                # No active connections - log silently (not an error)
+                return
+            
+            # Send to all active connections
+            for connection_id in connection_ids:
+                try:
+                    self.send_to_client(connection_id, log_message)
+                except Exception as e:
+                    logger.warning(f"Failed to send agent log to connection {connection_id}: {str(e)}")
+                    
+        except Exception as e:
+            logger.error(f"Error sending agent log: {str(e)}")
+    
+    def send_chat_response(self, user_id: str, session_id: str, response_content: str, message_id: Optional[str] = None):
+        """
+        Send chat response directly to WebSocket connections.
+        Called directly from chat agent (no SQS queue needed!)
+        """
+        try:
+            # Get active connections
+            connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
+            
+            if not connection_ids:
+                logger.info(f"No active connections for user {user_id}, session {session_id}")
+                return
+            
+            # Generate message ID if not provided
+            if not message_id:
+                message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+            
+            # Create AI response message
+            ai_response_message = {
+                'type': 'ai_response',
+                'message_id': message_id,
+                'content': response_content,
+                'session_id': session_id,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Send to all active connections
+            for connection_id in connection_ids:
+                try:
+                    self.send_to_client(connection_id, ai_response_message)
+                    logger.info(f"✅ Sent chat response to connection {connection_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to send response to connection {connection_id}: {str(e)}")
+                    
+        except Exception as e:
+            logger.error(f"Error sending chat response: {str(e)}")
+    
+    def process_websocket_message(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process WebSocket message from API Gateway
+        
+        Args:
+            event: WebSocket API Gateway event
+            
+        Returns:
+            API Gateway response
+        """
+        try:
+            # Extract connection ID from request context
+            connection_id = event.get('requestContext', {}).get('connectionId')
+            if not connection_id:
+                logger.error("No connection ID found in request context")
+                return {
+                    'statusCode': 400,
+                    'body': json_dumps_safe({'error': 'No connection ID'})
+                }
+            
+            # Get user ID from connection info
+            connection_info = self.get_connection_info(connection_id)
+            if not connection_info:
+                logger.error(f"Connection {connection_id} not found")
+                return {
+                    'statusCode': 400,
+                    'body': json_dumps_safe({'error': 'Connection not found'})
+                }
+            
+            user_id = connection_info['user_id']
+            
+            # Extract message body and parse it
+            body = event.get('body', '{}')
+            if isinstance(body, str):
+                message_data = json.loads(body)
+            else:
+                message_data = body
+            
+            # Get session_id from message data
+            session_id = message_data.get('sessionId')
+            logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id}")
+            
+            # Session ID is required for all message types except connection_establish
+            if not session_id and message_data.get('type') != 'connection_establish':
+                logger.error(f"No sessionId provided in message data")
+                return {
+                    'statusCode': 400,
+                    'body': json_dumps_safe({'error': 'Session ID required'})
+                }
+            
+            # Update connection record with session_id
+            if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
+                self.update_connection_session(connection_id, session_id)
+            
+            # Process the WebSocket message
+            return self._process_message(connection_id, user_id, session_id, message_data)
+            
+        except Exception as e:
+            logger.error(f"Error in process_websocket_message: {str(e)}")
+            return {
+                'statusCode': 500,
+                'body': json_dumps_safe({'error': 'Internal server error'})
+            }
+    
+    def _process_message(self, connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process incoming chat message
+        
+        Args:
+            connection_id: WebSocket connection ID
+            user_id: User ID
+            session_id: Session ID
+            message_data: Message data from client
+            
+        Returns:
+            API Gateway response
+        """
+        try:
+            message_type = message_data.get('type', 'chat')
+            message_text = message_data.get('message', '')
+            model = message_data.get('model', 'claude-sonnet-4')
+            files = message_data.get('files', [])
+            
+            # Use message ID from frontend if provided, otherwise generate one
+            frontend_message_id = message_data.get('messageId')
+            message_id = frontend_message_id or f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+            
+            logger.info(f"Processing message type: {message_type} for connection {connection_id}")
+            logger.info(f"Using message_id: {message_id}")
+            
+            # Handle connection establishment message
+            if message_type == 'connection_establish':
+                connection_message = {
+                    'type': 'connection_established',
+                    'session_id': session_id,
+                    'message': 'Connected to Cosine AI Chat',
+                    'timestamp': datetime.now().isoformat()
+                }
+                self.send_to_client(connection_id, connection_message)
+                return {
+                    'statusCode': 200,
+                    'body': json_dumps_safe({'message': 'Connection established'})
+                }
+            
+            # Handle kill signal message
+            if message_type == 'kill_signal':
+                return self._handle_kill_signal(connection_id, user_id, session_id, message_data)
+            
+            # Handle message editing
+            if message_type == 'edit_message':
+                return self._handle_edit_message(connection_id, user_id, session_id, message_data)
+            
+            # Check if this is the first message (welcome message)
+            is_first_message = message_data.get('is_first_message', False)
+            if is_first_message:
+                welcome_message = {
+                    'type': 'connection_established',
+                    'session_id': session_id,
+                    'message': 'Connected to Cosine AI Chat',
+                    'timestamp': datetime.now().isoformat()
+                }
+                self.send_to_client(connection_id, welcome_message)
+            
+            # Save user message to database
+            self._save_user_message(user_id, session_id, message_id, message_text, files)
+            
+            # Send acknowledgment
+            ack_message = {
+                'type': 'message_received',
+                'message_id': message_id,
+                'timestamp': datetime.now().isoformat()
+            }
+            self.send_to_client(connection_id, ack_message)
+            
+            # Check if session exists, create if needed
+            if not self._check_session_exists(user_id, session_id):
+                logger.info(f"Session {session_id} doesn't exist, creating it")
+                self._create_session_for_first_message(user_id, session_id, model)
+            
+            # Extract context items and uploaded files
+            context_items = message_data.get('contextItems', [])
+            uploaded_files = message_data.get('uploadedFiles', [])
+            session_variables_updated = message_data.get('session_variables_updated', False)
+            
+            # Handle session variables update notification
+            if session_variables_updated:
+                self._send_session_update(user_id, session_id)
+            
+            # Process context and files
+            has_context = len(context_items) > 0
+            has_files = len(uploaded_files) > 0
+            original_user_message = message_text
+            
+            if has_context or has_files:
+                logger.info(f"Context-aware message: {len(context_items)} context items, {len(uploaded_files)} uploaded files")
+                
+                # Store context items in session_variables
+                if has_context and CONTEXT_BUILDER_AVAILABLE:
+                    self._store_context_items(user_id, session_id, context_items)
+                
+                # Use clean message for AI (let tools handle file access)
+                message_text = original_user_message
+            
+            # Determine if new context items were added
+            has_new_context_items = has_context and CONTEXT_BUILDER_AVAILABLE and len(context_items) > 0
+            
+            # Process with chat agent directly (in same container, no Lambda invoke!)
+            # Import here to avoid circular dependencies
+            from lambda_handler import handle_chat_message
+            
+            # Prepare event body for chat handler
+            event_body = {
+                'action': 'chat',
+                'message': message_text,
+                'userId': user_id,
+                'sessionId': session_id,
+                'model': model,
+                'files': files,
+                'contextItems': context_items if has_context else None,
+                'originalMessage': original_user_message if (has_context or has_files) else None,
+                'uploadedFiles': uploaded_files if has_files else None,
+                'hasNewContextItems': has_new_context_items,
+                'messageId': message_id
+            }
+            
+            # Call chat handler directly (no Lambda invocation!)
+            try:
+                # This will process the message and send response directly via WebSocket
+                result = handle_chat_message(event_body, None)
+                
+                # Extract response from result
+                if result.get('statusCode') == 200:
+                    response_body = result.get('body', {})
+                    if isinstance(response_body, str):
+                        response_body = json.loads(response_body)
+                    
+                    response_content = response_body.get('response')
+                    if response_content:
+                        # Send response directly to WebSocket (no SQS!)
+                        self.send_chat_response(user_id, session_id, response_content, message_id)
+                
+            except Exception as e:
+                logger.error(f"Error processing with chat agent: {str(e)}")
+                error_message = {
+                    'type': 'ai_response',
+                    'message_id': f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}",
+                    'content': "I apologize, but I encountered an error processing your request. Please try again.",
+                    'session_id': session_id,
+                    'timestamp': datetime.now().isoformat()
+                }
+                self.send_to_client(connection_id, error_message)
+            
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'Message processed successfully'})
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing message: {str(e)}")
+            return {
+                'statusCode': 500,
+                'body': json_dumps_safe({'error': 'Failed to process message'})
+            }
+    
+    def process_file_upload_message(self, user_id: str, session_id: str, message: Dict[str, Any], 
+                                   uploaded_files: List[Dict[str, Any]], context_items: List[Dict[str, Any]], 
+                                   model: str) -> Dict[str, Any]:
+        """
+        Process message with uploaded files - called directly from file upload handler
+        No Lambda invocation needed!
+        """
+        try:
+            # Get active connections
+            connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
+            
+            # Update connections with session_id if needed
+            if connection_ids:
+                for conn_id in connection_ids:
+                    self.update_connection_session(conn_id, session_id)
+            
+            # Save user message
+            message_id = message.get('id') or f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+            self._save_user_message(user_id, session_id, message_id, message.get('text', ''), [])
+            
+            # Process with chat agent directly
+            from lambda_handler import handle_chat_message
+            
+            event_body = {
+                'action': 'chat',
+                'message': message.get('text', ''),
+                'userId': user_id,
+                'sessionId': session_id,
+                'model': model,
+                'files': [],
+                'contextItems': context_items,
+                'uploadedFiles': uploaded_files,
+                'messageId': message_id
+            }
+            
+            # Call chat handler directly
+            result = handle_chat_message(event_body, None)
+            
+            # Extract and send response
+            if result.get('statusCode') == 200:
+                response_body = result.get('body', {})
+                if isinstance(response_body, str):
+                    response_body = json.loads(response_body)
+                
+                response_content = response_body.get('response')
+                if response_content:
+                    # Send to all active connections
+                    for conn_id in connection_ids:
+                        self.send_chat_response(user_id, session_id, response_content, message_id)
+            
+            return {'statusCode': 200, 'body': 'Message processed'}
+            
+        except Exception as e:
+            logger.error(f"Error processing file upload message: {str(e)}")
+            raise
+    
+    def _save_user_message(self, user_id: str, session_id: str, message_id: str, message_text: str, files: List[Dict]):
+        """Save user message to DynamoDB"""
+        try:
+            session_response = self.chat_sessions_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id},
+                ConsistentRead=True
+            )
+            
+            if 'Item' in session_response:
+                messages = session_response['Item'].get('messages', [])
+                
+                user_message = {
+                    'id': message_id,
+                    'text': message_text,
+                    'sender': 'user',
+                    'timestamp': int(datetime.now().timestamp()),
+                    'message_type': 'text'
+                }
+                
+                if files:
+                    file_metadata = []
+                    for file_info in files:
+                        file_metadata.append({
+                            'name': file_info.get('name', 'Unknown'),
+                            'size': file_info.get('size', 0),
+                            'type': file_info.get('type', 'application/octet-stream')
+                        })
+                    user_message['files'] = file_metadata
+                
+                messages.append(user_message)
+                
+                self.chat_sessions_table.update_item(
+                    Key={'user_id': user_id, 'session_id': session_id},
+                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                    ExpressionAttributeValues={
+                        ':messages': messages,
+                        ':count': len(messages),
+                        ':timestamp': int(datetime.now().timestamp())
+                    }
+                )
+                logger.info(f"✅ Saved user message: {message_id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to save user message: {e}")
+    
+    def _check_session_exists(self, user_id: str, session_id: str) -> bool:
+        """Check if a session exists in DynamoDB"""
+        try:
+            response = self.chat_sessions_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id}
+            )
+            return 'Item' in response
+        except Exception as e:
+            logger.error(f"Error checking session existence: {str(e)}")
+            return False
+    
+    def _create_session_for_first_message(self, user_id: str, session_id: str, model: str):
+        """Create a session for the first message"""
+        try:
+            current_time = int(datetime.now().timestamp())
+            session_item = {
+                'user_id': user_id,
+                'session_id': session_id,
+                'created_at': current_time,
+                'last_updated': current_time,
+                'title': 'New Chat',
+                'model': model,
+                'message_count': 0,
+                'messages': [],
+                'metadata': {
+                    'created_via': 'websocket_first_message',
+                    'model': model
+                }
+            }
+            self.chat_sessions_table.put_item(Item=session_item)
+            logger.info(f"✅ Created session {session_id}")
+        except Exception as e:
+            logger.error(f"Error creating session: {str(e)}")
+    
+    def _handle_kill_signal(self, connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle kill signal message"""
+        try:
+            reason = message_data.get('reason', 'user_cancellation')
+            logger.info(f"🔴 KILL SIGNAL: Processing kill signal for session {session_id}, reason: {reason}")
+            
+            if not session_id:
+                return {
+                    'statusCode': 400,
+                    'body': json_dumps_safe({'error': 'No session_id provided'})
+                }
+            
+            # Set kill flag in DynamoDB
+            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            self.chat_sessions_table.update_item(
+                Key={'user_id': user_id, 'session_id': session_id},
+                UpdateExpression='SET killed_at = :killed_at, kill_reason = :kill_reason',
+                ExpressionAttributeValues={
+                    ':killed_at': timestamp_ms,
+                    ':kill_reason': reason
+                },
+                ConditionExpression='attribute_exists(user_id) AND attribute_exists(session_id)'
+            )
+            
+            # Send acknowledgment
+            ack_message = {
+                'type': 'kill_signal_acknowledged',
+                'session_id': session_id,
+                'reason': reason,
+                'timestamp': datetime.now().isoformat(),
+                'message': 'Processing cancelled successfully'
+            }
+            self.send_to_client(connection_id, ack_message)
+            
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'Kill signal processed successfully'})
+            }
+        except Exception as e:
+            logger.error(f"Error processing kill signal: {str(e)}")
+            return {
+                'statusCode': 500,
+                'body': json_dumps_safe({'error': f'Failed to process kill signal: {str(e)}'})
+            }
+    
+    def _handle_edit_message(self, connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle message editing"""
+        try:
+            message_id = message_data.get('messageId')
+            new_text = message_data.get('newText')
+            model = message_data.get('model', 'claude-sonnet-4')
+            
+            if not all([message_id, new_text]):
+                return {
+                    'statusCode': 400,
+                    'body': json_dumps_safe({'error': 'Missing required fields for edit message'})
+                }
+            
+            logger.info(f"🔍 EDIT: Starting edit process for message {message_id}")
+            
+            # Set kill signal to stop ongoing processing
+            timestamp_ms = int(datetime.now().timestamp() * 1000)
+            try:
+                self.chat_sessions_table.update_item(
+                    Key={'user_id': user_id, 'session_id': session_id},
+                    UpdateExpression='SET killed_at = :killed_at',
+                    ExpressionAttributeValues={':killed_at': timestamp_ms}
+                )
+            except Exception:
+                pass
+            
+            # Get current session
+            response = self.chat_sessions_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id}
+            )
+            
+            if 'Item' not in response:
+                return {
+                    'statusCode': 404,
+                    'body': json_dumps_safe({'error': 'Session not found'})
+                }
+            
+            messages = response['Item'].get('messages', [])
+            
+            # Find message to edit
+            message_to_edit_index = None
+            for i, msg in enumerate(messages):
+                if msg.get('id') == message_id:
+                    message_to_edit_index = i
+                    break
+            
+            if message_to_edit_index is None:
+                return {
+                    'statusCode': 404,
+                    'body': json_dumps_safe({'error': 'Message not found'})
+                }
+            
+            message_to_edit = messages[message_to_edit_index]
+            if message_to_edit['sender'] != 'user':
+                return {
+                    'statusCode': 400,
+                    'body': json_dumps_safe({'error': 'Can only edit user messages'})
+                }
+            
+            # Check if text changed
+            if message_to_edit.get('text', '').strip() == new_text.strip():
+                ack_message = {
+                    'type': 'edit_acknowledged',
+                    'message_id': message_id,
+                    'message_index': message_to_edit_index,
+                    'unchanged': True,
+                    'timestamp': datetime.now().isoformat()
+                }
+                self.send_to_client(connection_id, ack_message)
+                return {
+                    'statusCode': 200,
+                    'body': json_dumps_safe({'message': 'Message unchanged', 'unchanged': True})
+                }
+            
+            # Truncate messages after edited message
+            truncated_messages = messages[:message_to_edit_index + 1]
+            truncated_messages[-1]['text'] = new_text
+            
+            # Update session
+            timestamp = int(datetime.now().timestamp())
+            self.chat_sessions_table.update_item(
+                Key={'user_id': user_id, 'session_id': session_id},
+                UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :updated, last_edit_at = :edit_at, last_edited_message_id = :edited_id REMOVE killed_at',
+                ExpressionAttributeValues={
+                    ':messages': truncated_messages,
+                    ':count': len(truncated_messages),
+                    ':updated': timestamp,
+                    ':edit_at': timestamp,
+                    ':edited_id': message_id
+                }
+            )
+            
+            # Send acknowledgment
+            ack_message = {
+                'type': 'edit_acknowledged',
+                'message_id': message_id,
+                'message_index': message_to_edit_index,
+                'timestamp': datetime.now().isoformat()
+            }
+            self.send_to_client(connection_id, ack_message)
+            
+            # Process with chat agent directly (no Lambda invoke!)
+            from lambda_handler import handle_chat_message
+            
+            event_body = {
+                'action': 'chat',
+                'message': new_text,
+                'userId': user_id,
+                'sessionId': session_id,
+                'model': model,
+                'files': [],
+                'is_edit': True,
+                'edited_message_id': message_id,
+                'messageId': message_id
+            }
+            
+            # Call chat handler directly
+            result = handle_chat_message(event_body, None)
+            
+            # Extract and send response
+            if result.get('statusCode') == 200:
+                response_body = result.get('body', {})
+                if isinstance(response_body, str):
+                    response_body = json.loads(response_body)
+                
+                response_content = response_body.get('response')
+                if response_content:
+                    self.send_chat_response(user_id, session_id, response_content)
+            
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'Message edit processed successfully'})
+            }
+            
+        except Exception as e:
+            logger.error(f"Error handling edit message: {str(e)}")
+            return {
+                'statusCode': 500,
+                'body': json_dumps_safe({'error': 'Failed to process edit message'})
+            }
+    
+    def _store_context_items(self, user_id: str, session_id: str, context_items: List[Dict[str, Any]]):
+        """Store context items in session_variables"""
+        try:
+            context_items_decimal = convert_floats_to_decimal(context_items)
+            context_summary = extract_context_summary(context_items)
+            context_summary_decimal = convert_floats_to_decimal(context_summary)
+            
+            response = self.chat_sessions_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id}
+            )
+            
+            existing_session_vars = response.get('Item', {}).get('session_variables', {})
+            
+            session_vars = {
+                **existing_session_vars,
+                'context_items': context_items_decimal,
+                'context_added_at': int(datetime.now().timestamp()),
+                'context_summary': context_summary_decimal,
+                'last_updated': int(datetime.now().timestamp())
+            }
+            
+            self.chat_sessions_table.update_item(
+                Key={'user_id': user_id, 'session_id': session_id},
+                UpdateExpression='SET session_variables = :vars, last_updated = :updated',
+                ExpressionAttributeValues={
+                    ':vars': session_vars,
+                    ':updated': int(datetime.now().timestamp())
+                }
+            )
+            logger.info(f"📌 Stored context items in session_variables")
+        except Exception as e:
+            logger.error(f"❌ Failed to store context items: {e}")
+    
+    def _send_session_update(self, user_id: str, session_id: str):
+        """Send session update message to frontend"""
+        try:
+            session_response = self.chat_sessions_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id}
+            )
+            
+            if 'Item' in session_response:
+                session_variables = session_response['Item'].get('session_variables', {})
+                
+                session_update_message = {
+                    'type': 'session_updated',
+                    'session_id': session_id,
+                    'session_variables': session_variables,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
+                for conn_id in connection_ids:
+                    self.send_to_client(conn_id, session_update_message)
+        except Exception as e:
+            logger.error(f"❌ Failed to send session update: {str(e)}")
+

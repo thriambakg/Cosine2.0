@@ -3,7 +3,7 @@ Agent Logger - Handles both CloudWatch logging and WebSocket streaming for tool 
 
 This class processes all logs from the agent and:
 1. Sends logs to CloudWatch (standard logging)
-2. Streams tool call logs immediately to WebSocket via SQS for real-time user visibility
+2. Streams tool call logs immediately to WebSocket directly (no SQS queue needed!)
 3. Filters logs to only send tool-related logs (no batching - immediate delivery)
 """
 
@@ -15,28 +15,22 @@ import json
 from typing import List, Dict, Any, Optional
 import os
 
-# Try to import lambda_invocation for WebSocket streaming (fallback)
+# Try to import websocket_handler for direct WebSocket streaming
 try:
-    from lambda_invocation import invoke_websocket_processor
-    LAMBDA_INVOCATION_AVAILABLE = True
+    from websocket_handler import WebSocketHandler
+    WEBSOCKET_HANDLER_AVAILABLE = True
 except ImportError:
-    LAMBDA_INVOCATION_AVAILABLE = False
-
-# Try to import boto3 for SQS (preferred method for high-volume logs)
-try:
-    import boto3
-    SQS_AVAILABLE = True
-except ImportError:
-    SQS_AVAILABLE = False
+    WEBSOCKET_HANDLER_AVAILABLE = False
+    WebSocketHandler = None
 
 
 class AgentLogger(logging.Handler):
     """
     Unified logging handler for agent that processes logs for both CloudWatch and WebSocket.
     
-    Sends all logs immediately to SQS for WebSocket streaming.
+    Sends all logs immediately to WebSocket directly (no SQS queue needed!).
     - Immediate delivery (no batching)
-    - No filtering - all logs sent to both CloudWatch and SQS
+    - No filtering - all logs sent to both CloudWatch and WebSocket
     - Session/user isolation
     """
     
@@ -99,21 +93,19 @@ class AgentLogger(logging.Handler):
         ]
         
         # Enable WebSocket streaming only if session context is available
-        # Prefer SQS if available, fallback to Lambda invocation
-        self.websocket_enabled = bool(session_id and user_id and (SQS_AVAILABLE or LAMBDA_INVOCATION_AVAILABLE))
-        self.use_sqs = SQS_AVAILABLE  # Prefer SQS for high-volume logs
-        self.sqs_queue_url = os.environ.get('AGENT_LOGS_SQS_QUEUE_URL') if self.use_sqs else None
+        # Use direct WebSocket handler (no SQS queue needed!)
+        self.websocket_enabled = bool(session_id and user_id and WEBSOCKET_HANDLER_AVAILABLE)
         
-        # Initialize SQS client if using SQS
-        if self.use_sqs and self.sqs_queue_url:
+        # Initialize WebSocket handler if available
+        if self.websocket_enabled and WEBSOCKET_HANDLER_AVAILABLE:
             try:
-                self.sqs_client = boto3.client('sqs')
+                self.ws_handler = WebSocketHandler()
             except Exception as e:
-                self._internal_logger.warning(f"Failed to initialize SQS client: {e}, falling back to Lambda invocation")
-                self.use_sqs = False
-                self.sqs_client = None
+                self._internal_logger.warning(f"Failed to initialize WebSocket handler: {e}")
+                self.websocket_enabled = False
+                self.ws_handler = None
         else:
-            self.sqs_client = None
+            self.ws_handler = None
     
     @classmethod
     def get_instance(cls, session_id: Optional[str] = None, user_id: Optional[str] = None, message_id: Optional[str] = None) -> 'AgentLogger':
@@ -136,85 +128,44 @@ class AgentLogger(logging.Handler):
                 cls._instance.session_id = session_id
                 cls._instance.user_id = user_id
                 cls._instance.message_id = message_id
-                cls._instance.websocket_enabled = bool(session_id and user_id and (SQS_AVAILABLE or LAMBDA_INVOCATION_AVAILABLE))
+                cls._instance.websocket_enabled = bool(session_id and user_id and WEBSOCKET_HANDLER_AVAILABLE)
                 cls._instance.start_time = time.time()
+                # Reinitialize WebSocket handler if needed
+                if cls._instance.websocket_enabled and WEBSOCKET_HANDLER_AVAILABLE and not cls._instance.ws_handler:
+                    try:
+                        cls._instance.ws_handler = WebSocketHandler()
+                    except Exception as e:
+                        cls._instance._internal_logger.warning(f"Failed to reinitialize WebSocket handler: {e}")
+                        cls._instance.websocket_enabled = False
             return cls._instance
     
     
     def _send_log_to_websocket(self, log_entry: Dict[str, Any]):
-        """Send single log entry immediately to WebSocket processor via SQS"""
-        if not self.websocket_enabled:
+        """Send single log entry immediately to WebSocket directly (no SQS queue needed!)"""
+        if not self.websocket_enabled or not self.ws_handler:
             return
         
         try:
-            # Construct unique payload with all necessary markers
-            unique_payload = {
-                # Session/User Identification (CRITICAL for differentiation)
+            # Construct log message in format expected by frontend
+            log_message = {
+                'type': 'agent_log',
                 'session_id': self.session_id,
                 'user_id': self.user_id,
-                'message_id': self.message_id,
-                
-                # Single Log Entry (no batching)
-                'log_id': log_entry.get('log_id', f"log_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:8]}"),
-                'log_timestamp': log_entry.get('timestamp', time.time()),
-                'relative_time': log_entry.get('relative_time', time.time() - self.start_time),
-                
-                # Log Content
-                'level': log_entry.get('level', 'INFO'),
-                'message': log_entry.get('message', ''),
-                
-                # Processing Context
-                'source': 'agent_lambda',
-                'log_type': 'agent_tool_call',
-                'version': '1.0'
+                'payload': {
+                    'message': log_entry.get('message', ''),
+                    'level': log_entry.get('level', 'INFO'),
+                    'log_id': log_entry.get('log_id', f"log_{int(time.time() * 1000000)}_{uuid.uuid4().hex[:8]}"),
+                    'log_timestamp': log_entry.get('timestamp', time.time()),
+                    'relative_time': log_entry.get('relative_time', time.time() - self.start_time),
+                    'source': 'agent_lambda',
+                    'log_type': 'agent_tool_call',
+                    'message_id': self.message_id,
+                    'version': '1.0'
+                }
             }
             
-            # Send via SQS (preferred) or Lambda invocation (fallback)
-            if self.use_sqs and self.sqs_client and self.sqs_queue_url:
-                # Send to SQS queue immediately (no batching)
-                try:
-                    sqs_message = {
-                        'type': 'agent_log',  # Marker to ensure processor routes to handle_sqs_agent_logs
-                        'session_id': self.session_id,
-                        'user_id': self.user_id,
-                        'payload': unique_payload
-                    }
-
-                    response = self.sqs_client.send_message(
-                        QueueUrl=self.sqs_queue_url,
-                        MessageBody=json.dumps(sqs_message),
-                        MessageAttributes={
-                            'session_id': {'StringValue': self.session_id, 'DataType': 'String'},
-                            'user_id': {'StringValue': self.user_id, 'DataType': 'String'},
-                            'message_type': {'StringValue': 'agent_log', 'DataType': 'String'}
-                        }
-                    )
-                    
-                    # Log successful send (use internal logger to avoid loop)
-                    self._internal_logger.info(f"✅ Sent tool call log to SQS: {response['MessageId']} (session: {self.session_id})")
-                    return
-                    
-                except Exception as sqs_error:
-                    # If SQS fails, fallback to Lambda invocation
-                    # Use internal logger to avoid infinite loop
-                    self._internal_logger.warning(f"SQS send failed: {sqs_error}, falling back to Lambda invocation")
-                    if LAMBDA_INVOCATION_AVAILABLE:
-                        invoke_websocket_processor(
-                            user_id=self.user_id,
-                            session_id=self.session_id,
-                            message_type='agent_log',
-                            payload=unique_payload
-                        )
-            elif LAMBDA_INVOCATION_AVAILABLE:
-                # Fallback to direct Lambda invocation
-                invoke_websocket_processor(
-                    user_id=self.user_id,
-                    session_id=self.session_id,
-                    message_type='agent_log',
-                    payload=unique_payload
-                )
-            else:
-                self._internal_logger.warning("Neither SQS nor Lambda invocation available for log streaming")
+            # Send directly to WebSocket (no SQS queue!)
+            self.ws_handler.send_agent_log(self.user_id, self.session_id, log_message)
             
         except Exception as e:
             # Log error but don't break agent
@@ -226,18 +177,18 @@ class AgentLogger(logging.Handler):
         """
         Override logging.Handler.emit (not used - we don't attach as handler).
         This method exists because AgentLogger extends logging.Handler, but we don't use it.
-        Only logs explicitly sent via agent_logger.info/debug/warning/error/critical() go to SQS.
+        Only logs explicitly sent via agent_logger.info/debug/warning/error/critical() go to WebSocket.
         
         Args:
             record: LogRecord from Python's logging system
         """
         # This method is not used - we don't attach AgentLogger as a handler
-        # Only explicit calls to agent_logger methods send logs to SQS
+        # Only explicit calls to agent_logger methods send logs to WebSocket
         pass
     
     def _send_to_websocket(self, level: str, message: str, **kwargs):
         """
-        Send log immediately to WebSocket processor via SQS (no batching, no filtering).
+        Send log immediately to WebSocket directly (no SQS queue needed!).
         This is used when calling agent_logger.info() directly.
         
         Args:
@@ -259,7 +210,7 @@ class AgentLogger(logging.Handler):
             **kwargs
         }
         
-        # Send immediately to SQS (no filtering)
+        # Send immediately to WebSocket (no filtering, no SQS!)
         self._send_log_to_websocket(log_entry)
     
     def info(self, message: str, **kwargs):
@@ -305,7 +256,14 @@ class AgentLogger(logging.Handler):
         self.user_id = user_id
         if message_id:
             self.message_id = message_id
-        self.websocket_enabled = bool(session_id and user_id and (SQS_AVAILABLE or LAMBDA_INVOCATION_AVAILABLE))
+        self.websocket_enabled = bool(session_id and user_id and WEBSOCKET_HANDLER_AVAILABLE)
+        # Reinitialize WebSocket handler if needed
+        if self.websocket_enabled and WEBSOCKET_HANDLER_AVAILABLE and not self.ws_handler:
+            try:
+                self.ws_handler = WebSocketHandler()
+            except Exception as e:
+                self._internal_logger.warning(f"Failed to initialize WebSocket handler: {e}")
+                self.websocket_enabled = False
         self.start_time = time.time()
 
 

@@ -218,17 +218,112 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Main AWS Lambda handler function for API Gateway integration
-    Routes requests to appropriate handlers based on the action parameter
+    Main AWS Lambda handler function - handles WebSocket, REST API, and SQS events
+    Routes requests to appropriate handlers based on event type
     
     Args:
-        event: AWS Lambda event object from API Gateway
+        event: AWS Lambda event object (WebSocket, REST API, or SQS)
         context: AWS Lambda context object
         
     Returns:
-        HTTP response with CORS headers for API Gateway
+        Response appropriate for event type
     """
     
+    logger.debug("lambda_handler called")
+    logger.debug(f"Event keys: {list(event.keys()) if isinstance(event, dict) else 'Not a dict'}")
+    
+    # Detect event type and route accordingly
+    try:
+        # 1. WebSocket API Gateway event (has requestContext with routeKey)
+        if 'requestContext' in event and 'routeKey' in event.get('requestContext', {}):
+            logger.info("Detected WebSocket API Gateway event")
+            from websocket_handler import WebSocketHandler
+            ws_handler = WebSocketHandler()
+            return ws_handler.process_websocket_message(event)
+        
+        # 2. SQS event (has Records array)
+        elif 'Records' in event and isinstance(event.get('Records'), list):
+            logger.info("Detected SQS event")
+            # Check if it's an SQS record
+            first_record = event['Records'][0]
+            if 'eventSource' in first_record and first_record.get('eventSource') == 'aws:sqs':
+                logger.info("Processing SQS event (backward compatibility - should not be used)")
+                # For backward compatibility, but we don't use SQS anymore
+                # This could be removed in future
+                return {
+                    'statusCode': 200,
+                    'body': json.dumps({'message': 'SQS events no longer processed - use direct WebSocket'})
+                }
+        
+        # 3. REST API Gateway event (has httpMethod or path)
+        elif 'httpMethod' in event or 'path' in event:
+            logger.info("Detected REST API Gateway event")
+            
+            # CORS headers for API Gateway responses
+            cors_headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+                'Content-Type': 'application/json'
+            }
+            
+            # Handle OPTIONS request for CORS preflight
+            if event.get('httpMethod') == 'OPTIONS':
+                return {
+                    'statusCode': 200,
+                    'headers': cors_headers,
+                    'body': json.dumps({'message': 'CORS preflight successful'})
+                }
+            
+            # Check if this is the /files endpoint (file upload)
+            path = event.get('path', '')
+            if '/files' in path or event.get('resource', '').endswith('/files'):
+                logger.info("Processing file upload request")
+                from file_upload_handler import FileUploadHandler
+                file_handler = FileUploadHandler()
+                return file_handler.handle_file_upload(event)
+            
+            # Otherwise, process as regular REST API request
+            return handle_rest_api_request(event, cors_headers)
+        
+        # 4. Direct invocation (for testing or internal calls)
+        else:
+            logger.info("Detected direct invocation event")
+            return handle_rest_api_request(event, {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+                'Content-Type': 'application/json'
+            })
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in lambda_handler: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Access-Control-Allow-Origin': '*',
+                'Content-Type': 'application/json'
+            },
+            'body': json.dumps({
+                'error': 'Internal server error',
+                'message': 'An unexpected error occurred while processing your request'
+            })
+        }
+
+
+def handle_rest_api_request(event: Dict[str, Any], cors_headers: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Handle REST API Gateway requests (original logic)
+    
+    Args:
+        event: REST API Gateway event
+        cors_headers: CORS headers to include in response
+        
+    Returns:
+        HTTP response with CORS headers
+    """
     # Try to extract session context early for agent_logger initialization
     session_id = None
     user_id = None
@@ -267,41 +362,20 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Use default logger for early logs without session context
         agent_logger = get_agent_logger()
     
-    logger.debug("lambda_handler called")
+    # Parse request body - handle both direct event and nested body
+    event_body = {}
     
-    # CORS headers for API Gateway responses
-    cors_headers = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-        'Content-Type': 'application/json'
-    }
-    
-    try:
-        logger.debug(f"Event keys: {list(event.keys()) if isinstance(event, dict) else 'Not a dict'}")
-        
-        # Handle OPTIONS request for CORS preflight
-        if event.get('httpMethod') == 'OPTIONS':
-            return {
-                'statusCode': 200,
-                'headers': cors_headers,
-                'body': json.dumps({'message': 'CORS preflight successful'})
-            }
-        
-        # Parse request body - handle both direct event and nested body
-        event_body = {}
-        
-        # Check if this is a direct event (no 'body' wrapper)
-        if 'action' in event:
-            event_body = event
-        elif 'body' in event and event['body']:
-            try:
-                if isinstance(event['body'], str):
-                    event_body = json.loads(event['body'])
-                else:
-                    event_body = event['body']
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error: {e}")
+    # Check if this is a direct event (no 'body' wrapper)
+    if 'action' in event:
+        event_body = event
+    elif 'body' in event and event['body']:
+        try:
+            if isinstance(event['body'], str):
+                event_body = json.loads(event['body'])
+            else:
+                event_body = event['body']
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e}")
             return {
                 'statusCode': 400,
                 'headers': cors_headers,
@@ -310,108 +384,97 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'message': 'Please provide valid JSON in the request body'
                 })
             }
-        else:
-            logger.warning("No body or action found in event")
-            event_body = event
-        
-        # Re-initialize agent_logger with session context from event_body if available
-        session_id_from_body = event_body.get('sessionId') or event_body.get('session_id')
-        user_id_from_body = event_body.get('userId') or event_body.get('user_id')
-        if session_id_from_body and user_id_from_body and (not session_id or not user_id):
-            agent_logger = get_agent_logger(session_id_from_body, user_id_from_body)
-            session_id = session_id_from_body
-            user_id = user_id_from_body
-            # Update agent module's logger
-            try:
-                import agent as agent_module
-                agent_module.agent_logger = agent_logger
-            except:
-                pass
-        
-        # Extract action from request
-        action = event_body.get('action', event.get('pathParameters', {}).get('action', 'chat'))
-        
-        logger.info(f"Processing action: {action}")
-        
+    else:
+        logger.warning("No body or action found in event")
+        event_body = event
+    
+    # Re-initialize agent_logger with session context from event_body if available
+    session_id_from_body = event_body.get('sessionId') or event_body.get('session_id')
+    user_id_from_body = event_body.get('userId') or event_body.get('user_id')
+    if session_id_from_body and user_id_from_body and (not session_id or not user_id):
+        agent_logger = get_agent_logger(session_id_from_body, user_id_from_body)
+        session_id = session_id_from_body
+        user_id = user_id_from_body
+        # Update agent module's logger
         try:
-            if action == 'analyze_stock':
-                logger.info("🔍 DEBUG: Routing to stock analysis handler")
-                result = handle_stock_analysis(event_body)
-            elif action == 'chat':
-                logger.debug("Routing to chat message handler")
-                result = handle_chat_message(event_body, agent_logger)
-            elif action == 'analyze_portfolio':
-                logger.info("🔍 DEBUG: Routing to portfolio analysis handler")
-                result = handle_portfolio_analysis(event_body)
-            elif action == 'calculate_correlation':
-                logger.info("🔍 DEBUG: Routing to correlation analysis handler")
-                result = handle_correlation_analysis(event_body)
-            elif action == 'health':
-                logger.info("🔍 DEBUG: Routing to health check handler")
-                # Lazy load for health check
-                _, _, FinancialTools = get_financial_agent()
-                result = {
-                    'statusCode': 200,
-                    'body': {
-                        'status': 'healthy',
-                        'service': 'Cosine Financial Analysis Agent',
-                        'version': '1.0.0',
-                        'timestamp': FinancialTools.get_current_timestamp()
-                    }
-                }
-            else:
-                logger.warning(f"Invalid action: {action}")
-                result = {
-                    'statusCode': 400,
-                    'body': {
-                        'error': 'Invalid action',
-                        'message': f'Action "{action}" is not supported. Available actions: analyze_stock, chat, analyze_portfolio, calculate_correlation, health'
-                    }
-                }
-            
-            logger.debug("Handler completed successfully")
-            
-        except Exception as handler_error:
-            logger.error(f"Error in handler routing: {str(handler_error)}")
-            import traceback
-            logger.debug(f"Handler error traceback: {traceback.format_exc()}")
+            import agent as agent_module
+            agent_module.agent_logger = agent_logger
+        except:
+            pass
+    
+    # Extract action from request
+    action = event_body.get('action', event.get('pathParameters', {}).get('action', 'chat'))
+    
+    logger.info(f"Processing action: {action}")
+    
+    try:
+        if action == 'analyze_stock':
+            logger.info("🔍 DEBUG: Routing to stock analysis handler")
+            result = handle_stock_analysis(event_body)
+        elif action == 'chat':
+            logger.debug("Routing to chat message handler")
+            result = handle_chat_message(event_body, agent_logger)
+        elif action == 'analyze_portfolio':
+            logger.info("🔍 DEBUG: Routing to portfolio analysis handler")
+            result = handle_portfolio_analysis(event_body)
+        elif action == 'calculate_correlation':
+            logger.info("🔍 DEBUG: Routing to correlation analysis handler")
+            result = handle_correlation_analysis(event_body)
+        elif action == 'health':
+            logger.info("🔍 DEBUG: Routing to health check handler")
+            # Lazy load for health check
+            _, _, FinancialTools = get_financial_agent()
             result = {
-                'statusCode': 500,
+                'statusCode': 200,
                 'body': {
-                    'error': 'Handler execution failed',
-                    'message': str(handler_error)
+                    'status': 'healthy',
+                    'service': 'Cosine Financial Analysis Agent',
+                    'version': '1.0.0',
+                    'timestamp': FinancialTools.get_current_timestamp()
+                }
+            }
+        else:
+            logger.warning(f"Invalid action: {action}")
+            result = {
+                'statusCode': 400,
+                'body': {
+                    'error': 'Invalid action',
+                    'message': f'Action "{action}" is not supported. Available actions: analyze_stock, chat, analyze_portfolio, calculate_correlation, health'
                 }
             }
         
-        # Format response for API Gateway
-        try:
-            serialized_body = json.dumps(result['body'])
-        except Exception as serialization_error:
-            logger.error(f"JSON serialization error: {str(serialization_error)}")
-            # Try to identify which field is causing the issue
-            for key, value in result['body'].items():
-                try:
-                    json.dumps(value)
-                except Exception as field_error:
-                    logger.error(f"Field '{key}' serialization error: {str(field_error)}")
-            raise serialization_error
+        logger.debug("Handler completed successfully")
         
-        return {
-            'statusCode': result['statusCode'],
-            'headers': cors_headers,
-            'body': serialized_body
-        }
-        
-    except Exception as e:
-        logger.error(f"Unexpected error in lambda_handler: {str(e)}")
-        return {
+    except Exception as handler_error:
+        logger.error(f"Error in handler routing: {str(handler_error)}")
+        import traceback
+        logger.debug(f"Handler error traceback: {traceback.format_exc()}")
+        result = {
             'statusCode': 500,
-            'headers': cors_headers,
-            'body': json.dumps({
-                'error': 'Internal server error',
-                'message': 'An unexpected error occurred while processing your request'
-            })
+            'body': {
+                'error': 'Handler execution failed',
+                'message': str(handler_error)
+            }
         }
+    
+    # Format response for API Gateway
+    try:
+        serialized_body = json.dumps(result['body'])
+    except Exception as serialization_error:
+        logger.error(f"JSON serialization error: {str(serialization_error)}")
+        # Try to identify which field is causing the issue
+        for key, value in result['body'].items():
+            try:
+                json.dumps(value)
+            except Exception as field_error:
+                logger.error(f"Field '{key}' serialization error: {str(field_error)}")
+        raise serialization_error
+    
+    return {
+        'statusCode': result['statusCode'],
+        'headers': cors_headers,
+        'body': serialized_body
+    }
 
 def handle_stock_analysis(event_body: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -795,69 +858,76 @@ Context Items Available: {len(context_items)} items
             is_edit = event_body.get('is_edit', False)
             edited_message_id = event_body.get('edited_message_id')
             
-            # Send response to SQS for async delivery
+            # Send response directly to WebSocket (no SQS queue needed!)
             try:
-                sqs_queue_url = os.environ.get('CHAT_RESPONSE_SQS_QUEUE_URL')
-                if sqs_queue_url:
+                from websocket_handler import WebSocketHandler
+                ws_handler = WebSocketHandler()
+                
+                # Generate message ID
+                message_id = event_body.get('messageId') or f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+                
+                # Send response directly to WebSocket connections
+                ws_handler.send_chat_response(user_id, session_id, response_content, message_id)
+                
+                logger.info(f"✅ Sent chat response directly to WebSocket (session: {session_id}, user: {user_id})")
+                
+                # Also save AI response to DynamoDB
+                try:
                     import boto3
-                    sqs_client = boto3.client('sqs')
+                    from decimal import Decimal
+                    dynamodb = boto3.resource('dynamodb')
+                    chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
                     
-                    # Create SQS message
-                    message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-                    sqs_message = {
-                        'type': 'chat_response',
-                        'session_id': session_id,
-                        'user_id': user_id,
-                        'payload': {
-                            'session_id': session_id,
-                            'user_id': user_id,
-                            'response': response_content,
-                            'message_id': message_id,
-                            'timestamp': int(time.time()),
-                            'message_type': 'ai_response'
-                        }
-                    }
-                    
-                    # Send to SQS
-                    response = sqs_client.send_message(
-                        QueueUrl=sqs_queue_url,
-                        MessageBody=json.dumps(sqs_message),
-                        MessageAttributes={
-                            'session_id': {'StringValue': session_id, 'DataType': 'String'},
-                            'user_id': {'StringValue': user_id, 'DataType': 'String'},
-                            'message_type': {'StringValue': 'chat_response', 'DataType': 'String'}
-                        }
+                    # Get current messages
+                    session_response = chat_sessions_table.get_item(
+                        Key={'user_id': user_id, 'session_id': session_id},
+                        ConsistentRead=True
                     )
                     
-                    logger.info(f"✅ Sent chat response to SQS queue: {response['MessageId']} (session: {session_id}, user: {user_id})")
-                    
-                    # Return acknowledgment
-                    return {
-                        'statusCode': 200,
-                        'body': {
-                            'message': 'Response sent for async delivery',
-                            'session_id': session_id,
-                            'user_id': user_id,
-                            'sqs_message_id': response['MessageId']
+                    if 'Item' in session_response:
+                        messages = session_response['Item'].get('messages', [])
+                        timestamp = int(time.time())
+                        
+                        # Add AI response message
+                        ai_message = {
+                            'id': message_id,
+                            'text': response_content,
+                            'sender': 'bot',
+                            'timestamp': timestamp,
+                            'message_type': 'text'
                         }
-                    }
-                else:
-                    logger.warning("CHAT_RESPONSE_SQS_QUEUE_URL not configured, falling back to direct response")
-                    # Fallback to direct response if SQS not configured
-                    response_body = {
-                        'response': response_content,
+                        
+                        # Avoid duplicates
+                        if not any(m.get('sender') == 'bot' and m.get('text') == response_content for m in messages):
+                            messages.append(ai_message)
+                            
+                            chat_sessions_table.update_item(
+                                Key={'user_id': user_id, 'session_id': session_id},
+                                UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                                ExpressionAttributeValues={
+                                    ':messages': messages,
+                                    ':count': len(messages),
+                                    ':timestamp': timestamp
+                                }
+                            )
+                            logger.info(f"✅ Saved AI response to DynamoDB: {message_id}")
+                except Exception as db_error:
+                    logger.warning(f"Failed to save AI response to DynamoDB: {str(db_error)}")
+                    # Continue - response was sent via WebSocket
+                
+                # Return acknowledgment
+                return {
+                    'statusCode': 200,
+                    'body': {
+                        'message': 'Response sent directly to WebSocket',
                         'session_id': session_id,
                         'user_id': user_id,
-                        'timestamp': int(time.time())
+                        'message_id': message_id
                     }
-                    return {
-                        'statusCode': 200,
-                        'body': response_body
-                    }
-                    
-            except Exception as sqs_error:
-                logger.error(f"Error sending to SQS: {str(sqs_error)}")
-                # Fallback to direct response on SQS error
+                }
+            except Exception as ws_error:
+                logger.error(f"Error sending to WebSocket: {str(ws_error)}")
+                # Fallback to direct response on WebSocket error
                 response_body = {
                     'response': response_content,
                     'session_id': session_id,
