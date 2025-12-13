@@ -1083,11 +1083,28 @@ export interface GovtContractsSearchResponse {
   index_used?: string;
 }
 
+export interface GovtContractsGetAwardRequest {
+  award_id: string;
+}
+
+export interface GovtContractsGetAwardResponse {
+  success: boolean;
+  result?: GovtContractAward;
+  count?: number;
+  error?: string;
+}
+
 export const govtContractsSearchAPI = {
   search: async (params: GovtContractsSearchRequest): Promise<GovtContractsSearchResponse> => {
     return apiRequest<GovtContractsSearchResponse>('/usaspending-search', {
       method: 'POST',
       body: JSON.stringify(params),
+    });
+  },
+  getAward: async (params: GovtContractsGetAwardRequest): Promise<GovtContractsGetAwardResponse> => {
+    return apiRequest<GovtContractsGetAwardResponse>('/usaspending-search', {
+      method: 'POST',
+      body: JSON.stringify({ award_id: params.award_id }),
     });
   },
 };

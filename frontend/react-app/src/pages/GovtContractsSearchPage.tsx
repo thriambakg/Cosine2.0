@@ -685,67 +685,42 @@ const GovtContractsSearchPage: React.FC = () => {
             `Refreshing award data... Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}.`
           );
           
-          // Wait a moment for DynamoDB to be consistent, then re-fetch
+          // Wait a moment for DynamoDB to be consistent, then fetch just this single award
           setTimeout(async () => {
             try {
-              // Re-run the current search to get fresh data
-              const currentFilters = { ...searchParams };
-              
-              // Keep agency names as-is (backend handles both names and codes)
-              // Remove any code fields if names are present to avoid confusion
-              if (currentFilters.awarding_agency_name && currentFilters.awarding_agency_name.length > 0) {
-                delete currentFilters.awarding_agency_code;
-              }
-              
-              if (currentFilters.funding_agency_name && currentFilters.funding_agency_name.length > 0) {
-                delete (currentFilters as any).funding_agency_code;
-              }
-              
-              // Remove empty arrays
-              Object.keys(currentFilters).forEach((key) => {
-                const value = (currentFilters as any)[key];
-                if (Array.isArray(value) && value.length === 0) {
-                  delete (currentFilters as any)[key];
-                }
+              // Fetch just the single award by ID (doesn't affect search results)
+              const awardResponse = await govtContractsSearchAPI.getAward({
+                award_id: awardId,
               });
               
-              const searchResponse = await govtContractsSearchAPI.search({
-                filters: currentFilters,
-                limit: pageSize,
-              });
-              
-              if (searchResponse.success && searchResponse.results) {
-                // Update search results with fresh data
-                setAllSearchResults(searchResponse.results);
+              if (awardResponse.success && awardResponse.result) {
+                // Update just this one award in the search results (if it exists in results)
+                setAllSearchResults((prevResults) => {
+                  const awardExists = prevResults.some((award: GovtContractAward) => award.award_id === awardId);
+                  if (awardExists) {
+                    // Update existing award in results
+                    return prevResults.map((award: GovtContractAward) =>
+                      award.award_id === awardId ? awardResponse.result! : award
+                    );
+                  } else {
+                    // Award not in current results, but that's okay - just update the dialog
+                    return prevResults;
+                  }
+                });
                 
-                // Find and select the updated award
-                const updatedAward = searchResponse.results.find(
-                  (award: GovtContractAward) => award.award_id === awardId
+                // Update the selected award with fresh data (keep dialog open)
+                setSelectedAwardForDetails(awardResponse.result);
+                
+                setEnrichmentSuccess(
+                  `Award data refreshed successfully! Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}.`
                 );
                 
-                if (updatedAward) {
-                  // Update the selected award with fresh data (keep dialog open)
-                  setSelectedAwardForDetails(updatedAward);
-                  
-                  setEnrichmentSuccess(
-                    `Award data refreshed successfully! Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}.`
-                  );
-                  
-                  // Clear success message after 5 seconds
-                  setTimeout(() => {
-                    setEnrichmentSuccess(null);
-                  }, 5000);
-                } else {
-                  // Award not in current search results - show message to user
-                  setEnrichmentSuccess(
-                    `Award data refreshed successfully! Updated ${response.transactions_count || 0} transactions, ${response.subawards_count || 0} subawards${response.child_awards_count ? `, ${response.child_awards_count} child awards` : ''}. Please close and reopen this dialog to see the updated data.`
-                  );
-                  setTimeout(() => {
-                    setEnrichmentSuccess(null);
-                  }, 5000);
-                }
+                // Clear success message after 5 seconds
+                setTimeout(() => {
+                  setEnrichmentSuccess(null);
+                }, 5000);
               } else {
-                setEnrichmentError('Award updated but could not refresh search results.');
+                setEnrichmentError(awardResponse.error || 'Award updated but could not refresh award data.');
               }
             } catch (fetchError) {
               console.error('Error refreshing award after enrichment:', fetchError);

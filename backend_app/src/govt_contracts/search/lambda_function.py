@@ -1108,6 +1108,142 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     return query_configs
 
 
+def get_award_by_id(award_id: str) -> Dict[str, Any]:
+    """
+    Fetch a single award by ID from DynamoDB (for refreshing after enrichment)
+    
+    Args:
+        award_id: The award ID to fetch
+    
+    Returns:
+        Dictionary with the award data or error
+    """
+    if not awards_table:
+        raise Exception("DynamoDB awards table not initialized")
+    
+    try:
+        # Get item from DynamoDB
+        response = awards_table.get_item(Key={'award_id': award_id})
+        item = response.get('Item')
+        
+        if not item:
+            return {
+                'success': False,
+                'error': f'Award {award_id} not found'
+            }
+        
+        # Check if this is an oversized award (stored in S3)
+        oversize_s3_key = item.get('oversize_s3_key')
+        if oversize_s3_key:
+            logger.info(f"Fetching oversized award {award_id} from S3")
+            full_award = fetch_oversized_award_from_s3(oversize_s3_key)
+            if full_award:
+                # Merge S3 data with DynamoDB GSI fields (S3 data takes precedence)
+                full_award.update(item)
+                item = full_award
+            else:
+                logger.warning(f"Failed to fetch from S3 for {award_id}, using DynamoDB data only")
+        
+        # Convert Decimal to float and handle other types
+        award = convert_decimal_to_float(item)
+        
+        # Check if this is an oversized item (full details in S3)
+        oversize_s3_key = award.get('oversize_s3_key')
+        if oversize_s3_key:
+            # Fetch full award details from S3
+            full_award = fetch_oversized_award_from_s3(oversize_s3_key)
+            if full_award:
+                # Replace award with full details from S3
+                award = convert_decimal_to_float(full_award)
+        
+        # Transactions and subawards are now stored directly in the table
+        # Ensure they exist (may be None or missing)
+        if 'transactions' not in award or award.get('transactions') is None:
+            award['transactions'] = []
+        if 'subawards' not in award or award.get('subawards') is None:
+            award['subawards'] = []
+        
+        # Parse is_assistance binary byte if present
+        if 'is_assistance' in award:
+            is_assistance_val = award['is_assistance']
+            if isinstance(is_assistance_val, bytes):
+                award['is_assistance'] = bool(is_assistance_val[0]) if len(is_assistance_val) > 0 else False
+            elif isinstance(is_assistance_val, int):
+                award['is_assistance'] = bool(is_assistance_val)
+        
+        # Calculate combined obligated amount from transactions for IDVs
+        if award.get('transactions') and isinstance(award['transactions'], list):
+            combined_obligated = 0.0
+            for transaction in award['transactions']:
+                if isinstance(transaction, dict):
+                    obligation = transaction.get('federal_action_obligation') or \
+                                transaction.get('total_obligated_amount') or \
+                                transaction.get('obligated_amount') or 0
+                    try:
+                        if isinstance(obligation, (int, float)):
+                            combined_obligated += float(obligation)
+                        elif isinstance(obligation, str):
+                            combined_obligated += float(obligation)
+                    except (ValueError, TypeError):
+                        pass
+            
+            if combined_obligated > 0 and (not award.get('total_obligated_amount') or award.get('total_obligated_amount') == 0):
+                award['combined_obligated_amount'] = combined_obligated
+        
+        # Handle child awards if this is an IDV
+        if award.get('is_idv_parent') and award.get('child_awards'):
+        child_award_ids = award.get('child_awards', [])
+        if isinstance(child_award_ids, list) and len(child_award_ids) > 0:
+            logger.info(f"Fetching details for {len(child_award_ids)} child awards for IDV {award_id}")
+            child_awards_details = []
+            for child_id in child_award_ids:
+                try:
+                    child_response = awards_table.get_item(Key={'award_id': str(child_id)})
+                    if 'Item' in child_response:
+                        child_item = child_response['Item']
+                        child_item = convert_decimal_to_float(child_item)
+                        # Create summary for child award (same format as search function)
+                        child_summary = {
+                            'award_id': child_item.get('award_id'),
+                            'award_id_piid': child_item.get('award_id_piid'),
+                            'description': child_item.get('description'),
+                            'total_obligated_amount': child_item.get('total_obligated_amount'),
+                            'period_of_performance_start_date': child_item.get('period_of_performance_start_date') or child_item.get('period_start_date'),
+                            'period_of_performance_current_end_date': child_item.get('period_of_performance_current_end_date') or child_item.get('period_end_date'),
+                            'transaction_count': child_item.get('transaction_count', 0),
+                            'subaward_count': child_item.get('subaward_count', 0),
+                            'award_type': child_item.get('award_type'),
+                            'award_type_description': child_item.get('award_type_description'),
+                            'recipient_name': child_item.get('recipient_name'),
+                            'awarding_agency_name': child_item.get('awarding_agency_name'),
+                            'parent_idv_id': child_item.get('parent_idv_id'),
+                            'is_idv_child': child_item.get('is_idv_child', False),
+                        }
+                        child_awards_details.append(child_summary)
+                    else:
+                        logger.warning(f"Child award {child_id} not found in DynamoDB")
+                except Exception as e:
+                    logger.error(f"Error fetching child award {child_id}: {str(e)}")
+                    continue
+            
+            if child_awards_details:
+                award['child_awards_details'] = child_awards_details
+                logger.info(f"Added {len(child_awards_details)} child award details for IDV {award_id}")
+        
+        return {
+            'success': True,
+            'result': award,
+            'count': 1
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching award {award_id}: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
 def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Search awards in DynamoDB using filters with multi-GSI intersection approach
@@ -1966,21 +2102,27 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Direct Lambda invocation
             body = event
         
-        # Extract parameters
-        filters = body.get('filters', {})
-        limit = int(body.get('limit', 100))
-        last_evaluated_key = body.get('last_evaluated_key')
-        
-        # Validate limit
-        if limit > 1000:
-            limit = 1000  # Cap at 1000
-        if limit < 1:
-            limit = 100
-        
-        logger.info(f"Searching awards with filters: {json.dumps(filters, default=str)}, limit: {limit}")
-        
-        # Search awards
-        result = search_awards(filters, limit=limit, last_evaluated_key=last_evaluated_key)
+        # Check if this is a single-item fetch request (for refreshing after enrichment)
+        award_id = body.get('award_id')
+        if award_id:
+            logger.info(f"Fetching single award by ID: {award_id}")
+            result = get_award_by_id(award_id)
+        else:
+            # Extract parameters for search
+            filters = body.get('filters', {})
+            limit = int(body.get('limit', 100))
+            last_evaluated_key = body.get('last_evaluated_key')
+            
+            # Validate limit
+            if limit > 1000:
+                limit = 1000  # Cap at 1000
+            if limit < 1:
+                limit = 100
+            
+            logger.info(f"Searching awards with filters: {json.dumps(filters, default=str)}, limit: {limit}")
+            
+            # Search awards
+            result = search_awards(filters, limit=limit, last_evaluated_key=last_evaluated_key)
         
         # Log final results
         result_count = result.get('count', 0)
