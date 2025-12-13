@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 
 export interface ContextItem {
   id: string;
-  type: 'tile' | 'article' | 'chart' | 'custom';
+  type: 'tile' | 'article' | 'chart' | 'congress_bill' | 'custom';
   title: string;
   subtitle?: string;
   data: any;
