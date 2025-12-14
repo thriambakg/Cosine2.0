@@ -390,8 +390,43 @@ class WebSocketHandler:
                 }
                 self.send_to_client(connection_id, welcome_message)
             
-            # Save user message to database
-            self._save_user_message(user_id, session_id, message_id, message_text, files)
+            # Check if session exists, create if needed
+            if not self._check_session_exists(user_id, session_id):
+                logger.info(f"Session {session_id} doesn't exist, creating it")
+                self._create_session_for_first_message(user_id, session_id, model)
+            
+            # Extract context items and check for file attachment flag
+            context_items = message_data.get('contextItems', [])
+            session_variables_updated = message_data.get('session_variables_updated', False)
+            
+            # Check if message has files attached (files were uploaded via REST API)
+            has_files_flag = message_data.get('hasFiles', False)
+            uploaded_files_metadata = message_data.get('uploadedFiles', [])  # File metadata from frontend for display
+            
+            # If hasFiles flag is set, get files from session_variables (uploaded via REST API)
+            uploaded_files = []
+            if has_files_flag:
+                logger.info(f"Message has files attached (uploaded via REST API), retrieving from session_variables")
+                try:
+                    session_response = self.chat_sessions_table.get_item(
+                        Key={'user_id': user_id, 'session_id': session_id}
+                    )
+                    if 'Item' in session_response:
+                        session_vars = session_response['Item'].get('session_variables', {})
+                        uploaded_files_from_session = session_vars.get('uploaded_files', [])
+                        if uploaded_files_from_session:
+                            # Use files from session_variables (already uploaded to S3)
+                            uploaded_files = uploaded_files_from_session
+                            logger.info(f"Retrieved {len(uploaded_files)} files from session_variables")
+                        else:
+                            logger.warning(f"hasFiles flag set but no files found in session_variables")
+                except Exception as e:
+                    logger.error(f"Error retrieving files from session_variables: {str(e)}")
+            
+            # Save user message to database with file metadata for display
+            # Use uploadedFiles metadata from WebSocket message (has display info like name, size, type)
+            files_for_display = uploaded_files_metadata if has_files_flag else files
+            self._save_user_message(user_id, session_id, message_id, message_text, files_for_display)
             
             # Send acknowledgment
             ack_message = {
@@ -401,16 +436,6 @@ class WebSocketHandler:
                 'timestamp': datetime.now().isoformat()
             }
             self.send_to_client(connection_id, ack_message)
-            
-            # Check if session exists, create if needed
-            if not self._check_session_exists(user_id, session_id):
-                logger.info(f"Session {session_id} doesn't exist, creating it")
-                self._create_session_for_first_message(user_id, session_id, model)
-            
-            # Extract context items and uploaded files
-            context_items = message_data.get('contextItems', [])
-            uploaded_files = message_data.get('uploadedFiles', [])
-            session_variables_updated = message_data.get('session_variables_updated', False)
             
             # Handle session variables update notification
             if session_variables_updated:
@@ -439,13 +464,17 @@ class WebSocketHandler:
             from lambda_handler import handle_chat_message
             
             # Prepare event body for chat handler
+            # If hasFiles flag is set, use files from session_variables (already uploaded)
+            # Otherwise use files from WebSocket message (legacy support)
+            files_for_handler = uploaded_files if has_files_flag and uploaded_files else files
+            
             event_body = {
                 'action': 'chat',
                 'message': message_text,
                 'userId': user_id,
                 'sessionId': session_id,
                 'model': model,
-                'files': files,
+                'files': files_for_handler,
                 'contextItems': context_items if has_context else None,
                 'originalMessage': original_user_message if (has_context or has_files) else None,
                 'uploadedFiles': uploaded_files if has_files else None,

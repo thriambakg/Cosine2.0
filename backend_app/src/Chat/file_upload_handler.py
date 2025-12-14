@@ -225,21 +225,12 @@ class FileUploadHandler:
             except Exception as e:
                 logger.error(f"Error updating session variables: {str(e)}")
             
-            # Process message with uploaded files directly (no Lambda invocation!)
-            try:
-                from websocket_handler import WebSocketHandler
-                ws_handler = WebSocketHandler()
-                
-                # Process message with files directly
-                ws_handler.process_file_upload_message(
-                    user_id, session_id, message, uploaded_files, context_items, model
-                )
-                
-                logger.info("Successfully processed message with uploaded files")
-            except Exception as e:
-                logger.error(f"Error processing message with files: {str(e)}")
-                # Continue anyway - files are uploaded
+            # Files are uploaded and session variables are updated
+            # The message will be sent via WebSocket separately by the frontend
+            # This ensures files are uploaded before message processing begins
+            logger.info(f"Files uploaded successfully. Waiting for WebSocket message to process.")
             
+            # Return immediately - frontend will send message via WebSocket
             return {
                 'statusCode': 200,
                 'headers': {
@@ -249,7 +240,7 @@ class FileUploadHandler:
                     'Access-Control-Allow-Methods': 'POST, OPTIONS'
                 },
                 'body': json.dumps({
-                    'message': f'Successfully uploaded {len(uploaded_files)} file(s) and processed message',
+                    'message': f'Successfully uploaded {len(uploaded_files)} file(s)',
                     'uploaded_files': uploaded_files
                 })
             }

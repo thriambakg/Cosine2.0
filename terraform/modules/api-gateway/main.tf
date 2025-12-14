@@ -121,7 +121,6 @@ resource "aws_api_gateway_method_response" "this" {
     "method.response.header.Access-Control-Allow-Methods"     = true
     "method.response.header.Access-Control-Allow-Origin"      = true
     "method.response.header.Access-Control-Allow-Credentials" = true
-    "method.response.header.Content-Type"                     = true
   }
 
   response_models = {
@@ -137,20 +136,15 @@ resource "aws_api_gateway_method_response" "this" {
   ]
 }
 
-# Integration responses - only for MOCK integrations
-# For AWS_PROXY, headers are passed through automatically from Lambda response
+# Integration responses - for all methods (both Lambda and MOCK)
 resource "aws_api_gateway_integration_response" "this" {
-  for_each = {
-    for k, v in var.methods : k => v
-    if v.integration_type == "MOCK"
-  }
+  for_each = var.methods
 
   rest_api_id = aws_api_gateway_rest_api.this.id
   resource_id = aws_api_gateway_resource.this[each.value.resource_key].id
   http_method = aws_api_gateway_method.this[each.key].http_method
   status_code = aws_api_gateway_method_response.this[each.key].status_code
 
-  # Static CORS headers for MOCK integrations
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
     "method.response.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
@@ -158,9 +152,11 @@ resource "aws_api_gateway_integration_response" "this" {
     "method.response.header.Access-Control-Allow-Credentials" = "'true'"
   }
 
-  # Response template for MOCK integrations
-  response_templates = {
+  # For MOCK integrations, we need a response template
+  response_templates = each.value.integration_type == "MOCK" ? {
     "application/json" = "{\"statusCode\": 200}"
+    } : {
+    "application/json" = ""
   }
 
   # Add lifecycle to prevent recreation issues
@@ -184,9 +180,6 @@ resource "aws_lambda_permission" "lambda_permissions" {
   function_name = each.value.function_arn
   principal     = "apigateway.amazonaws.com"
 
-  # Use wildcard for stage to allow all stages (dev, staging, production, etc.)
-  # Format: arn:aws:execute-api:region:account:api-id/*/method/resource-path
-  # This is the standard pattern for API Gateway Lambda permissions
   source_arn = "${aws_api_gateway_rest_api.this.execution_arn}/*/${each.value.http_method}/${each.value.resource_path}"
 }
 

@@ -20,6 +20,7 @@ export interface SharedMessage {
   }>;
   sessionId: string;
   source: 'chatpage' | 'sidebar' | 'database';
+  isStreaming?: boolean;  // Flag for streaming messages
 }
 
 export interface UnifiedMessageData {
@@ -686,7 +687,7 @@ class UnifiedMessageHandlerService {
   }
 
   /**
-   * Send file message via WebSocket
+   * Send file message: upload files via REST API, then send message via WebSocket
    */
   private async sendFileMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
     const ws = this.webSocketConnections.get(sessionId);
@@ -697,14 +698,14 @@ class UnifiedMessageHandlerService {
     // For file messages, we need to send the files to the file handler endpoint first
     if (messageData.files && messageData.files.length > 0) {
       try {
-        // Send files to file handler endpoint
+        // Step 1: Upload files via REST API
         const filesData = messageData.files.map(file => ({
           filename: file.name,
           content_type: file.type,
           data: file.compressedData
         }));
 
-        const fileMessageRequest = {
+        const fileUploadRequest = {
           user_id: messageData.userId,
           session_id: sessionId,
           message: {
@@ -714,18 +715,15 @@ class UnifiedMessageHandlerService {
           },
           files: filesData,
           context_items: messageData.contextItems || [],
-          model: messageData.model || 'claude-sonnet-4'  // Include selected model
+          model: messageData.model || 'claude-sonnet-4'
         };
 
         const url = `${process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'}/files`;
-        const requestBody = JSON.stringify(fileMessageRequest);
+        const requestBody = JSON.stringify(fileUploadRequest);
         
-        // Log request details for debugging
-        console.log('📁 UnifiedMessageHandler: Sending file upload request:', {
+        console.log('📁 UnifiedMessageHandler: Uploading files via REST API:', {
           url,
           fileCount: filesData.length,
-          totalSize: filesData.reduce((sum, f) => sum + (f.data?.length || 0), 0),
-          requestSize: requestBody.length,
           messageId: messageData.messageId,
           sessionId: sessionId
         });
@@ -738,16 +736,7 @@ class UnifiedMessageHandlerService {
           body: requestBody
         });
 
-        // Log response details
-        console.log('📁 UnifiedMessageHandler: File upload response:', {
-          status: response.status,
-          statusText: response.statusText,
-          headers: Object.fromEntries(response.headers.entries()),
-          ok: response.ok
-        });
-
         if (!response.ok) {
-          // Try to get error details from response
           let errorMessage = `HTTP error! status: ${response.status}`;
           try {
             const errorBody = await response.text();
@@ -764,10 +753,37 @@ class UnifiedMessageHandlerService {
           throw new Error(errorMessage);
         }
 
-        const result = await response.json();
-        console.log('📁 UnifiedMessageHandler: Files sent to file handler:', result);
+        const uploadResult = await response.json();
+        console.log('✅ UnifiedMessageHandler: Files uploaded successfully:', uploadResult);
+
+        // Step 2: Send message via WebSocket with file attachment flag
+        // Include file metadata for frontend display
+        const uploadedFilesMetadata = messageData.files.map(file => ({
+          name: file.name,
+          size: file.size,
+          type: file.type
+        }));
+
+        const websocketMessage = {
+          action: 'chat',
+          type: 'chat_message',
+          message: messageData.text,
+          userId: messageData.userId,
+          sessionId: sessionId,
+          model: messageData.model,
+          messageId: messageData.messageId,
+          contextItems: messageData.contextItems || [],
+          context: messageData.context,
+          // Flag indicating files are attached (already uploaded)
+          hasFiles: true,
+          uploadedFiles: uploadedFilesMetadata  // File metadata for frontend display
+        };
+
+        console.log('📤 UnifiedMessageHandler: Sending message via WebSocket with file attachment flag');
+        ws.send(JSON.stringify(websocketMessage));
+        console.log('✅ UnifiedMessageHandler: File message sent via WebSocket');
       } catch (error) {
-        console.error('❌ UnifiedMessageHandler: Error sending files to file handler:', error);
+        console.error('❌ UnifiedMessageHandler: Error in file message flow:', error);
         throw error;
       }
     } else {
