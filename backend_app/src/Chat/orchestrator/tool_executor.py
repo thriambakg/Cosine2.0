@@ -230,7 +230,10 @@ class ToolExecutor:
             def wrapped_chart(symbol: str, data_json: Any, chart_type: str = 'line', title: str = None):
                 logger.info(f"wrapped_chart called with symbol={symbol}, data_json length={len(data_json) if isinstance(data_json, str) else 'not a string'}, chart_type={chart_type}, title={title}")
                 try:
+                    import uuid
                     tool_use_dict = {
+                        'toolUseId': str(uuid.uuid4()),
+                        'toolName': 'generate_chart_tool',
                         'input': {
                             'symbol': symbol,
                             'data_json': data_json,
@@ -242,6 +245,18 @@ class ToolExecutor:
                     logger.info(f"Created ToolUse object, calling generate_chart_tool")
                     result = generate_chart_tool(tool_use)
                     logger.info(f"generate_chart_tool returned result type: {type(result)}")
+                    
+                    # Extract result from ToolResult format
+                    if hasattr(result, 'content'):
+                        # Extract text from content array
+                        if isinstance(result.content, list) and len(result.content) > 0:
+                            return result.content[0].get('text', result.content[0])
+                        return result.content
+                    elif isinstance(result, dict):
+                        content = result.get('content', result.get('output', result))
+                        if isinstance(content, list) and len(content) > 0:
+                            return content[0].get('text', content[0])
+                        return content
                     return result
                 except Exception as e:
                     logger.error(f"Error in wrapped_chart: {e}")

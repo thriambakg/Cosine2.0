@@ -1955,9 +1955,13 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
             from reportlab.lib.pagesizes import letter, A4
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
             from reportlab.lib.units import inch
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image
             from reportlab.lib.enums import TA_LEFT, TA_CENTER
             from io import BytesIO
+            import boto3
+            import re
+            import json
+            import os
             
             # Create PDF in memory
             buffer = BytesIO()
@@ -1997,9 +2001,61 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                 leading=12
             )
             
+            # Helper function to download image from S3 and embed in PDF
+            def embed_image_from_s3(s3_key: str, max_width: float = 6*inch, max_height: float = 4*inch):
+                """Download image from S3 and return Image element for PDF"""
+                try:
+                    s3_client = boto3.client('s3')
+                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
+                    
+                    if not bucket_name:
+                        logger.warning(f"Cannot embed image: bucket name not configured")
+                        return None
+                    
+                    # Download image from S3
+                    response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+                    image_data = response['Body'].read()
+                    
+                    # Create Image from bytes
+                    img_buffer = BytesIO(image_data)
+                    img = Image(img_buffer, width=max_width, height=max_height, kind='proportional')
+                    return img
+                except Exception as e:
+                    logger.error(f"Error embedding image from S3 {s3_key}: {str(e)}")
+                    return None
+            
+            # First, try to parse entire content as JSON to extract chart references
+            chart_s3_keys = []
+            try:
+                # Try to parse as JSON
+                content_json = json.loads(content)
+                if isinstance(content_json, dict) and 's3_key' in content_json:
+                    chart_s3_keys.append(content_json['s3_key'])
+                    logger.info(f"Found chart S3 key in JSON content: {content_json['s3_key']}")
+                elif isinstance(content_json, list):
+                    # Check if any item in the list has s3_key
+                    for item in content_json:
+                        if isinstance(item, dict) and 's3_key' in item:
+                            chart_s3_keys.append(item['s3_key'])
+                            logger.info(f"Found chart S3 key in JSON list: {item['s3_key']}")
+            except (json.JSONDecodeError, ValueError):
+                # Not JSON, continue with line-by-line parsing
+                pass
+            
             # Parse content and convert to PDF elements
             lines = content.split('\n')
             current_section = []
+            s3_client = None
+            
+            # If we found chart S3 keys from JSON parsing, embed them first
+            for s3_key in chart_s3_keys:
+                if s3_key.endswith('.png'):
+                    logger.info(f"Embedding chart image from JSON: {s3_key}")
+                    img = embed_image_from_s3(s3_key)
+                    if img:
+                        story.append(Spacer(1, 0.2*inch))
+                        story.append(img)
+                        story.append(Spacer(1, 0.2*inch))
             
             for line in lines:
                 line = line.strip()
@@ -2009,6 +2065,39 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                         current_section = []
                     story.append(Spacer(1, 0.1*inch))
                     continue
+                
+                # Check for S3 key references (format: users/.../agent-files/...png)
+                s3_key_match = re.search(r'users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>]+\.png', line)
+                if s3_key_match:
+                    s3_key = s3_key_match.group(0)
+                    logger.info(f"Found chart image reference in content: {s3_key}")
+                    # Embed the image
+                    img = embed_image_from_s3(s3_key)
+                    if img:
+                        if current_section:
+                            story.extend(current_section)
+                            current_section = []
+                        story.append(Spacer(1, 0.2*inch))
+                        story.append(img)
+                        story.append(Spacer(1, 0.2*inch))
+                        # Remove the S3 key from the line and continue processing the rest
+                        line = re.sub(r'users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>]+\.png', '[Chart embedded above]', line)
+                
+                # Check for JSON chart references (format: {"s3_key": "users/.../agent-files/...png"})
+                json_match = re.search(r'\{"s3_key":\s*"([^"]+)"', line)
+                if json_match:
+                    s3_key = json_match.group(1)
+                    logger.info(f"Found JSON chart reference: {s3_key}")
+                    img = embed_image_from_s3(s3_key)
+                    if img:
+                        if current_section:
+                            story.extend(current_section)
+                            current_section = []
+                        story.append(Spacer(1, 0.2*inch))
+                        story.append(img)
+                        story.append(Spacer(1, 0.2*inch))
+                        # Remove the JSON reference from the line
+                        line = re.sub(r'\{"s3_key":\s*"[^"]+"[^}]*\}', '[Chart embedded above]', line)
                 
                 # Detect headings (markdown style or plain text)
                 if line.startswith('# '):

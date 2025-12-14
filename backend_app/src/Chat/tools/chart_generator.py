@@ -262,7 +262,18 @@ class UnifiedChartGenerator:
             )
             
             logger.info(f"Generated chart: {filename}")
-            return result
+            
+            # Construct S3 key for embedding in PDFs
+            s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
+            
+            # Return JSON string with both message and S3 key for PDF embedding
+            import json
+            return json.dumps({
+                "message": result,
+                "s3_key": s3_key,
+                "filename": filename,
+                "file_type": "png"
+            })
             
         except ImportError:
             logger.warning("lambda_invocation module not available - falling back to manual upload")
@@ -576,32 +587,65 @@ class UnifiedChartGenerator:
 # Global instance
 chart_generator = UnifiedChartGenerator()
 
-@tool
-def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", title: str = None) -> str:
+def generate_chart_tool(tool_use: ToolUse) -> ToolResult:
     """
     Generate a unified chart that works with both stock and cryptocurrency data.
     Automatically detects data type and generates appropriate charts.
     
-    Args:
+    Args (via ToolUse):
         symbol: Stock ticker or cryptocurrency symbol
         data_json: JSON string containing data from get_financial_data or get_crypto_data_tool
         chart_type: Type of chart ('line', 'candlestick', 'volume', 'ohlc') - defaults to 'line'
         title: Custom title for the chart (optional)
     
     Returns:
-        Success message with file details
+        ToolResult with success message and file details
     """
     try:
+        # Extract parameters from ToolUse object
+        input_data = tool_use["input"]
+        symbol = input_data.get("symbol")
+        data_json = input_data.get("data_json")
+        chart_type = input_data.get("chart_type", "line")
+        title = input_data.get("title")
+        
+        if not symbol:
+            return {
+                "toolUseId": tool_use["toolUseId"],
+                "status": "error",
+                "content": [{"text": "Error: symbol parameter is required"}]
+            }
+        
+        if not data_json:
+            return {
+                "toolUseId": tool_use["toolUseId"],
+                "status": "error",
+                "content": [{"text": "Error: data_json parameter is required"}]
+            }
+        
         agent_logger.info(f"Generating {chart_type} chart for {symbol}")
-        # Debug logging to see what data is being passed
         logger.info(f"🔍 DEBUG: generate_chart_tool called with symbol={symbol}, chart_type={chart_type}")
         logger.info(f"🔍 DEBUG: data_json length: {len(data_json)} characters")
         logger.info(f"🔍 DEBUG: data_json preview: {data_json[:200]}...")
         
-        return chart_generator.generate_chart(symbol, data_json, chart_type, title)
+        result = chart_generator.generate_chart(symbol, data_json, chart_type, title)
+        
+        # The result is already a JSON string with s3_key from generate_chart
+        # Return it as-is for PDF embedding
+        return {
+            "toolUseId": tool_use.get("toolUseId", "unknown"),
+            "status": "success",
+            "content": [{"text": result}]
+        }
     except Exception as e:
-        logger.error(f"Error generating chart for {symbol}: {str(e)}")
-        return f"❌ Error generating chart: {str(e)}"
+        logger.error(f"Error generating chart: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {
+            "toolUseId": tool_use.get("toolUseId", "unknown"),
+            "status": "error",
+            "content": [{"text": f"❌ Error generating chart: {str(e)}"}]
+        }
 
 @tool
 def generate_stock_chart(symbol: str, timeframe: str = "1y", chart_type: str = "line", title: str = None, start_date: str = None, end_date: str = None) -> str:
