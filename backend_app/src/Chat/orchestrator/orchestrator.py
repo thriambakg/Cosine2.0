@@ -64,18 +64,58 @@ class Orchestrator:
             
             try:
                 # Resolve placeholders in parameters using previous step results
+                logger.debug(f"Resolving placeholders for step {step_num}, parameters before resolution: {parameters}")
                 parameters = self._resolve_placeholders(parameters, results, step_num)
+                logger.debug(f"Parameters after resolution: {parameters}")
                 
                 # Check if any placeholders failed to resolve (empty string values that should have been replaced)
                 unresolved_placeholders = []
-                for key, value in parameters.items():
-                    if isinstance(value, str):
-                        # Check for unresolved placeholder patterns
-                        if re.search(r'\{\{?step[_\s]*\d+[._].*\}\}?', value):
-                            unresolved_placeholders.append(f"{key}={value}")
+                missing_required_params = []
+                
+                # Get tool function signature to check required parameters
+                try:
+                    import inspect
+                    tool_func = self.tool_executor._get_tool_function(tool_name)
+                    sig = inspect.signature(tool_func)
+                    
+                    for key, value in parameters.items():
+                        param = sig.parameters.get(key)
+                        is_required = param and param.default == inspect.Parameter.empty
+                        
+                        if isinstance(value, str):
+                            # Check for unresolved placeholder patterns
+                            if re.search(r'\{\{?step[_\s]*\d+[._].*\}\}?', value):
+                                unresolved_placeholders.append(f"{key}={value}")
+                                if is_required:
+                                    missing_required_params.append(key)
+                            # Also check if required parameter is empty string (placeholder resolved to empty)
+                            elif is_required and value.strip() == '':
+                                missing_required_params.append(key)
+                                logger.warning(f"Required parameter '{key}' resolved to empty string")
+                        elif value is None or value == '':
+                            # Check if this is a required parameter
+                            if is_required:
+                                missing_required_params.append(key)
+                                logger.warning(f"Required parameter '{key}' is None or empty")
+                    
+                    # Check for missing required parameters that weren't provided at all
+                    for param_name, param in sig.parameters.items():
+                        if param.default == inspect.Parameter.empty and param_name not in parameters:
+                            # Skip session_id and user_id as they're added automatically
+                            if param_name not in ['session_id', 'user_id']:
+                                missing_required_params.append(param_name)
+                except Exception as e:
+                    logger.warning(f"Could not check tool signature for {tool_name}: {e}")
                 
                 if unresolved_placeholders:
                     logger.warning(f"Unresolved placeholders in step {step_num}: {unresolved_placeholders}")
+                
+                if missing_required_params:
+                    error_msg = f"Step {step_num} failed: Missing required parameters: {', '.join(missing_required_params)}"
+                    if unresolved_placeholders:
+                        error_msg += f" (unresolved placeholders: {', '.join(unresolved_placeholders)})"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
                 
                 # Report tool starting
                 self.status_reporter.report_tool_starting(
@@ -267,9 +307,11 @@ class Orchestrator:
                     if step_match:
                         step_num = int(step_match.group(1))
                         field = step_match.group(2).strip() if step_match.group(2) else 'result'
+                        logger.debug(f"Parsed placeholder: step_num={step_num}, field='{field}'")
                         # Handle "result.field" pattern - extract just the field part
                         if field.startswith('result.'):
                             field = field.replace('result.', '', 1)
+                            logger.debug(f"Stripped 'result.' prefix, new field='{field}'")
                         replacement = ''  # Initialize replacement at the start
                         
                         if step_num < current_step:
@@ -297,20 +339,27 @@ class Orchestrator:
                                 # we need to read from S3 and extract the nested field
                                 if needs_s3_read and ('.' in field or field not in ['result', 's3_key', 'file_reference']):
                                     try:
+                                        logger.info(f"Reading from S3 for step {step_num}, field '{field}', s3_key: {s3_key_to_read}")
                                         # Read the actual result from S3
                                         result_data = self.data_storage.retrieve_result({'s3_key': s3_key_to_read})
+                                        logger.info(f"Retrieved data from S3, type: {type(result_data)}, keys: {list(result_data.keys()) if isinstance(result_data, dict) else 'Not a dict'}")
                                         
                                         # If field is "result.X", extract X from the result
                                         if field.startswith('result.'):
                                             nested_field = field.replace('result.', '', 1)
+                                            logger.info(f"Extracting nested field '{nested_field}' from result")
                                             replacement = self._extract_nested_field(result_data, nested_field)
                                         else:
                                             # Field is directly in the result (e.g., "time_series", "metrics_table")
+                                            logger.info(f"Extracting direct field '{field}' from result")
                                             replacement = self._extract_nested_field(result_data, field)
+                                        
+                                        logger.info(f"Extracted replacement, type: {type(replacement)}, empty: {not replacement if replacement else True}")
                                         
                                         # Convert to JSON string if it's a dict/list
                                         if isinstance(replacement, (dict, list)):
                                             replacement = json.dumps(replacement)
+                                            logger.info(f"Converted replacement to JSON string, length: {len(replacement)}")
                                         
                                         if replacement:
                                             # Replace placeholder
@@ -318,11 +367,20 @@ class Orchestrator:
                                             placeholder_single_brace = f'{{{placeholder}}}'
                                             if placeholder_with_braces in resolved_value:
                                                 resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                                                logger.info(f"Replaced placeholder {placeholder_with_braces} with data (length: {len(str(replacement))})")
                                             if placeholder_single_brace in resolved_value:
                                                 resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                                                logger.info(f"Replaced placeholder {placeholder_single_brace} with data (length: {len(str(replacement))})")
+                                            logger.debug(f"Successfully resolved placeholder {placeholder} to field {field}")
                                             continue
+                                        else:
+                                            logger.warning(f"Field {field} extracted from S3 but is empty or None")
                                     except Exception as e:
-                                        logger.warning(f"Could not read from S3 or extract field {field}: {e}")
+                                        logger.error(f"Could not read from S3 or extract field {field}: {e}")
+                                        logger.error(f"S3 key attempted: {s3_key_to_read}")
+                                        logger.error(f"Step result keys: {list(step_result.keys()) if isinstance(step_result, dict) else 'Not a dict'}")
+                                        import traceback
+                                        logger.error(f"Traceback: {traceback.format_exc()}")
                                 
                                 # Handle simple field requests
                                 if field == 'result':
