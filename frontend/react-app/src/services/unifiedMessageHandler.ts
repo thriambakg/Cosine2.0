@@ -20,6 +20,7 @@ export interface SharedMessage {
   }>;
   sessionId: string;
   source: 'chatpage' | 'sidebar' | 'database';
+  isStreaming?: boolean; // Indicates if message is currently being streamed
 }
 
 export interface UnifiedMessageData {
@@ -954,9 +955,15 @@ class UnifiedMessageHandlerService {
       streamingMessage.text += (content || '');
     }
     
+    // Ensure streamingMessage is defined (should always be at this point)
+    if (!streamingMessage) {
+      console.error('⚠️ UnifiedMessageHandler: streamingMessage is undefined, cannot update');
+      return;
+    }
+    
     // Update the message in cache
     const updatedMessages = this.localCache.get(sessionId)!.map(m => 
-      m.id === message_id && m.sender === 'ai' ? streamingMessage! : m
+      m.id === message_id && m.sender === 'ai' ? streamingMessage : m
     );
     this.localCache.set(sessionId, updatedMessages);
     
