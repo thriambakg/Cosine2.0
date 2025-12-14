@@ -139,6 +139,10 @@ class Orchestrator:
         else:
             results['status'] = 'failed'
         
+        # Create structured summary for Reasoning LLM
+        summary = self._create_execution_summary(plan, results)
+        results['summary'] = summary
+        
         return results
     
     def _is_large_result(self, result: Any) -> bool:
@@ -166,4 +170,205 @@ class Orchestrator:
             return len(result_str) > LARGE_RESULT_THRESHOLD
         
         return False
+    
+    def _create_execution_summary(self, plan: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a structured summary of the execution for the Reasoning LLM.
+        
+        Args:
+            plan: The original execution plan
+            results: Execution results from execute_plan
+            
+        Returns:
+            Structured summary with task_completed, file_references, key_results, table, notes
+        """
+        import json
+        
+        # Extract task description from plan
+        task_completed = plan.get('query', 'Task execution completed')
+        
+        # Format file references
+        file_references = []
+        for file_ref in results.get('file_references', []):
+            file_references.append({
+                'filename': file_ref.get('filename', 'Unknown'),
+                's3_key': file_ref.get('s3_key', ''),
+                'type': self._infer_file_type(file_ref.get('filename', '')),
+                'description': self._generate_file_description(file_ref, results),
+                'size_bytes': file_ref.get('size_bytes', 0),
+                'stored_at': file_ref.get('stored_at', '')
+            })
+        
+        # Extract key results from execution
+        key_results = {}
+        table = []
+        notes = []
+        
+        # Process step results to extract key data
+        for step_result in results.get('results', []):
+            if step_result.get('status') == 'completed':
+                tool_name = step_result.get('tool', '')
+                
+                # Extract key metrics from results
+                if 'result' in step_result:
+                    result_data = step_result['result']
+                    key_results.update(self._extract_key_metrics(tool_name, result_data))
+                    
+                    # Create table rows for tabular data
+                    table_rows = self._extract_table_data(tool_name, result_data)
+                    if table_rows:
+                        table.extend(table_rows)
+                
+                # Add notes about what was accomplished
+                if 'file_reference' in step_result:
+                    file_ref = step_result['file_reference']
+                    notes.append(f"Generated {file_ref.get('filename', 'file')} using {tool_name}")
+                else:
+                    notes.append(f"Completed {tool_name} successfully")
+        
+        # Add execution summary notes
+        if results['status'] == 'completed':
+            notes.insert(0, f"Successfully completed {results['steps_completed']} step(s)")
+        elif results['status'] == 'partial':
+            notes.insert(0, f"Completed {results['steps_completed']} of {results['steps_completed'] + results['steps_failed']} steps")
+        else:
+            notes.insert(0, f"Execution failed: {results['steps_failed']} step(s) failed")
+        
+        # Create summary structure
+        summary = {
+            'task_completed': task_completed,
+            'file_references': file_references,
+            'key_results': key_results,
+            'table': table,
+            'notes': notes,
+            'execution_status': results['status'],
+            'steps_completed': results['steps_completed'],
+            'steps_failed': results['steps_failed']
+        }
+        
+        return summary
+    
+    def _infer_file_type(self, filename: str) -> str:
+        """Infer file type from filename."""
+        if not filename:
+            return 'unknown'
+        
+        filename_lower = filename.lower()
+        if filename_lower.endswith('.csv') or filename_lower.endswith('.xlsx') or filename_lower.endswith('.xls'):
+            return 'csv'
+        elif filename_lower.endswith('.pdf'):
+            return 'pdf'
+        elif filename_lower.endswith('.json'):
+            return 'json'
+        elif filename_lower.endswith('.txt') or filename_lower.endswith('.md'):
+            return 'text'
+        elif filename_lower.endswith('.png') or filename_lower.endswith('.jpg') or filename_lower.endswith('.jpeg'):
+            return 'image'
+        else:
+            return 'unknown'
+    
+    def _generate_file_description(self, file_ref: Dict[str, Any], results: Dict[str, Any]) -> str:
+        """Generate a description for a file reference."""
+        tool_name = file_ref.get('tool_name', '')
+        filename = file_ref.get('filename', '')
+        
+        # Tool-specific descriptions
+        if 'portfolio' in filename.lower() or 'performance' in filename.lower():
+            return "Portfolio performance analysis and metrics"
+        elif 'chart' in filename.lower() or 'graph' in filename.lower():
+            return "Visualization chart or graph"
+        elif 'report' in filename.lower():
+            return "Analysis report"
+        elif tool_name == 'generate_excel_file_tool':
+            return "Financial data spreadsheet"
+        elif tool_name == 'generate_agent_file_tool':
+            return "Generated analysis document"
+        else:
+            return f"Output from {tool_name}"
+    
+    def _extract_key_metrics(self, tool_name: str, result_data: Any) -> Dict[str, Any]:
+        """Extract key metrics from tool results."""
+        key_metrics = {}
+        
+        try:
+            # Handle string results that might be JSON
+            if isinstance(result_data, str):
+                try:
+                    import json
+                    result_data = json.loads(result_data)
+                except:
+                    pass
+            
+            # Extract metrics based on tool type
+            if tool_name == 'python_financial_calculator':
+                # Try to extract common financial metrics
+                if isinstance(result_data, dict):
+                    for key in ['cagr', 'volatility', 'sharpe', 'max_drawdown', 'return', 'correlation']:
+                        if key in result_data:
+                            key_metrics[key] = result_data[key]
+            
+            elif tool_name in ['get_financial_data', 'get_multiple_financial_data']:
+                # Extract price data summary
+                if isinstance(result_data, dict):
+                    if 'data' in result_data:
+                        data = result_data['data']
+                        if isinstance(data, list) and len(data) > 0:
+                            key_metrics['data_points'] = len(data)
+                            if 'close' in str(data[0]):
+                                key_metrics['has_price_data'] = True
+            
+            elif tool_name == 'generate_chart_tool':
+                key_metrics['chart_generated'] = True
+            
+            # Generic extraction for dict results
+            if isinstance(result_data, dict):
+                # Look for common metric keys
+                metric_keys = ['value', 'result', 'output', 'metric', 'score', 'ratio', 'percentage']
+                for key in metric_keys:
+                    if key in result_data:
+                        key_metrics[key] = result_data[key]
+        
+        except Exception as e:
+            logger.debug(f"Error extracting key metrics: {str(e)}")
+        
+        return key_metrics
+    
+    def _extract_table_data(self, tool_name: str, result_data: Any) -> List[Dict[str, Any]]:
+        """Extract tabular data from tool results."""
+        table_rows = []
+        
+        try:
+            # Handle string results that might be JSON
+            if isinstance(result_data, str):
+                try:
+                    import json
+                    result_data = json.loads(result_data)
+                except:
+                    return table_rows
+            
+            # Extract table data based on tool type
+            if tool_name == 'python_financial_calculator':
+                # Try to extract comparison data (portfolio vs benchmark)
+                if isinstance(result_data, dict):
+                    # Look for comparison metrics
+                    if 'portfolio' in str(result_data) and 'benchmark' in str(result_data):
+                        for key in result_data:
+                            if isinstance(result_data[key], dict):
+                                if 'portfolio' in result_data[key] and 'benchmark' in result_data[key]:
+                                    table_rows.append({
+                                        'metric': key.replace('_', ' ').title(),
+                                        'portfolio': result_data[key].get('portfolio', 'N/A'),
+                                        'benchmark': result_data[key].get('benchmark', 'N/A')
+                                    })
+            
+            # Generic table extraction for list of dicts
+            if isinstance(result_data, list):
+                for item in result_data[:10]:  # Limit to first 10 rows
+                    if isinstance(item, dict):
+                        table_rows.append(item)
+        
+        except Exception as e:
+            logger.debug(f"Error extracting table data: {str(e)}")
+        
+        return table_rows
 

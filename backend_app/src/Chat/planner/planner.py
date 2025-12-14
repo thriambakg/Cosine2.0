@@ -53,11 +53,11 @@ class Planner:
 You can ONLY create plans that specify tool names and parameters.
 The orchestrator will execute your plans.
 
-IMPORTANT: 
-- If this is a SIMPLE query (single question, quick lookup), provide a direct answer instead of a plan.
-- If this is a COMPLEX task (multi-step, large datasets, multiple files), create a structured plan.
+🚨 ABSOLUTE REQUIREMENT: You MUST return a JSON plan for ALL queries, even simple ones.
+- For SIMPLE queries (single question, quick lookup): Create a 1-step plan
+- For COMPLEX tasks (multi-step, large datasets, multiple files): Create a multi-step plan
 
-For COMPLEX tasks, respond with ONLY a JSON plan in this exact format:
+You MUST respond with ONLY a JSON plan in this exact format:
 {{
   "query": "original user query",
   "steps": [
@@ -68,13 +68,13 @@ For COMPLEX tasks, respond with ONLY a JSON plan in this exact format:
       "store_result": false
     }}
   ],
-  "estimated_complexity": "medium",
+  "estimated_complexity": "low|medium|high",
   "requires_file_storage": false
 }}
 
-For SIMPLE queries, just provide a direct answer - no plan needed.
+DO NOT provide direct answers. DO NOT provide text explanations. ONLY return JSON plans.
 
-Remember: You cannot execute tools. You only create plans."""
+Remember: You cannot execute tools. You only create plans. You MUST return JSON for every query."""
             
             # Get LLM response
             response = agent(planning_prompt)
@@ -91,16 +91,26 @@ Remember: You cannot execute tools. You only create plans."""
             # Try to parse as JSON plan
             plan = self._extract_plan_from_response(response_text)
             
-            if plan:
+            if plan and 'steps' in plan:
                 logger.info(f"Created plan with {len(plan.get('steps', []))} steps")
                 return plan
             else:
-                # Response was a direct answer, not a plan
-                logger.info("LLM provided direct answer instead of plan")
+                # If we couldn't parse a plan, create a minimal fallback plan
+                # This should rarely happen if the prompt is followed correctly
+                logger.warning(f"Could not parse plan from response, creating minimal fallback plan")
                 return {
                     'query': user_query,
-                    'direct_answer': response_text,
-                    'requires_plan': False
+                    'steps': [
+                        {
+                            'tool': 'get_financial_data',
+                            'parameters': {'symbol': 'UNKNOWN', 'timeframe': '1d'},
+                            'critical': False,
+                            'store_result': False
+                        }
+                    ],
+                    'estimated_complexity': 'unknown',
+                    'requires_file_storage': False,
+                    'parse_error': 'Could not parse plan from LLM response'
                 }
                 
         except Exception as e:
