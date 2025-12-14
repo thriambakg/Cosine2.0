@@ -174,31 +174,57 @@ class PortfolioAnalyzer:
         # Extract stock data from the structure
         stocks_data = {}
         
+        # Log the data structure for debugging
+        if isinstance(data, dict):
+            logger.info(f"Data structure keys: {list(data.keys())}")
+        else:
+            logger.warning(f"Data is not a dict: {type(data)}")
+            return stocks_data
+        
         if 'stocks' in data:
             # Format from get_multiple_financial_data
-            for stock in data['stocks']:
+            logger.info(f"Found 'stocks' array with {len(data['stocks'])} entries")
+            for i, stock in enumerate(data['stocks']):
+                symbol = stock.get('symbol', f'UNKNOWN_{i}')
+                status = stock.get('status', 'unknown')
+                logger.info(f"Processing stock {i+1}: {symbol}, status: {status}, keys: {list(stock.keys())}")
+                
                 # Try to get data even if status is not explicitly 'success'
                 # Some tools may not set status but still have data
                 if 'historical_data' in stock:
-                    symbol = stock.get('symbol', 'UNKNOWN')
                     try:
                         historical_data = stock['historical_data']
+                        logger.info(f"Found historical_data for {symbol}: {type(historical_data)}, length: {len(historical_data) if isinstance(historical_data, list) else 'N/A'}")
+                        
                         if isinstance(historical_data, list) and len(historical_data) > 0:
                             df = pd.DataFrame(historical_data)
-                            if 'date' in df.columns:
-                                df['date'] = pd.to_datetime(df['date'])
-                                df.set_index('date', inplace=True)
-                                stocks_data[symbol] = df
-                            elif 'Date' in df.columns:
-                                df['Date'] = pd.to_datetime(df['Date'])
-                                df.set_index('Date', inplace=True)
-                                stocks_data[symbol] = df
+                            logger.info(f"Created DataFrame for {symbol}: shape {df.shape}, columns: {list(df.columns)}")
+                            
+                            # Try different date column names
+                            date_col = None
+                            for col_name in ['date', 'Date', 'timestamp', 'Timestamp']:
+                                if col_name in df.columns:
+                                    date_col = col_name
+                                    break
+                            
+                            if date_col:
+                                df[date_col] = pd.to_datetime(df[date_col])
+                                df.set_index(date_col, inplace=True)
+                                # Ensure we have price columns
+                                if 'close' in df.columns or 'Close' in df.columns:
+                                    stocks_data[symbol] = df
+                                    logger.info(f"Successfully loaded data for {symbol}: {len(df)} rows")
+                                else:
+                                    logger.warning(f"DataFrame for {symbol} missing price columns. Available: {list(df.columns)}")
+                            else:
+                                logger.warning(f"DataFrame for {symbol} missing date column. Available: {list(df.columns)}")
+                        else:
+                            logger.warning(f"historical_data for {symbol} is not a non-empty list: {type(historical_data)}")
                     except Exception as e:
-                        logger.warning(f"Failed to process data for {symbol}: {e}")
+                        logger.error(f"Failed to process data for {symbol}: {e}", exc_info=True)
                         continue
                 elif stock.get('status') == 'success' and 'data' in stock:
                     # Alternative format with 'data' instead of 'historical_data'
-                    symbol = stock.get('symbol', 'UNKNOWN')
                     try:
                         stock_data = stock['data']
                         if isinstance(stock_data, list) and len(stock_data) > 0:
@@ -207,9 +233,12 @@ class PortfolioAnalyzer:
                                 df['date'] = pd.to_datetime(df['date'])
                                 df.set_index('date', inplace=True)
                                 stocks_data[symbol] = df
+                                logger.info(f"Successfully loaded data for {symbol} from 'data' field")
                     except Exception as e:
                         logger.warning(f"Failed to process data for {symbol}: {e}")
                         continue
+                else:
+                    logger.warning(f"Stock {symbol} has no 'historical_data' or 'data' field. Available fields: {list(stock.keys())}")
         elif isinstance(data, dict):
             # Try to find price data in various formats
             for key, value in data.items():
