@@ -67,6 +67,13 @@ class PortfolioAnalyzer:
         """Read financial data from S3"""
         try:
             logger.info(f"Reading financial data from S3: {s3_key}")
+            
+            # Ensure bucket name is set
+            if not self.bucket_name:
+                self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
+                if not self.bucket_name:
+                    raise ValueError("S3 bucket name not configured")
+            
             response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
             content = response['Body'].read().decode('utf-8')
             return json.loads(content)
@@ -77,19 +84,52 @@ class PortfolioAnalyzer:
             logger.error(f"Error parsing JSON from S3: {e}")
             raise
     
-    def _parse_portfolio_holdings(self, holdings_str: str) -> List[Dict[str, Any]]:
-        """Parse portfolio holdings from string like '2 shares AAPL, 3 shares VOO'"""
+    def _parse_portfolio_holdings(self, holdings_input: Any) -> List[Dict[str, Any]]:
+        """Parse portfolio holdings from string like '2 shares AAPL, 3 shares VOO' or list/dict"""
         holdings = []
+        
+        # Handle if input is already a list
+        if isinstance(holdings_input, list):
+            # Validate list format
+            for item in holdings_input:
+                if isinstance(item, dict):
+                    # Already in correct format: [{"symbol": "AAPL", "shares": 2}, ...]
+                    if 'symbol' in item and 'shares' in item:
+                        holdings.append(item)
+                    # Alternative format: [{"ticker": "AAPL", "shares": 2}, ...]
+                    elif 'ticker' in item and 'shares' in item:
+                        holdings.append({
+                            'symbol': item['ticker'],
+                            'shares': item['shares']
+                        })
+                elif isinstance(item, str):
+                    # List of strings like ["AAPL", "VOO"] - assume equal shares
+                    holdings.append({'symbol': item, 'shares': 1.0})
+            if holdings:
+                return holdings
+        
+        # Handle if input is a dict
+        if isinstance(holdings_input, dict):
+            # Format: {"AAPL": 2, "VOO": 3}
+            for symbol, shares in holdings_input.items():
+                holdings.append({'symbol': str(symbol), 'shares': float(shares)})
+            if holdings:
+                return holdings
+        
+        # Convert to string if not already
+        holdings_str = str(holdings_input) if not isinstance(holdings_input, str) else holdings_input
         
         # Try to parse as JSON first
         try:
             holdings_data = json.loads(holdings_str)
             if isinstance(holdings_data, list):
-                return holdings_data
+                return self._parse_portfolio_holdings(holdings_data)  # Recursive call to handle list
+            elif isinstance(holdings_data, dict):
+                return self._parse_portfolio_holdings(holdings_data)  # Recursive call to handle dict
         except:
             pass
         
-        # Parse from natural language
+        # Parse from natural language string
         # Pattern: "N shares SYMBOL" or "SYMBOL: N shares"
         pattern = r'(\d+(?:\.\d+)?)\s+shares?\s+([A-Z]+)|([A-Z]+):\s*(\d+(?:\.\d+)?)\s+shares?'
         matches = re.findall(pattern, holdings_str.upper())
@@ -109,14 +149,18 @@ class PortfolioAnalyzer:
         
         return holdings
     
-    def _load_financial_data(self, data_source: str) -> Dict[str, pd.DataFrame]:
+    def _load_financial_data(self, data_source: Any) -> Dict[str, pd.DataFrame]:
         """Load financial data from S3 or JSON string"""
-        # Try to parse as JSON string first
-        try:
-            data = json.loads(data_source)
-        except:
-            # Assume it's an S3 key
-            data = self._read_data_from_s3(data_source)
+        # Handle if data_source is already a dict (from placeholder resolution)
+        if isinstance(data_source, dict):
+            data = data_source
+        else:
+            # Try to parse as JSON string first
+            try:
+                data = json.loads(str(data_source))
+            except:
+                # Assume it's an S3 key (string)
+                data = self._read_data_from_s3(str(data_source))
         
         # Extract stock data from the structure
         stocks_data = {}
@@ -431,6 +475,17 @@ def analyze_portfolio_performance(tool_use: ToolUse) -> ToolResult:
                 "status": "error",
                 "content": [{"text": "Error: portfolio_holdings parameter is required"}]
             }
+        
+        # Handle data_source if it's a dict (from placeholder resolution)
+        if isinstance(data_source, dict):
+            # If it's a file_reference dict, extract the s3_key
+            if 's3_key' in data_source:
+                data_source = data_source['s3_key']
+            elif 'file_reference' in data_source and isinstance(data_source['file_reference'], dict):
+                data_source = data_source['file_reference'].get('s3_key', '')
+            else:
+                # Try to convert dict to JSON string
+                data_source = json.dumps(data_source)
         
         analyzer = PortfolioAnalyzer()
         metrics = analyzer.analyze(data_source, portfolio_holdings, benchmark_symbol, risk_free_rate)

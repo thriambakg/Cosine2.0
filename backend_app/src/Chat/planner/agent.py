@@ -1292,8 +1292,13 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
         if not symbols:
             return "Error: symbols parameter is required"
         
-        # Parse symbols
-        symbol_list = [s.strip().upper() for s in symbols.split(',')]
+        # Parse symbols - handle both string and list inputs
+        if isinstance(symbols, list):
+            symbol_list = [str(s).strip().upper() for s in symbols]
+        elif isinstance(symbols, str):
+            symbol_list = [s.strip().upper() for s in symbols.split(',')]
+        else:
+            return "Error: symbols parameter must be a string or list"
         
         if len(symbol_list) > 10:
             return "Error: Maximum 10 stocks can be fetched at once"

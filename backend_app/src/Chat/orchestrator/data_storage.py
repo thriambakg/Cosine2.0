@@ -56,8 +56,9 @@ class DataStorage:
             filename = f"{tool_name}_{timestamp}_{file_id}.json"
             
             # Determine S3 key (path) - use data-files for intermediate tool results
-            # agent-files is reserved for completed agent-generated files (reports, CSVs, PDFs)
-            s3_key = f"data-files/{user_id}/{session_id}/{filename}"
+            # Structure: users/{user_id}/sessions/{session_id}/data-files/{filename}
+            # This matches the structure used for agent-files/ and files/ folders
+            s3_key = f"users/{user_id}/sessions/{session_id}/data-files/{filename}"
             
             # Convert data to JSON string
             if isinstance(data, str):

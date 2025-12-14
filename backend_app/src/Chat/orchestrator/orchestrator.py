@@ -246,10 +246,19 @@ class Orchestrator:
                             
                             if step_result:
                                 # Extract field from result
-                                if field == 'result' and 'result' in step_result:
-                                    replacement = step_result['result']
+                                if field == 'result':
+                                    # If data was stored in S3, return file_reference or s3_key
+                                    if 'file_reference' in step_result:
+                                        # Return the s3_key so tools can read from S3
+                                        replacement = step_result['file_reference'].get('s3_key', '')
+                                    elif 'result' in step_result:
+                                        replacement = step_result['result']
+                                    else:
+                                        replacement = ''
                                 elif field == 's3_key' and 'file_reference' in step_result:
                                     replacement = step_result['file_reference'].get('s3_key', '')
+                                elif field == 'file_reference' and 'file_reference' in step_result:
+                                    replacement = step_result['file_reference']
                                 elif field in step_result:
                                     replacement = step_result[field]
                                 else:
