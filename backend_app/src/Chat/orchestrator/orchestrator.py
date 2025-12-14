@@ -340,19 +340,17 @@ class Orchestrator:
                                         replacement = ''
                                 
                                 # Convert replacement to string if needed
-                                    # Convert replacement to string if needed
-                                    if not isinstance(replacement, str):
-                                        replacement = json.dumps(replacement) if replacement else ''
-                                    
-                                    # Replace placeholder (handle both {{...}} and {...} formats)
-                                    # Replace both formats to handle all cases
-                                    placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                                    placeholder_single_brace = f'{{{placeholder}}}'
-                                    if placeholder_with_braces in resolved_value:
-                                        resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                                    if placeholder_single_brace in resolved_value:
-                                        resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                                    continue
+                                if not isinstance(replacement, str):
+                                    replacement = json.dumps(replacement) if replacement else ''
+                                
+                                # Replace placeholder (handle both {{...}} and {...} formats)
+                                placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                                placeholder_single_brace = f'{{{placeholder}}}'
+                                if placeholder_with_braces in resolved_value:
+                                    resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                                if placeholder_single_brace in resolved_value:
+                                    resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                                continue
                     
                     # Pattern 2: {{field_from_step_N}} - extract field from step N result
                     field_match = re.match(r'(.+?)[_\s]+from[_\s]+step[_\s]*(\d+)', placeholder, re.IGNORECASE)
