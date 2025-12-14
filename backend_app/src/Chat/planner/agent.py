@@ -2116,42 +2116,11 @@ def get_excel_formatting(template_type: str) -> dict:
         "dates": {"number_format": "mm/dd/yyyy"}
     }
 
-# Define the tools list that Strands can automatically detect
-enhanced_tools = [
-    fetch_web_content_tool,  # Web content fetcher for article context items
-    get_financial_data,
-    get_multiple_financial_data,
-    search_financial_news, 
-    get_technical_analysis,
-    analyze_portfolio,  # Portfolio analysis with live yfinance data
-    calculate_stock_correlation,  # Live correlation analysis
-    get_volatility_surface,  # New volatility surface analysis
-    python_financial_calculator,  # Advanced financial calculations
-    http_request,  # Web request tool
-    read_s3_file_tool,  # S3 file reader tool
-    get_session_files_tool,  # Session database access tool
-    generate_agent_file_tool,  # Generate files in agent-files folder
-    generate_excel_file_tool,  # Generate Excel files for financial analysis
-    get_session_context_tool,  # Complete session context tool
-    get_crypto_data_tool,  # Real-time cryptocurrency data tool
-    compare_crypto_tool,  # Cryptocurrency comparison tool
-    read_pdf_tool,  # PDF file reader tool
-    analyze_pdf_content_tool,  # PDF content analysis tool
-    analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
-    get_company_cik,  # Get company CIK from ticker symbol
-    get_company_filings,  # Get SEC filings for a company
-    get_filing_document,  # Get full text of SEC filing
-    search_sec_filings,  # Search SEC filings by criteria
-    get_filing_exhibits,  # Get exhibits for SEC filing
-    download_filing_pdf,  # Download SEC filing as PDF
-    generate_chart_tool,  # Generate unified charts for both stocks and crypto (requires pre-fetched data)
-    generate_stock_chart,  # Convenience tool: fetch stock data and generate chart in one step
-    get_chat_history_tool,  # Get chat history on-demand with pagination
-    search_chat_history_tool,  # Search chat history for specific terms
-    process_chat_session_context_tool,  # Process chat session context from history sidebar
-    analyze_chat_session_context_tool,  # Analyze chat session context for insights
-    fetch_web_content_tool,  # Fetch and extract content from web URLs (for article context items)
-]
+# NOTE: PLANNER DOES NOT USE TOOL IMPLEMENTATIONS
+# The planner only creates plans, it does not execute tools
+# Tool implementations are in the tools/ directory and are executed by the orchestrator
+# This list is kept empty for the planner - tools are only used by the orchestrator
+enhanced_tools = []  # Empty - planner doesn't execute tools
 
 # Function to create agents with different models
 def create_financial_agent(model_name: str = 'claude-sonnet-4') -> Agent:
