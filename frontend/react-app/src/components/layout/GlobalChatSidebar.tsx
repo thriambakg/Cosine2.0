@@ -223,8 +223,13 @@ const GlobalChatSidebar: React.FC = () => {
   const { isVisible, setIsVisible, activeSessionId, setActiveSessionId, close } = useGlobalChat();
   const { user } = useAuth();
   
-  // Get updateSessionVariables from useChatPersistence
-  const { updateSessionAgentFiles, updateSessionVariables } = useChatPersistence(user?.id || '');
+  // Get updateSessionVariables and addPersistedMessage from useChatPersistence
+  const { 
+    updateSessionAgentFiles, 
+    updateSessionVariables,
+    addMessage: addPersistedMessage,
+    currentSession: persistenceSession
+  } = useChatPersistence(user?.id || '');
   // COMMENTED OUT: Old WebSocket context (replaced by messaging service)
   // const { connect: connectWebSocket, sendMessage, isConnected } = useWebSocket();
   
@@ -278,6 +283,9 @@ const GlobalChatSidebar: React.FC = () => {
   const { selectedModel, setSelectedModel } = usePersistentModel();
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
   const [currentAgentLog, setCurrentAgentLog] = useState<string | null>(null);
+  // Session-specific loading states (matching ChatPage pattern)
+  const [sessionLoadingStates, setSessionLoadingStates] = useState<Record<string, boolean>>({});
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   // Removed inline collapses; using side panels instead
   const [isFilesPanelOpen, setIsFilesPanelOpen] = useState(false);
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
@@ -551,17 +559,46 @@ const GlobalChatSidebar: React.FC = () => {
     }
   });
 
-  // Use unified messages directly - no need for local state syncing
-  // Filter by activeSessionId, but if no activeSessionId, show all messages (for debugging)
+  // Use messages from unified messaging system (real-time) as primary source
+  // Fall back to persistence system for initial load or when unified messages aren't available
+  // Merge both sources to ensure we show all messages (matching ChatPage pattern)
+  const persistenceMessages = currentSession?.messages || [];
+  const unifiedMessageList = unifiedMessages || [];
+  
+  // Create a merged list, prioritizing unified messages (real-time) but including persistence messages
+  // Use a Map to deduplicate by message ID, with unified messages taking precedence
   const messages = React.useMemo(() => {
     if (!activeSessionId) {
       console.warn('⚠️ Sidebar: No activeSessionId, showing all unifiedMessages:', unifiedMessages.length);
       return unifiedMessages;
     }
-    const filtered = unifiedMessages.filter(msg => msg.sessionId === activeSessionId);
-    console.log(`📨 Sidebar: Filtered messages - activeSessionId: ${activeSessionId}, unifiedMessages: ${unifiedMessages.length}, filtered: ${filtered.length}`);
-    return filtered;
-  }, [unifiedMessages, activeSessionId]);
+    
+    const messageMap = new Map<string, any>();
+    
+    // First add persistence messages (for initial load)
+    persistenceMessages.forEach(msg => {
+      messageMap.set(msg.id, {
+        id: msg.id,
+        sender: msg.sender === 'bot' ? 'ai' : msg.sender,
+        text: msg.text,
+        timestamp: msg.timestamp instanceof Date ? msg.timestamp.getTime() : (typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()),
+        sessionId: activeSessionId,
+        source: 'database' as const,
+        files: msg.files
+      });
+    });
+    
+    // Then add/override with unified messages (real-time updates) for this session
+    const filteredUnified = unifiedMessageList.filter(msg => msg.sessionId === activeSessionId);
+    filteredUnified.forEach(msg => {
+      messageMap.set(msg.id, msg);
+    });
+    
+    // Convert to sorted array
+    const merged = Array.from(messageMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+    console.log(`📨 Sidebar: Merged messages - activeSessionId: ${activeSessionId}, unified: ${filteredUnified.length}, persistence: ${persistenceMessages.length}, merged: ${merged.length}`);
+    return merged;
+  }, [unifiedMessages, activeSessionId, persistenceMessages]);
 
   // Subscribe to agent log updates
   useEffect(() => {
@@ -578,6 +615,84 @@ const GlobalChatSidebar: React.FC = () => {
     const unsubscribe = unifiedMessageHandler.onAgentLogUpdate((sessionId, logMessage) => {
       if (sessionId === activeSessionId) {
         setCurrentAgentLog(logMessage);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [activeSessionId]);
+
+  // Sync unified messages with local persistence system (DEBOUNCED for performance)
+  // This runs asynchronously to avoid blocking message display (matching ChatPage pattern)
+  useEffect(() => {
+    if (!activeSessionId || !currentSession || unifiedMessages.length === 0) return;
+
+    // Debounce persistence sync to avoid blocking UI updates
+    // Messages are displayed immediately from unified cache, persistence happens in background
+    const syncTimeout = setTimeout(() => {
+      console.log('🔄 Sidebar: Syncing unified messages with persistence system', {
+        sessionId: activeSessionId,
+        unifiedMessageCount: unifiedMessages.length,
+        localMessageCount: currentSession.messages.length
+      });
+
+      // Only sync messages that belong to the active session
+      const sessionMessages = unifiedMessages.filter(msg => msg.sessionId === activeSessionId);
+      
+      if (sessionMessages.length === 0) {
+        console.log('🔄 Sidebar: No unified messages for active session, skipping sync');
+        return;
+      }
+
+      // Get messages that exist in unified cache but not in local persistence
+      const localMessageIds = new Set(currentSession.messages.map(m => m.id));
+      const newMessages = sessionMessages.filter(unifiedMsg => !localMessageIds.has(unifiedMsg.id));
+
+      // Only add truly new messages to prevent duplication
+      if (newMessages.length > 0) {
+        console.log(`📨 Sidebar: Found ${newMessages.length} new messages to add to persistence`);
+        // Batch persistence operations asynchronously using requestIdleCallback or setTimeout fallback
+        const schedulePersistence = (callback: () => void) => {
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            (window as any).requestIdleCallback(callback, { timeout: 1000 });
+          } else {
+            setTimeout(callback, 0);
+          }
+        };
+        
+        schedulePersistence(() => {
+          newMessages.forEach(unifiedMsg => {
+            addPersistedMessage({
+              id: unifiedMsg.id,
+              text: unifiedMsg.text,
+              sender: unifiedMsg.sender === 'ai' ? 'bot' : unifiedMsg.sender,
+              timestamp: new Date(unifiedMsg.timestamp),
+              files: unifiedMsg.files
+            }, activeSessionId);
+          });
+        });
+      } else {
+        console.log('🔄 Sidebar: All unified messages already exist in persistence, skipping sync');
+      }
+    }, 100); // 100ms debounce - messages display immediately, persistence happens shortly after
+
+    return () => clearTimeout(syncTimeout);
+  }, [unifiedMessages, activeSessionId, currentSession, addPersistedMessage]);
+
+  // Subscribe to loading state updates from unified messaging system (matching ChatPage pattern)
+  useEffect(() => {
+    const unsubscribe = unifiedMessageHandler.subscribeToLoadingState((sessionId, isLoading, source) => {
+      // Only update if it's for sidebar source or cross-interface loading
+      if (source === 'sidebar' || (source === 'chatpage' && isLoading)) {
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [sessionId]: isLoading
+        }));
+        // Also update local loading state for active session
+        if (sessionId === activeSessionId) {
+          setIsLoadingMessage(isLoading);
+        }
       }
     });
 
@@ -621,10 +736,14 @@ const GlobalChatSidebar: React.FC = () => {
         console.log('🤖 Sidebar: Received AI typing event for message:', messageId);
         setTypingMessages(prev => new Set([...prev, messageId]));
         
-        // Clear loading state when AI starts responding
-        setIsLoadingMessage(false);
-        // Broadcast loading state clearing to other interfaces
-        unifiedMessageHandler.broadcastLoadingState(sessionId, false, 'sidebar');
+        // Clear the timeout since AI is responding
+        // NOTE: Loading state is cleared by unifiedMessageHandler when first chunk arrives
+        // Don't clear it here to avoid race conditions and ensure it stays until chunk actually arrives
+        if (activeSessionId && loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
+          loadingTimeoutRef.current = null;
+          console.log('🔄 Sidebar: Cleared timeout for session:', activeSessionId);
+        }
       }
     };
 
@@ -634,6 +753,67 @@ const GlobalChatSidebar: React.FC = () => {
       window.removeEventListener('ai-response-typing', handleAITyping as EventListener);
     };
   }, [activeSessionId]);
+
+  // Listen for file-message-sent events to reset timeout (matching ChatPage pattern)
+  useEffect(() => {
+    if (!activeSessionId) return;
+
+    const handleFileMessageSent = (event: CustomEvent) => {
+      const { sessionId } = event.detail;
+      if (sessionId === activeSessionId) {
+        console.log('🔄 Sidebar: Received file-message-sent event, resetting timeout for session:', sessionId);
+        // Clear existing timeout
+        if (loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
+          loadingTimeoutRef.current = null;
+        }
+        // Re-set the timeout to effectively restart it from now
+        // This ensures the 5-minute timeout only counts from when AI processing actually starts
+        setLoadingTimeout(sessionId);
+      }
+    };
+
+    const setLoadingTimeout = (sessionId: string) => {
+      // Clear any existing timeout
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+      
+      // Set new 5-minute timeout
+      loadingTimeoutRef.current = setTimeout(() => {
+        console.log(`⏰ Sidebar: 5-minute timeout reached for session ${sessionId}`);
+        
+        // Clear loading state
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [sessionId]: false
+        }));
+        
+        setIsLoadingMessage(false);
+        
+        // Add helpful timeout message to guide user
+        if (sessionId) {
+          addPersistedMessage({
+            id: `timeout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            text: "⏰ **Processing Extended**: Your request is taking longer than usual to process. The AI is still working on your request and may take up to 15 minutes to complete. Please refresh the page periodically to check for updates, or start a new conversation if you would like to talk about something else.",
+            sender: 'bot',
+            timestamp: new Date()
+          }, sessionId);
+        }
+        
+        loadingTimeoutRef.current = null;
+      }, 300000); // 5 minutes (300,000 ms)
+    };
+
+    window.addEventListener('file-message-sent', handleFileMessageSent as any);
+    
+    return () => {
+      window.removeEventListener('file-message-sent', handleFileMessageSent as any);
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+    };
+  }, [activeSessionId, addPersistedMessage]);
 
   // Listen for session variable updates (including file uploads)
   useEffect(() => {

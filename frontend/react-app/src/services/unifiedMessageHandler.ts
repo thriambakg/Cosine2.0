@@ -586,7 +586,10 @@ class UnifiedMessageHandlerService {
             // Use session_id from message payload if available, otherwise fall back to connection's sessionId
             // This ensures messages are routed to the correct session even if received on a different connection
             const messageSessionId = data.session_id || sessionId;
-            console.log('📨 UnifiedMessageHandler: Received WebSocket message:', data.type, 'message session_id:', messageSessionId, 'connection sessionId:', sessionId);
+            // Only log non-streaming messages to reduce noise
+            if (data.type !== 'ai_response_chunk') {
+              console.log('📨 UnifiedMessageHandler: Received WebSocket message:', data.type, 'for session:', messageSessionId);
+            }
             this.handleWebSocketMessage(messageSessionId, data);
           } catch (error) {
             console.error('❌ UnifiedMessageHandler: Error parsing WebSocket message:', error);
@@ -897,7 +900,10 @@ class UnifiedMessageHandlerService {
    * Handle WebSocket message
    */
   private handleWebSocketMessage(sessionId: string, data: any): void {
-    console.log('📨 UnifiedMessageHandler: Handling WebSocket message:', data.type, 'for session:', sessionId);
+    // Only log non-streaming messages to reduce noise
+    if (data.type !== 'ai_response_chunk') {
+      console.log('📨 UnifiedMessageHandler: Handling WebSocket message:', data.type, 'for session:', sessionId);
+    }
     
     // Debug: Log full message if type is missing
     if (!data.type) {
@@ -1079,13 +1085,13 @@ class UnifiedMessageHandlerService {
   private handleAIResponseChunk(sessionId: string, data: any): void {
     const { message_id, content, timestamp, is_complete } = data;
     
-    console.log('🌊 UnifiedMessageHandler: Received AI response chunk for session:', sessionId, 'message_id:', message_id, 'is_complete:', is_complete);
-    
     // Get or create the streaming message
     const messages = this.localCache.get(sessionId) || [];
     let streamingMessage = messages.find(m => m.id === message_id && m.sender === 'ai');
     
     if (!streamingMessage) {
+      // Log only when streaming starts (first chunk)
+      console.log('🌊 UnifiedMessageHandler: Agent streaming response for session:', sessionId);
       // Create new streaming message
       const timestampMs = typeof timestamp === 'number' ? timestamp : (timestamp ? new Date(timestamp).getTime() : Date.now());
       streamingMessage = {
@@ -1556,7 +1562,6 @@ class UnifiedMessageHandlerService {
    * Broadcast loading state change to all listeners
    */
   broadcastLoadingState(sessionId: string, isLoading: boolean, source: 'chatpage' | 'sidebar'): void {
-    console.log(`🔄 UnifiedMessageHandler: Broadcasting loading state - Session: ${sessionId}, Loading: ${isLoading}, Source: ${source}`);
     this.loadingStateListeners.forEach(callback => {
       try {
         callback(sessionId, isLoading, source);
