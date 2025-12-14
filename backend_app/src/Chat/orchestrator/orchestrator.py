@@ -72,6 +72,20 @@ class Orchestrator:
                 # Execute tool
                 tool_result = self.tool_executor.execute_tool(tool_name, parameters, session_id, user_id)
                 
+                # Check if tool_result is a JSON string that contains a file_reference (from get_multiple_financial_data)
+                # If so, extract the actual data file's S3 key for easier placeholder resolution
+                actual_data_s3_key = None
+                if isinstance(tool_result, str):
+                    try:
+                        parsed_result = json.loads(tool_result)
+                        if isinstance(parsed_result, dict) and 'file_reference' in parsed_result:
+                            file_ref = parsed_result.get('file_reference', {})
+                            if isinstance(file_ref, dict) and 's3_key' in file_ref:
+                                # This is the actual data file's S3 key
+                                actual_data_s3_key = file_ref.get('s3_key')
+                    except:
+                        pass
+                
                 # Check if result needs storage (either explicitly requested or if result is large)
                 should_store = step.get('store_result', False) or self._is_large_result(tool_result)
                 
@@ -89,12 +103,18 @@ class Orchestrator:
                             session_id, user_id, message_id, step_num, len(steps)
                         )
                         
-                        results['results'].append({
+                        # Store both the orchestrator's file_reference and the actual data file's S3 key
+                        result_entry = {
                             'step': step_num,
                             'tool': tool_name,
                             'status': 'completed',
                             'file_reference': file_reference
-                        })
+                        }
+                        # If we found an actual data file S3 key, store it for easier placeholder resolution
+                        if actual_data_s3_key:
+                            result_entry['actual_data_s3_key'] = actual_data_s3_key
+                        
+                        results['results'].append(result_entry)
                     except ValueError as e:
                         # S3 bucket not configured - continue without storing
                         logger.warning(f"S3 storage not available for step {step_num}, continuing without storage: {str(e)}")
@@ -248,15 +268,24 @@ class Orchestrator:
                                 # Extract field from result
                                 if field == 'result':
                                     # If data was stored in S3, return file_reference or s3_key
-                                    if 'file_reference' in step_result:
+                                    # Check for actual_data_s3_key first (from tools that store data themselves)
+                                    if 'actual_data_s3_key' in step_result:
+                                        replacement = step_result['actual_data_s3_key']
+                                    elif 'file_reference' in step_result:
                                         # Return the s3_key so tools can read from S3
                                         replacement = step_result['file_reference'].get('s3_key', '')
                                     elif 'result' in step_result:
                                         replacement = step_result['result']
                                     else:
                                         replacement = ''
-                                elif field == 's3_key' and 'file_reference' in step_result:
-                                    replacement = step_result['file_reference'].get('s3_key', '')
+                                elif field == 's3_key':
+                                    # Check for actual_data_s3_key first (from tools that store data themselves)
+                                    if 'actual_data_s3_key' in step_result:
+                                        replacement = step_result['actual_data_s3_key']
+                                    elif 'file_reference' in step_result:
+                                        replacement = step_result['file_reference'].get('s3_key', '')
+                                    else:
+                                        replacement = ''
                                 elif field == 'file_reference' and 'file_reference' in step_result:
                                     replacement = step_result['file_reference']
                                 elif field in step_result:
@@ -272,6 +301,27 @@ class Orchestrator:
                                             try:
                                                 parsed = json.loads(result_data)
                                                 if isinstance(parsed, dict):
+                                                    # Special handling: if this is a file reference JSON (from get_multiple_financial_data),
+                                                    # and we're looking for s3_key or result, extract the actual data file's S3 key
+                                                    if field in ['result', 's3_key'] and 'file_reference' in parsed:
+                                                        file_ref = parsed.get('file_reference', {})
+                                                        if isinstance(file_ref, dict) and 's3_key' in file_ref:
+                                                            # This is the actual data file's S3 key
+                                                            replacement = file_ref.get('s3_key', '')
+                                                            # If we got the s3_key, we're done
+                                                            if replacement:
+                                                                # Convert replacement to string if needed
+                                                                if not isinstance(replacement, str):
+                                                                    replacement = json.dumps(replacement) if replacement else ''
+                                                                # Replace placeholder
+                                                                placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                                                                placeholder_single_brace = f'{{{placeholder}}}'
+                                                                if placeholder_with_braces in resolved_value:
+                                                                    resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                                                                if placeholder_single_brace in resolved_value:
+                                                                    resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                                                                continue
+                                                    
                                                     # Extract field from parsed JSON (support nested paths)
                                                     replacement = self._extract_nested_field(parsed, field)
                                                     

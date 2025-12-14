@@ -162,19 +162,54 @@ class PortfolioAnalyzer:
                 # Assume it's an S3 key (string)
                 data = self._read_data_from_s3(str(data_source))
         
+        # Check if this is a file reference JSON (from get_multiple_financial_data)
+        # If so, we need to read the actual data file
+        if isinstance(data, dict) and 'file_reference' in data and 'stocks' not in data:
+            file_ref = data.get('file_reference', {})
+            if isinstance(file_ref, dict) and 's3_key' in file_ref:
+                # Read the actual data file
+                logger.info(f"Detected file reference JSON, reading actual data from: {file_ref['s3_key']}")
+                data = self._read_data_from_s3(file_ref['s3_key'])
+        
         # Extract stock data from the structure
         stocks_data = {}
         
         if 'stocks' in data:
             # Format from get_multiple_financial_data
             for stock in data['stocks']:
-                if stock.get('status') == 'success' and 'historical_data' in stock:
-                    symbol = stock['symbol']
-                    df = pd.DataFrame(stock['historical_data'])
-                    if 'date' in df.columns:
-                        df['date'] = pd.to_datetime(df['date'])
-                        df.set_index('date', inplace=True)
-                    stocks_data[symbol] = df
+                # Try to get data even if status is not explicitly 'success'
+                # Some tools may not set status but still have data
+                if 'historical_data' in stock:
+                    symbol = stock.get('symbol', 'UNKNOWN')
+                    try:
+                        historical_data = stock['historical_data']
+                        if isinstance(historical_data, list) and len(historical_data) > 0:
+                            df = pd.DataFrame(historical_data)
+                            if 'date' in df.columns:
+                                df['date'] = pd.to_datetime(df['date'])
+                                df.set_index('date', inplace=True)
+                                stocks_data[symbol] = df
+                            elif 'Date' in df.columns:
+                                df['Date'] = pd.to_datetime(df['Date'])
+                                df.set_index('Date', inplace=True)
+                                stocks_data[symbol] = df
+                    except Exception as e:
+                        logger.warning(f"Failed to process data for {symbol}: {e}")
+                        continue
+                elif stock.get('status') == 'success' and 'data' in stock:
+                    # Alternative format with 'data' instead of 'historical_data'
+                    symbol = stock.get('symbol', 'UNKNOWN')
+                    try:
+                        stock_data = stock['data']
+                        if isinstance(stock_data, list) and len(stock_data) > 0:
+                            df = pd.DataFrame(stock_data)
+                            if 'date' in df.columns:
+                                df['date'] = pd.to_datetime(df['date'])
+                                df.set_index('date', inplace=True)
+                                stocks_data[symbol] = df
+                    except Exception as e:
+                        logger.warning(f"Failed to process data for {symbol}: {e}")
+                        continue
         elif isinstance(data, dict):
             # Try to find price data in various formats
             for key, value in data.items():
