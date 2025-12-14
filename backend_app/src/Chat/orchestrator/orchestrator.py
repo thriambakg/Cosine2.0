@@ -216,8 +216,9 @@ class Orchestrator:
         def resolve_value(value):
             """Recursively resolve placeholders in a value"""
             if isinstance(value, str):
-                # Find all placeholders like {{step_N.field}} or {{field_from_step_N}}
-                placeholder_pattern = r'\{\{([^}]+)\}\}'
+                # Find all placeholders like {{step_N.field}} or {step_N.field} or {{field_from_step_N}}
+                # Support both {{...}} and {...} formats
+                placeholder_pattern = r'\{\{?([^}]+)\}\}?'
                 matches = re.findall(placeholder_pattern, value)
                 
                 if not matches:
@@ -252,19 +253,106 @@ class Orchestrator:
                                     replacement = step_result[field]
                                 else:
                                     # Try to extract from nested result
-                                    if 'result' in step_result and isinstance(step_result['result'], dict):
-                                        replacement = step_result['result'].get(field, '')
-                                    else:
+                                    if 'result' in step_result:
+                                        result_data = step_result['result']
+                                        
+                                        # Handle string results (like file content or JSON strings)
+                                        if isinstance(result_data, str):
+                                            # Try to parse as JSON first
+                                            try:
+                                                parsed = json.loads(result_data)
+                                                if isinstance(parsed, dict):
+                                                    # Extract field from parsed JSON
+                                                    replacement = parsed.get(field, '')
+                                                    
+                                                    # Try common field variations for file S3 keys
+                                                    if not replacement and field in ['file_s3_key', 's3_key', 'file_key']:
+                                                        # Look in files array
+                                                        files = parsed.get('files', [])
+                                                        if files and isinstance(files, list) and len(files) > 0:
+                                                            # Get first file's S3 key
+                                                            first_file = files[0] if isinstance(files[0], dict) else {}
+                                                            replacement = first_file.get('s3_key', first_file.get('file_key', ''))
+                                                        
+                                                        # Also check direct fields
+                                                        if not replacement:
+                                                            replacement = parsed.get('s3_key', parsed.get('file_key', ''))
+                                                    
+                                                    # Try portfolio tickers extraction
+                                                    if not replacement and ('portfolio' in field.lower() or 'ticker' in field.lower()):
+                                                        # Look in files for portfolio CSV
+                                                        files = parsed.get('files', [])
+                                                        for file_info in files:
+                                                            if isinstance(file_info, dict):
+                                                                filename = file_info.get('filename', '').lower()
+                                                                if 'portfolio' in filename:
+                                                                    # This is a portfolio file, return its S3 key for reading
+                                                                    replacement = file_info.get('s3_key', '')
+                                                                    break
+                                                else:
+                                                    replacement = ''
+                                            except json.JSONDecodeError:
+                                                # Not JSON, try to extract from plain text (like get_session_files_tool output)
+                                                if field in ['file_s3_key', 's3_key', 'file_key']:
+                                                    # Try to extract S3 key from formatted text output
+                                                    # Pattern: "S3 Key: files/user_id/session_id/filename"
+                                                    s3_key_match = re.search(r'S3 Key:\s*([^\n\r]+)', result_data, re.IGNORECASE)
+                                                    if s3_key_match:
+                                                        replacement = s3_key_match.group(1).strip()
+                                                    else:
+                                                        # Try s3:// URL pattern
+                                                        s3_key_match = re.search(r's3://[^/\s]+/([^\s]+)', result_data)
+                                                        if s3_key_match:
+                                                            replacement = s3_key_match.group(1)
+                                                        else:
+                                                            # Try to find files/ path pattern
+                                                            s3_key_match = re.search(r'(files/[^\s\n\r]+)', result_data)
+                                                            if s3_key_match:
+                                                                replacement = s3_key_match.group(1)
+                                                            else:
+                                                                replacement = ''
+                                                elif 'portfolio' in field.lower() or 'ticker' in field.lower():
+                                                    # Try to extract portfolio tickers from text
+                                                    # Look for patterns like "tickers: AAPL,MSFT,GOOGL" or similar
+                                                    ticker_match = re.search(r'(?:ticker|symbol)[s]?[:\s]+([A-Z,]+)', result_data, re.IGNORECASE)
+                                                    if ticker_match:
+                                                        replacement = ticker_match.group(1).strip()
+                                                    else:
+                                                        replacement = ''
+                                                else:
+                                                    replacement = ''
+                                        elif isinstance(result_data, dict):
+                                            replacement = result_data.get(field, '')
+                                            
+                                            # Try common field variations
+                                            if not replacement:
+                                                # Try file_s3_key -> s3_key, file_key, etc.
+                                                if 'file' in field.lower() and 's3' in field.lower():
+                                                    replacement = result_data.get('s3_key', result_data.get('file_key', ''))
+                                                # Try portfolio_tickers -> tickers, symbols, etc.
+                                                elif 'portfolio' in field.lower() or 'ticker' in field.lower():
+                                                    replacement = result_data.get('tickers', result_data.get('symbols', result_data.get('portfolio_tickers', '')))
+                                        else:
+                                            replacement = ''
+                                    
+                                    if not replacement:
                                         logger.warning(f"Could not resolve placeholder {{step_{step_num}.{field}}}")
                                         replacement = ''
                                 
                                 # Convert replacement to string if needed
-                                if not isinstance(replacement, str):
-                                    replacement = json.dumps(replacement) if replacement else ''
-                                
-                                # Replace placeholder
-                                resolved_value = resolved_value.replace(f'{{{{{placeholder}}}}}', str(replacement))
-                                continue
+                                    # Convert replacement to string if needed
+                                    if not isinstance(replacement, str):
+                                        replacement = json.dumps(replacement) if replacement else ''
+                                    
+                                    # Replace placeholder (handle both {{...}} and {...} formats)
+                                    # Replace both formats to handle all cases
+                                    placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                                    placeholder_single_brace = f'{{{placeholder}}}'
+                                    if placeholder_with_braces in resolved_value:
+                                        resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                                    if placeholder_single_brace in resolved_value:
+                                        resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                                    continue
                     
                     # Pattern 2: {{field_from_step_N}} - extract field from step N result
                     field_match = re.match(r'(.+?)[_\s]+from[_\s]+step[_\s]*(\d+)', placeholder, re.IGNORECASE)

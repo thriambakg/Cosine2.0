@@ -102,10 +102,34 @@ class ToolExecutor:
         elif tool_name == 'python_financial_calculator':
             from financial_calculator import python_financial_calculator
             from strands.types.tools import ToolUse
-            # Wrap to handle ToolUse format
+            # Wrap to handle ToolUse format - the actual function expects a ToolUse object
             def wrapped_calculator(calculation: str):
-                tool_use = {'input': {'calculation': calculation}}
-                return python_financial_calculator(ToolUse(tool_use))
+                # Create a proper ToolUse object structure
+                # ToolUse from strands.types.tools expects a dict-like structure
+                import uuid
+                tool_use_dict = {
+                    'toolUseId': str(uuid.uuid4()),
+                    'toolName': 'python_financial_calculator',
+                    'input': {'calculation': calculation}
+                }
+                # ToolUse can be constructed from a dict
+                try:
+                    tool_use = ToolUse(tool_use_dict)
+                except Exception as e:
+                    # If ToolUse construction fails, try passing dict directly
+                    logger.warning(f"ToolUse construction failed, using dict directly: {str(e)}")
+                    tool_use = tool_use_dict
+                
+                result = python_financial_calculator(tool_use)
+                
+                # Extract the output from ToolResult if needed
+                if hasattr(result, 'output'):
+                    return result.output
+                elif hasattr(result, 'content'):
+                    return result.content
+                elif isinstance(result, dict):
+                    return result.get('output', result.get('content', result))
+                return result
             self._tool_cache[tool_name] = wrapped_calculator
             return wrapped_calculator
         
