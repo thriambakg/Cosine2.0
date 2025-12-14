@@ -24,7 +24,19 @@ lambda_client = boto3.client('lambda')
 # Environment variables
 CHAT_SESSIONS_TABLE_NAME = os.environ.get('CHAT_SESSIONS_TABLE_NAME')
 CHAT_FILES_BUCKET_NAME = os.environ.get('CHAT_FILES_BUCKET_NAME')
-WEBSOCKET_PROCESSOR_FUNCTION_NAME = os.environ.get('WEBSOCKET_PROCESSOR_FUNCTION_NAME')
+PROJECT_NAME = os.environ.get('PROJECT_NAME', 'cosine')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'production')
+
+# Construct chat agent function name at runtime to avoid circular dependency
+def get_chat_agent_function_name():
+    """Get chat agent function name by constructing it from environment variables"""
+    websocket_processor_name = os.environ.get('WEBSOCKET_PROCESSOR_FUNCTION_NAME')
+    if websocket_processor_name:
+        return websocket_processor_name
+    # Fallback: construct from standard naming pattern
+    return f"{PROJECT_NAME}-chat-agent-{ENVIRONMENT}"
+
+WEBSOCKET_PROCESSOR_FUNCTION_NAME = get_chat_agent_function_name()
 
 def lambda_handler(event, context):
     """

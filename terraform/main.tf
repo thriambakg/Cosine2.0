@@ -1905,11 +1905,14 @@ module "agent_files_processor_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT                       = var.environment
-    LOG_LEVEL                         = var.environment == "development" ? "DEBUG" : "INFO"
-    CHAT_FILES_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
-    CHAT_SESSIONS_TABLE_NAME          = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    WEBSOCKET_PROCESSOR_FUNCTION_NAME = aws_lambda_function.chat_agent.function_name
+    ENVIRONMENT              = var.environment
+    LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
+    CHAT_FILES_BUCKET_NAME   = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    CHAT_SESSIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    # WEBSOCKET_PROCESSOR_FUNCTION_NAME removed to avoid circular dependency with chat_agent
+    # The agent_files_processor can construct the function name at runtime using the standard pattern:
+    # "${project_name}-chat-agent-${environment}"
+    PROJECT_NAME = var.project_name
   }
 
   # Attach core layer only
