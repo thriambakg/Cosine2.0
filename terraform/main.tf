@@ -1236,6 +1236,37 @@ resource "aws_iam_role_policy_attachment" "chat_agent_websocket_policy" {
   policy_arn = aws_iam_policy.lambda_websocket_policy.arn
 }
 
+# IAM Policy for Chat Agent to read from Stock Historical S3 Bucket (READ ONLY)
+resource "aws_iam_policy" "chat_agent_stock_historical_s3_read_policy" {
+  name        = "${var.project_name}-chat-agent-stock-historical-s3-read-${var.environment}"
+  description = "Allows Chat Agent Lambda to read from stock historical data S3 bucket (READ ONLY)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Attach Stock Historical S3 read policy for chat agent
+resource "aws_iam_role_policy_attachment" "chat_agent_stock_historical_s3_read_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.chat_agent_stock_historical_s3_read_policy.arn
+}
+
 # SQS policy for chat agent - REMOVED
 # SQS queues are no longer used - direct WebSocket delivery is used instead
 # The chat_agent now sends logs and responses directly via WebSocket API Gateway
@@ -1329,6 +1360,8 @@ resource "aws_lambda_function" "chat_agent" {
   environment {
     variables = {
       ENVIRONMENT                 = var.environment
+      STOCK_HISTORICAL_BUCKET     = data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_name
+      PROJECT_NAME                = var.project_name
       LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
       DEPLOYMENT_TIMESTAMP        = timestamp()
       IMAGE_URI                   = var.chat_agent_image_uri != "" ? var.chat_agent_image_uri : "${module.chat_agent_ecr.repository_url}:${var.chat_agent_image_tag}"

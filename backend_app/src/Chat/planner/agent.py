@@ -1304,17 +1304,42 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
             return "Error: Maximum 10 stocks can be fetched at once"
         
         # Fetch data for each symbol
+        # First try S3 historical data, then fall back to yfinance
         results = []
         for symbol in symbol_list:
             try:
+                # Try S3 historical data first (via helper function used by tools)
+                from tools.s3_historical_data_helper import fetch_stock_from_s3_historical
+                
+                s3_data = fetch_stock_from_s3_historical(symbol, timeframe, start_date, end_date)
+                
+                if s3_data:
+                    # Import compression utility
+                    from compression_helper import CompressionHelper
+                    compressed_result = CompressionHelper.compress_data(s3_data, compression_threshold=2000)
+                    results.append(compressed_result)
+                    agent_logger.info(f"✅ Loaded {symbol} from S3 historical data")
+                else:
+                    # Fall back to yfinance if S3 data not available
+                    agent_logger.info(f"S3 historical data not available for {symbol}, using yfinance")
+                    data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
+                    results.append(data)
+            except ImportError:
+                # If helper not available, fall back to yfinance
+                agent_logger.warning(f"S3 historical helper not available, using yfinance for {symbol}")
                 data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
                 results.append(data)
             except Exception as e:
-                results.append({
-                    "symbol": symbol,
-                    "status": "error",
-                    "message": f"Failed to fetch data: {str(e)}"
-                })
+                agent_logger.warning(f"Error fetching {symbol} from S3: {str(e)}, falling back to yfinance")
+                try:
+                    data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
+                    results.append(data)
+                except Exception as fallback_error:
+                    results.append({
+                        "symbol": symbol,
+                        "status": "error",
+                        "message": f"Failed to fetch data: {str(fallback_error)}"
+                    })
         
         # Return consolidated results
         consolidated_data = {

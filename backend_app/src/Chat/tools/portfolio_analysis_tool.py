@@ -171,6 +171,17 @@ class PortfolioAnalyzer:
                 logger.info(f"Detected file reference JSON, reading actual data from: {file_ref['s3_key']}")
                 data = self._read_data_from_s3(file_ref['s3_key'])
         
+        # Decompress data if it's compressed
+        try:
+            from compression_helper import CompressionHelper
+            if isinstance(data, dict) and CompressionHelper.is_compressed(data):
+                logger.info("Detected compressed data, decompressing...")
+                data = CompressionHelper.decompress_data(data)
+        except ImportError:
+            logger.warning("CompressionHelper not available, skipping decompression check")
+        except Exception as e:
+            logger.warning(f"Error checking/decompressing data: {e}")
+        
         # Extract stock data from the structure
         stocks_data = {}
         
@@ -189,11 +200,30 @@ class PortfolioAnalyzer:
                 status = stock.get('status', 'unknown')
                 logger.info(f"Processing stock {i+1}: {symbol}, status: {status}, keys: {list(stock.keys())}")
                 
+                # Decompress individual stock data if compressed
+                try:
+                    from compression_helper import CompressionHelper
+                    if isinstance(stock, dict) and CompressionHelper.is_compressed(stock):
+                        logger.info(f"Decompressing stock data for {symbol}")
+                        stock = CompressionHelper.decompress_data(stock)
+                except:
+                    pass
+                
                 # Try to get data even if status is not explicitly 'success'
                 # Some tools may not set status but still have data
                 if 'historical_data' in stock:
                     try:
                         historical_data = stock['historical_data']
+                        
+                        # Decompress historical_data if it's compressed
+                        try:
+                            from compression_helper import CompressionHelper
+                            if isinstance(historical_data, dict) and CompressionHelper.is_compressed(historical_data):
+                                logger.info(f"Decompressing historical_data for {symbol}")
+                                historical_data = CompressionHelper.decompress_data(historical_data)
+                        except:
+                            pass
+                        
                         logger.info(f"Found historical_data for {symbol}: {type(historical_data)}, length: {len(historical_data) if isinstance(historical_data, list) else 'N/A'}")
                         
                         if isinstance(historical_data, list) and len(historical_data) > 0:
@@ -227,6 +257,15 @@ class PortfolioAnalyzer:
                     # Alternative format with 'data' instead of 'historical_data'
                     try:
                         stock_data = stock['data']
+                        
+                        # Decompress if compressed
+                        try:
+                            from compression_helper import CompressionHelper
+                            if isinstance(stock_data, dict) and CompressionHelper.is_compressed(stock_data):
+                                stock_data = CompressionHelper.decompress_data(stock_data)
+                        except:
+                            pass
+                        
                         if isinstance(stock_data, list) and len(stock_data) > 0:
                             df = pd.DataFrame(stock_data)
                             if 'date' in df.columns:
