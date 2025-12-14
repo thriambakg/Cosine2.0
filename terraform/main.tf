@@ -1835,9 +1835,10 @@ module "file_return_lambda" {
     SEC_FILINGS_BUCKET       = "cosine-sec-filings-${var.environment}"
     POLITICIAN_TRADES_BUCKET = "cosine-politician-trades-${var.environment}"
     SESSIONS_TABLE           = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    WEBSOCKET_ENDPOINT       = module.websocket_api.stage_url
-    ENVIRONMENT              = var.environment
-    LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
+    # WebSocket endpoint removed to avoid circular dependency with websocket_api module
+    # The file_return Lambda can discover the endpoint at runtime if needed
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
   additional_policy_arns = [
@@ -1851,7 +1852,8 @@ module "file_return_lambda" {
 
   tags = var.common_tags
 
-  depends_on = [module.websocket_api]
+  # Removed depends_on to break circular dependency
+  # depends_on = [module.websocket_api]
 }
 
 # News Search Lambda Function
