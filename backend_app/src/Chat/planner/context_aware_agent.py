@@ -331,14 +331,19 @@ When creating a plan, use this EXACT JSON format:
 
 💾 DATA STORAGE STRATEGY:
 ========================
-- Results >10KB are automatically stored in S3 by the orchestrator
-- File references are returned instead of raw data
-- Use read_s3_file_tool(s3_key) to retrieve stored data in subsequent steps
+- Results >10KB are automatically stored in S3 by the orchestrator in the data-files/ folder
+- File references are returned instead of raw data to prevent context overflow
+- Use read_s3_file_tool(s3_key) to retrieve stored data from data-files/ in subsequent steps
 - Large data tools that should use storage:
   * get_multiple_financial_data (5+ stocks, long timeframes) → store_result: true
   * python_financial_calculator (complex calculations with large datasets) → store_result: true
   * analyze_portfolio (large portfolios) → store_result: true
   * calculate_stock_correlation (many stocks) → store_result: true
+
+📁 FOLDER STRUCTURE:
+====================
+- data-files/: Intermediate tool results (large datasets, calculations) - automatically stored by orchestrator
+- agent-files/: Completed agent-generated files (reports, CSVs, PDFs) - created by generate_agent_file_tool and generate_excel_file_tool
 
 🔧 AVAILABLE TOOLS FOR PLANNING:
 - get_financial_data(symbol, timeframe, start_date, end_date) - Single stock data

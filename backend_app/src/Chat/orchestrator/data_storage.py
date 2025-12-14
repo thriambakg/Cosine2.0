@@ -16,6 +16,10 @@ class DataStorage:
     """
     Handles storage of large tool results in S3.
     Returns file references instead of raw data to prevent LLM context overflow.
+    
+    Note: This stores intermediate tool results in the data-files/ folder.
+    Completed agent-generated files (reports, CSVs, PDFs) should use agent-files/ folder
+    via generate_agent_file_tool or generate_excel_file_tool.
     """
     
     def __init__(self):
@@ -51,8 +55,9 @@ class DataStorage:
             file_id = uuid.uuid4().hex[:8]
             filename = f"{tool_name}_{timestamp}_{file_id}.json"
             
-            # Determine S3 key (path)
-            s3_key = f"agent-files/{user_id}/{session_id}/{filename}"
+            # Determine S3 key (path) - use data-files for intermediate tool results
+            # agent-files is reserved for completed agent-generated files (reports, CSVs, PDFs)
+            s3_key = f"data-files/{user_id}/{session_id}/{filename}"
             
             # Convert data to JSON string
             if isinstance(data, str):

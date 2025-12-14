@@ -149,16 +149,16 @@ TOOL_SPECIFICATIONS = {
         'size_estimate': 'small - File metadata',
         'store_result': False
     },
-    'read_s3_file_tool': {
-        'name': 'read_s3_file_tool',
-        'description': 'Read files from S3 (use after large data is stored)',
-        'inputs': {
-            's3_key': 'str - S3 key/path to file (from file_reference.s3_key)'
+        'read_s3_file_tool': {
+            'name': 'read_s3_file_tool',
+            'description': 'Read files from S3 (use after large data is stored). Can read from both data-files/ (intermediate tool results) and agent-files/ (completed agent files)',
+            'inputs': {
+                's3_key': 'str - S3 key/path to file (from file_reference.s3_key). Paths may be in data-files/ or agent-files/ folders'
+            },
+            'outputs': 'File contents',
+            'size_estimate': 'variable - Depends on file size',
+            'store_result': False
         },
-        'outputs': 'File contents',
-        'size_estimate': 'variable - Depends on file size',
-        'store_result': False
-    },
     'get_chat_history_tool': {
         'name': 'get_chat_history_tool',
         'description': 'Get chat history for a session',
