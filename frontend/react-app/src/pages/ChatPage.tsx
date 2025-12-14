@@ -547,9 +547,9 @@ export default function ChatPage() {
         // Clear the timeout since AI is responding
         // NOTE: Loading state is cleared by unifiedMessageHandler when first chunk arrives
         // Don't clear it here to avoid race conditions and ensure it stays until chunk actually arrives
-        if (currentSession?.session_id && loadingTimeoutRef.current) {
-          clearTimeout(loadingTimeoutRef.current);
-          loadingTimeoutRef.current = null;
+        if (currentSession?.session_id && loadingTimeoutRefs.current[currentSession.session_id]) {
+          clearTimeout(loadingTimeoutRefs.current[currentSession.session_id]);
+          delete loadingTimeoutRefs.current[currentSession.session_id];
           console.log('🔄 ChatPage: Cleared timeout for session:', currentSession.session_id);
         }
       }
@@ -626,33 +626,18 @@ export default function ChatPage() {
     // not from when file upload begins
     const handleFileMessageSent = (event: CustomEvent) => {
       const { sessionId } = event.detail;
-      if (sessionId === currentSession?.session_id && loadingTimeoutRef.current) {
+      if (sessionId === currentSession?.session_id) {
         console.log('🔄 ChatPage: File message sent, resetting timeout for session:', sessionId);
-        clearTimeout(loadingTimeoutRef.current);
-        loadingTimeoutRef.current = null;
+        
+        // Clear any existing timeout for this session
+        if (loadingTimeoutRefs.current[sessionId]) {
+          clearTimeout(loadingTimeoutRefs.current[sessionId]);
+          delete loadingTimeoutRefs.current[sessionId];
+        }
         
         // Reset timeout - now counting from when AI processing actually starts
-        loadingTimeoutRef.current = setTimeout(() => {
-          console.log('⏰ TIMEOUT: Agent response timeout after 5 minutes for session:', sessionId);
-          
-          // Clear loading state
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [sessionId]: false
-          }));
-          
-          // Add helpful timeout message to guide user
-          if (sessionId) {
-            addPersistedMessage({
-              id: `timeout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              text: "⏰ **Processing Extended**: Your request is taking longer than usual to process. The AI is still working on your request and may take up to 15 minutes to complete. Please refresh the page periodically to check for updates, or start a new conversation if you would like to talk about something else.",
-              sender: 'bot',
-              timestamp: new Date()
-            });
-          }
-          
-          loadingTimeoutRef.current = null;
-        }, 300000); // 5 minutes (300,000 ms)
+        // Note: The main timeout effect will handle setting the timeout when loading becomes true
+        // This handler just ensures we don't have stale timeouts from file upload
       }
     };
 
@@ -708,7 +693,8 @@ export default function ChatPage() {
 
   // Handle session switching and message caching
   const previousSessionIdRef = useRef<string | null>(null);
-  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Use a map to track timeouts per session instead of a single global timeout
+  const loadingTimeoutRefs = useRef<Record<string, NodeJS.Timeout>>({});
   
   useEffect(() => {
     const currentSessionId = currentSession?.session_id;
@@ -757,10 +743,10 @@ export default function ChatPage() {
         });
       }
       
-      // Clear any pending timeout
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-        loadingTimeoutRef.current = null;
+      // Clear any pending timeouts for the previous session
+      if (previousSessionIdRef.current && loadingTimeoutRefs.current[previousSessionIdRef.current]) {
+        clearTimeout(loadingTimeoutRefs.current[previousSessionIdRef.current]);
+        delete loadingTimeoutRefs.current[previousSessionIdRef.current];
       }
     }
     
@@ -795,62 +781,67 @@ export default function ChatPage() {
   // Only trigger timeout when loading state becomes true (not on every render)
   const prevLoadingStatesRef = useRef<Record<string, boolean>>({});
   useEffect(() => {
-    const currentSessionId = currentSession?.session_id;
-    if (currentSessionId && sessionLoadingStates[currentSessionId]) {
-      const prevLoadingState = prevLoadingStatesRef.current[currentSessionId] || false;
+    // Process all sessions, not just current session
+    Object.keys(sessionLoadingStates).forEach(sessionId => {
+      const isLoading = sessionLoadingStates[sessionId];
+      const prevLoadingState = prevLoadingStatesRef.current[sessionId] || false;
       
       // Only set timeout if loading state just became true (transition from false to true)
-      if (!prevLoadingState) {
-        console.log('🔄 ChatPage: Loading state became true, setting 5-minute timeout for session:', currentSessionId);
+      if (isLoading && !prevLoadingState) {
+        console.log('🔄 ChatPage: Loading state became true, setting 5-minute timeout for session:', sessionId);
         
-        // Clear any existing timeout
-        if (loadingTimeoutRef.current) {
-          clearTimeout(loadingTimeoutRef.current);
+        // Clear any existing timeout for this session
+        if (loadingTimeoutRefs.current[sessionId]) {
+          clearTimeout(loadingTimeoutRefs.current[sessionId]);
+          delete loadingTimeoutRefs.current[sessionId];
         }
         
         // Set new timeout for this session (5 minutes)
-        loadingTimeoutRef.current = setTimeout(() => {
-          console.log('⏰ TIMEOUT: Agent response timeout after 5 minutes for session:', currentSessionId);
+        loadingTimeoutRefs.current[sessionId] = setTimeout(() => {
+          // Check current loading state using the state setter callback to get latest state
+          setSessionLoadingStates(prev => {
+            const stillLoading = prev[sessionId];
+            
+            if (stillLoading) {
+              console.log('⏰ TIMEOUT: Agent response timeout after 5 minutes for session:', sessionId);
+              
+              // Add helpful timeout message to guide user
+              addPersistedMessage({
+                id: `timeout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                text: "⏰ **Processing Extended**: Your request is taking longer than usual to process. The AI is still working on your request and may take up to 15 minutes to complete. Please refresh the page periodically to check for updates, or start a new conversation if you would like to talk about something else.",
+                sender: 'bot',
+                timestamp: new Date()
+              });
+              
+              // Return updated state with loading cleared
+              return {
+                ...prev,
+                [sessionId]: false
+              };
+            } else {
+              console.log('🔄 ChatPage: Timeout fired but loading already cleared for session:', sessionId);
+              return prev; // No change needed
+            }
+          });
           
-          // Clear loading state
-          setSessionLoadingStates(prev => ({
-            ...prev,
-            [currentSessionId]: false
-          }));
-          
-          // Add helpful timeout message to guide user
-          if (currentSessionId) {
-            addPersistedMessage({
-              id: `timeout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              text: "⏰ **Processing Extended**: Your request is taking longer than usual to process. The AI is still working on your request and may take up to 15 minutes to complete. Please refresh the page periodically to check for updates, or start a new conversation if you would like to talk about something else.",
-              sender: 'bot',
-              timestamp: new Date()
-            });
-          }
-          
-          loadingTimeoutRef.current = null;
+          // Clean up timeout ref
+          delete loadingTimeoutRefs.current[sessionId];
         }, 300000); // 5 minutes (300,000 ms)
       }
-    }
+      
+      // Clear timeout if loading state just became false (transition from true to false)
+      if (!isLoading && prevLoadingState) {
+        if (loadingTimeoutRefs.current[sessionId]) {
+          console.log('🔄 ChatPage: Loading state became false, clearing timeout for session:', sessionId);
+          clearTimeout(loadingTimeoutRefs.current[sessionId]);
+          delete loadingTimeoutRefs.current[sessionId];
+        }
+      }
+    });
     
     // Update the ref to track previous loading states
     prevLoadingStatesRef.current = { ...sessionLoadingStates };
-  }, [currentSession?.session_id, sessionLoadingStates, addPersistedMessage]);
-
-  // Clear timeout when loading state becomes false
-  useEffect(() => {
-    const currentSessionId = currentSession?.session_id;
-    if (currentSessionId && !sessionLoadingStates[currentSessionId]) {
-      const prevLoadingState = prevLoadingStatesRef.current[currentSessionId] || false;
-      
-      // Clear timeout if loading state just became false (transition from true to false)
-      if (prevLoadingState && loadingTimeoutRef.current) {
-        console.log('🔄 ChatPage: Loading state became false, clearing timeout for session:', currentSessionId);
-        clearTimeout(loadingTimeoutRef.current);
-        loadingTimeoutRef.current = null;
-      }
-    }
-  }, [sessionLoadingStates, currentSession?.session_id]);
+  }, [sessionLoadingStates, addPersistedMessage]);
 
   // Track current session for cleanup
   const currentSessionRef = useRef<string | null>(null);
@@ -868,9 +859,11 @@ export default function ChatPage() {
       }
       cleanupCalledRef.current = true;
       
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
+      // Clear all pending timeouts for all sessions
+      Object.values(loadingTimeoutRefs.current).forEach(timeout => {
+        clearTimeout(timeout);
+      });
+      loadingTimeoutRefs.current = {};
       
       // Cancel all pending messages when component unmounts (page refresh)
       if (currentSessionRef.current) {

@@ -48,7 +48,8 @@ class ToolExecutor:
             import inspect
             sig = inspect.signature(tool_func)
             accepted_params = set(sig.parameters.keys())
-            logger.debug(f"Tool {tool_name} accepts parameters: {accepted_params}")
+            logger.info(f"Tool {tool_name} function: {tool_func.__name__}, accepts parameters: {accepted_params}")
+            logger.info(f"Tool {tool_name} function signature: {sig}")
             
             # Filter parameters to only include those the tool accepts
             filtered_params = {k: v for k, v in parameters.items() if k in accepted_params}
@@ -80,7 +81,25 @@ class ToolExecutor:
                 filtered_params['user_id'] = user_id
             
             # Execute tool with filtered parameters
-            result = tool_func(**filtered_params)
+            # Log what we're about to pass
+            logger.info(f"Calling {tool_name} (function: {tool_func.__name__}) with {len(filtered_params)} parameters: {list(filtered_params.keys())}")
+            for key, value in filtered_params.items():
+                if isinstance(value, str) and len(value) > 100:
+                    logger.info(f"  {key}: string (length={len(value)}, first 100 chars: {value[:100]}...)")
+                elif value is None:
+                    logger.warning(f"  {key}: None (WARNING: This might cause issues!)")
+                else:
+                    logger.info(f"  {key}: {type(value).__name__} = {value}")
+            
+            try:
+                result = tool_func(**filtered_params)
+            except TypeError as e:
+                # More detailed error logging for type errors
+                logger.error(f"TypeError calling {tool_name}: {e}")
+                logger.error(f"Function signature: {sig}")
+                logger.error(f"Filtered parameters keys: {list(filtered_params.keys())}")
+                logger.error(f"Filtered parameters values types: {[(k, type(v).__name__) for k, v in filtered_params.items()]}")
+                raise
             
             logger.info(f"Tool {tool_name} executed successfully")
             return result
@@ -206,14 +225,29 @@ class ToolExecutor:
             from tools.chart_generator import generate_chart_tool
             from strands.types.tools import ToolUse
             # Wrap to handle ToolUse format
+            # The @tool decorator wraps the function, so we need to call it with ToolUse
+            # But we want to accept individual parameters, so we create a wrapper
             def wrapped_chart(symbol: str, data_json: Any, chart_type: str = 'line', title: str = None):
-                tool_use = {'input': {
-                    'symbol': symbol,
-                    'data_json': data_json,
-                    'chart_type': chart_type,
-                    'title': title
-                }}
-                return generate_chart_tool(ToolUse(tool_use))
+                logger.info(f"wrapped_chart called with symbol={symbol}, data_json length={len(data_json) if isinstance(data_json, str) else 'not a string'}, chart_type={chart_type}, title={title}")
+                try:
+                    tool_use_dict = {
+                        'input': {
+                            'symbol': symbol,
+                            'data_json': data_json,
+                            'chart_type': chart_type,
+                            'title': title
+                        }
+                    }
+                    tool_use = ToolUse(tool_use_dict)
+                    logger.info(f"Created ToolUse object, calling generate_chart_tool")
+                    result = generate_chart_tool(tool_use)
+                    logger.info(f"generate_chart_tool returned result type: {type(result)}")
+                    return result
+                except Exception as e:
+                    logger.error(f"Error in wrapped_chart: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    raise
             self._tool_cache[tool_name] = wrapped_chart
             return wrapped_chart
         
