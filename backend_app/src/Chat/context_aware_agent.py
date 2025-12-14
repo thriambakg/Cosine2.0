@@ -456,14 +456,17 @@ Based on the current webpage and user intent, focus on:
     
     def clear_session_cache(self, session_id: str) -> None:
         """
-        Clear cached agent for a session
+        Clear cached agent for a session (handles both old and new key formats)
         
         Args:
             session_id: Session identifier
         """
-        if session_id in self.session_agents:
-            del self.session_agents[session_id]
-            logger.debug(f"Cleared cached agent for session {session_id}")
+        # Clear all agents for this session (handles both old format and new format with model)
+        keys_to_remove = [key for key in self.session_agents.keys() if key == session_id or key.startswith(f"{session_id}_")]
+        for key in keys_to_remove:
+            del self.session_agents[key]
+        if keys_to_remove:
+            logger.debug(f"Cleared {len(keys_to_remove)} cached agent(s) for session {session_id}")
     
     def get_session_summary(self, session_context: Dict[str, Any]) -> Dict[str, Any]:
         """

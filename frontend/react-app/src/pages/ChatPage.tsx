@@ -285,6 +285,7 @@ export default function ChatPage() {
     updateSessionFiles,
     updateSessionAgentFiles,
     updateSessionVariables,
+    loadSessionsFromBackend,
   } = useChatPersistence(user?.id || '');
   
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -878,6 +879,26 @@ export default function ChatPage() {
       }
     };
   }, []); // Empty dependency array - only run on mount/unmount
+
+  // Listen for new session creation from sidebar
+  useEffect(() => {
+    const handleNewSessionCreated = (event: CustomEvent) => {
+      const { sessionId, source } = event.detail;
+      // Only handle if created from sidebar (not from chatpage itself)
+      if (source === 'sidebar' && sessionId) {
+        console.log('🔄 ChatPage: New session created in sidebar, refreshing session list:', sessionId);
+        // Reload sessions from backend to include the new session
+        loadSessionsFromBackend();
+      }
+    };
+
+    window.addEventListener('new-session-created', handleNewSessionCreated as EventListener);
+    
+    return () => {
+      window.removeEventListener('new-session-created', handleNewSessionCreated as EventListener);
+    };
+  }, [loadSessionsFromBackend]);
+
   const editContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

@@ -31,7 +31,21 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         padding: '1em', 
         borderRadius: '5px',
         overflow: 'auto',
-        margin: '0.5em 0'
+        margin: '0.5em 0',
+        '&::-webkit-scrollbar': {
+          width: '6px',
+          height: '6px'
+        },
+        '&::-webkit-scrollbar-track': {
+          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+        },
+        '&::-webkit-scrollbar-thumb': {
+          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+          borderRadius: '3px',
+        },
+        '&::-webkit-scrollbar-thumb:hover': {
+          backgroundColor: 'rgba(59, 130, 246, 0.7)',
+        },
       },
       '& pre code': { 
         backgroundColor: 'transparent', 
@@ -89,6 +103,22 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       '& tbody tr:hover': {
         backgroundColor: 'rgba(59, 130, 246, 0.05)'
       },
+      '& .markdown-pre-code': {
+        '&::-webkit-scrollbar': {
+          width: '6px',
+          height: '6px'
+        },
+        '&::-webkit-scrollbar-track': {
+          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+        },
+        '&::-webkit-scrollbar-thumb': {
+          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+          borderRadius: '3px',
+        },
+        '&::-webkit-scrollbar-thumb:hover': {
+          backgroundColor: 'rgba(59, 130, 246, 0.7)',
+        },
+      },
       ...sx
     }}>
       <ReactMarkdown
@@ -136,7 +166,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 borderRadius: '5px',
                 overflow: 'auto',
                 margin: '0.5em 0'
-              }}>
+              }} className="markdown-pre-code">
                 <code style={{
                   backgroundColor: 'transparent',
                   padding: 0,
