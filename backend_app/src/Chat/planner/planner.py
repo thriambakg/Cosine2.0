@@ -108,6 +108,11 @@ Remember: You cannot execute tools. You only create plans. If you need informati
             # Try to parse as JSON plan
             plan = self._extract_plan_from_response(response_text)
             
+            # Check if planner needs more information (need_info response)
+            if plan and plan.get('need_info', False):
+                logger.info(f"Planner needs more information: {plan.get('missing_info', 'unknown')}")
+                return plan
+            
             if plan and 'steps' in plan:
                 logger.info(f"Created plan with {len(plan.get('steps', []))} steps")
                 return plan
@@ -157,16 +162,37 @@ Remember: You cannot execute tools. You only create plans. If you need informati
             json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
             if json_match:
                 plan_json = json_match.group(1)
-                return json.loads(plan_json)
+                parsed = json.loads(plan_json)
+                # Check if it's a need_info response
+                if parsed.get('need_info', False):
+                    return parsed
+                # Check if it's a normal plan
+                if 'steps' in parsed:
+                    return parsed
+                return parsed
             
-            # Try to find JSON object directly
-            json_match = re.search(r'\{.*"steps".*\}', response_text, re.DOTALL)
+            # Try to find JSON object directly (either with "steps" or "need_info")
+            json_match = re.search(r'\{.*"(?:steps|need_info)".*\}', response_text, re.DOTALL)
             if json_match:
                 plan_json = json_match.group(0)
-                return json.loads(plan_json)
+                parsed = json.loads(plan_json)
+                # Check if it's a need_info response
+                if parsed.get('need_info', False):
+                    return parsed
+                # Check if it's a normal plan
+                if 'steps' in parsed:
+                    return parsed
+                return parsed
             
             # Try parsing entire response as JSON
-            return json.loads(response_text)
+            parsed = json.loads(response_text)
+            # Check if it's a need_info response
+            if parsed.get('need_info', False):
+                return parsed
+            # Check if it's a normal plan
+            if 'steps' in parsed:
+                return parsed
+            return parsed
             
         except (json.JSONDecodeError, AttributeError):
             # Not a JSON plan - likely a direct answer

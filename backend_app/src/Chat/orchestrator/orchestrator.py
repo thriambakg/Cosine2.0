@@ -234,6 +234,7 @@ class Orchestrator:
                     if step_match:
                         step_num = int(step_match.group(1))
                         field = step_match.group(2).strip() if step_match.group(2) else 'result'
+                        replacement = ''  # Initialize replacement at the start
                         
                         if step_num < current_step:
                             # Get result from previous step
@@ -338,19 +339,23 @@ class Orchestrator:
                                     if not replacement:
                                         logger.warning(f"Could not resolve placeholder {{step_{step_num}.{field}}}")
                                         replacement = ''
-                                
-                                # Convert replacement to string if needed
-                                if not isinstance(replacement, str):
-                                    replacement = json.dumps(replacement) if replacement else ''
-                                
-                                # Replace placeholder (handle both {{...}} and {...} formats)
-                                placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                                placeholder_single_brace = f'{{{placeholder}}}'
-                                if placeholder_with_braces in resolved_value:
-                                    resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                                if placeholder_single_brace in resolved_value:
-                                    resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                                continue
+                            else:
+                                # step_result is None - step hasn't completed yet or doesn't exist
+                                logger.warning(f"Step {step_num} result not found for placeholder {{step_{step_num}.{field}}}")
+                                replacement = ''
+                            
+                            # Convert replacement to string if needed
+                            if not isinstance(replacement, str):
+                                replacement = json.dumps(replacement) if replacement else ''
+                            
+                            # Replace placeholder (handle both {{...}} and {...} formats)
+                            placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                            placeholder_single_brace = f'{{{placeholder}}}'
+                            if placeholder_with_braces in resolved_value:
+                                resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                            if placeholder_single_brace in resolved_value:
+                                resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                            continue
                     
                     # Pattern 2: {{field_from_step_N}} - extract field from step N result
                     field_match = re.match(r'(.+?)[_\s]+from[_\s]+step[_\s]*(\d+)', placeholder, re.IGNORECASE)
