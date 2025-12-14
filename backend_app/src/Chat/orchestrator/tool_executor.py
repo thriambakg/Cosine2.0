@@ -100,7 +100,7 @@ class ToolExecutor:
         
         # Python calculator
         elif tool_name == 'python_financial_calculator':
-            from financial_calculator import python_financial_calculator
+            from tools.financial_calculator import python_financial_calculator
             from strands.types.tools import ToolUse
             # Wrap to handle ToolUse format - the actual function expects a ToolUse object
             def wrapped_calculator(calculation: str):
@@ -132,6 +132,46 @@ class ToolExecutor:
                 return result
             self._tool_cache[tool_name] = wrapped_calculator
             return wrapped_calculator
+        
+        # Portfolio analysis tool
+        elif tool_name == 'analyze_portfolio_performance':
+            from tools.portfolio_analysis_tool import analyze_portfolio_performance
+            from strands.types.tools import ToolUse
+            def wrapped_portfolio(data_source: str, portfolio_holdings: str, benchmark_symbol: str = "^GSPC", risk_free_rate: float = 0.02):
+                import uuid
+                tool_use_dict = {
+                    'toolUseId': str(uuid.uuid4()),
+                    'toolName': 'analyze_portfolio_performance',
+                    'input': {
+                        'data_source': data_source,
+                        'portfolio_holdings': portfolio_holdings,
+                        'benchmark_symbol': benchmark_symbol,
+                        'risk_free_rate': risk_free_rate
+                    }
+                }
+                try:
+                    tool_use = ToolUse(tool_use_dict)
+                except Exception as e:
+                    logger.warning(f"ToolUse construction failed, using dict directly: {str(e)}")
+                    tool_use = tool_use_dict
+                
+                result = analyze_portfolio_performance(tool_use)
+                
+                if hasattr(result, 'output'):
+                    return result.output
+                elif hasattr(result, 'content'):
+                    # Extract text from content array
+                    if isinstance(result.content, list) and len(result.content) > 0:
+                        return result.content[0].get('text', result.content[0])
+                    return result.content
+                elif isinstance(result, dict):
+                    content = result.get('content', result.get('output', result))
+                    if isinstance(content, list) and len(content) > 0:
+                        return content[0].get('text', content[0])
+                    return content
+                return result
+            self._tool_cache[tool_name] = wrapped_portfolio
+            return wrapped_portfolio
         
         # Chart tools
         elif tool_name == 'generate_chart_tool':
