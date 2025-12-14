@@ -1031,8 +1031,7 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
                     user_id=user_id,
                     session_id=session_id,
                     message_id=ai_message_id,
-                    response_content=response_content,
-                    response_type='ai_response'
+                    response_content=response_content
                 )
                 
                 # Save to DynamoDB
