@@ -431,9 +431,28 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             path = event.get('path', '')
             if '/files' in path or event.get('resource', '').endswith('/files'):
                 logger.info("Processing file upload request")
-                from file_upload_handler import FileUploadHandler
-                file_handler = FileUploadHandler()
-                return file_handler.handle_file_upload(event)
+                try:
+                    from file_upload_handler import FileUploadHandler
+                    file_handler = FileUploadHandler()
+                    result = file_handler.handle_file_upload(event)
+                    # Ensure CORS headers are always present
+                    if 'headers' not in result:
+                        result['headers'] = cors_headers
+                    elif 'Access-Control-Allow-Origin' not in result.get('headers', {}):
+                        result['headers'].update(cors_headers)
+                    return result
+                except Exception as e:
+                    logger.error(f"Error in file upload handler: {str(e)}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    return {
+                        'statusCode': 500,
+                        'headers': cors_headers,
+                        'body': json.dumps({
+                            'error': 'Internal server error',
+                            'message': str(e)
+                        })
+                    }
             
             # Otherwise, process as regular REST API request
             return handle_rest_api_request(event, cors_headers)
@@ -478,12 +497,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"Unexpected error in lambda_handler: {str(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
+        # Always include full CORS headers even on errors
+        cors_headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+            'Content-Type': 'application/json'
+        }
         return {
             'statusCode': 500,
-            'headers': {
-                'Access-Control-Allow-Origin': '*',
-                'Content-Type': 'application/json'
-            },
+            'headers': cors_headers,
             'body': json.dumps({
                 'error': 'Internal server error',
                 'message': 'An unexpected error occurred while processing your request'

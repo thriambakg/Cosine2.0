@@ -66,12 +66,31 @@ class FileUploadHandler:
         """
         try:
             logger.info(f"File upload request received")
+            logger.debug(f"Event structure: {json.dumps({k: str(type(v).__name__) for k, v in event.items() if k != 'body'}, indent=2)}")
             
             # Parse request body
             if isinstance(event.get('body'), str):
-                body = json.loads(event['body'])
+                try:
+                    body = json.loads(event['body'])
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse JSON body: {str(e)}")
+                    return {
+                        'statusCode': 400,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*',
+                            'Access-Control-Allow-Headers': 'Content-Type',
+                            'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                        },
+                        'body': json.dumps({
+                            'error': 'Invalid JSON in request body',
+                            'details': str(e)
+                        })
+                    }
             else:
                 body = event.get('body', {})
+            
+            logger.debug(f"Parsed body keys: {list(body.keys()) if isinstance(body, dict) else 'not a dict'}")
             
             user_id = body.get('user_id')
             session_id = body.get('session_id')

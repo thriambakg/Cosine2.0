@@ -922,6 +922,15 @@ resource "aws_iam_policy" "lambda_websocket_policy" {
         Resource = [
           "${module.websocket_api.api_execution_arn}/*"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "apigatewayv2:GetApis"
+        ]
+        Resource = "*"
+        # Read-only permission to discover WebSocket API ID at runtime
+        # Used when environment variables aren't set to avoid circular dependencies
       }
     ]
   })
