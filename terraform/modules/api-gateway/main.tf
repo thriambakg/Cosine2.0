@@ -31,11 +31,7 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_method.options_methods,
     aws_api_gateway_integration.options_integrations,
     aws_api_gateway_method_response.options_method_responses,
-    aws_api_gateway_integration_response.options_integration_responses,
-    aws_api_gateway_gateway_response.default_4xx,
-    aws_api_gateway_gateway_response.default_5xx,
-    aws_api_gateway_gateway_response.bad_request_body,
-    aws_api_gateway_gateway_response.bad_request_parameters
+    aws_api_gateway_integration_response.options_integration_responses
   ]
 
   lifecycle {
@@ -284,68 +280,5 @@ resource "aws_api_gateway_integration_response" "options_integration_responses" 
 
   lifecycle {
     create_before_destroy = true
-  }
-}
-
-# Gateway Responses for CORS on error responses
-# These are needed for AWS_PROXY integrations where integration responses don't work
-# Gateway responses add CORS headers to error responses (4xx, 5xx) even when Lambda doesn't return them
-resource "aws_api_gateway_gateway_response" "default_4xx" {
-  rest_api_id   = aws_api_gateway_rest_api.this.id
-  response_type = "DEFAULT_4XX"
-
-  response_templates = {
-    "application/json" = "{\"message\":$context.error.messageString}"
-  }
-
-  response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
-    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
-  }
-}
-
-resource "aws_api_gateway_gateway_response" "default_5xx" {
-  rest_api_id   = aws_api_gateway_rest_api.this.id
-  response_type = "DEFAULT_5XX"
-
-  response_templates = {
-    "application/json" = "{\"message\":$context.error.messageString}"
-  }
-
-  response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
-    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
-  }
-}
-
-resource "aws_api_gateway_gateway_response" "bad_request_body" {
-  rest_api_id   = aws_api_gateway_rest_api.this.id
-  response_type = "BAD_REQUEST_BODY"
-
-  response_templates = {
-    "application/json" = "{\"message\":$context.error.messageString}"
-  }
-
-  response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
-    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
-  }
-}
-
-resource "aws_api_gateway_gateway_response" "bad_request_parameters" {
-  rest_api_id   = aws_api_gateway_rest_api.this.id
-  response_type = "BAD_REQUEST_PARAMETERS"
-
-  response_templates = {
-    "application/json" = "{\"message\":$context.error.messageString}"
-  }
-
-  response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
-    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
   }
 }

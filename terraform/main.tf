@@ -677,7 +677,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "45" # Updated to add government contracts enrichment endpoint
+  deployment_trigger = "46" # Updated to fix CORS for file upload endpoint
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
