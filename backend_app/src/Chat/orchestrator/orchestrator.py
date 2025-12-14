@@ -357,6 +357,7 @@ class Orchestrator:
                     if field_match:
                         field_name = field_match.group(1).strip()
                         step_num = int(field_match.group(2))
+                        replacement = ''  # Initialize replacement
                         
                         if step_num < current_step:
                             # Get result from previous step
@@ -401,19 +402,29 @@ class Orchestrator:
                                                         tickers = [t for t in tickers if t]
                                                         if tickers:
                                                             replacement = ','.join(tickers)
-                                                    
-                                                    # Also check files for portfolio CSV
-                                                    files = result_data.get('files', [])
-                                                    for file_info in files:
-                                                        if isinstance(file_info, dict) and 'portfolio' in file_info.get('filename', '').lower():
-                                                            # Could read file, but for now just note it exists
-                                                            pass
                                     
+                                    # Convert replacement to string if needed
                                     if not isinstance(replacement, str):
                                         replacement = json.dumps(replacement) if replacement else ''
-                                    
-                                    resolved_value = resolved_value.replace(f'{{{{{placeholder}}}}}', str(replacement))
-                                    continue
+                                elif isinstance(result_data, str):
+                                    # Try to parse as JSON or extract from text
+                                    try:
+                                        parsed = json.loads(result_data)
+                                        if isinstance(parsed, dict):
+                                            replacement = parsed.get(field_name, '')
+                                            if not isinstance(replacement, str):
+                                                replacement = json.dumps(replacement) if replacement else ''
+                                    except:
+                                        replacement = ''
+                            
+                            # Replace placeholder (handle both {{...}} and {...} formats)
+                            placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                            placeholder_single_brace = f'{{{placeholder}}}'
+                            if placeholder_with_braces in resolved_value:
+                                resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                            if placeholder_single_brace in resolved_value:
+                                resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                            continue
                     
                     # If no pattern matched, log warning
                     logger.warning(f"Could not resolve placeholder: {{{{placeholder}}}}")

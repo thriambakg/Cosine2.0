@@ -56,8 +56,17 @@ The orchestrator will execute your plans.
 🚨 ABSOLUTE REQUIREMENT: You MUST return a JSON plan for ALL queries, even simple ones.
 - For SIMPLE queries (single question, quick lookup): Create a 1-step plan
 - For COMPLEX tasks (multi-step, large datasets, multiple files): Create a multi-step plan
+- If you NEED MORE INFORMATION from the user to create a plan, return a special "need_info" response
 
-You MUST respond with ONLY a JSON plan in this exact format:
+🚨 PLACEHOLDER RULES:
+- You CAN use simple placeholders like {{step_1.result}}, {{step_2.s3_key}}, {{portfolio_tickers_from_step_1}}
+- You CANNOT use complex Jinja templates like {{step1.files | selectattr(...) | first | attr(...)}}
+- If you need to extract data from a previous step, use simple field names that the orchestrator can resolve
+- If the data structure is too complex for simple placeholders, you MUST ask the user for the information instead
+
+You MUST respond with ONLY a JSON in one of these formats:
+
+FORMAT 1 - Normal Plan:
 {{
   "query": "original user query",
   "steps": [
@@ -72,9 +81,17 @@ You MUST respond with ONLY a JSON plan in this exact format:
   "requires_file_storage": false
 }}
 
-DO NOT provide direct answers. DO NOT provide text explanations. ONLY return JSON plans.
+FORMAT 2 - Need More Information (use when you cannot create a plan without user input):
+{{
+  "query": "original user query",
+  "need_info": true,
+  "missing_info": "What information is needed (e.g., 'portfolio symbols', 'time period', 'specific file name')",
+  "question": "A clear, friendly question to ask the user"
+}}
 
-Remember: You cannot execute tools. You only create plans. You MUST return JSON for every query."""
+DO NOT provide direct answers. DO NOT provide text explanations. ONLY return JSON.
+
+Remember: You cannot execute tools. You only create plans. If you need information the user hasn't provided, use the "need_info" format to ask for it."""
             
             # Get LLM response
             response = agent(planning_prompt)

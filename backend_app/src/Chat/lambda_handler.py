@@ -1000,6 +1000,66 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
             planner = Planner(context_aware_agent)
             plan = planner.create_plan(user_message, session_context, model)
             
+            # Check if planner needs more information from user
+            if plan.get('need_info', False):
+                logger.info("Planner needs more information from user")
+                # Route to Reasoning LLM to format the question nicely
+                reasoning_llm = ReasoningLLM(context_aware_agent)
+                missing_info = plan.get('missing_info', 'additional information')
+                question = plan.get('question', f'Could you please provide {missing_info}?')
+                
+                # Create a chat payload for the reasoning LLM
+                chat_payload = {
+                    'task_completed': f"Need {missing_info} to proceed",
+                    'file_references': [],
+                    'key_results': {},
+                    'table': [],
+                    'notes': [f"Planner needs: {missing_info}", f"Question: {question}"]
+                }
+                
+                # Format the question using Reasoning LLM
+                response_content = reasoning_llm.format_response(
+                    user_message,
+                    chat_payload,
+                    session_context,
+                    model
+                )
+                
+                # Send response via WebSocket
+                ws_handler = WebSocketHandler()
+                ws_handler.send_chat_response(
+                    user_id=user_id,
+                    session_id=session_id,
+                    message_id=ai_message_id,
+                    response_content=response_content,
+                    response_type='ai_response'
+                )
+                
+                # Save to DynamoDB
+                try:
+                    session_manager.save_message(
+                        session_id=session_id,
+                        user_id=user_id,
+                        message_id=ai_message_id,
+                        sender='ai',
+                        content=response_content,
+                        timestamp=int(time.time() * 1000)
+                    )
+                    logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (length: {len(response_content)})")
+                except Exception as db_error:
+                    logger.error(f"Error saving AI response to DynamoDB: {str(db_error)}")
+                
+                return {
+                    'statusCode': 200,
+                    'body': {
+                        'message': 'Response sent',
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'message_id': ai_message_id,
+                        'response_type': 'need_info'
+                    }
+                }
+            
             if not plan or 'steps' not in plan or len(plan.get('steps', [])) == 0:
                 logger.error("Planner did not return a valid plan")
                 return {
