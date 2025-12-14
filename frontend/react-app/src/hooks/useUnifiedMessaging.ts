@@ -40,8 +40,9 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
     const unsubscribe = unifiedMessageHandler.subscribeToMessages((updatedSessionId, updatedMessages) => {
       // Only update if it's for the current session
       if (updatedSessionId === sessionId) {
-        console.log(`📨 ${source}: Received message update for session ${sessionId}:`, updatedMessages.length);
-        setMessages([...updatedMessages]);
+        // Use functional update to avoid stale closure issues
+        // Direct array reference for maximum performance (React will handle re-render)
+        setMessages(() => updatedMessages);
       }
     });
     

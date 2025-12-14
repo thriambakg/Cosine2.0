@@ -119,7 +119,7 @@ def get_context_aware_agent():
 
 def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, session_context):
     """
-    Process agent with periodic kill signal monitoring
+    Process agent with periodic kill signal monitoring (non-streaming version)
     
     Args:
         agent: The agent to process with
@@ -127,6 +127,26 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
         session_id: Session ID for kill signal checking
         user_id: User ID for kill signal checking
         session_context: Session context for kill signal checking
+        
+    Returns:
+        Agent response or kill signal response
+    """
+    return process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_id, user_id, session_context, None)
+
+def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_id, user_id, session_context, ai_message_id, ws_handler, streaming_used, accumulated_streaming_content):
+    """
+    Process agent with periodic kill signal monitoring and streaming support
+    
+    Args:
+        agent: The agent to process with
+        enhanced_message: The message to process
+        session_id: Session ID for kill signal checking
+        user_id: User ID for kill signal checking
+        session_context: Session context for kill signal checking
+        ai_message_id: Message ID for streaming chunks
+        ws_handler: WebSocket handler for sending streaming chunks
+        streaming_used: Dict to track if streaming was actually used
+        accumulated_streaming_content: Dict to accumulate streaming content
         
     Returns:
         Agent response or kill signal response
@@ -169,11 +189,121 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
     monitor_thread = threading.Thread(target=check_kill_signal, daemon=True)
     monitor_thread.start()
     
+    # Accumulated content for streaming
+    accumulated_content = ""
+    last_sent_length = 0
+    
     try:
         # Process with timeout and kill signal monitoring
         with ThreadPoolExecutor(max_workers=1) as executor:
-            # Submit the agent processing task
-            future = executor.submit(agent, enhanced_message)
+            # For streaming, we need to intercept the agent's output
+            # Strands Agent with streaming=True should stream tokens, but we need to capture them
+            # We'll use a wrapper that monitors the agent's response as it's generated
+            
+            def agent_with_streaming_wrapper():
+                """Wrapper to capture streaming output from agent"""
+                try:
+                    # Check if agent has a stream method (Strands may support this)
+                    if hasattr(agent, 'stream'):
+                        # Use streaming method if available
+                        full_response = ""
+                        for chunk in agent.stream(enhanced_message):
+                            if kill_flag.is_set():
+                                break
+                            if chunk:
+                                chunk_text = str(chunk)
+                                full_response += chunk_text
+                                accumulated_streaming_content['value'] = full_response
+                                
+                                # Send incremental chunk (only new content)
+                                if ai_message_id and ws_handler and len(full_response) > last_sent_length:
+                                    new_chunk = full_response[last_sent_length:]
+                                    last_sent_length = len(full_response)
+                                    try:
+                                        ws_handler.send_chat_response(
+                                            user_id, session_id, new_chunk, ai_message_id,
+                                            is_streaming=True, is_complete=False
+                                        )
+                                        streaming_used['value'] = True
+                                    except Exception as e:
+                                        logger.warning(f"Failed to send streaming chunk: {str(e)}")
+                        return full_response
+                    else:
+                        # Fallback: Try to access underlying model's streaming if available
+                        # Check if agent's model has streaming capabilities
+                        if hasattr(agent, 'model') and hasattr(agent.model, 'stream'):
+                            # Use model's stream method directly
+                            full_response = ""
+                            try:
+                                # Get the conversation history for the model
+                                # For now, we'll use a simplified approach
+                                for chunk in agent.model.stream(enhanced_message):
+                                    if kill_flag.is_set():
+                                        break
+                                    if chunk:
+                                        chunk_text = str(chunk)
+                                        full_response += chunk_text
+                                        accumulated_content = full_response
+                                        
+                                        # Send incremental chunk (only new content)
+                                        if ai_message_id and ws_handler and len(full_response) > last_sent_length:
+                                            new_chunk = full_response[last_sent_length:]
+                                            last_sent_length = len(full_response)
+                                            try:
+                                                ws_handler.send_chat_response(
+                                                    user_id, session_id, new_chunk, ai_message_id,
+                                                    is_streaming=True, is_complete=False
+                                                )
+                                            except Exception as e:
+                                                logger.warning(f"Failed to send streaming chunk: {str(e)}")
+                                
+                                # Create agent response object from streamed content
+                                from strands.types import AgentResult, Message
+                                return AgentResult(message=Message(content=full_response))
+                            except Exception as stream_error:
+                                logger.warning(f"Model streaming failed, falling back to regular invocation: {str(stream_error)}")
+                                # Fall through to regular invocation
+                        
+                        # Final fallback: Use regular invocation and chunk the response
+                        # This simulates streaming by sending response in small chunks
+                        response = agent(enhanced_message)
+                        response_str = ""
+                        if hasattr(response, 'message') and hasattr(response.message, 'content'):
+                            if isinstance(response.message.content, list):
+                                response_str = "".join(str(block) for block in response.message.content)
+                            else:
+                                response_str = str(response.message.content)
+                        else:
+                            response_str = str(response)
+                        
+                        # Send response in small chunks to simulate streaming
+                        chunk_size = 20  # Send 20 characters at a time for smoother appearance
+                        for i in range(0, len(response_str), chunk_size):
+                            if kill_flag.is_set():
+                                break
+                            chunk = response_str[i:i+chunk_size]
+                            accumulated_streaming_content['value'] += chunk
+                            
+                            if ai_message_id and ws_handler:
+                                try:
+                                    is_final = (i+chunk_size >= len(response_str))
+                                    ws_handler.send_chat_response(
+                                        user_id, session_id, chunk, ai_message_id,
+                                        is_streaming=True, is_complete=is_final
+                                    )
+                                    streaming_used['value'] = True
+                                    if not is_final:
+                                        time.sleep(0.02)  # Small delay between chunks (20ms)
+                                except Exception as e:
+                                    logger.warning(f"Failed to send streaming chunk: {str(e)}")
+                        
+                        return response
+                except Exception as e:
+                    logger.error(f"Error in streaming wrapper: {str(e)}")
+                    raise
+            
+            # Submit the agent processing task with streaming wrapper
+            future = executor.submit(agent_with_streaming_wrapper)
             
             # Set maximum timeout for the entire operation (12 minutes)
             max_timeout = 720  # 12 minutes in seconds
@@ -193,13 +323,26 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
                     future.cancel()
                     raise Exception("Request timed out after 12 minutes. Please try again.")
                 
-                time.sleep(5.0)  # Check every 5 seconds (less frequent to reduce CPU usage)
+                time.sleep(0.5)  # Check more frequently for streaming (every 0.5 seconds)
             
             # Get the result
             if future.cancelled():
                 raise Exception("Session has been terminated")
             
-            return future.result()
+            result = future.result()
+            
+            # Send final completion signal if streaming was used
+            if ai_message_id and ws_handler and accumulated_content:
+                try:
+                    ws_handler.send_chat_response(
+                        user_id, session_id, "", ai_message_id,
+                        is_streaming=True, is_complete=True
+                    )
+                    streaming_used['value'] = True
+                except Exception as e:
+                    logger.warning(f"Failed to send final streaming chunk: {str(e)}")
+            
+            return result
             
     except Exception as e:
         if "Session has been terminated" in str(e):
@@ -796,8 +939,19 @@ Context Items Available: {len(context_items)} items
                     }
                 }
             
-            # Process with kill signal monitoring
-            agent_response = process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, session_context)
+            # Generate UNIQUE message ID for AI response (don't reuse user's message_id!)
+            ai_message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+            
+            # Process with streaming support and kill signal monitoring
+            # Pass WebSocket handler for streaming callbacks
+            from websocket_handler import WebSocketHandler
+            ws_handler = WebSocketHandler()
+            
+            # Create a shared variable to track if streaming was used
+            streaming_used = {'value': False}
+            agent_response = process_with_kill_monitoring_and_streaming(
+                agent, enhanced_message, session_id, user_id, session_context, ai_message_id, ws_handler, streaming_used
+            )
             
             # Flush any remaining logs to WebSocket before returning
             try:
@@ -814,42 +968,47 @@ Context Items Available: {len(context_items)} items
             raise
         
         # Extract the actual response content from AgentResult
-        response_content = ""
-        if hasattr(agent_response, 'message') and hasattr(agent_response.message, 'content'):
-            # Handle structured content (list of content blocks)
-            if isinstance(agent_response.message.content, list):
-                for content_block in agent_response.message.content:
-                    if hasattr(content_block, 'text'):
-                        response_content += content_block.text
-                    elif isinstance(content_block, str):
-                        response_content += content_block
-            else:
-                response_content = str(agent_response.message.content)
+        # If streaming was used, prefer the accumulated streaming content (it's already clean)
+        if streaming_used.get('value', False) and accumulated_streaming_content.get('value'):
+            response_content = accumulated_streaming_content['value']
+            logger.debug(f"Using accumulated streaming content: {len(response_content)} chars")
         else:
-            # Fallback: convert to string
-            response_content = str(agent_response)
-            
-            # Clean up response content by removing metadata
-            def clean_response_content(content):
-                """Remove metadata tags from agent response"""
-                import re
+            response_content = ""
+            if hasattr(agent_response, 'message') and hasattr(agent_response.message, 'content'):
+                # Handle structured content (list of content blocks)
+                if isinstance(agent_response.message.content, list):
+                    for content_block in agent_response.message.content:
+                        if hasattr(content_block, 'text'):
+                            response_content += content_block.text
+                        elif isinstance(content_block, str):
+                            response_content += content_block
+                else:
+                    response_content = str(agent_response.message.content)
+            else:
+                # Fallback: convert to string
+                response_content = str(agent_response)
                 
-                # Remove search_quality_reflection blocks
-                content = re.sub(r'<search_quality_reflection>.*?</search_quality_reflection>', '', content, flags=re.DOTALL)
+                # Clean up response content by removing metadata
+                def clean_response_content(content):
+                    """Remove metadata tags from agent response"""
+                    import re
+                    
+                    # Remove search_quality_reflection blocks
+                    content = re.sub(r'<search_quality_reflection>.*?</search_quality_reflection>', '', content, flags=re.DOTALL)
+                    
+                    # Remove search_quality_score blocks
+                    content = re.sub(r'<search_quality_score>\d+</search_quality_score>', '', content)
+                    
+                    # Remove result tags
+                    content = re.sub(r'<result>', '', content)
+                    content = re.sub(r'</result>', '', content)
+                    
+                    # Clean up extra whitespace
+                    content = content.strip()
+                    
+                    return content
                 
-                # Remove search_quality_score blocks
-                content = re.sub(r'<search_quality_score>\d+</search_quality_score>', '', content)
-                
-                # Remove result tags
-                content = re.sub(r'<result>', '', content)
-                content = re.sub(r'</result>', '', content)
-                
-                # Clean up extra whitespace
-                content = content.strip()
-                
-                return content
-            
-            response_content = clean_response_content(response_content)
+                response_content = clean_response_content(response_content)
             
             logger.debug(f"Extracted response content: {len(response_content)} chars")
             
@@ -863,12 +1022,12 @@ Context Items Available: {len(context_items)} items
                 from websocket_handler import WebSocketHandler
                 ws_handler = WebSocketHandler()
                 
-                # Generate UNIQUE message ID for AI response (don't reuse user's message_id!)
-                # The user message and AI response should have different IDs to avoid duplicate keys
-                ai_message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-                
-                # Send response directly to WebSocket connections with unique AI message ID
-                ws_handler.send_chat_response(user_id, session_id, response_content, ai_message_id)
+                # Only send complete response if streaming wasn't used
+                # If streaming was used, chunks were already sent incrementally
+                if not streaming_used.get('value', False):
+                    ws_handler.send_chat_response(user_id, session_id, response_content, ai_message_id)
+                else:
+                    logger.info(f"✅ Streaming was used, skipping complete response send (chunks already sent)")
                 
                 logger.info(f"✅ Sent chat response directly to WebSocket (session: {session_id}, user: {user_id})")
                 

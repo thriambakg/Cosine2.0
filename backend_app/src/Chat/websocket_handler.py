@@ -200,10 +200,19 @@ class WebSocketHandler:
         except Exception as e:
             logger.error(f"Error sending agent log: {str(e)}")
     
-    def send_chat_response(self, user_id: str, session_id: str, response_content: str, message_id: Optional[str] = None):
+    def send_chat_response(self, user_id: str, session_id: str, response_content: str, message_id: Optional[str] = None, is_streaming: bool = False, is_complete: bool = True):
         """
         Send chat response directly to WebSocket connections.
+        Supports both streaming chunks and complete responses.
         Called directly from chat agent (no SQS queue needed!)
+        
+        Args:
+            user_id: User ID
+            session_id: Session ID
+            response_content: Response content (full response or chunk)
+            message_id: Message ID (generated if not provided)
+            is_streaming: If True, sends as streaming chunk; if False, sends as complete response
+            is_complete: If True, marks this as the final chunk (only used when is_streaming=True)
         """
         try:
             # Get active connections
@@ -217,24 +226,43 @@ class WebSocketHandler:
             if not message_id:
                 message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
             
-            # Create AI response message
             # Use milliseconds timestamp (number) instead of ISO string for frontend compatibility
             timestamp_ms = int(datetime.now().timestamp() * 1000)
-            ai_response_message = {
-                'type': 'ai_response',
-                'message_id': message_id,
-                'content': response_content,
-                'session_id': session_id,
-                'timestamp': timestamp_ms
-            }
             
-            # Send to all active connections
-            for connection_id in connection_ids:
-                try:
-                    self.send_to_client(connection_id, ai_response_message)
-                    logger.info(f"✅ Sent chat response to connection {connection_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to send response to connection {connection_id}: {str(e)}")
+            if is_streaming:
+                # Send streaming chunk
+                ai_response_chunk = {
+                    'type': 'ai_response_chunk',
+                    'message_id': message_id,
+                    'content': response_content,  # This is just the chunk, not the full response
+                    'session_id': session_id,
+                    'timestamp': timestamp_ms,
+                    'is_complete': is_complete
+                }
+                
+                # Send to all active connections
+                for connection_id in connection_ids:
+                    try:
+                        self.send_to_client(connection_id, ai_response_chunk)
+                    except Exception as e:
+                        logger.warning(f"Failed to send streaming chunk to connection {connection_id}: {str(e)}")
+            else:
+                # Send complete response (backward compatibility)
+                ai_response_message = {
+                    'type': 'ai_response',
+                    'message_id': message_id,
+                    'content': response_content,
+                    'session_id': session_id,
+                    'timestamp': timestamp_ms
+                }
+                
+                # Send to all active connections
+                for connection_id in connection_ids:
+                    try:
+                        self.send_to_client(connection_id, ai_response_message)
+                        logger.info(f"✅ Sent chat response to connection {connection_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to send response to connection {connection_id}: {str(e)}")
                     
         except Exception as e:
             logger.error(f"Error sending chat response: {str(e)}")
@@ -369,6 +397,7 @@ class WebSocketHandler:
             ack_message = {
                 'type': 'message_received',
                 'message_id': message_id,
+                'session_id': session_id,  # Include session_id for proper routing
                 'timestamp': datetime.now().isoformat()
             }
             self.send_to_client(connection_id, ack_message)
@@ -711,6 +740,7 @@ class WebSocketHandler:
                     'message_id': message_id,
                     'message_index': message_to_edit_index,
                     'unchanged': True,
+                    'session_id': session_id,  # Include session_id for proper routing
                     'timestamp': datetime.now().isoformat()
                 }
                 self.send_to_client(connection_id, ack_message)
@@ -742,6 +772,7 @@ class WebSocketHandler:
                 'type': 'edit_acknowledged',
                 'message_id': message_id,
                 'message_index': message_to_edit_index,
+                'session_id': session_id,  # Include session_id for proper routing
                 'timestamp': datetime.now().isoformat()
             }
             self.send_to_client(connection_id, ack_message)

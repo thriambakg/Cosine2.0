@@ -551,8 +551,11 @@ class UnifiedMessageHandlerService {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            console.log('📨 UnifiedMessageHandler: Received WebSocket message:', data.type, 'for session:', sessionId);
-            this.handleWebSocketMessage(sessionId, data);
+            // Use session_id from message payload if available, otherwise fall back to connection's sessionId
+            // This ensures messages are routed to the correct session even if received on a different connection
+            const messageSessionId = data.session_id || sessionId;
+            console.log('📨 UnifiedMessageHandler: Received WebSocket message:', data.type, 'message session_id:', messageSessionId, 'connection sessionId:', sessionId);
+            this.handleWebSocketMessage(messageSessionId, data);
           } catch (error) {
             console.error('❌ UnifiedMessageHandler: Error parsing WebSocket message:', error);
           }
@@ -748,6 +751,9 @@ class UnifiedMessageHandlerService {
       case 'ai_response':
         this.handleAIResponse(sessionId, data);
         break;
+      case 'ai_response_chunk':
+        this.handleAIResponseChunk(sessionId, data);
+        break;
       case 'edit_acknowledged':
         this.handleEditAcknowledged(sessionId, data);
         break;
@@ -816,7 +822,17 @@ class UnifiedMessageHandlerService {
     const existingMessage = messages.find(m => m.id === message_id && m.sender === 'ai');
     
     if (existingMessage) {
-      console.log('⚠️ UnifiedMessageHandler: Duplicate AI response detected, skipping:', message_id);
+      // If this message was streamed, the complete response is just a confirmation
+      // Update the existing streaming message with final content if it differs
+      if (existingMessage.isStreaming && content && content.trim()) {
+        // Update the message with the final content (in case backend sends cleaned version)
+        existingMessage.text = content;
+        delete existingMessage.isStreaming;
+        this.notifyMessageUpdate(sessionId, messages);
+        console.log('✅ UnifiedMessageHandler: Updated streaming message with final content:', message_id);
+      } else {
+        console.log('⚠️ UnifiedMessageHandler: Duplicate AI response detected, skipping:', message_id);
+      }
       // Still clear loading state and agent log even if duplicate
       this.broadcastLoadingState(sessionId, false, 'chatpage');
       this.broadcastLoadingState(sessionId, false, 'sidebar');
@@ -899,6 +915,64 @@ class UnifiedMessageHandlerService {
   }
 
   /**
+   * Handle AI response chunk (streaming)
+   */
+  private handleAIResponseChunk(sessionId: string, data: any): void {
+    const { message_id, content, timestamp, is_complete } = data;
+    
+    console.log('🌊 UnifiedMessageHandler: Received AI response chunk for session:', sessionId, 'message_id:', message_id, 'is_complete:', is_complete);
+    
+    // Get or create the streaming message
+    const messages = this.localCache.get(sessionId) || [];
+    let streamingMessage = messages.find(m => m.id === message_id && m.sender === 'ai');
+    
+    if (!streamingMessage) {
+      // Create new streaming message
+      const timestampMs = typeof timestamp === 'number' ? timestamp : (timestamp ? new Date(timestamp).getTime() : Date.now());
+      streamingMessage = {
+        id: message_id,
+        sender: 'ai',
+        text: content || '',
+        timestamp: timestampMs,
+        sessionId: sessionId,
+        source: 'database',
+        isStreaming: true
+      };
+      
+      // Add to cache
+      if (!this.localCache.has(sessionId)) {
+        this.localCache.set(sessionId, []);
+      }
+      this.localCache.get(sessionId)!.push(streamingMessage);
+      
+      // Clear loading state when first chunk arrives
+      this.broadcastLoadingState(sessionId, false, 'chatpage');
+      this.broadcastLoadingState(sessionId, false, 'sidebar');
+      this.clearAgentLog(sessionId);
+    } else {
+      // Append chunk to existing message
+      streamingMessage.text += (content || '');
+    }
+    
+    // Update the message in cache
+    const updatedMessages = this.localCache.get(sessionId)!.map(m => 
+      m.id === message_id && m.sender === 'ai' ? streamingMessage! : m
+    );
+    this.localCache.set(sessionId, updatedMessages);
+    
+    // Notify listeners immediately for instant UI update
+    this.notifyMessageUpdate(sessionId, updatedMessages);
+    
+    // If this is the final chunk, mark as complete
+    if (is_complete) {
+      if (streamingMessage.isStreaming !== undefined) {
+        delete streamingMessage.isStreaming;
+      }
+      console.log('✅ UnifiedMessageHandler: Streaming complete for message:', message_id);
+    }
+  }
+
+  /**
    * Add AI response to local cache
    */
   private addAIResponseToCache(sessionId: string, messageId: string, content: string, timestamp: number): void {
@@ -915,10 +989,12 @@ class UnifiedMessageHandlerService {
     if (!this.localCache.has(sessionId)) {
       this.localCache.set(sessionId, []);
     }
-    this.localCache.get(sessionId)!.push(aiMessage);
+    const messages = this.localCache.get(sessionId)!;
+    messages.push(aiMessage);
 
-    // Notify listeners of message update
-    this.notifyMessageUpdate(sessionId, this.localCache.get(sessionId)!);
+    // Notify listeners IMMEDIATELY (synchronous) for instant UI update
+    // This ensures messages appear instantly without waiting for persistence
+    this.notifyMessageUpdate(sessionId, messages);
 
     // Dispatch typing animation event for streaming
     const typingEvent = new CustomEvent('ai-response-typing', {

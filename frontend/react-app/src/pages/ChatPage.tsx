@@ -415,44 +415,61 @@ export default function ChatPage() {
     }
   });
 
-  // Sync unified messages with local persistence system
+  // Sync unified messages with local persistence system (DEBOUNCED for performance)
+  // This runs asynchronously to avoid blocking message display
   useEffect(() => {
     if (!currentSession?.session_id || unifiedMessages.length === 0) return;
 
-    console.log('🔄 ChatPage: Syncing unified messages with persistence system', {
-      sessionId: currentSession.session_id,
-      unifiedMessageCount: unifiedMessages.length,
-      localMessageCount: currentSession.messages.length
-    });
-
-    // Only sync messages that belong to the current session
-    const sessionMessages = unifiedMessages.filter(msg => msg.sessionId === currentSession.session_id);
-    
-    if (sessionMessages.length === 0) {
-      console.log('🔄 ChatPage: No unified messages for current session, skipping sync');
-      return;
-    }
-
-    // Get messages that exist in unified cache but not in local persistence
-    const localMessageIds = new Set(currentSession.messages.map(m => m.id));
-    const newMessages = sessionMessages.filter(unifiedMsg => !localMessageIds.has(unifiedMsg.id));
-
-    // Only add truly new messages to prevent duplication
-    if (newMessages.length > 0) {
-      console.log(`📨 ChatPage: Found ${newMessages.length} new messages to add to persistence`);
-      newMessages.forEach(unifiedMsg => {
-        console.log('📨 ChatPage: Adding unified message to persistence:', unifiedMsg.id);
-        addPersistedMessage({
-          id: unifiedMsg.id,
-          text: unifiedMsg.text,
-          sender: unifiedMsg.sender === 'ai' ? 'bot' : unifiedMsg.sender,
-          timestamp: new Date(unifiedMsg.timestamp),
-          files: unifiedMsg.files
-        });
+    // Debounce persistence sync to avoid blocking UI updates
+    // Messages are displayed immediately from unified cache, persistence happens in background
+    const syncTimeout = setTimeout(() => {
+      console.log('🔄 ChatPage: Syncing unified messages with persistence system', {
+        sessionId: currentSession.session_id,
+        unifiedMessageCount: unifiedMessages.length,
+        localMessageCount: currentSession.messages.length
       });
-    } else {
-      console.log('🔄 ChatPage: All unified messages already exist in persistence, skipping sync');
-    }
+
+      // Only sync messages that belong to the current session
+      const sessionMessages = unifiedMessages.filter(msg => msg.sessionId === currentSession.session_id);
+      
+      if (sessionMessages.length === 0) {
+        console.log('🔄 ChatPage: No unified messages for current session, skipping sync');
+        return;
+      }
+
+      // Get messages that exist in unified cache but not in local persistence
+      const localMessageIds = new Set(currentSession.messages.map(m => m.id));
+      const newMessages = sessionMessages.filter(unifiedMsg => !localMessageIds.has(unifiedMsg.id));
+
+      // Only add truly new messages to prevent duplication
+      if (newMessages.length > 0) {
+        console.log(`📨 ChatPage: Found ${newMessages.length} new messages to add to persistence`);
+        // Batch persistence operations asynchronously using requestIdleCallback or setTimeout fallback
+        const schedulePersistence = (callback: () => void) => {
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            (window as any).requestIdleCallback(callback, { timeout: 1000 });
+          } else {
+            setTimeout(callback, 0);
+          }
+        };
+        
+        schedulePersistence(() => {
+          newMessages.forEach(unifiedMsg => {
+            addPersistedMessage({
+              id: unifiedMsg.id,
+              text: unifiedMsg.text,
+              sender: unifiedMsg.sender === 'ai' ? 'bot' : unifiedMsg.sender,
+              timestamp: new Date(unifiedMsg.timestamp),
+              files: unifiedMsg.files
+            });
+          });
+        });
+      } else {
+        console.log('🔄 ChatPage: All unified messages already exist in persistence, skipping sync');
+      }
+    }, 100); // 100ms debounce - messages display immediately, persistence happens shortly after
+
+    return () => clearTimeout(syncTimeout);
   }, [unifiedMessages, currentSession?.session_id, currentSession?.messages, addPersistedMessage]);
 
   // Subscribe to loading state updates from unified messaging system

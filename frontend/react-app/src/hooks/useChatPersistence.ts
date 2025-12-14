@@ -538,44 +538,47 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     }
     
     // Add to pending messages for backend save (session-specific)
+    // This is async and non-blocking - messages display immediately from unified cache
     if (sessionId) {
       if (!pendingMessagesRef.current[sessionId]) {
         pendingMessagesRef.current[sessionId] = [];
       }
       pendingMessagesRef.current[sessionId].push(message);
-      console.log('📋 Pending messages count for session', sessionId + ':', pendingMessagesRef.current[sessionId].length);
       
-      // Update reactive state for useEffect dependency
-      setPendingMessageCounts(prev => ({
-        ...prev,
-        [sessionId]: pendingMessagesRef.current[sessionId].length
-      }));
+      // Batch state updates to reduce re-renders
+      // Use requestAnimationFrame for smooth UI updates
+      if (typeof window !== 'undefined') {
+        requestAnimationFrame(() => {
+          setPendingMessageCounts(prev => ({
+            ...prev,
+            [sessionId]: pendingMessagesRef.current[sessionId].length
+          }));
+        });
+      }
     }
     
-    // Update sessions list - using the effective session ID
+    // Update sessions list asynchronously to avoid blocking message display
+    // This runs in the background while messages are already visible
     if (sessionId) {
-      setSessions(prev => {
-        const updated = prev.map(s => {
-          if (s.session_id === sessionId) {
-            // Check for duplicate before adding to session
-            const messageExists = s.messages.some(m => m.id === message.id);
-            if (messageExists) {
-              console.log('📋 Message already exists in sessions list, skipping:', message.id);
+      // Defer session list update to next frame for better performance
+      if (typeof window !== 'undefined') {
+        requestAnimationFrame(() => {
+          setSessions(prev => {
+            const updated = prev.map(s => {
+              if (s.session_id === sessionId) {
+                // Check for duplicate before adding to session
+                const messageExists = s.messages.some(m => m.id === message.id);
+                if (messageExists) {
+                  return s;
+                }
+                return { ...s, messages: [...s.messages, message], message_count: s.message_count + 1 };
+              }
               return s;
-            }
-            return { ...s, messages: [...s.messages, message], message_count: s.message_count + 1 };
-          }
-          return s;
+            });
+            return updated;
+          });
         });
-        
-        console.log('📋 Updated sessions list:', {
-          sessionId: sessionId,
-          totalSessions: updated.length,
-          targetSession: updated.find(s => s.session_id === sessionId)?.messages.length || 0
-        });
-        
-        return updated;
-      });
+      }
     } else {
       console.log('📋 Skipping sessions list update - no effective session ID');
     }

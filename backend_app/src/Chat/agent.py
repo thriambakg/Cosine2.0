@@ -691,10 +691,12 @@ load_dotenv()
 # Configure different Bedrock models
 MODELS = {
     'claude-sonnet-4': BedrockModel(
-        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0"
+        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+        streaming=True  # Enable streaming for real-time token delivery
     ),
     'claude-haiku-4-5': BedrockModel(
-        model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        streaming=True  # Enable streaming for real-time token delivery
     ),
     'nova-lite': BedrockModel(
         model_id="us.amazon.nova-lite-v1:0"
