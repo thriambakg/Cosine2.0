@@ -1188,29 +1188,44 @@ Context Items Available: {len(context_items)} items
                         messages = session_response['Item'].get('messages', [])
                         timestamp = int(time.time())
                         
-                        # Add AI response message with unique ID
-                        ai_message = {
-                            'id': ai_message_id,  # Use unique AI message ID, not user's message_id
-                            'text': content_to_save,  # Use accumulated content if streaming was used
-                            'sender': 'bot',
-                            'timestamp': timestamp,
-                            'message_type': 'text'
-                        }
-                        
-                        # Avoid duplicates by checking both ID and content
-                        if not any(m.get('id') == ai_message_id or (m.get('sender') == 'bot' and m.get('text') == content_to_save) for m in messages):
-                            messages.append(ai_message)
-                            
-                            chat_sessions_table.update_item(
-                                Key={'user_id': user_id, 'session_id': session_id},
-                                UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
-                                ExpressionAttributeValues={
-                                    ':messages': messages,
-                                    ':count': len(messages),
-                                    ':timestamp': timestamp
-                                }
+                        # Check for duplicates BEFORE creating the message object
+                        # Check by ID first (most reliable)
+                        existing_by_id = any(m.get('id') == ai_message_id for m in messages)
+                        if existing_by_id:
+                            logger.warning(f"⚠️ AI message {ai_message_id} already exists in DynamoDB (duplicate by ID), skipping save")
+                        else:
+                            # Also check by content for bot messages (in case ID differs but content is identical)
+                            # Only check content if it's a bot message to avoid false positives
+                            existing_by_content = any(
+                                m.get('sender') == 'bot' and 
+                                m.get('text') == content_to_save and 
+                                m.get('id') != ai_message_id  # Different ID but same content
+                                for m in messages
                             )
-                            logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (streaming: {streaming_used.get('value', False)}, length: {len(content_to_save)})")
+                            if existing_by_content:
+                                logger.warning(f"⚠️ AI message with identical content already exists in DynamoDB (duplicate by content), skipping save")
+                            else:
+                                # Add AI response message with unique ID
+                                ai_message = {
+                                    'id': ai_message_id,  # Use unique AI message ID, not user's message_id
+                                    'text': content_to_save,  # Use accumulated content if streaming was used
+                                    'sender': 'bot',
+                                    'timestamp': timestamp,
+                                    'message_type': 'text'
+                                }
+                                
+                                messages.append(ai_message)
+                                
+                                chat_sessions_table.update_item(
+                                    Key={'user_id': user_id, 'session_id': session_id},
+                                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                                    ExpressionAttributeValues={
+                                        ':messages': messages,
+                                        ':count': len(messages),
+                                        ':timestamp': timestamp
+                                    }
+                                )
+                                logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (streaming: {streaming_used.get('value', False)}, length: {len(content_to_save)})")
                 except Exception as db_error:
                     logger.warning(f"Failed to save AI response to DynamoDB: {str(db_error)}")
                     # Continue - response was sent via WebSocket

@@ -217,13 +217,33 @@ class FileUploadHandler:
             
             # Files uploaded successfully, update session variables
             session_variables_updated = False
+            updated_session_variables = None
             try:
                 session_variables_updated = self._update_session_variables(
                     user_id, session_id, uploaded_files, context_items
                 )
                 logger.info(f"Session variables update result: {session_variables_updated}")
+                
+                # Get updated session_variables to send to frontend
+                if session_variables_updated:
+                    response = self.chat_sessions_table.get_item(
+                        Key={'user_id': user_id, 'session_id': session_id}
+                    )
+                    if 'Item' in response:
+                        updated_session_variables = response['Item'].get('session_variables', {})
             except Exception as e:
                 logger.error(f"Error updating session variables: {str(e)}")
+            
+            # Send session_update notification to frontend via WebSocket
+            if session_variables_updated and updated_session_variables:
+                try:
+                    from websocket_handler import WebSocketHandler
+                    ws_handler = WebSocketHandler()
+                    ws_handler._send_session_update_with_variables(user_id, session_id, updated_session_variables)
+                    logger.info(f"✅ Sent session_update to WebSocket for session {session_id} after file upload")
+                except Exception as ws_error:
+                    logger.warning(f"Failed to send session_update to WebSocket: {str(ws_error)}")
+                    # Non-critical - continue with response
             
             # Files are uploaded and session variables are updated
             # The message will be sent via WebSocket separately by the frontend
