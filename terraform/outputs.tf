@@ -116,13 +116,14 @@ output "websocket_connection_lambda" {
 }
 
 output "websocket_message_lambda" {
-  description = "Information about the WebSocket message processor Lambda function"
+  description = "Information about the WebSocket message processor (consolidated into chat_agent)"
   value = {
-    function_name = module.websocket_message_lambda.function_name
-    function_arn  = module.websocket_message_lambda.function_arn
-    invoke_arn    = module.websocket_message_lambda.invoke_arn
-    role_arn      = module.websocket_message_lambda.execution_role_arn
-    role_name     = module.websocket_message_lambda.execution_role_name
+    function_name = aws_lambda_function.chat_agent.function_name
+    function_arn  = aws_lambda_function.chat_agent.arn
+    invoke_arn    = aws_lambda_function.chat_agent.invoke_arn
+    role_arn      = aws_iam_role.chat_agent_execution_role.arn
+    role_name     = aws_iam_role.chat_agent_execution_role.name
+    note          = "WebSocket message processing is now handled by the chat_agent Lambda function"
   }
 }
 
