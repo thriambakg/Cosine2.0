@@ -824,6 +824,23 @@ class UnifiedMessageHandlerService {
       return;
     }
     
+    // Convert timestamp to milliseconds if it's an ISO string
+    let timestampMs: number;
+    if (typeof timestamp === 'string') {
+      // ISO string - convert to milliseconds
+      timestampMs = new Date(timestamp).getTime();
+      if (isNaN(timestampMs)) {
+        console.warn('⚠️ UnifiedMessageHandler: Invalid timestamp format, using current time');
+        timestampMs = Date.now();
+      }
+    } else if (typeof timestamp === 'number') {
+      // Already in milliseconds (or seconds - check if it's seconds)
+      timestampMs = timestamp < 1e12 ? timestamp * 1000 : timestamp;
+    } else {
+      // No timestamp or invalid - use current time
+      timestampMs = Date.now();
+    }
+    
     // Check if this looks like an error message
     const errorPatterns = [
       /^I apologize, but I encountered an error/i,
@@ -838,7 +855,7 @@ class UnifiedMessageHandlerService {
     if (isErrorResponse) {
       const hasNonErrorResponse = messages.some(m => 
         m.sender === 'ai' && 
-        m.timestamp >= (timestamp - 5000) && // Within 5 seconds
+        m.timestamp >= (timestampMs - 5000) && // Within 5 seconds
         !errorPatterns.some(p => p.test(m.text))
       );
       
@@ -852,14 +869,14 @@ class UnifiedMessageHandlerService {
       }
     }
     
-    // Valid response - add it immediately
-    this.addAIResponseToCache(sessionId, message_id, content, timestamp);
+    // Valid response - add it immediately (use converted timestamp)
+    this.addAIResponseToCache(sessionId, message_id, content, timestampMs);
     
     // If we just added a non-error response, remove any recent error responses
     if (!isErrorResponse) {
       const recentErrorMessages = messages.filter(m => 
         m.sender === 'ai' && 
-        m.timestamp >= (timestamp - 5000) && // Within 5 seconds
+        m.timestamp >= (timestampMs - 5000) && // Within 5 seconds
         errorPatterns.some(p => p.test(m.text))
       );
       

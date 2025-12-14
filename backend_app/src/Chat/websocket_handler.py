@@ -218,12 +218,14 @@ class WebSocketHandler:
                 message_id = f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
             
             # Create AI response message
+            # Use milliseconds timestamp (number) instead of ISO string for frontend compatibility
+            timestamp_ms = int(datetime.now().timestamp() * 1000)
             ai_response_message = {
                 'type': 'ai_response',
                 'message_id': message_id,
                 'content': response_content,
                 'session_id': session_id,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': timestamp_ms
             }
             
             # Send to all active connections
@@ -423,29 +425,39 @@ class WebSocketHandler:
             }
             
             # Call chat handler directly (no Lambda invocation!)
+            # Note: handle_chat_message will send the response directly via WebSocket
+            # so we don't need to send it again here
             try:
-                # This will process the message and send response directly via WebSocket
                 result = handle_chat_message(event_body, None)
                 
-                # Extract response from result
-                if result.get('statusCode') == 200:
-                    response_body = result.get('body', {})
-                    if isinstance(response_body, str):
-                        response_body = json.loads(response_body)
-                    
-                    response_content = response_body.get('response')
-                    if response_content:
-                        # Send response directly to WebSocket (no SQS!)
-                        self.send_chat_response(user_id, session_id, response_content, message_id)
+                # Log the result for debugging
+                if result.get('statusCode') != 200:
+                    logger.warning(f"Chat handler returned non-200 status: {result.get('statusCode')}")
+                    # Send error message if handler failed
+                    error_timestamp_ms = int(datetime.now().timestamp() * 1000)
+                    error_message = {
+                        'type': 'ai_response',
+                        'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
+                        'content': "I apologize, but I encountered an error processing your request. Please try again.",
+                        'session_id': session_id,
+                        'timestamp': error_timestamp_ms
+                    }
+                    self.send_to_client(connection_id, error_message)
+                else:
+                    logger.info(f"✅ Chat handler processed message successfully, response sent via WebSocket")
                 
             except Exception as e:
                 logger.error(f"Error processing with chat agent: {str(e)}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                # Send error message to client
+                error_timestamp_ms = int(datetime.now().timestamp() * 1000)
                 error_message = {
                     'type': 'ai_response',
-                    'message_id': f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}",
+                    'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
                     'content': "I apologize, but I encountered an error processing your request. Please try again.",
                     'session_id': session_id,
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': error_timestamp_ms
                 }
                 self.send_to_client(connection_id, error_message)
             
@@ -497,19 +509,12 @@ class WebSocketHandler:
             }
             
             # Call chat handler directly
+            # Note: handle_chat_message will send the response directly via WebSocket
+            # so we don't need to send it again here
             result = handle_chat_message(event_body, None)
             
-            # Extract and send response
-            if result.get('statusCode') == 200:
-                response_body = result.get('body', {})
-                if isinstance(response_body, str):
-                    response_body = json.loads(response_body)
-                
-                response_content = response_body.get('response')
-                if response_content:
-                    # Send to all active connections
-                    for conn_id in connection_ids:
-                        self.send_chat_response(user_id, session_id, response_content, message_id)
+            if result.get('statusCode') != 200:
+                logger.warning(f"Chat handler returned non-200 status: {result.get('statusCode')}")
             
             return {'statusCode': 200, 'body': 'Message processed'}
             

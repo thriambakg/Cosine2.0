@@ -863,11 +863,12 @@ Context Items Available: {len(context_items)} items
                 from websocket_handler import WebSocketHandler
                 ws_handler = WebSocketHandler()
                 
-                # Generate message ID
-                message_id = event_body.get('messageId') or f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+                # Generate UNIQUE message ID for AI response (don't reuse user's message_id!)
+                # The user message and AI response should have different IDs to avoid duplicate keys
+                ai_message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
                 
-                # Send response directly to WebSocket connections
-                ws_handler.send_chat_response(user_id, session_id, response_content, message_id)
+                # Send response directly to WebSocket connections with unique AI message ID
+                ws_handler.send_chat_response(user_id, session_id, response_content, ai_message_id)
                 
                 logger.info(f"✅ Sent chat response directly to WebSocket (session: {session_id}, user: {user_id})")
                 
@@ -888,17 +889,17 @@ Context Items Available: {len(context_items)} items
                         messages = session_response['Item'].get('messages', [])
                         timestamp = int(time.time())
                         
-                        # Add AI response message
+                        # Add AI response message with unique ID
                         ai_message = {
-                            'id': message_id,
+                            'id': ai_message_id,  # Use unique AI message ID, not user's message_id
                             'text': response_content,
                             'sender': 'bot',
                             'timestamp': timestamp,
                             'message_type': 'text'
                         }
                         
-                        # Avoid duplicates
-                        if not any(m.get('sender') == 'bot' and m.get('text') == response_content for m in messages):
+                        # Avoid duplicates by checking both ID and content
+                        if not any(m.get('id') == ai_message_id or (m.get('sender') == 'bot' and m.get('text') == response_content) for m in messages):
                             messages.append(ai_message)
                             
                             chat_sessions_table.update_item(
@@ -910,7 +911,7 @@ Context Items Available: {len(context_items)} items
                                     ':timestamp': timestamp
                                 }
                             )
-                            logger.info(f"✅ Saved AI response to DynamoDB: {message_id}")
+                            logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id}")
                 except Exception as db_error:
                     logger.warning(f"Failed to save AI response to DynamoDB: {str(db_error)}")
                     # Continue - response was sent via WebSocket
@@ -922,7 +923,7 @@ Context Items Available: {len(context_items)} items
                         'message': 'Response sent directly to WebSocket',
                         'session_id': session_id,
                         'user_id': user_id,
-                        'message_id': message_id
+                        'message_id': ai_message_id  # Return the AI message ID, not user's message_id
                     }
                 }
             except Exception as ws_error:
