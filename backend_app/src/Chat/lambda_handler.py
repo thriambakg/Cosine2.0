@@ -1144,6 +1144,72 @@ Context Items Available: {len(context_items)} items
         # Update response_content with final content
         response_content = final_content
         
+        # Check if response contains a plan that needs to be executed
+        plan = None
+        try:
+            import re
+            # Try to extract JSON plan from response
+            json_match = re.search(r'```(?:json)?\s*(\{.*?"steps".*?\})\s*```', response_content, re.DOTALL)
+            if json_match:
+                plan_json = json_match.group(1)
+                plan = json.loads(plan_json)
+            else:
+                # Try to find JSON object directly
+                json_match = re.search(r'\{.*?"steps".*?\}', response_content, re.DOTALL)
+                if json_match:
+                    plan_json = json_match.group(0)
+                    plan = json.loads(plan_json)
+        except (json.JSONDecodeError, AttributeError):
+            # Not a plan, continue with normal response
+            plan = None
+        
+        # If we found a plan, execute it via orchestrator
+        if plan and 'steps' in plan and len(plan.get('steps', [])) > 0:
+            logger.info(f"Detected execution plan with {len(plan['steps'])} steps, executing via orchestrator...")
+            try:
+                from orchestrator import Orchestrator, ToolExecutor, DataStorage, StatusReporter
+                from websocket_handler import WebSocketHandler
+                
+                # Initialize orchestrator components
+                tool_executor = ToolExecutor()
+                data_storage = DataStorage()
+                status_reporter = StatusReporter(ws_handler)
+                orchestrator = Orchestrator(tool_executor, data_storage, status_reporter)
+                
+                # Execute the plan
+                execution_results = orchestrator.execute_plan(plan, session_id, user_id, ai_message_id)
+                
+                # Format execution results as response
+                if execution_results.get('status') == 'completed':
+                    results_summary = f"✅ Plan execution completed successfully.\n\n"
+                    results_summary += f"Steps completed: {execution_results.get('steps_completed', 0)}\n"
+                    
+                    # Add file references if any
+                    if execution_results.get('file_references'):
+                        results_summary += f"\n📁 Generated files:\n"
+                        for file_ref in execution_results['file_references']:
+                            results_summary += f"- {file_ref.get('filename', 'Unknown')} (S3: {file_ref.get('s3_key', 'N/A')})\n"
+                    
+                    # Add step results summary
+                    if execution_results.get('results'):
+                        results_summary += f"\n📊 Results:\n"
+                        for result in execution_results['results']:
+                            step_num = result.get('step', '?')
+                            tool_name = result.get('tool', 'unknown')
+                            status = result.get('status', 'unknown')
+                            results_summary += f"Step {step_num} ({tool_name}): {status}\n"
+                    
+                    response_content = results_summary
+                else:
+                    response_content = f"❌ Plan execution failed: {execution_results.get('error', 'Unknown error')}"
+                    
+            except Exception as e:
+                logger.error(f"Error executing plan via orchestrator: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                # Fall back to returning the plan as text
+                response_content = f"⚠️ Plan created but execution failed: {str(e)}\n\nOriginal plan:\n{response_content}"
+        
         # WebSocket processor now handles all user message saving
         # Chat agent only processes and generates responses - no message saving needed
         is_edit = event_body.get('is_edit', False)

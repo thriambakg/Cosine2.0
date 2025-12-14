@@ -69,8 +69,10 @@ class Orchestrator:
                 # Execute tool
                 tool_result = self.tool_executor.execute_tool(tool_name, parameters, session_id, user_id)
                 
-                # Check if result is large and needs storage
-                if self._is_large_result(tool_result):
+                # Check if result needs storage (either explicitly requested or if result is large)
+                should_store = step.get('store_result', False) or self._is_large_result(tool_result)
+                
+                if should_store:
                     # Store in S3 and return file reference
                     file_reference = self.data_storage.store_result(
                         tool_result, tool_name, session_id, user_id
@@ -128,6 +130,15 @@ class Orchestrator:
                     break
         
         logger.info(f"Plan execution completed: {results['steps_completed']} succeeded, {results['steps_failed']} failed")
+        
+        # Set final status
+        if results['steps_failed'] == 0:
+            results['status'] = 'completed'
+        elif results['steps_completed'] > 0:
+            results['status'] = 'partial'
+        else:
+            results['status'] = 'failed'
+        
         return results
     
     def _is_large_result(self, result: Any) -> bool:
