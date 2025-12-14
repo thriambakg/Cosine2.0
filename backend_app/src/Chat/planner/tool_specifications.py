@@ -65,6 +65,49 @@ TOOL_SPECIFICATIONS = {
         'size_estimate': 'large (>10KB) for portfolios with 5+ holdings',
         'store_result': True
     },
+    'analyze_portfolio_performance': {
+        'name': 'analyze_portfolio_performance',
+        'description': 'Analyze portfolio performance vs benchmark. Calculates CAGR, volatility, max drawdown, Sharpe ratio, and rolling 12-month returns. Requires financial data from previous step (S3 key or data reference).',
+        'inputs': {
+            'data_source': 'str - S3 key of stored financial data from previous step (e.g., from get_multiple_financial_data), or JSON string with financial data',
+            'portfolio_holdings': 'str - Portfolio holdings in format: "2 shares AAPL, 3 shares VOO" or JSON array',
+            'benchmark_symbol': 'str (optional) - Benchmark symbol (e.g., "^GSPC" for S&P 500, default: "^GSPC")',
+            'risk_free_rate': 'float (optional) - Risk-free rate for Sharpe ratio (as decimal, e.g., 0.02 for 2%, default: 0.02)'
+        },
+        'outputs': 'JSON string with structured portfolio metrics including: portfolio (cagr, volatility, max_drawdown, sharpe_ratio, total_return, rolling_12m_returns), benchmark (same metrics), time_series (dates, portfolio_values, benchmark_values), metrics_table (2D array for CSV)',
+        'size_estimate': 'medium to large (>10KB) - Contains time series data and metrics',
+        'store_result': True,
+        'output_structure': {
+            'portfolio': {
+                'cagr': 'float - Compound Annual Growth Rate',
+                'volatility': 'float - Annualized volatility',
+                'max_drawdown': 'float - Maximum drawdown',
+                'sharpe_ratio': 'float - Sharpe ratio',
+                'total_return': 'float - Total return over period',
+                'rolling_12m_returns': {
+                    'dates': 'list[str] - ISO date strings',
+                    'returns': 'list[float] - Rolling 12-month returns',
+                    'mean': 'float - Mean rolling return',
+                    'std': 'float - Standard deviation',
+                    'min': 'float - Minimum',
+                    'max': 'float - Maximum'
+                }
+            },
+            'benchmark': 'Same structure as portfolio (if benchmark provided)',
+            'time_series': {
+                'dates': 'list[str] - ISO date strings',
+                'portfolio_values': 'list[float] - Portfolio values over time',
+                'benchmark_values': 'list[float] - Benchmark values over time (if benchmark provided)'
+            },
+            'metrics_table': 'list[list[str]] - 2D array for CSV generation: [["Metric", "Portfolio", "Benchmark"], ["CAGR", "15.00%", "12.00%"], ...]'
+        },
+        'placeholder_examples': {
+            'metrics_table': '{{step_2.result.metrics_table}} - Use for CSV generation',
+            'time_series': '{{step_2.result.time_series}} - Use for chart generation',
+            'portfolio_cagr': '{{step_2.result.portfolio.cagr}} - Get specific metric',
+            'rolling_returns': '{{step_2.result.portfolio.rolling_12m_returns}} - Get rolling returns data'
+        }
+    },
     'calculate_stock_correlation': {
         'name': 'calculate_stock_correlation',
         'description': 'Calculate correlation matrix between multiple stocks',

@@ -263,8 +263,8 @@ class Orchestrator:
                                             try:
                                                 parsed = json.loads(result_data)
                                                 if isinstance(parsed, dict):
-                                                    # Extract field from parsed JSON
-                                                    replacement = parsed.get(field, '')
+                                                    # Extract field from parsed JSON (support nested paths)
+                                                    replacement = self._extract_nested_field(parsed, field)
                                                     
                                                     # Try common field variations for file S3 keys
                                                     if not replacement and field in ['file_s3_key', 's3_key', 'file_key']:
@@ -323,9 +323,10 @@ class Orchestrator:
                                                 else:
                                                     replacement = ''
                                         elif isinstance(result_data, dict):
-                                            replacement = result_data.get(field, '')
+                                            # Use nested field extraction for dict results too
+                                            replacement = self._extract_nested_field(result_data, field)
                                             
-                                            # Try common field variations
+                                            # Try common field variations if still not found
                                             if not replacement:
                                                 # Try file_s3_key -> s3_key, file_key, etc.
                                                 if 'file' in field.lower() and 's3' in field.lower():
@@ -416,7 +417,7 @@ class Orchestrator:
                                     try:
                                         parsed = json.loads(result_data)
                                         if isinstance(parsed, dict):
-                                            replacement = parsed.get(field_name, '')
+                                            replacement = self._extract_nested_field(parsed, field_name)
                                             if not isinstance(replacement, str):
                                                 replacement = json.dumps(replacement) if replacement else ''
                                     except:
@@ -447,6 +448,62 @@ class Orchestrator:
         # Resolve all placeholders in parameters
         resolved_params = resolve_value(parameters)
         return resolved_params
+    
+    def _extract_nested_field(self, data: Dict[str, Any], field_path: str) -> Any:
+        """
+        Extract a field from nested dictionary, supporting dot notation and common variations.
+        Examples:
+        - 'portfolio_time_series' -> data.get('time_series', {}).get('portfolio_values')
+        - 'time_series.portfolio_values' -> data.get('time_series', {}).get('portfolio_values')
+        - 'portfolio.cagr' -> data.get('portfolio', {}).get('cagr')
+        - 'metrics_table' -> data.get('metrics_table')
+        """
+        if not isinstance(data, dict):
+            return ''
+        
+        # Handle dot notation for nested paths
+        if '.' in field_path:
+            parts = field_path.split('.')
+            current = data
+            for part in parts:
+                if isinstance(current, dict):
+                    current = current.get(part)
+                    if current is None:
+                        return ''
+                else:
+                    return ''
+            return current
+        
+        # Direct field access
+        replacement = data.get(field_path, '')
+        
+        # Try common variations for portfolio analysis fields
+        if not replacement:
+            # portfolio_time_series -> time_series.portfolio_values
+            if 'portfolio_time_series' in field_path or 'time_series' in field_path:
+                time_series = data.get('time_series', {})
+                if isinstance(time_series, dict):
+                    replacement = time_series.get('portfolio_values', time_series.get('dates', ''))
+            
+            # metrics_table -> metrics_table
+            elif 'metrics_table' in field_path:
+                replacement = data.get('metrics_table', '')
+            
+            # portfolio.cagr, portfolio.volatility, etc.
+            elif field_path in ['cagr', 'volatility', 'max_drawdown', 'sharpe_ratio', 'total_return']:
+                portfolio = data.get('portfolio', {})
+                if isinstance(portfolio, dict):
+                    replacement = portfolio.get(field_path, '')
+            
+            # rolling_12m_returns
+            elif 'rolling' in field_path.lower() or ('returns' in field_path.lower() and '12' in field_path.lower()):
+                portfolio = data.get('portfolio', {})
+                if isinstance(portfolio, dict):
+                    rolling = portfolio.get('rolling_12m_returns', {})
+                    if isinstance(rolling, dict):
+                        replacement = rolling.get('returns', rolling.get('dates', ''))
+        
+        return replacement
     
     def _create_execution_summary(self, plan: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
         """
