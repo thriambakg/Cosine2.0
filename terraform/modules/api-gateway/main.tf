@@ -184,6 +184,9 @@ resource "aws_lambda_permission" "lambda_permissions" {
   function_name = each.value.function_arn
   principal     = "apigateway.amazonaws.com"
 
+  # Use wildcard for stage to allow all stages (dev, staging, production, etc.)
+  # Format: arn:aws:execute-api:region:account:api-id/*/method/resource-path
+  # This is the standard pattern for API Gateway Lambda permissions
   source_arn = "${aws_api_gateway_rest_api.this.execution_arn}/*/${each.value.http_method}/${each.value.resource_path}"
 }
 
