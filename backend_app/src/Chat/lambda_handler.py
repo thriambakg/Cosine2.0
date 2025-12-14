@@ -51,11 +51,13 @@ def get_financial_agent():
         logger.info("🔍 DEBUG: Loading financial agent (first time)")
         try:
             logger.info("🔍 DEBUG: Attempting to import agent module...")
-            from planner.agent import financial_agent, analyze_stock, FinancialTools
+            # Note: financial_agent and analyze_stock are not used by planner
+            # Planner uses context_aware_agent instead
+            from planner.agent import FinancialTools
             logger.info("🔍 DEBUG: Successfully imported agent module")
             
-            _financial_agent = financial_agent
-            _analyze_stock = analyze_stock
+            _financial_agent = None  # Not used - planner uses context_aware_agent
+            _analyze_stock = None  # Not used - planner uses context_aware_agent
             _financial_tools = FinancialTools
             logger.info("🔍 DEBUG: Financial agent loaded successfully")
         except ImportError as e:
@@ -976,8 +978,8 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
         message_id = event_body.get('messageId') or f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         agent_logger = get_agent_logger(session_id, user_id, message_id)
         
-        # Update the global agent_logger instance in agent.py module
-        import agent as agent_module  # Import with alias to avoid shadowing the agent instance variable
+        # Update the global agent_logger instance in planner.agent module
+        from planner import agent as agent_module  # Import with alias to avoid shadowing the agent instance variable
         agent_module.agent_logger = agent_logger
         
         # Check if new context items were added (flag from WebSocket processor)
