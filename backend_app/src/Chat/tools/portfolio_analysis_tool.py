@@ -196,7 +196,20 @@ class PortfolioAnalyzer:
             # Format from get_multiple_financial_data
             logger.info(f"Found 'stocks' array with {len(data['stocks'])} entries")
             for i, stock in enumerate(data['stocks']):
-                symbol = stock.get('symbol', f'UNKNOWN_{i}')
+                # Extract symbol - check original_data first if compressed
+                symbol = None
+                if isinstance(stock, dict):
+                    # Check if compressed - symbol might be in original_data
+                    if 'original_data' in stock and isinstance(stock['original_data'], dict):
+                        symbol = stock['original_data'].get('symbol')
+                    # Also check top level
+                    if not symbol:
+                        symbol = stock.get('symbol')
+                
+                # If still no symbol, try to get from index (fallback)
+                if not symbol:
+                    symbol = f'UNKNOWN_{i}'
+                
                 status = stock.get('status', 'unknown')
                 logger.info(f"Processing stock {i+1}: {symbol}, status: {status}, keys: {list(stock.keys())}")
                 
@@ -206,7 +219,12 @@ class PortfolioAnalyzer:
                     if isinstance(stock, dict) and CompressionHelper.is_compressed(stock):
                         logger.info(f"Decompressing stock data for {symbol}")
                         stock = CompressionHelper.decompress_data(stock)
-                except:
+                        # Re-extract symbol after decompression (it should be in the decompressed data now)
+                        if isinstance(stock, dict) and 'symbol' in stock:
+                            symbol = stock['symbol']
+                            logger.info(f"Extracted symbol after decompression: {symbol}")
+                except Exception as e:
+                    logger.warning(f"Error decompressing stock data: {e}")
                     pass
                 
                 # Try to get data even if status is not explicitly 'success'
@@ -454,10 +472,20 @@ class PortfolioAnalyzer:
             if not stocks_data:
                 raise ValueError("No financial data found in data source")
             
+            # Verify we have data for all required symbols
+            required_symbols = [h['symbol'] for h in holdings]
+            missing_symbols = [s for s in required_symbols if s not in stocks_data]
+            if missing_symbols:
+                logger.warning(f"Missing data for symbols: {missing_symbols}. Available symbols: {list(stocks_data.keys())}")
+                raise ValueError(f"Missing financial data for symbols: {missing_symbols}")
+            
             # Calculate portfolio value over time
+            logger.info(f"Calculating portfolio value for holdings: {holdings}")
             portfolio_values = self._calculate_portfolio_value(holdings, stocks_data)
+            logger.info(f"Calculated portfolio values: {len(portfolio_values)} data points")
             
             if len(portfolio_values) < 2:
+                logger.error(f"Insufficient portfolio values: {len(portfolio_values)} points. Holdings: {holdings}, Available symbols: {list(stocks_data.keys())}")
                 raise ValueError("Insufficient data to calculate portfolio metrics")
             
             # Get benchmark data
