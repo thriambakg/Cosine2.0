@@ -66,7 +66,20 @@ class Orchestrator:
                 # Resolve placeholders in parameters using previous step results
                 logger.debug(f"Resolving placeholders for step {step_num}, parameters before resolution: {parameters}")
                 parameters = self._resolve_placeholders(parameters, results, step_num)
-                logger.debug(f"Parameters after resolution: {parameters}")
+                logger.info(f"Parameters after resolution for step {step_num}: {list(parameters.keys())}")
+                # Log parameter values (truncated for large values)
+                for key, value in parameters.items():
+                    if isinstance(value, str):
+                        if len(value) > 100:
+                            logger.info(f"  {key}: (string, length={len(value)}, preview={value[:100]}...)")
+                        elif value == '':
+                            logger.error(f"  {key}: EMPTY STRING!")
+                        else:
+                            logger.info(f"  {key}: {value} (length={len(value)})")
+                    elif value is None:
+                        logger.error(f"  {key}: None!")
+                    else:
+                        logger.info(f"  {key}: {value}")
                 
                 # Check if any placeholders failed to resolve (empty string values that should have been replaced)
                 unresolved_placeholders = []
@@ -88,15 +101,19 @@ class Orchestrator:
                                 unresolved_placeholders.append(f"{key}={value}")
                                 if is_required:
                                     missing_required_params.append(key)
+                                    logger.error(f"Required parameter '{key}' has unresolved placeholder: {value}")
                             # Also check if required parameter is empty string (placeholder resolved to empty)
-                            elif is_required and value.strip() == '':
+                            elif is_required and (not value or value.strip() == ''):
                                 missing_required_params.append(key)
-                                logger.warning(f"Required parameter '{key}' resolved to empty string")
+                                logger.error(f"Required parameter '{key}' resolved to empty string (length: {len(value) if value else 0})")
                         elif value is None or value == '':
                             # Check if this is a required parameter
                             if is_required:
                                 missing_required_params.append(key)
-                                logger.warning(f"Required parameter '{key}' is None or empty")
+                                logger.error(f"Required parameter '{key}' is None or empty")
+                        elif is_required:
+                            # Parameter exists but check if it's a falsy value that shouldn't be
+                            logger.debug(f"Required parameter '{key}' has value: {type(value)}")
                     
                     # Check for missing required parameters that weren't provided at all
                     for param_name, param in sig.parameters.items():
@@ -623,6 +640,18 @@ class Orchestrator:
         
         # Resolve all placeholders in parameters
         resolved_params = resolve_value(parameters)
+        
+        # Log resolved parameters for debugging
+        logger.debug(f"Resolved parameters: {list(resolved_params.keys()) if isinstance(resolved_params, dict) else type(resolved_params)}")
+        if isinstance(resolved_params, dict):
+            for key, value in resolved_params.items():
+                if isinstance(value, str) and len(value) > 100:
+                    logger.debug(f"  {key}: (string, length={len(value)}, preview={value[:100]}...)")
+                elif value is None or value == '':
+                    logger.warning(f"  {key}: {value} (EMPTY OR NONE!)")
+                else:
+                    logger.debug(f"  {key}: {value}")
+        
         return resolved_params
     
     def _extract_nested_field(self, data: Dict[str, Any], field_path: str) -> Any:

@@ -33,6 +33,13 @@ class ToolExecutor:
         """
         logger.info(f"Executing tool: {tool_name} with parameters: {list(parameters.keys())}")
         
+        # Log parameter values (truncated for large values)
+        for key, value in parameters.items():
+            if isinstance(value, str) and len(value) > 100:
+                logger.debug(f"  Parameter {key}: (string, length={len(value)}, preview={value[:100]}...)")
+            else:
+                logger.debug(f"  Parameter {key}: {value}")
+        
         try:
             # Get tool function
             tool_func = self._get_tool_function(tool_name)
@@ -41,9 +48,30 @@ class ToolExecutor:
             import inspect
             sig = inspect.signature(tool_func)
             accepted_params = set(sig.parameters.keys())
+            logger.debug(f"Tool {tool_name} accepts parameters: {accepted_params}")
             
             # Filter parameters to only include those the tool accepts
             filtered_params = {k: v for k, v in parameters.items() if k in accepted_params}
+            logger.debug(f"Filtered parameters: {list(filtered_params.keys())}")
+            
+            # Log filtered parameter values
+            for key, value in filtered_params.items():
+                if isinstance(value, str) and len(value) > 100:
+                    logger.debug(f"  Filtered {key}: (string, length={len(value)}, preview={value[:100]}...)")
+                else:
+                    logger.debug(f"  Filtered {key}: {value}")
+            
+            # Check for missing required parameters
+            missing_required = []
+            for param_name, param in sig.parameters.items():
+                if param.default == inspect.Parameter.empty and param_name not in filtered_params:
+                    if param_name not in ['session_id', 'user_id']:
+                        missing_required.append(param_name)
+            
+            if missing_required:
+                logger.error(f"Missing required parameters for {tool_name}: {missing_required}")
+                logger.error(f"Provided parameters: {list(filtered_params.keys())}")
+                logger.error(f"Accepted parameters: {accepted_params}")
             
             # Add session_id and user_id only if the tool accepts them
             if 'session_id' in accepted_params and 'session_id' not in filtered_params:
