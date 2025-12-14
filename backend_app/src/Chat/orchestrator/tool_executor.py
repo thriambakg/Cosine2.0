@@ -37,17 +37,22 @@ class ToolExecutor:
             # Get tool function
             tool_func = self._get_tool_function(tool_name)
             
-            # Add session context to parameters if tool needs it
-            if tool_name in ['get_session_context_tool', 'get_session_files_tool', 
-                           'get_chat_history_tool', 'search_chat_history_tool',
-                           'read_s3_file_tool']:
-                if 'session_id' not in parameters:
-                    parameters['session_id'] = session_id
-                if 'user_id' not in parameters:
-                    parameters['user_id'] = user_id
+            # Use introspection to check which parameters the tool accepts
+            import inspect
+            sig = inspect.signature(tool_func)
+            accepted_params = set(sig.parameters.keys())
             
-            # Execute tool
-            result = tool_func(**parameters)
+            # Filter parameters to only include those the tool accepts
+            filtered_params = {k: v for k, v in parameters.items() if k in accepted_params}
+            
+            # Add session_id and user_id only if the tool accepts them
+            if 'session_id' in accepted_params and 'session_id' not in filtered_params:
+                filtered_params['session_id'] = session_id
+            if 'user_id' in accepted_params and 'user_id' not in filtered_params:
+                filtered_params['user_id'] = user_id
+            
+            # Execute tool with filtered parameters
+            result = tool_func(**filtered_params)
             
             logger.info(f"Tool {tool_name} executed successfully")
             return result
