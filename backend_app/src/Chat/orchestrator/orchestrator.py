@@ -61,6 +61,9 @@ class Orchestrator:
             logger.info(f"Executing step {step_num}/{len(steps)}: {tool_name}")
             
             try:
+                # Resolve placeholders in parameters using previous step results
+                parameters = self._resolve_placeholders(parameters, results, step_num)
+                
                 # Report tool starting
                 self.status_reporter.report_tool_starting(
                     tool_name, parameters, session_id, user_id, message_id, step_num, len(steps)
@@ -73,24 +76,43 @@ class Orchestrator:
                 should_store = step.get('store_result', False) or self._is_large_result(tool_result)
                 
                 if should_store:
-                    # Store in S3 and return file reference
-                    file_reference = self.data_storage.store_result(
-                        tool_result, tool_name, session_id, user_id
-                    )
-                    results['file_references'].append(file_reference)
-                    
-                    # Report completion with file reference
-                    self.status_reporter.report_tool_completed(
-                        tool_name, f"Data stored in {file_reference['filename']}", 
-                        session_id, user_id, message_id, step_num, len(steps)
-                    )
-                    
-                    results['results'].append({
-                        'step': step_num,
-                        'tool': tool_name,
-                        'status': 'completed',
-                        'file_reference': file_reference
-                    })
+                    try:
+                        # Store in S3 and return file reference
+                        file_reference = self.data_storage.store_result(
+                            tool_result, tool_name, session_id, user_id
+                        )
+                        results['file_references'].append(file_reference)
+                        
+                        # Report completion with file reference
+                        self.status_reporter.report_tool_completed(
+                            tool_name, f"Data stored in {file_reference['filename']}", 
+                            session_id, user_id, message_id, step_num, len(steps)
+                        )
+                        
+                        results['results'].append({
+                            'step': step_num,
+                            'tool': tool_name,
+                            'status': 'completed',
+                            'file_reference': file_reference
+                        })
+                    except ValueError as e:
+                        # S3 bucket not configured - continue without storing
+                        logger.warning(f"S3 storage not available for step {step_num}, continuing without storage: {str(e)}")
+                        
+                        # Report completion without file reference
+                        self.status_reporter.report_tool_completed(
+                            tool_name, "Completed successfully (data not stored - S3 not configured)", 
+                            session_id, user_id, message_id, step_num, len(steps)
+                        )
+                        
+                        # Store result directly (even though it's large, we have no choice)
+                        results['results'].append({
+                            'step': step_num,
+                            'tool': tool_name,
+                            'status': 'completed',
+                            'result': tool_result,
+                            'storage_warning': 'S3 bucket not configured, result not stored'
+                        })
                 else:
                     # Return result directly (small data)
                     self.status_reporter.report_tool_completed(
@@ -170,6 +192,159 @@ class Orchestrator:
             return len(result_str) > LARGE_RESULT_THRESHOLD
         
         return False
+    
+    def _resolve_placeholders(self, parameters: Dict[str, Any], results: Dict[str, Any], current_step: int) -> Dict[str, Any]:
+        """
+        Resolve placeholders in parameters using results from previous steps.
+        
+        Supports placeholders like:
+        - {{step_1.result}} - result from step 1
+        - {{step_2.s3_key}} - s3_key from file_reference in step 2
+        - {{portfolio_tickers_from_step_1}} - extract specific field from step 1 result
+        
+        Args:
+            parameters: Parameters dictionary that may contain placeholders
+            results: Execution results from previous steps
+            current_step: Current step number (1-indexed)
+            
+        Returns:
+            Parameters with placeholders resolved
+        """
+        import json
+        import re
+        
+        def resolve_value(value):
+            """Recursively resolve placeholders in a value"""
+            if isinstance(value, str):
+                # Find all placeholders like {{step_N.field}} or {{field_from_step_N}}
+                placeholder_pattern = r'\{\{([^}]+)\}\}'
+                matches = re.findall(placeholder_pattern, value)
+                
+                if not matches:
+                    return value
+                
+                resolved_value = value
+                for placeholder in matches:
+                    placeholder = placeholder.strip()
+                    
+                    # Try to extract step number and field
+                    # Pattern 1: {{step_N.field}} or {{step_N.result}}
+                    step_match = re.match(r'step[_\s]*(\d+)[._]?(.*)', placeholder, re.IGNORECASE)
+                    if step_match:
+                        step_num = int(step_match.group(1))
+                        field = step_match.group(2).strip() if step_match.group(2) else 'result'
+                        
+                        if step_num < current_step:
+                            # Get result from previous step
+                            step_result = None
+                            for result in results.get('results', []):
+                                if result.get('step') == step_num:
+                                    step_result = result
+                                    break
+                            
+                            if step_result:
+                                # Extract field from result
+                                if field == 'result' and 'result' in step_result:
+                                    replacement = step_result['result']
+                                elif field == 's3_key' and 'file_reference' in step_result:
+                                    replacement = step_result['file_reference'].get('s3_key', '')
+                                elif field in step_result:
+                                    replacement = step_result[field]
+                                else:
+                                    # Try to extract from nested result
+                                    if 'result' in step_result and isinstance(step_result['result'], dict):
+                                        replacement = step_result['result'].get(field, '')
+                                    else:
+                                        logger.warning(f"Could not resolve placeholder {{step_{step_num}.{field}}}")
+                                        replacement = ''
+                                
+                                # Convert replacement to string if needed
+                                if not isinstance(replacement, str):
+                                    replacement = json.dumps(replacement) if replacement else ''
+                                
+                                # Replace placeholder
+                                resolved_value = resolved_value.replace(f'{{{{{placeholder}}}}}', str(replacement))
+                                continue
+                    
+                    # Pattern 2: {{field_from_step_N}} - extract field from step N result
+                    field_match = re.match(r'(.+?)[_\s]+from[_\s]+step[_\s]*(\d+)', placeholder, re.IGNORECASE)
+                    if field_match:
+                        field_name = field_match.group(1).strip()
+                        step_num = int(field_match.group(2))
+                        
+                        if step_num < current_step:
+                            # Get result from previous step
+                            step_result = None
+                            for result in results.get('results', []):
+                                if result.get('step') == step_num:
+                                    step_result = result
+                                    break
+                            
+                            if step_result and 'result' in step_result:
+                                result_data = step_result['result']
+                                
+                                # Try to extract field from result
+                                if isinstance(result_data, dict):
+                                    # Look for field in result dict
+                                    replacement = result_data.get(field_name, '')
+                                    
+                                    # If not found, try common variations
+                                    if not replacement:
+                                        # Try extracting portfolio tickers from context
+                                        if 'portfolio' in field_name.lower() or 'ticker' in field_name.lower():
+                                            # Look for tickers in context items or session context
+                                            if isinstance(result_data, dict):
+                                                # Check context_items array
+                                                context_items = result_data.get('context_items', [])
+                                                for item in context_items:
+                                                    if isinstance(item, dict):
+                                                        tickers = item.get('tickers', item.get('symbols', item.get('ticker', [])))
+                                                        if tickers:
+                                                            if isinstance(tickers, list):
+                                                                replacement = ','.join(str(t) for t in tickers)
+                                                            else:
+                                                                replacement = str(tickers)
+                                                            break
+                                                
+                                                # If still not found, check for portfolio data in other fields
+                                                if not replacement:
+                                                    # Check for portfolio in session_variables or other fields
+                                                    portfolio_data = result_data.get('portfolio', result_data.get('holdings', []))
+                                                    if portfolio_data and isinstance(portfolio_data, list):
+                                                        tickers = [item.get('ticker', item.get('symbol', '')) for item in portfolio_data if isinstance(item, dict)]
+                                                        tickers = [t for t in tickers if t]
+                                                        if tickers:
+                                                            replacement = ','.join(tickers)
+                                                    
+                                                    # Also check files for portfolio CSV
+                                                    files = result_data.get('files', [])
+                                                    for file_info in files:
+                                                        if isinstance(file_info, dict) and 'portfolio' in file_info.get('filename', '').lower():
+                                                            # Could read file, but for now just note it exists
+                                                            pass
+                                    
+                                    if not isinstance(replacement, str):
+                                        replacement = json.dumps(replacement) if replacement else ''
+                                    
+                                    resolved_value = resolved_value.replace(f'{{{{{placeholder}}}}}', str(replacement))
+                                    continue
+                    
+                    # If no pattern matched, log warning
+                    logger.warning(f"Could not resolve placeholder: {{{{placeholder}}}}")
+                
+                return resolved_value
+            elif isinstance(value, dict):
+                # Recursively resolve placeholders in dict values
+                return {k: resolve_value(v) for k, v in value.items()}
+            elif isinstance(value, list):
+                # Recursively resolve placeholders in list items
+                return [resolve_value(item) for item in value]
+            else:
+                return value
+        
+        # Resolve all placeholders in parameters
+        resolved_params = resolve_value(parameters)
+        return resolved_params
     
     def _create_execution_summary(self, plan: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
         """

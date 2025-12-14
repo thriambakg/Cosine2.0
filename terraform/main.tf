@@ -1347,7 +1347,8 @@ resource "aws_lambda_function" "chat_agent" {
       MAX_CONTEXT_SIZE           = "100000"
 
       # S3 Configuration for file uploads
-      CHAT_FILES_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+      CHAT_FILES_BUCKET_NAME  = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+      AGENT_FILES_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
 
 
       # File Return Lambda Function Name for direct invocation

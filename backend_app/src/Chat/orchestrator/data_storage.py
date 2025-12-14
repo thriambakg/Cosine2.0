@@ -21,12 +21,13 @@ class DataStorage:
     def __init__(self):
         """Initialize data storage with S3 client."""
         self.s3_client = boto3.client('s3')
-        self.bucket_name = os.environ.get('AGENT_FILES_BUCKET_NAME')
+        # Try AGENT_FILES_BUCKET_NAME first, fallback to CHAT_FILES_BUCKET_NAME
+        self.bucket_name = os.environ.get('AGENT_FILES_BUCKET_NAME') or os.environ.get('CHAT_FILES_BUCKET_NAME')
         
         if not self.bucket_name:
-            logger.warning("AGENT_FILES_BUCKET_NAME not set, data storage will not work")
-        
-        logger.info(f"DataStorage initialized with bucket: {self.bucket_name}")
+            logger.warning("Neither AGENT_FILES_BUCKET_NAME nor CHAT_FILES_BUCKET_NAME is set, data storage will not work")
+        else:
+            logger.info(f"DataStorage initialized with bucket: {self.bucket_name}")
     
     def store_result(self, data: Any, tool_name: str, session_id: str, user_id: str) -> Dict[str, Any]:
         """
