@@ -1375,8 +1375,8 @@ resource "aws_lambda_function" "chat_agent" {
       AGENT_FILES_PROCESSOR_FUNCTION_NAME = module.agent_files_processor_lambda.function_name
 
       # WebSocket API Gateway endpoint for direct message delivery
-      WEBSOCKET_ENDPOINT = module.websocket_api.stage_url
-      WEBSOCKET_API_ID   = module.websocket_api.api_id
+      # Note: These are set via data source lookup at runtime to avoid circular dependency
+      # The websocket_handler.py will construct the endpoint from WEBSOCKET_API_ID if needed
     }
   }
 
@@ -1407,10 +1407,10 @@ module "websocket_connection_lambda" {
   environment_variables = {
     CHAT_CONNECTIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_connections_table_name
     CHAT_SESSIONS_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    WEBSOCKET_ENDPOINT          = module.websocket_api.stage_url
-    WEBSOCKET_API_ID            = module.websocket_api.api_id
-    ENVIRONMENT                 = var.environment
-    LOG_LEVEL                   = var.environment == "development" ? "DEBUG" : "INFO"
+    # WebSocket API endpoint and ID removed to avoid circular dependency with websocket_api module
+    # The connection manager will discover the API ID at runtime if needed
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
   # Attach core layer
@@ -1430,6 +1430,9 @@ module "websocket_connection_lambda" {
 # Functionality consolidated into chat_agent container
 
 # WebSocket API Gateway
+# Note: Created after chat_agent to break circular dependency
+# chat_agent env vars don't reference websocket_api to avoid cycle
+# The websocket_handler.py will construct the endpoint at runtime
 module "websocket_api" {
   source = "./modules/websocket-api"
 
@@ -1443,7 +1446,14 @@ module "websocket_api" {
   message_lambda_name    = aws_lambda_function.chat_agent.function_name
 
   tags = var.common_tags
+
+  depends_on = [aws_lambda_function.chat_agent]
 }
+
+# Note: WebSocket API endpoint and ID are not set in chat_agent environment variables
+# to avoid circular dependency. The websocket_handler.py will construct the endpoint
+# at runtime using the API ID pattern or discover it via API Gateway Management API.
+# If needed, these can be set manually after deployment or via a separate update script.
 
 # ============================================================================
 # SQS QUEUES REMOVED - Direct WebSocket delivery used instead

@@ -79,10 +79,32 @@ class WebSocketHandler:
             # Fallback: construct from API Gateway ID
             api_gateway_id = os.environ.get('WEBSOCKET_API_ID')
             if api_gateway_id:
-                websocket_endpoint = f"https://{api_gateway_id}.execute-api.us-east-1.amazonaws.com/production"
+                # Get stage name from environment or use default
+                stage_name = os.environ.get('WEBSOCKET_STAGE_NAME', 'production')
+                region = os.environ.get('AWS_REGION', 'us-east-1')
+                websocket_endpoint = f"https://{api_gateway_id}.execute-api.{region}.amazonaws.com/{stage_name}"
             else:
-                # Default fallback
-                websocket_endpoint = "https://xem3y35uzd.execute-api.us-east-1.amazonaws.com/production"
+                # Try to discover API ID from API Gateway (for cases where env vars aren't set due to circular dependency)
+                try:
+                    apigw_client = boto3.client('apigatewayv2')
+                    # List WebSocket APIs and find the one for this environment
+                    environment = os.environ.get('ENVIRONMENT', 'production')
+                    project_name = 'cosine'  # Default, can be overridden
+                    api_name = f"{project_name}-websocket-api-{environment}"
+                    
+                    apis = apigw_client.get_apis()
+                    for api in apis.get('Items', []):
+                        if api.get('Name') == api_name and api.get('ProtocolType') == 'WEBSOCKET':
+                            api_gateway_id = api['ApiId']
+                            stage_name = os.environ.get('WEBSOCKET_STAGE_NAME', environment)
+                            region = os.environ.get('AWS_REGION', 'us-east-1')
+                            websocket_endpoint = f"https://{api_gateway_id}.execute-api.{region}.amazonaws.com/{stage_name}"
+                            logger.info(f"Discovered WebSocket API endpoint: {websocket_endpoint}")
+                            break
+                except Exception as e:
+                    logger.warning(f"Failed to discover WebSocket API: {e}, using default fallback")
+                    # Default fallback
+                    websocket_endpoint = "https://xem3y35uzd.execute-api.us-east-1.amazonaws.com/production"
         
         # Convert wss:// to https:// for the API Gateway Management API
         if websocket_endpoint.startswith('wss://'):
