@@ -250,6 +250,31 @@ class FileUploadHandler:
             # This ensures files are uploaded before message processing begins
             logger.info(f"Files uploaded successfully. Waiting for WebSocket message to process.")
             
+            # Prepare response body with session_variables for frontend to update immediately
+            response_body = {
+                'message': f'Successfully uploaded {len(uploaded_files)} file(s)',
+                'uploaded_files': uploaded_files
+            }
+            
+            # Include updated session_variables in response so frontend can update immediately
+            if updated_session_variables:
+                # Convert Decimal types to native Python types for JSON serialization
+                import json as json_module
+                from decimal import Decimal
+                
+                def decimal_default(obj):
+                    if isinstance(obj, Decimal):
+                        return int(obj) if obj % 1 == 0 else float(obj)
+                    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+                
+                # Convert session_variables to JSON-serializable format
+                try:
+                    session_vars_json = json_module.loads(json_module.dumps(updated_session_variables, default=decimal_default))
+                    response_body['session_variables'] = session_vars_json
+                    logger.info(f"✅ Including session_variables in response for immediate frontend update")
+                except Exception as e:
+                    logger.warning(f"Failed to serialize session_variables for response: {str(e)}")
+            
             # Return immediately - frontend will send message via WebSocket
             return {
                 'statusCode': 200,
@@ -259,10 +284,7 @@ class FileUploadHandler:
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'POST, OPTIONS'
                 },
-                'body': json.dumps({
-                    'message': f'Successfully uploaded {len(uploaded_files)} file(s)',
-                    'uploaded_files': uploaded_files
-                })
+                'body': json.dumps(response_body)
             }
             
         except Exception as e:

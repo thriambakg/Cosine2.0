@@ -756,6 +756,19 @@ class UnifiedMessageHandlerService {
         const uploadResult = await response.json();
         console.log('✅ UnifiedMessageHandler: Files uploaded successfully:', uploadResult);
 
+        // Update session variables immediately from API response (if provided)
+        if (uploadResult.session_variables) {
+          console.log('📁 UnifiedMessageHandler: Updating session variables from file upload response');
+          const updateEvent = new CustomEvent('session-variables-updated', {
+            detail: {
+              sessionId: sessionId,
+              sessionVariables: uploadResult.session_variables
+            }
+          });
+          window.dispatchEvent(updateEvent);
+          console.log('✅ UnifiedMessageHandler: Dispatched session variables update from file upload response');
+        }
+
         // Step 2: Send message via WebSocket with file attachment flag
         // Include file metadata for frontend display
         const uploadedFilesMetadata = messageData.files.map(file => ({
