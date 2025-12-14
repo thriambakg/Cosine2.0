@@ -410,6 +410,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # 3. REST API Gateway event (has httpMethod or path)
         elif 'httpMethod' in event or 'path' in event:
             logger.info("Detected REST API Gateway event")
+            logger.debug(f"REST API event structure: httpMethod={event.get('httpMethod')}, path={event.get('path')}, resource={event.get('resource')}, pathParameters={event.get('pathParameters')}")
             
             # CORS headers for API Gateway responses
             cors_headers = {
@@ -428,18 +429,49 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 }
             
             # Check if this is the /files endpoint (file upload)
+            # Check multiple possible path formats
             path = event.get('path', '')
-            if '/files' in path or event.get('resource', '').endswith('/files'):
-                logger.info("Processing file upload request")
+            resource = event.get('resource', '')
+            path_parameters = event.get('pathParameters') or {}
+            
+            # Log path detection for debugging
+            logger.debug(f"Path detection: path='{path}', resource='{resource}', pathParameters={path_parameters}")
+            
+            is_files_endpoint = (
+                '/files' in path or 
+                resource.endswith('/files') or 
+                path.endswith('/files') or
+                'files' in path_parameters.values()
+            )
+            
+            if is_files_endpoint:
+                logger.info(f"Processing file upload request - path: {path}, resource: {resource}")
+                logger.debug(f"Event body type: {type(event.get('body'))}, body length: {len(str(event.get('body', '')))}")
                 try:
                     from file_upload_handler import FileUploadHandler
                     file_handler = FileUploadHandler()
                     result = file_handler.handle_file_upload(event)
+                    
+                    # Ensure result is a valid dict
+                    if not isinstance(result, dict):
+                        logger.error(f"File upload handler returned invalid result type: {type(result)}")
+                        result = {
+                            'statusCode': 500,
+                            'headers': cors_headers,
+                            'body': json.dumps({'error': 'Invalid response from file upload handler'})
+                        }
+                    
                     # Ensure CORS headers are always present
                     if 'headers' not in result:
-                        result['headers'] = cors_headers
+                        result['headers'] = cors_headers.copy()
                     elif 'Access-Control-Allow-Origin' not in result.get('headers', {}):
-                        result['headers'].update(cors_headers)
+                        result['headers'] = {**result.get('headers', {}), **cors_headers}
+                    
+                    # Ensure statusCode is present
+                    if 'statusCode' not in result:
+                        result['statusCode'] = 200
+                    
+                    logger.info(f"File upload handler returned: statusCode={result.get('statusCode')}")
                     return result
                 except Exception as e:
                     logger.error(f"Error in file upload handler: {str(e)}")

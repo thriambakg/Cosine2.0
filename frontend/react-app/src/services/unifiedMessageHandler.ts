@@ -717,16 +717,51 @@ class UnifiedMessageHandlerService {
           model: messageData.model || 'claude-sonnet-4'  // Include selected model
         };
 
-        const response = await fetch(`${process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'}/files`, {
+        const url = `${process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'}/files`;
+        const requestBody = JSON.stringify(fileMessageRequest);
+        
+        // Log request details for debugging
+        console.log('📁 UnifiedMessageHandler: Sending file upload request:', {
+          url,
+          fileCount: filesData.length,
+          totalSize: filesData.reduce((sum, f) => sum + (f.data?.length || 0), 0),
+          requestSize: requestBody.length,
+          messageId: messageData.messageId,
+          sessionId: sessionId
+        });
+        
+        const response = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(fileMessageRequest)
+          body: requestBody
+        });
+
+        // Log response details
+        console.log('📁 UnifiedMessageHandler: File upload response:', {
+          status: response.status,
+          statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries()),
+          ok: response.ok
         });
 
         if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+          // Try to get error details from response
+          let errorMessage = `HTTP error! status: ${response.status}`;
+          try {
+            const errorBody = await response.text();
+            console.error('📁 UnifiedMessageHandler: Error response body:', errorBody);
+            try {
+              const errorJson = JSON.parse(errorBody);
+              errorMessage = errorJson.error || errorJson.message || errorMessage;
+            } catch {
+              errorMessage = errorBody || errorMessage;
+            }
+          } catch (e) {
+            console.error('📁 UnifiedMessageHandler: Failed to read error response:', e);
+          }
+          throw new Error(errorMessage);
         }
 
         const result = await response.json();

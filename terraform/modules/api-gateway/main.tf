@@ -121,6 +121,7 @@ resource "aws_api_gateway_method_response" "this" {
     "method.response.header.Access-Control-Allow-Methods"     = true
     "method.response.header.Access-Control-Allow-Origin"      = true
     "method.response.header.Access-Control-Allow-Credentials" = true
+    "method.response.header.Content-Type"                     = true
   }
 
   response_models = {
@@ -136,15 +137,20 @@ resource "aws_api_gateway_method_response" "this" {
   ]
 }
 
-# Integration responses - for all methods (both Lambda and MOCK)
+# Integration responses - only for MOCK integrations
+# For AWS_PROXY, headers are passed through automatically from Lambda response
 resource "aws_api_gateway_integration_response" "this" {
-  for_each = var.methods
+  for_each = {
+    for k, v in var.methods : k => v
+    if v.integration_type == "MOCK"
+  }
 
   rest_api_id = aws_api_gateway_rest_api.this.id
   resource_id = aws_api_gateway_resource.this[each.value.resource_key].id
   http_method = aws_api_gateway_method.this[each.key].http_method
   status_code = aws_api_gateway_method_response.this[each.key].status_code
 
+  # Static CORS headers for MOCK integrations
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
     "method.response.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
@@ -152,11 +158,9 @@ resource "aws_api_gateway_integration_response" "this" {
     "method.response.header.Access-Control-Allow-Credentials" = "'true'"
   }
 
-  # For MOCK integrations, we need a response template
-  response_templates = each.value.integration_type == "MOCK" ? {
+  # Response template for MOCK integrations
+  response_templates = {
     "application/json" = "{\"statusCode\": 200}"
-    } : {
-    "application/json" = ""
   }
 
   # Add lifecycle to prevent recreation issues
