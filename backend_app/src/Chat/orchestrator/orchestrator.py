@@ -64,6 +64,17 @@ class Orchestrator:
                 # Resolve placeholders in parameters using previous step results
                 parameters = self._resolve_placeholders(parameters, results, step_num)
                 
+                # Check if any placeholders failed to resolve (empty string values that should have been replaced)
+                unresolved_placeholders = []
+                for key, value in parameters.items():
+                    if isinstance(value, str):
+                        # Check for unresolved placeholder patterns
+                        if re.search(r'\{\{?step[_\s]*\d+[._].*\}\}?', value):
+                            unresolved_placeholders.append(f"{key}={value}")
+                
+                if unresolved_placeholders:
+                    logger.warning(f"Unresolved placeholders in step {step_num}: {unresolved_placeholders}")
+                
                 # Report tool starting
                 self.status_reporter.report_tool_starting(
                     tool_name, parameters, session_id, user_id, message_id, step_num, len(steps)
@@ -249,11 +260,14 @@ class Orchestrator:
                     placeholder = placeholder.strip()
                     
                     # Try to extract step number and field
-                    # Pattern 1: {{step_N.field}} or {{step_N.result}}
+                    # Pattern 1: {{step_N.field}} or {{step_N.result}} or {{step_N.result.field}}
                     step_match = re.match(r'step[_\s]*(\d+)[._]?(.*)', placeholder, re.IGNORECASE)
                     if step_match:
                         step_num = int(step_match.group(1))
                         field = step_match.group(2).strip() if step_match.group(2) else 'result'
+                        # Handle "result.field" pattern - extract just the field part
+                        if field.startswith('result.'):
+                            field = field.replace('result.', '', 1)
                         replacement = ''  # Initialize replacement at the start
                         
                         if step_num < current_step:
@@ -266,6 +280,49 @@ class Orchestrator:
                             
                             if step_result:
                                 # Extract field from result
+                                # Check if we need to read from S3 (when result is stored)
+                                needs_s3_read = False
+                                s3_key_to_read = None
+                                
+                                if 'file_reference' in step_result:
+                                    s3_key_to_read = step_result['file_reference'].get('s3_key', '')
+                                    needs_s3_read = True
+                                elif 'actual_data_s3_key' in step_result:
+                                    s3_key_to_read = step_result['actual_data_s3_key']
+                                    needs_s3_read = True
+                                
+                                # If field is a nested path (e.g., "result.time_series" or "time_series"), 
+                                # we need to read from S3 and extract the nested field
+                                if needs_s3_read and ('.' in field or field not in ['result', 's3_key', 'file_reference']):
+                                    try:
+                                        # Read the actual result from S3
+                                        result_data = self.data_storage.retrieve_result({'s3_key': s3_key_to_read})
+                                        
+                                        # If field is "result.X", extract X from the result
+                                        if field.startswith('result.'):
+                                            nested_field = field.replace('result.', '', 1)
+                                            replacement = self._extract_nested_field(result_data, nested_field)
+                                        else:
+                                            # Field is directly in the result (e.g., "time_series", "metrics_table")
+                                            replacement = self._extract_nested_field(result_data, field)
+                                        
+                                        # Convert to JSON string if it's a dict/list
+                                        if isinstance(replacement, (dict, list)):
+                                            replacement = json.dumps(replacement)
+                                        
+                                        if replacement:
+                                            # Replace placeholder
+                                            placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                                            placeholder_single_brace = f'{{{placeholder}}}'
+                                            if placeholder_with_braces in resolved_value:
+                                                resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                                            if placeholder_single_brace in resolved_value:
+                                                resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                                            continue
+                                    except Exception as e:
+                                        logger.warning(f"Could not read from S3 or extract field {field}: {e}")
+                                
+                                # Handle simple field requests
                                 if field == 'result':
                                     # If data was stored in S3, return file_reference or s3_key
                                     # Check for actual_data_s3_key first (from tools that store data themselves)

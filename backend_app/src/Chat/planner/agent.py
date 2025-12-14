@@ -2302,6 +2302,18 @@ def generate_portfolio_analysis_content(data):
             # If not JSON, try to extract metrics from text
             pass
     
+    # Handle case where data is directly the metrics_table array
+    if isinstance(data, list):
+        # Check if it looks like a metrics_table (array of arrays)
+        if len(data) > 0 and isinstance(data[0], list):
+            # This is a metrics_table array - use it directly
+            for row in data:
+                if isinstance(row, list):
+                    lines.append(','.join(str(cell) for cell in row))
+                else:
+                    lines.append(str(row))
+            return lines
+    
     # Check if data contains portfolio analysis metrics
     if isinstance(data, dict):
         # Check for portfolio analysis tool output structure

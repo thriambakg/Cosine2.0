@@ -93,6 +93,11 @@ class UnifiedChartGenerator:
         - Has 'name' key (coin name)
         - Chart data has 'time' and 'price' keys (not 'close')
         """
+        # Check for portfolio time series data (from portfolio analysis tool)
+        if 'time_series' in data_dict and isinstance(data_dict['time_series'], dict):
+            if 'dates' in data_dict['time_series'] and 'portfolio_values' in data_dict['time_series']:
+                return 'portfolio_time_series'
+        
         # Check for multiple stocks data
         if 'stocks' in data_dict and isinstance(data_dict['stocks'], list):
             return 'multiple_stocks'
@@ -184,6 +189,41 @@ class UnifiedChartGenerator:
                 })
             return normalized_data, data_dict.get('timeframe', 'Custom Range')
         
+        elif data_type == 'portfolio_time_series':
+            # Portfolio time series data from portfolio analysis tool
+            time_series = data_dict.get('time_series', {})
+            dates = time_series.get('dates', [])
+            portfolio_values = time_series.get('portfolio_values', [])
+            benchmark_values = time_series.get('benchmark_values', [])
+            
+            # Normalize to format: {'Portfolio': [...], 'Benchmark': [...]} for multiple_stocks handling
+            normalized_data = {}
+            
+            # Portfolio data
+            portfolio_data = []
+            for i, date_str in enumerate(dates):
+                if i < len(portfolio_values):
+                    portfolio_data.append({
+                        'time': date_str,
+                        'close': portfolio_values[i] if portfolio_values[i] is not None else 0
+                    })
+            if portfolio_data:
+                normalized_data['Portfolio'] = portfolio_data
+            
+            # Benchmark data (if available)
+            if benchmark_values:
+                benchmark_data = []
+                for i, date_str in enumerate(dates):
+                    if i < len(benchmark_values) and benchmark_values[i] is not None:
+                        benchmark_data.append({
+                            'time': date_str,
+                            'close': benchmark_values[i]
+                        })
+                if benchmark_data:
+                    normalized_data['Benchmark'] = benchmark_data
+            
+            return normalized_data, 'Portfolio Analysis'
+        
         return [], 'Unknown'
 
     def _save_chart_to_s3(self, fig, filename: str, symbol: str, chart_type: str, timeframe: str, data_points: int, asset_type: str) -> str:
@@ -256,6 +296,12 @@ class UnifiedChartGenerator:
             data_dict = json.loads(data_json)
             logger.info(f"🔍 DEBUG: After JSON parsing, data type: {type(data_dict)}")
             logger.info(f"🔍 DEBUG: After JSON parsing, keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
+            
+            # Handle case where data_json is directly a time_series object (from placeholder resolution)
+            if isinstance(data_dict, dict) and 'dates' in data_dict and 'portfolio_values' in data_dict:
+                # This is a time_series object directly - wrap it in the expected structure
+                logger.info("🔍 DEBUG: Detected time_series object directly, wrapping in structure")
+                data_dict = {'time_series': data_dict}
             
             # Decompress data if it's compressed
             import sys
@@ -360,35 +406,42 @@ class UnifiedChartGenerator:
             logger.info(f"🔍 DEBUG: Chart maker processing {total_data_points} total data points")
             
             # Handle different data types
-            if data_type == 'multiple_stocks':
-                # Handle multiple stocks comparison
+            if data_type == 'multiple_stocks' or data_type == 'portfolio_time_series':
+                # Handle multiple stocks comparison or portfolio vs benchmark
                 colors = ['#F06292', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD']
                 
-                for i, (stock_symbol, stock_data) in enumerate(normalized_data.items()):
-                    if not stock_data:
+                for i, (series_name, series_data) in enumerate(normalized_data.items()):
+                    if not series_data:
                         continue
                     
-                    logger.info(f"🔍 DEBUG: Processing {len(stock_data)} data points for {stock_symbol}")
+                    logger.info(f"🔍 DEBUG: Processing {len(series_data)} data points for {series_name}")
                         
                     # Convert to DataFrame
-                    df = pd.DataFrame(stock_data)
+                    df = pd.DataFrame(series_data)
                     
                     # Convert time to datetime
-                    if df['time'].dtype == 'int64':
-                        df['time'] = pd.to_datetime(df['time'], unit='s')
+                    if 'time' in df.columns:
+                        if df['time'].dtype == 'int64':
+                            df['time'] = pd.to_datetime(df['time'], unit='s')
+                        else:
+                            df['time'] = pd.to_datetime(df['time'])
+                        df.set_index('time', inplace=True)
                     else:
-                        df['time'] = pd.to_datetime(df['time'])
+                        logger.warning(f"No 'time' column found for {series_name}")
+                        continue
                     
-                    df.set_index('time', inplace=True)
-                    
-                    # Plot line for this stock with professional styling
+                    # Plot line for this series with professional styling
                     color = colors[i % len(colors)]
-                    ax.plot(df.index, df['close'], linewidth=3, color=color, alpha=0.9, label=stock_symbol)
+                    ax.plot(df.index, df['close'], linewidth=3, color=color, alpha=0.9, label=series_name)
                 
-                # Set title for multiple stocks
+                # Set title for multiple series
                 if not title:
-                    stock_symbols = list(normalized_data.keys())
-                    title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
+                    if data_type == 'portfolio_time_series':
+                        series_names = list(normalized_data.keys())
+                        title = f"Portfolio Performance Comparison - {', '.join(series_names)}"
+                    else:
+                        stock_symbols = list(normalized_data.keys())
+                        title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
                 ax.set_title(title, fontsize=18, fontweight='bold', pad=20)
                 ax.legend()
             else:
