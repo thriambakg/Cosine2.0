@@ -1017,22 +1017,27 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
                     'notes': [f"Planner needs: {missing_info}", f"Question: {question}"]
                 }
                 
-                # Format the question using Reasoning LLM
-                response_content = reasoning_llm.format_response(
+                # Format the question using Reasoning LLM with streaming
+                ws_handler = WebSocketHandler()
+                response_content, was_streamed = reasoning_llm.format_response(
                     user_message,
                     chat_payload,
                     session_context,
-                    model
+                    model,
+                    ws_handler=ws_handler,
+                    message_id=ai_message_id,
+                    user_id=user_id,
+                    session_id=session_id
                 )
                 
-                # Send response via WebSocket
-                ws_handler = WebSocketHandler()
-                ws_handler.send_chat_response(
-                    user_id=user_id,
-                    session_id=session_id,
-                    message_id=ai_message_id,
-                    response_content=response_content
-                )
+                # Send response via WebSocket (if not already streamed)
+                if not was_streamed:
+                    ws_handler.send_chat_response(
+                        user_id=user_id,
+                        session_id=session_id,
+                        message_id=ai_message_id,
+                        response_content=response_content
+                    )
                 
                 # Save to DynamoDB
                 try:
@@ -1098,16 +1103,16 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
             chat_payload = execution_results.get('summary', {})
             reasoning_llm = ReasoningLLM(context_aware_agent)
             
-            # Use streaming for Reasoning LLM response
-            streaming_used = {'value': False}
-            accumulated_streaming_content = {'value': ''}
-            
-            # Get reasoning response (this will be natural language explanation)
-            response_content = reasoning_llm.format_response(
+            # Get reasoning response with streaming enabled
+            response_content, was_streamed = reasoning_llm.format_response(
                 user_message, 
                 chat_payload, 
                 session_context, 
-                model
+                model,
+                ws_handler=ws_handler,
+                message_id=ai_message_id,
+                user_id=user_id,
+                session_id=session_id
             )
             
             # Note: File references and data outputs are already handled by orchestrator
@@ -1132,15 +1137,18 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
         is_edit = event_body.get('is_edit', False)
         edited_message_id = event_body.get('edited_message_id')
         
-        # Send response directly to WebSocket
+        # Send response directly to WebSocket (if not already streamed)
         try:
             from websocket_handler import WebSocketHandler
             ws_handler = WebSocketHandler()
             
-            # Send Reasoning LLM response to user
-            ws_handler.send_chat_response(user_id, session_id, response_content, ai_message_id)
-            
-            logger.info(f"✅ Sent reasoning response to WebSocket (session: {session_id}, user: {user_id})")
+            # Only send complete response if it wasn't already streamed
+            if not was_streamed:
+                ws_handler.send_chat_response(user_id, session_id, response_content, ai_message_id)
+                logger.info(f"✅ Sent reasoning response to WebSocket (session: {session_id}, user: {user_id})")
+            else:
+                # Response was streamed in chunks, just log
+                logger.info(f"✅ Reasoning response was streamed to WebSocket (session: {session_id}, user: {user_id})")
             
             # Save AI response to DynamoDB
             if response_content and response_content.strip():
