@@ -272,50 +272,69 @@ class UnifiedMessageHandlerService {
         return sessionResult;
       }
 
-      const sessionId = sessionResult.sessionId!;
+      const finalSessionId = sessionResult.sessionId!;
 
       // Store user ID for this session
-      this.sessionUserIds.set(sessionId, messageData.userId);
+      this.sessionUserIds.set(finalSessionId, messageData.userId);
 
-      // Step 2-4: Process message types with correct local UI handling
+      // Step 2: If sessionId changed (new session created), move message from old sessionId to new one
+      // This prevents duplicates when a new session is created mid-processing
+      if (messageData.sessionId && messageData.sessionId !== finalSessionId) {
+        console.log(`🔄 UnifiedMessageHandler: Session ID changed from ${messageData.sessionId} to ${finalSessionId}, moving message`);
+        this._moveMessageToNewSession(messageData.messageId, messageData.sessionId, finalSessionId);
+      }
+
+      // Step 3: For new WebSocket connections, ensure connection is established BEFORE adding message to cache
+      // This prevents messages appearing/disappearing and loading state issues on first message
+      const isNewConnection = !this.hasWebSocketConnection(finalSessionId);
+      
+      if (isNewConnection) {
+        console.log('🔄 UnifiedMessageHandler: New WebSocket connection detected, establishing connection before adding message');
+        // Establish connection first for new connections to prevent race conditions
+        await this.ensureWebSocketConnection(finalSessionId, messageData.userId);
+      }
+      
+      // Step 4: Process message types with correct local UI handling
+      // Only add message to cache if it doesn't already exist (prevents duplicates)
       switch (messageData.type) {
         case 'new_message':
           // Add user message locally and start loading
-          this.addUserMessageToLocalCache(sessionId, messageData);
-          this.broadcastLoadingState(sessionId, true, messageData.source);
-          await this.processNewMessage(sessionId, messageData);
+          this.addUserMessageToLocalCache(finalSessionId, messageData);
+          this.broadcastLoadingState(finalSessionId, true, messageData.source);
+          await this.processNewMessage(finalSessionId, messageData);
           break;
         
         case 'context_message':
           // Add user message locally and start loading
-          this.addUserMessageToLocalCache(sessionId, messageData);
-          this.broadcastLoadingState(sessionId, true, messageData.source);
-          await this.processContextMessage(sessionId, messageData);
+          this.addUserMessageToLocalCache(finalSessionId, messageData);
+          this.broadcastLoadingState(finalSessionId, true, messageData.source);
+          await this.processContextMessage(finalSessionId, messageData);
           break;
         
         case 'file_message':
-          // Start loading during file processing
-          this.broadcastLoadingState(sessionId, true, messageData.source);
-          await this.processFileMessage(sessionId, messageData);
+          // Add user message locally and start loading (same pattern as regular messages)
+          this.addUserMessageToLocalCache(finalSessionId, messageData);
+          this.broadcastLoadingState(finalSessionId, true, messageData.source);
+          await this.processFileMessage(finalSessionId, messageData);
           break;
         
         case 'followup_message':
           // Add user message locally and start loading
-          this.addUserMessageToLocalCache(sessionId, messageData);
-          this.broadcastLoadingState(sessionId, true, messageData.source);
-          await this.processFollowupMessage(sessionId, messageData);
+          this.addUserMessageToLocalCache(finalSessionId, messageData);
+          this.broadcastLoadingState(finalSessionId, true, messageData.source);
+          await this.processFollowupMessage(finalSessionId, messageData);
           break;
         
         case 'edit_message':
           // Edit flow: update existing user message in-place and truncate UI immediately
-          this.applyLocalEditAndTruncate(sessionId, messageData);
+          this.applyLocalEditAndTruncate(finalSessionId, messageData);
           // Start loading while waiting for new AI response
-          this.broadcastLoadingState(sessionId, true, messageData.source);
-          await this.processEditMessage(sessionId, messageData);
+          this.broadcastLoadingState(finalSessionId, true, messageData.source);
+          await this.processEditMessage(finalSessionId, messageData);
           break;
       }
 
-      return { sessionId, success: true };
+      return { sessionId: finalSessionId, success: true };
     } catch (error) {
       console.error('❌ UnifiedMessageHandler: Error processing message:', error);
       return { 
@@ -399,8 +418,11 @@ class UnifiedMessageHandlerService {
   private async processNewMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
     console.log('📝 UnifiedMessageHandler: Processing new message for session:', sessionId);
     
-    // Ensure WebSocket connection
-    await this.ensureWebSocketConnection(sessionId, messageData.userId);
+    // Connection already established in handleMessageProcessing for new connections
+    // For existing connections, ensure it's still valid
+    if (!this.hasWebSocketConnection(sessionId)) {
+      await this.ensureWebSocketConnection(sessionId, messageData.userId);
+    }
     
     // Send message via WebSocket
     await this.sendWebSocketMessage(sessionId, messageData);
@@ -415,8 +437,11 @@ class UnifiedMessageHandlerService {
     console.log('🔍 DEBUG: processContextMessage - messageData.contextItems:', messageData.contextItems);
     console.log('🔍 DEBUG: processContextMessage - contextItems length:', messageData.contextItems?.length || 0);
     
-    // Ensure WebSocket connection
-    await this.ensureWebSocketConnection(sessionId, messageData.userId);
+    // Connection already established in handleMessageProcessing for new connections
+    // For existing connections, ensure it's still valid
+    if (!this.hasWebSocketConnection(sessionId)) {
+      await this.ensureWebSocketConnection(sessionId, messageData.userId);
+    }
     
     // Send message via WebSocket
     await this.sendWebSocketMessage(sessionId, messageData);
@@ -433,15 +458,15 @@ class UnifiedMessageHandlerService {
       throw new Error('No files provided for file message');
     }
 
-    // Add user message to local cache immediately for display
-    this.addUserMessageToLocalCache(sessionId, messageData);
-
-    // Broadcast loading state for file upload (keep loading until AI response)
-    this.broadcastLoadingState(sessionId, true, messageData.source);
+    // Note: User message and loading state are already set in the switch statement above
+    // This matches the pattern used by regular messages (new_message, context_message, etc.)
 
     try {
-      // Ensure WebSocket connection exists (creates new session if needed)
-      await this.ensureWebSocketConnection(sessionId, messageData.userId);
+      // Connection already established in handleMessageProcessing for new connections
+      // For existing connections, ensure it's still valid
+      if (!this.hasWebSocketConnection(sessionId)) {
+        await this.ensureWebSocketConnection(sessionId, messageData.userId);
+      }
 
       // Files are already processed by FileUploadService in the component
       // No need to process them again
@@ -466,8 +491,11 @@ class UnifiedMessageHandlerService {
   private async processFollowupMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
     console.log('🔄 UnifiedMessageHandler: Processing followup message for session:', sessionId);
     
-    // Ensure WebSocket connection
-    await this.ensureWebSocketConnection(sessionId, messageData.userId);
+    // Connection already established in handleMessageProcessing for new connections
+    // For existing connections, ensure it's still valid
+    if (!this.hasWebSocketConnection(sessionId)) {
+      await this.ensureWebSocketConnection(sessionId, messageData.userId);
+    }
     
     // Send message via WebSocket
     await this.sendWebSocketMessage(sessionId, messageData);
@@ -480,8 +508,11 @@ class UnifiedMessageHandlerService {
   private async processEditMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
     console.log('✏️ UnifiedMessageHandler: Processing edit message for session:', sessionId);
     
-    // Ensure WebSocket connection
-    await this.ensureWebSocketConnection(sessionId, messageData.userId);
+    // Connection already established in handleMessageProcessing for new connections
+    // For existing connections, ensure it's still valid
+    if (!this.hasWebSocketConnection(sessionId)) {
+      await this.ensureWebSocketConnection(sessionId, messageData.userId);
+    }
     
     // Send message via WebSocket
     await this.sendWebSocketMessage(sessionId, messageData);
@@ -596,15 +627,61 @@ class UnifiedMessageHandlerService {
     if (!this.localCache.has(sessionId)) {
       this.localCache.set(sessionId, []);
     }
-    this.localCache.get(sessionId)!.push(userMessage);
+    
+    // Check if message already exists - if so, update it instead of adding duplicate
+    const messages = this.localCache.get(sessionId)!;
+    const existingIndex = messages.findIndex(m => m.id === messageData.messageId && m.sender === 'user');
+    
+    if (existingIndex !== -1) {
+      // Update existing message instead of adding duplicate
+      messages[existingIndex] = userMessage;
+      console.log('🔄 UnifiedMessageHandler: Updated existing user message in cache:', messageData.messageId);
+    } else {
+      // Add new message
+      messages.push(userMessage);
+      console.log('📨 UnifiedMessageHandler: Added user message to local cache:', messageData.messageId);
+    }
 
     // Notify listeners of message update
-    this.notifyMessageUpdate(sessionId, this.localCache.get(sessionId)!);
+    this.notifyMessageUpdate(sessionId, messages);
 
     // Note: Removed sharedMessageCache integration to prevent double syncing
     // The unified system handles message distribution directly
+  }
+
+  /**
+   * Move a message from one session to another (when session ID changes during processing)
+   */
+  private _moveMessageToNewSession(messageId: string, oldSessionId: string, newSessionId: string): void {
+    const oldMessages = this.localCache.get(oldSessionId) || [];
+    const messageIndex = oldMessages.findIndex(m => m.id === messageId);
     
-    console.log('📨 UnifiedMessageHandler: Added user message to local cache:', messageData.messageId);
+    if (messageIndex !== -1) {
+      const message = oldMessages[messageIndex];
+      // Update message with new sessionId
+      message.sessionId = newSessionId;
+      
+      // Remove from old session
+      oldMessages.splice(messageIndex, 1);
+      this.localCache.set(oldSessionId, oldMessages);
+      if (oldMessages.length > 0) {
+        this.notifyMessageUpdate(oldSessionId, oldMessages);
+      }
+      
+      // Add to new session (only if it doesn't already exist)
+      if (!this.localCache.has(newSessionId)) {
+        this.localCache.set(newSessionId, []);
+      }
+      const newMessages = this.localCache.get(newSessionId)!;
+      if (!newMessages.some(m => m.id === messageId)) {
+        newMessages.push(message);
+        this.localCache.set(newSessionId, newMessages);
+        this.notifyMessageUpdate(newSessionId, newMessages);
+        console.log(`✅ UnifiedMessageHandler: Moved message ${messageId} from session ${oldSessionId} to ${newSessionId}`);
+      } else {
+        console.log(`⚠️ UnifiedMessageHandler: Message ${messageId} already exists in new session ${newSessionId}, skipping move`);
+      }
+    }
   }
 
   /**
@@ -795,6 +872,17 @@ class UnifiedMessageHandlerService {
         console.log('📤 UnifiedMessageHandler: Sending message via WebSocket with file attachment flag');
         ws.send(JSON.stringify(websocketMessage));
         console.log('✅ UnifiedMessageHandler: File message sent via WebSocket');
+        
+        // Dispatch event to reset timeout - file upload is complete, AI processing is starting
+        // This ensures the 5-minute timeout only counts from when AI actually starts processing
+        const fileMessageSentEvent = new CustomEvent('file-message-sent', {
+          detail: {
+            sessionId: sessionId,
+            messageId: messageData.messageId
+          }
+        });
+        window.dispatchEvent(fileMessageSentEvent);
+        console.log('✅ UnifiedMessageHandler: Dispatched file-message-sent event to reset timeout');
       } catch (error) {
         console.error('❌ UnifiedMessageHandler: Error in file message flow:', error);
         throw error;
@@ -835,6 +923,8 @@ class UnifiedMessageHandlerService {
       case 'message_received':
         console.log('📨 UnifiedMessageHandler: Message received confirmation for session:', sessionId);
         // Update user message status from 'sending' to 'sent'
+        // NOTE: Do NOT clear loading state here - keep it until AI response arrives
+        // Loading state will be cleared when first AI response chunk arrives (handleAIResponseChunk)
         this.updateUserMessageStatus(sessionId, data.message_id, 'sent');
         break;
       case 'user_message_with_files':
@@ -1340,15 +1430,17 @@ class UnifiedMessageHandlerService {
 
   /**
    * Load existing messages from database into unified system
+   * Merges with existing cache to preserve messages that haven't been saved yet
    */
   loadExistingMessages(sessionId: string, messages: any[]): void {
     console.log(`📨 UnifiedMessageHandler: Loading ${messages.length} existing messages for session ${sessionId}`);
     
-    // Clear existing messages for this session
-    this.localCache.delete(sessionId);
+    // Get existing messages from cache (may contain unsaved messages)
+    const existingCacheMessages = this.localCache.get(sessionId) || [];
+    const existingMessageIds = new Set(existingCacheMessages.map(m => m.id));
     
     // Convert database messages to SharedMessage format
-    const sharedMessages: SharedMessage[] = messages.map((msg: any) => ({
+    const databaseMessages: SharedMessage[] = messages.map((msg: any) => ({
       id: msg.message_id || msg.id || `msg_${Date.now()}_${Math.random()}`,
       sender: msg.sender,
       text: msg.text || msg.content,
@@ -1358,13 +1450,23 @@ class UnifiedMessageHandlerService {
       files: this.convertDynamoDBFormat(msg.files)
     }));
     
-    // Add to local cache
-    this.localCache.set(sessionId, sharedMessages);
+    // Merge: Keep cache messages that aren't in database (unsaved/new messages)
+    // Add database messages that aren't in cache
+    const mergedMessages: SharedMessage[] = [
+      ...existingCacheMessages.filter(m => !databaseMessages.some(db => db.id === m.id)),
+      ...databaseMessages.filter(db => !existingMessageIds.has(db.id))
+    ];
     
-    // Notify listeners of the loaded messages
-    this.notifyMessageUpdate(sessionId, sharedMessages);
+    // Sort by timestamp to maintain chronological order
+    mergedMessages.sort((a, b) => a.timestamp - b.timestamp);
     
-    console.log(`✅ UnifiedMessageHandler: Loaded ${sharedMessages.length} existing messages for session ${sessionId}`);
+    // Update cache with merged messages
+    this.localCache.set(sessionId, mergedMessages);
+    
+    // Notify listeners of the merged messages
+    this.notifyMessageUpdate(sessionId, mergedMessages);
+    
+    console.log(`✅ UnifiedMessageHandler: Merged messages for session ${sessionId} - Cache: ${existingCacheMessages.length}, Database: ${databaseMessages.length}, Merged: ${mergedMessages.length}`);
   }
 
   /**

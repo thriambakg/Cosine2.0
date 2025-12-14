@@ -543,25 +543,13 @@ export default function ChatPage() {
         console.log('🤖 ChatPage: Received AI typing event for message:', messageId);
         setTypingMessages(prev => new Set([...prev, messageId]));
         
-        // Clear loading state when AI starts responding (with small delay to ensure loading wheel is visible)
-        if (currentSession?.session_id) {
-          console.log('🤖 ChatPage: AI started typing, clearing loading state for session:', currentSession.session_id);
-          
-          // Clear the timeout since AI is responding
-          if (loadingTimeoutRef.current) {
-            clearTimeout(loadingTimeoutRef.current);
-            loadingTimeoutRef.current = null;
-            console.log('🔄 ChatPage: Cleared timeout for session:', currentSession.session_id);
-          }
-          
-          setTimeout(() => {
-            setSessionLoadingStates(prev => ({
-              ...prev,
-              [currentSession.session_id]: false
-            }));
-            // Broadcast loading state clearing to other interfaces
-            unifiedMessageHandler.broadcastLoadingState(currentSession.session_id, false, 'chatpage');
-          }, 100); // Small delay to ensure loading wheel is visible
+        // Clear the timeout since AI is responding
+        // NOTE: Loading state is cleared by unifiedMessageHandler when first chunk arrives
+        // Don't clear it here to avoid race conditions and ensure it stays until chunk actually arrives
+        if (currentSession?.session_id && loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
+          loadingTimeoutRef.current = null;
+          console.log('🔄 ChatPage: Cleared timeout for session:', currentSession.session_id);
         }
       }
     };
@@ -632,12 +620,49 @@ export default function ChatPage() {
       }
     };
 
+    // Listen for file message sent event to reset timeout
+    // This ensures the 5-minute timeout only counts from when AI processing starts,
+    // not from when file upload begins
+    const handleFileMessageSent = (event: CustomEvent) => {
+      const { sessionId } = event.detail;
+      if (sessionId === currentSession?.session_id && loadingTimeoutRef.current) {
+        console.log('🔄 ChatPage: File message sent, resetting timeout for session:', sessionId);
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+        
+        // Reset timeout - now counting from when AI processing actually starts
+        loadingTimeoutRef.current = setTimeout(() => {
+          console.log('⏰ TIMEOUT: Agent response timeout after 5 minutes for session:', sessionId);
+          
+          // Clear loading state
+          setSessionLoadingStates(prev => ({
+            ...prev,
+            [sessionId]: false
+          }));
+          
+          // Add helpful timeout message to guide user
+          if (sessionId) {
+            addPersistedMessage({
+              id: `timeout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              text: "⏰ **Processing Extended**: Your request is taking longer than usual to process. The AI is still working on your request and may take up to 15 minutes to complete. Please refresh the page periodically to check for updates, or start a new conversation if you would like to talk about something else.",
+              sender: 'bot',
+              timestamp: new Date()
+            });
+          }
+          
+          loadingTimeoutRef.current = null;
+        }, 300000); // 5 minutes (300,000 ms)
+      }
+    };
+
     window.addEventListener('session-variables-updated', handleSessionVariablesUpdate as any);
+    window.addEventListener('file-message-sent', handleFileMessageSent as any);
     
     return () => {
       window.removeEventListener('session-variables-updated', handleSessionVariablesUpdate as any);
+      window.removeEventListener('file-message-sent', handleFileMessageSent as any);
     };
-  }, [currentSession?.session_id]);
+  }, [currentSession?.session_id, addPersistedMessage]);
   
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1434,6 +1459,9 @@ export default function ChatPage() {
           // Broadcast loading state for the new session
           unifiedMessageHandler.broadcastLoadingState(result.sessionId, true, 'chatpage');
           
+          // Load session - this will merge any cached messages with backend messages
+          // For new sessions, the message is already in unifiedMessageHandler cache
+          // and will be preserved when the session loads via the merge logic in loadExistingMessages
           loadSession(result.sessionId);
         }
       } else {
