@@ -381,6 +381,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         Response appropriate for event type
     """
     
+    # CORS headers for REST API responses (defined at top level for use in exception handler)
+    cors_headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+        'Content-Type': 'application/json'
+    }
+    
     logger.debug("lambda_handler called")
     logger.debug(f"Event keys: {list(event.keys()) if isinstance(event, dict) else 'Not a dict'}")
     
@@ -412,13 +420,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.info("Detected REST API Gateway event")
             logger.debug(f"REST API event structure: httpMethod={event.get('httpMethod')}, path={event.get('path')}, resource={event.get('resource')}, pathParameters={event.get('pathParameters')}")
             
-            # CORS headers for API Gateway responses
-            cors_headers = {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-                'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-                'Content-Type': 'application/json'
-            }
+            # Use CORS headers defined at top of function
             
             # Handle OPTIONS request for CORS preflight
             if event.get('httpMethod') == 'OPTIONS':
@@ -529,13 +531,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"Unexpected error in lambda_handler: {str(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        # Always include full CORS headers even on errors
-        cors_headers = {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-            'Content-Type': 'application/json'
-        }
+        
+        # Check if this is a REST API event - if so, return CORS headers
+        if 'httpMethod' in event or 'path' in event:
+            # This is a REST API event - return error with CORS headers
+            return {
+                'statusCode': 500,
+                'headers': cors_headers,
+                'body': json.dumps({
+                    'error': 'Internal server error',
+                    'message': str(e)
+                })
+            }
+        
+        # For WebSocket or other events, return appropriate error format
+        # Use the cors_headers defined at the top of the function
         return {
             'statusCode': 500,
             'headers': cors_headers,
