@@ -460,7 +460,19 @@ class WebSocketHandler:
                 result = handle_chat_message(event_body, None)
                 
                 # Log the result for debugging
-                if result.get('statusCode') != 200:
+                if result is None:
+                    logger.warning(f"Chat handler returned None - this should not happen")
+                    # Send error message if handler failed
+                    error_timestamp_ms = int(datetime.now().timestamp() * 1000)
+                    error_message = {
+                        'type': 'ai_response',
+                        'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
+                        'content': "I apologize, but I encountered an error processing your request. Please try again.",
+                        'session_id': session_id,
+                        'timestamp': error_timestamp_ms
+                    }
+                    self.send_to_client(connection_id, error_message)
+                elif result.get('statusCode') != 200:
                     logger.warning(f"Chat handler returned non-200 status: {result.get('statusCode')}")
                     # Send error message if handler failed
                     error_timestamp_ms = int(datetime.now().timestamp() * 1000)
@@ -851,7 +863,7 @@ class WebSocketHandler:
             logger.error(f"❌ Failed to store context items: {e}")
     
     def _send_session_update(self, user_id: str, session_id: str):
-        """Send session update message to frontend"""
+        """Send session update message to frontend (fetches session_variables from DynamoDB)"""
         try:
             session_response = self.chat_sessions_table.get_item(
                 Key={'user_id': user_id, 'session_id': session_id}
@@ -859,17 +871,25 @@ class WebSocketHandler:
             
             if 'Item' in session_response:
                 session_variables = session_response['Item'].get('session_variables', {})
-                
-                session_update_message = {
-                    'type': 'session_updated',
-                    'session_id': session_id,
-                    'session_variables': session_variables,
-                    'timestamp': datetime.now().isoformat()
-                }
-                
-                connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
-                for conn_id in connection_ids:
-                    self.send_to_client(conn_id, session_update_message)
+                self._send_session_update_with_variables(user_id, session_id, session_variables)
+        except Exception as e:
+            logger.error(f"❌ Failed to send session update: {str(e)}")
+    
+    def _send_session_update_with_variables(self, user_id: str, session_id: str, session_variables: Dict[str, Any]):
+        """Send session update message to frontend with provided session_variables"""
+        try:
+            session_update_message = {
+                'type': 'session_updated',
+                'session_id': session_id,
+                'session_variables': session_variables,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
+            logger.info(f"📤 Sending session_update to {len(connection_ids)} connection(s) for session {session_id}")
+            for conn_id in connection_ids:
+                self.send_to_client(conn_id, session_update_message)
+                logger.info(f"✅ Sent session_update to connection {conn_id}")
         except Exception as e:
             logger.error(f"❌ Failed to send session update: {str(e)}")
 

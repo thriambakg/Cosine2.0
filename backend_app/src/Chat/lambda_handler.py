@@ -251,7 +251,7 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                     if chunk:
                                         chunk_text = str(chunk)
                                         full_response += chunk_text
-                                        accumulated_content = full_response
+                                        accumulated_streaming_content['value'] = full_response
                                         
                                         # Send incremental chunk (only new content)
                                         if ai_message_id and ws_handler and len(full_response) > last_sent_length:
@@ -262,6 +262,7 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                                     user_id, session_id, new_chunk, ai_message_id,
                                                     is_streaming=True, is_complete=False
                                                 )
+                                                streaming_used['value'] = True
                                             except Exception as e:
                                                 logger.warning(f"Failed to send streaming chunk: {str(e)}")
                                 
@@ -340,7 +341,7 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             result = future.result()
             
             # Send final completion signal if streaming was used
-            if ai_message_id and ws_handler and accumulated_content:
+            if ai_message_id and ws_handler and accumulated_streaming_content.get('value'):
                 try:
                     ws_handler.send_chat_response(
                         user_id, session_id, "", ai_message_id,
@@ -437,9 +438,35 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Otherwise, process as regular REST API request
             return handle_rest_api_request(event, cors_headers)
         
-        # 4. Direct invocation (for testing or internal calls)
+        # 4. Direct invocation (for testing or internal calls, including session_update from agent_files_processor)
         else:
             logger.info("Detected direct invocation event")
+            
+            # Check if this is a session_update from agent_files_processor
+            if event.get('type') == 'session_update':
+                logger.info("Processing session_update from agent_files_processor")
+                from websocket_handler import WebSocketHandler
+                ws_handler = WebSocketHandler()
+                
+                user_id = event.get('user_id')
+                session_id = event.get('session_id')
+                session_variables = event.get('session_variables', {})
+                
+                if user_id and session_id:
+                    # Send session update to WebSocket connections
+                    ws_handler._send_session_update_with_variables(user_id, session_id, session_variables)
+                    logger.info(f"✅ Sent session_update to WebSocket for session {session_id}")
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps({'message': 'Session update sent to WebSocket'})
+                    }
+                else:
+                    logger.error("session_update missing user_id or session_id")
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'Missing user_id or session_id'})
+                    }
+            
             return handle_rest_api_request(event, {
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Headers': 'Content-Type',
@@ -1040,49 +1067,59 @@ Context Items Available: {len(context_items)} items
                 
                 logger.info(f"✅ Sent chat response directly to WebSocket (session: {session_id}, user: {user_id})")
                 
-                # Also save AI response to DynamoDB
-                try:
-                    import boto3
-                    from decimal import Decimal
-                    dynamodb = boto3.resource('dynamodb')
-                    chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
-                    
-                    # Get current messages
-                    session_response = chat_sessions_table.get_item(
-                        Key={'user_id': user_id, 'session_id': session_id},
-                        ConsistentRead=True
-                    )
-                    
-                    if 'Item' in session_response:
-                        messages = session_response['Item'].get('messages', [])
-                        timestamp = int(time.time())
+                # Always save AI response to DynamoDB (whether streaming was used or not)
+                # Use accumulated streaming content if available and not empty, otherwise use response_content
+                if streaming_used.get('value', False) and accumulated_streaming_content.get('value') and accumulated_streaming_content['value'].strip():
+                    content_to_save = accumulated_streaming_content['value']
+                else:
+                    content_to_save = response_content
+                
+                # Only save if we have content
+                if content_to_save and content_to_save.strip():
+                    try:
+                        import boto3
+                        from decimal import Decimal
+                        dynamodb = boto3.resource('dynamodb')
+                        chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
                         
-                        # Add AI response message with unique ID
-                        ai_message = {
-                            'id': ai_message_id,  # Use unique AI message ID, not user's message_id
-                            'text': response_content,
-                            'sender': 'bot',
-                            'timestamp': timestamp,
-                            'message_type': 'text'
-                        }
+                        # Get current messages
+                        session_response = chat_sessions_table.get_item(
+                            Key={'user_id': user_id, 'session_id': session_id},
+                            ConsistentRead=True
+                        )
                         
-                        # Avoid duplicates by checking both ID and content
-                        if not any(m.get('id') == ai_message_id or (m.get('sender') == 'bot' and m.get('text') == response_content) for m in messages):
-                            messages.append(ai_message)
+                        if 'Item' in session_response:
+                            messages = session_response['Item'].get('messages', [])
+                            timestamp = int(time.time())
                             
-                            chat_sessions_table.update_item(
-                                Key={'user_id': user_id, 'session_id': session_id},
-                                UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
-                                ExpressionAttributeValues={
-                                    ':messages': messages,
-                                    ':count': len(messages),
-                                    ':timestamp': timestamp
-                                }
-                            )
-                            logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id}")
-                except Exception as db_error:
-                    logger.warning(f"Failed to save AI response to DynamoDB: {str(db_error)}")
-                    # Continue - response was sent via WebSocket
+                            # Add AI response message with unique ID
+                            ai_message = {
+                                'id': ai_message_id,  # Use unique AI message ID, not user's message_id
+                                'text': content_to_save,  # Use accumulated content if streaming was used
+                                'sender': 'bot',
+                                'timestamp': timestamp,
+                                'message_type': 'text'
+                            }
+                            
+                            # Avoid duplicates by checking both ID and content
+                            if not any(m.get('id') == ai_message_id or (m.get('sender') == 'bot' and m.get('text') == content_to_save) for m in messages):
+                                messages.append(ai_message)
+                                
+                                chat_sessions_table.update_item(
+                                    Key={'user_id': user_id, 'session_id': session_id},
+                                    UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                                    ExpressionAttributeValues={
+                                        ':messages': messages,
+                                        ':count': len(messages),
+                                        ':timestamp': timestamp
+                                    }
+                                )
+                                logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (streaming: {streaming_used.get('value', False)}, length: {len(content_to_save)})")
+                    except Exception as db_error:
+                        logger.warning(f"Failed to save AI response to DynamoDB: {str(db_error)}")
+                        # Continue - response was sent via WebSocket
+                else:
+                    logger.warning(f"⚠️ No content to save for AI message {ai_message_id}, skipping DynamoDB save")
                 
                 # Return acknowledgment
                 return {
