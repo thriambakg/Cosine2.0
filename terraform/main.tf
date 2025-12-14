@@ -929,20 +929,9 @@ resource "aws_iam_policy" "lambda_websocket_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for Lambda functions to receive messages from SQS
-resource "aws_iam_policy" "lambda_sqs_policy" {
-  name        = "${var.project_name}-lambda-sqs-policy-${var.environment}"
-  description = "Policy for Lambda functions to receive messages from SQS queues"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      # SQS permissions removed - using direct WebSocket delivery instead
-    ]
-  })
-
-  tags = var.common_tags
-}
+# IAM Policy for Lambda functions to receive messages from SQS - REMOVED
+# SQS queues are no longer used - direct WebSocket delivery is used instead
+# This policy has been removed to avoid empty policy document errors
 
 # SES Module for email sending capabilities
 module "ses" {
@@ -1238,26 +1227,10 @@ resource "aws_iam_role_policy_attachment" "chat_agent_websocket_policy" {
   policy_arn = aws_iam_policy.lambda_websocket_policy.arn
 }
 
-# SQS policy for chat agent to send logs and responses
-resource "aws_iam_policy" "chat_agent_sqs_policy" {
-  name        = "${var.project_name}-chat-agent-sqs-policy-${var.environment}"
-  description = "Policy for chat agent to send logs and responses to SQS queues"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      # SQS permissions removed - using direct WebSocket delivery instead
-    ]
-  })
-
-  tags = var.common_tags
-}
-
-# Attach SQS policy for chat agent
-resource "aws_iam_role_policy_attachment" "chat_agent_sqs_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.chat_agent_sqs_policy.arn
-}
+# SQS policy for chat agent - REMOVED
+# SQS queues are no longer used - direct WebSocket delivery is used instead
+# The chat_agent now sends logs and responses directly via WebSocket API Gateway
+# This policy and its attachment have been removed to avoid empty policy document errors
 
 
 
