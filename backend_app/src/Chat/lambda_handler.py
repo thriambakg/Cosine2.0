@@ -1005,11 +1005,12 @@ Context Items Available: {len(context_items)} items
         
         # Extract the actual response content from AgentResult
         # If streaming was used, prefer the accumulated streaming content (it's already clean)
-        if streaming_used.get('value', False) and accumulated_streaming_content.get('value'):
+        response_content = ""
+        if streaming_used.get('value', False) and accumulated_streaming_content.get('value') and accumulated_streaming_content['value'].strip():
             response_content = accumulated_streaming_content['value']
             logger.debug(f"Using accumulated streaming content: {len(response_content)} chars")
         else:
-            response_content = ""
+            # Extract from agent_response
             if hasattr(agent_response, 'message') and hasattr(agent_response.message, 'content'):
                 # Handle structured content (list of content blocks)
                 if isinstance(agent_response.message.content, list):
@@ -1047,6 +1048,25 @@ Context Items Available: {len(context_items)} items
                 response_content = clean_response_content(response_content)
             
             logger.debug(f"Extracted response content: {len(response_content)} chars")
+            
+            # If we still don't have content and streaming was used, try accumulated content as fallback
+            if not response_content or not response_content.strip():
+                if accumulated_streaming_content.get('value') and accumulated_streaming_content['value'].strip():
+                    response_content = accumulated_streaming_content['value']
+                    logger.debug(f"Using accumulated streaming content as fallback: {len(response_content)} chars")
+        
+        # Ensure we have response content - if not, return error
+        if not response_content or not response_content.strip():
+            logger.error(f"No response content extracted from agent response (streaming_used: {streaming_used.get('value', False)}, accumulated: {len(accumulated_streaming_content.get('value', ''))} chars)")
+            return {
+                'statusCode': 500,
+                'body': {
+                    'error': 'No response content',
+                    'message': 'Agent did not generate a response',
+                    'session_id': session_id,
+                    'user_id': user_id
+                }
+            }
             
             # WebSocket processor now handles all user message saving
             # Chat agent only processes and generates responses - no message saving needed
