@@ -20,7 +20,6 @@ export interface SharedMessage {
   }>;
   sessionId: string;
   source: 'chatpage' | 'sidebar' | 'database';
-  isStreaming?: boolean; // Indicates if message is currently being streamed
 }
 
 export interface UnifiedMessageData {
@@ -748,6 +747,11 @@ class UnifiedMessageHandlerService {
   private handleWebSocketMessage(sessionId: string, data: any): void {
     console.log('📨 UnifiedMessageHandler: Handling WebSocket message:', data.type, 'for session:', sessionId);
     
+    // Debug: Log full message if type is missing
+    if (!data.type) {
+      console.warn('⚠️ UnifiedMessageHandler: Received message without type field:', data);
+    }
+    
     switch (data.type) {
       case 'ai_response':
         this.handleAIResponse(sessionId, data);
@@ -955,15 +959,9 @@ class UnifiedMessageHandlerService {
       streamingMessage.text += (content || '');
     }
     
-    // Ensure streamingMessage is defined (should always be at this point)
-    if (!streamingMessage) {
-      console.error('⚠️ UnifiedMessageHandler: streamingMessage is undefined, cannot update');
-      return;
-    }
-    
     // Update the message in cache
     const updatedMessages = this.localCache.get(sessionId)!.map(m => 
-      m.id === message_id && m.sender === 'ai' ? streamingMessage : m
+      m.id === message_id && m.sender === 'ai' ? streamingMessage! : m
     );
     this.localCache.set(sessionId, updatedMessages);
     

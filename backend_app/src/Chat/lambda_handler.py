@@ -131,7 +131,15 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
     Returns:
         Agent response or kill signal response
     """
-    return process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_id, user_id, session_context, None)
+    # For non-streaming, pass None for streaming-related parameters
+    from websocket_handler import WebSocketHandler
+    ws_handler = WebSocketHandler()
+    streaming_used = {'value': False}
+    accumulated_streaming_content = {'value': ''}
+    return process_with_kill_monitoring_and_streaming(
+        agent, enhanced_message, session_id, user_id, session_context, 
+        None, ws_handler, streaming_used, accumulated_streaming_content
+    )
 
 def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_id, user_id, session_context, ai_message_id, ws_handler, streaming_used, accumulated_streaming_content):
     """
@@ -949,8 +957,9 @@ Context Items Available: {len(context_items)} items
             
             # Create a shared variable to track if streaming was used
             streaming_used = {'value': False}
+            accumulated_streaming_content = {'value': ''}
             agent_response = process_with_kill_monitoring_and_streaming(
-                agent, enhanced_message, session_id, user_id, session_context, ai_message_id, ws_handler, streaming_used
+                agent, enhanced_message, session_id, user_id, session_context, ai_message_id, ws_handler, streaming_used, accumulated_streaming_content
             )
             
             # Flush any remaining logs to WebSocket before returning

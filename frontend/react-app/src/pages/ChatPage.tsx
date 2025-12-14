@@ -287,8 +287,6 @@ export default function ChatPage() {
     updateSessionVariables,
   } = useChatPersistence(user?.id || '');
   
-  // Use messages from current session
-  const messages = currentSession?.messages || [];
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const { selectedModel, setSelectedModel } = usePersistentModel();
   const [missedResponseNotification] = useState<string | null>(null);
@@ -414,6 +412,37 @@ export default function ChatPage() {
       console.log('📨 ChatPage: Received unified message update:', update.type);
     }
   });
+
+  // Use messages from unified messaging system (real-time) as primary source
+  // Fall back to persistence system for initial load or when unified messages aren't available
+  // Merge both sources to ensure we show all messages
+  const persistenceMessages = currentSession?.messages || [];
+  const unifiedMessageList = unifiedMessages || [];
+  
+  // Create a merged list, prioritizing unified messages (real-time) but including persistence messages
+  // Use a Map to deduplicate by message ID, with unified messages taking precedence
+  const messageMap = new Map<string, any>();
+  
+  // First add persistence messages (for initial load)
+  persistenceMessages.forEach(msg => {
+    messageMap.set(msg.id, {
+      id: msg.id,
+      sender: msg.sender === 'bot' ? 'ai' : msg.sender,
+      text: msg.text,
+      timestamp: msg.timestamp instanceof Date ? msg.timestamp.getTime() : (typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()),
+      sessionId: currentSession?.session_id || '',
+      source: 'database' as const,
+      files: msg.files
+    });
+  });
+  
+  // Then add/override with unified messages (real-time updates)
+  unifiedMessageList.forEach(msg => {
+    messageMap.set(msg.id, msg);
+  });
+  
+  // Convert to sorted array
+  const messages = Array.from(messageMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 
   // Sync unified messages with local persistence system (DEBOUNCED for performance)
   // This runs asynchronously to avoid blocking message display
