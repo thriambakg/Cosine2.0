@@ -319,16 +319,8 @@ class UnifiedMessageHandlerService {
           break;
         
         case 'followup_message':
-          // Add user message locally FIRST (synchronously) before any async operations
-          // This ensures the message appears immediately in the UI
-          console.log(`📨 UnifiedMessageHandler: Adding followup message to cache - sessionId: ${finalSessionId}, messageId: ${messageData.messageId}`);
+          // Add user message locally and start loading
           this.addUserMessageToLocalCache(finalSessionId, messageData);
-          
-          // Verify message was added
-          const messagesAfterAdd = this.localCache.get(finalSessionId) || [];
-          const messageExists = messagesAfterAdd.some(m => m.id === messageData.messageId);
-          console.log(`✅ UnifiedMessageHandler: Message ${messageExists ? 'found' : 'NOT FOUND'} in cache after add. Total messages: ${messagesAfterAdd.length}`);
-          
           this.broadcastLoadingState(finalSessionId, true, messageData.source);
           await this.processFollowupMessage(finalSessionId, messageData);
           break;
@@ -619,8 +611,6 @@ class UnifiedMessageHandlerService {
    * Add user message to local cache for immediate display
    */
   private addUserMessageToLocalCache(sessionId: string, messageData: UnifiedMessageData): void {
-    console.log(`📨 UnifiedMessageHandler: addUserMessageToLocalCache called - sessionId: ${sessionId}, messageId: ${messageData.messageId}, messageData.sessionId: ${messageData.sessionId}`);
-    
     const userMessage: SharedMessage = {
       id: messageData.messageId,
       sender: 'user',
@@ -632,14 +622,13 @@ class UnifiedMessageHandlerService {
         size: file.size,
         type: file.type
       })),
-      sessionId: sessionId, // Use the provided sessionId (should be finalSessionId)
+      sessionId: sessionId,
       source: messageData.source
     };
 
     // Add to local cache
     if (!this.localCache.has(sessionId)) {
       this.localCache.set(sessionId, []);
-      console.log(`📦 UnifiedMessageHandler: Created new cache entry for session ${sessionId}`);
     }
     
     // Check if message already exists - if so, update it instead of adding duplicate
@@ -649,15 +638,14 @@ class UnifiedMessageHandlerService {
     if (existingIndex !== -1) {
       // Update existing message instead of adding duplicate
       messages[existingIndex] = userMessage;
-      console.log(`🔄 UnifiedMessageHandler: Updated existing user message in cache: ${messageData.messageId} (session: ${sessionId}, total messages: ${messages.length})`);
+      console.log('🔄 UnifiedMessageHandler: Updated existing user message in cache:', messageData.messageId);
     } else {
       // Add new message
       messages.push(userMessage);
-      console.log(`📨 UnifiedMessageHandler: Added user message to local cache: ${messageData.messageId} (session: ${sessionId}, total messages: ${messages.length})`);
+      console.log('📨 UnifiedMessageHandler: Added user message to local cache:', messageData.messageId);
     }
 
     // Notify listeners of message update
-    console.log(`📢 UnifiedMessageHandler: Calling notifyMessageUpdate for session ${sessionId} with ${messages.length} messages`);
     this.notifyMessageUpdate(sessionId, messages);
 
     // Note: Removed sharedMessageCache integration to prevent double syncing
@@ -1518,7 +1506,6 @@ class UnifiedMessageHandlerService {
    * Notify all listeners of message updates
    */
   private notifyMessageUpdate(sessionId: string, messages: SharedMessage[]): void {
-    console.log(`📢 UnifiedMessageHandler: Notifying ${this.messageListeners.size} listeners of message update for session ${sessionId} (${messages.length} messages)`);
     this.messageListeners.forEach(callback => {
       try {
         callback(sessionId, messages);

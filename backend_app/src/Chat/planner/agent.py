@@ -143,15 +143,11 @@ from strands import tool
 # Import our custom financial calculator tool module
 import financial_calculator
 
-# Import our custom session database access tool
-from tools.session_database_access import get_session_files_tool, get_session_context_tool, SessionDatabaseAccess
-from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
-from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
-from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
-from tools.chart_generator import generate_chart_tool, generate_stock_chart
-from tools.chat_history_tool import get_chat_history_tool, search_chat_history_tool
-from tools.chat_session_context_tool import process_chat_session_context_tool, analyze_chat_session_context_tool
-from tools.web_scraper import fetch_web_content_tool
+# NOTE: PLANNER DOES NOT IMPORT ACTUAL TOOL IMPLEMENTATIONS
+# The planner only needs tool specifications for planning, not actual tool functions
+# Tool implementations are in the tools/ directory and are executed by the orchestrator
+# Import tool specifications instead
+from .tool_specifications import TOOL_SPECIFICATIONS, get_tool_specification, get_all_tool_names
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -1325,7 +1321,44 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
             "stocks": results
         }
         
-        return json.dumps(consolidated_data, indent=2)
+        result_json = json.dumps(consolidated_data, indent=2)
+        
+        # Check if result is large (>10KB) and should be stored in S3
+        LARGE_DATA_THRESHOLD = 10000  # 10KB
+        if len(result_json) > LARGE_DATA_THRESHOLD:
+            try:
+                # Store in S3 and return file reference
+                from orchestrator.data_storage import DataStorage
+                storage = DataStorage()
+                
+                session_id = os.environ.get('SESSION_ID', 'default')
+                user_id = os.environ.get('USER_ID', 'default')
+                
+                file_ref = storage.store_result(
+                    consolidated_data,
+                    'get_multiple_financial_data',
+                    session_id,
+                    user_id
+                )
+                
+                agent_logger.info(f"Large dataset stored in S3: {file_ref['filename']} ({file_ref['size_bytes']} bytes)")
+                
+                # Return file reference instead of data
+                return json.dumps({
+                    "status": "success",
+                    "message": f"Large dataset stored in S3 ({(file_ref['size_bytes']/1024):.1f}KB). Use read_s3_file_tool to retrieve.",
+                    "file_reference": file_ref,
+                    "summary": {
+                        "total_symbols": len(symbol_list),
+                        "successful_symbols": len([r for r in results if r.get("status") == "success"]),
+                        "timeframe": timeframe
+                    }
+                }, indent=2)
+            except Exception as e:
+                agent_logger.warning(f"Failed to store large data in S3: {str(e)}, returning data directly")
+                # Fall through to return data directly
+        
+        return result_json
         
     except Exception as e:
         return f"Error getting multiple financial data: {str(e)}"
@@ -1383,13 +1416,14 @@ def get_volatility_surface(symbol: str) -> str:
 
 @tool
 def python_financial_calculator(calculation: str) -> str:
-    """Execute advanced financial calculations including Fama-French 5-factor regression analysis, correlations, cointegration tests, Sharpe ratios, and Value at Risk calculations."""
+    """Execute advanced financial calculations including Fama-French 5-factor regression analysis, correlations, cointegration tests, Sharpe ratios, and Value at Risk calculations. Large results (>10KB) are automatically stored in S3."""
     try:
         agent_logger.info(f"Running financial calculation: {calculation[:50]}...")
         # Use the enhanced financial calculator from our module
         calculator = financial_calculator.EnhancedFinancialCalculator()
         
         calc_lower = calculation.lower()
+        result = None
         
         if any(term in calc_lower for term in ["fama", "french", "factor", "regression"]):
             # Extract symbol if provided
@@ -1399,10 +1433,10 @@ def python_financial_calculator(calculation: str) -> str:
             if symbol_match:
                 symbol = symbol_match.group()
             
-            return calculator.fama_french_analysis(symbol)
+            result = calculator.fama_french_analysis(symbol)
             
         elif any(term in calc_lower for term in ["correlation", "corr"]):
-            return """
+            result = """
 CORRELATION ANALYSIS:
 ====================
 Stock A vs Stock B Correlation: 0.74***
@@ -1417,7 +1451,7 @@ ROLLING CORRELATION (12-month):
 """
             
         elif any(term in calc_lower for term in ["cointegration", "coint"]):
-            return """
+            result = """
 COINTEGRATION ANALYSIS:
 ======================
 Engle-Granger Test:
@@ -1433,7 +1467,7 @@ Johansen Test:
 """
             
         elif any(term in calc_lower for term in ["sharpe", "ratio"]):
-            return """
+            result = """
 SHARPE RATIO ANALYSIS:
 =====================
 • Sharpe Ratio: 1.42
@@ -1444,7 +1478,7 @@ SHARPE RATIO ANALYSIS:
 """
             
         elif any(term in calc_lower for term in ["var", "value at risk", "risk"]):
-            return """
+            result = """
 VALUE AT RISK (VaR) ANALYSIS:
 =============================
 1-Day VaR (95% confidence): -2.1%
@@ -1462,7 +1496,7 @@ RISK METRICS:
 """
         
         elif any(term in calc_lower for term in ["volatility", "surface", "implied"]):
-            return """
+            result = """
 VOLATILITY SURFACE ANALYSIS:
 ============================
 Current Implied Volatility Levels:
@@ -1489,7 +1523,49 @@ Term Structure:
 """
         
         else:
-            return "Financial calculation completed. For specific analyses, mention keywords like 'Fama-French', 'correlation', 'cointegration', 'Sharpe ratio', 'VaR', or 'volatility surface'."
+            result = "Financial calculation completed. For specific analyses, mention keywords like 'Fama-French', 'correlation', 'cointegration', 'Sharpe ratio', 'VaR', or 'volatility surface'."
+        
+        # Convert result to string if needed
+        if result is None:
+            result = "Calculation completed but no result returned."
+        
+        result_str = result if isinstance(result, str) else json.dumps(result, indent=2)
+        
+        # Check if result is large (>10KB) and should be stored in S3
+        LARGE_DATA_THRESHOLD = 10000  # 10KB
+        if len(result_str) > LARGE_DATA_THRESHOLD:
+            try:
+                # Store in S3 and return file reference
+                from orchestrator.data_storage import DataStorage
+                storage = DataStorage()
+                
+                session_id = os.environ.get('SESSION_ID', 'default')
+                user_id = os.environ.get('USER_ID', 'default')
+                
+                # Prepare data for storage
+                data_to_store = result if isinstance(result, (dict, list)) else {"result": result_str}
+                
+                file_ref = storage.store_result(
+                    data_to_store,
+                    'python_financial_calculator',
+                    session_id,
+                    user_id
+                )
+                
+                agent_logger.info(f"Large calculation result stored in S3: {file_ref['filename']} ({file_ref['size_bytes']} bytes)")
+                
+                # Return file reference with summary
+                return json.dumps({
+                    "status": "success",
+                    "message": f"Large calculation result stored in S3 ({(file_ref['size_bytes']/1024):.1f}KB). Use read_s3_file_tool to retrieve.",
+                    "file_reference": file_ref,
+                    "summary": f"Calculation completed: {calculation[:100]}..."
+                }, indent=2)
+            except Exception as e:
+                agent_logger.warning(f"Failed to store large calculation result in S3: {str(e)}, returning data directly")
+                # Fall through to return data directly
+        
+        return result_str
             
     except Exception as e:
         return f"Error in financial calculation: {str(e)}"

@@ -580,12 +580,12 @@ def generate_stock_chart(symbol: str, timeframe: str = "1y", chart_type: str = "
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         try:
-            from agent import FinancialTools
+            from planner.agent import FinancialTools
         except ImportError:
             # Fallback: try importing from parent directory
             parent_dir = os.path.dirname(os.path.dirname(__file__))
             sys.path.append(parent_dir)
-            from agent import FinancialTools
+            from planner.agent import FinancialTools
         
         # Fetch stock data
         logger.info(f"📊 Fetching stock data for {symbol}...")

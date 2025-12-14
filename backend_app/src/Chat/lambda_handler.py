@@ -51,7 +51,7 @@ def get_financial_agent():
         logger.info("🔍 DEBUG: Loading financial agent (first time)")
         try:
             logger.info("🔍 DEBUG: Attempting to import agent module...")
-            from agent import financial_agent, analyze_stock, FinancialTools
+            from planner.agent import financial_agent, analyze_stock, FinancialTools
             logger.info("🔍 DEBUG: Successfully imported agent module")
             
             _financial_agent = financial_agent
@@ -103,7 +103,7 @@ def get_context_aware_agent():
     if _context_aware_agent is None:
         logger.info("🔍 DEBUG: Loading context-aware agent (first time)")
         try:
-            from context_aware_agent import context_aware_agent
+            from planner.context_aware_agent import context_aware_agent
             _context_aware_agent = context_aware_agent
             logger.info("🔍 DEBUG: Context-aware agent loaded successfully")
         except ImportError as e:
@@ -140,121 +140,6 @@ def process_with_kill_monitoring(agent, enhanced_message, session_id, user_id, s
         agent, enhanced_message, session_id, user_id, session_context, 
         None, ws_handler, streaming_used, accumulated_streaming_content
     )
-
-def truncate_agent_messages(agent, max_messages: int = 15, max_total_size: int = 400000):
-    """
-    Truncate agent's message history to prevent exceeding Bedrock request size limits.
-    Bedrock has a request body size limit, so we need to keep message history manageable.
-    
-    Args:
-        agent: Strands Agent instance
-        max_messages: Maximum number of messages to keep (default: 15, reduced from 20)
-        max_total_size: Maximum total size in characters (default: 400KB, reduced from 500KB)
-    
-    Returns:
-        Number of messages removed
-    """
-    try:
-        if not hasattr(agent, 'messages') or not agent.messages:
-            return 0
-        
-        original_count = len(agent.messages)
-        original_size = sum(len(str(msg)) for msg in agent.messages)
-        
-        # Strategy 1: Keep only the most recent N messages (excluding system messages)
-        if len(agent.messages) > max_messages:
-            # Separate system messages from conversation messages
-            system_messages = []
-            conversation_messages = []
-            
-            for msg in agent.messages:
-                # Check if it's a system message (could be role='system' or at index 0)
-                is_system = False
-                if hasattr(msg, 'role'):
-                    is_system = msg.role == 'system'
-                elif isinstance(msg, dict):
-                    is_system = msg.get('role') == 'system'
-                
-                if is_system:
-                    system_messages.append(msg)
-                else:
-                    conversation_messages.append(msg)
-            
-            # Keep most recent conversation messages
-            if len(conversation_messages) > max_messages:
-                conversation_messages = conversation_messages[-max_messages:]
-                logger.info(f"📉 Truncated agent messages: {original_count} -> {len(system_messages) + len(conversation_messages)} (kept {max_messages} most recent)")
-            
-            # Reconstruct messages list
-            agent.messages = system_messages + conversation_messages
-        
-        # Strategy 2: If still too large, truncate individual large tool response messages
-        total_size = sum(len(str(msg)) for msg in agent.messages)
-        if total_size > max_total_size:
-            logger.warning(f"⚠️ Agent messages still too large ({total_size:,} chars > {max_total_size:,}), truncating large tool responses...")
-            truncated_count = 0
-            max_message_size = 50000  # Max 50KB per message
-            
-            for msg in agent.messages:
-                msg_str = str(msg)
-                if len(msg_str) > max_message_size:
-                    # Try to truncate content - handle different message formats
-                    truncated = False
-                    
-                    # Format 1: Message with content attribute
-                    if hasattr(msg, 'content'):
-                        if isinstance(msg.content, str) and len(msg.content) > max_message_size:
-                            msg.content = msg.content[:max_message_size] + "\n\n[Response truncated - too large for request]"
-                            truncated = True
-                        elif isinstance(msg.content, list):
-                            # Handle list of content blocks
-                            total_content_size = sum(len(str(block)) for block in msg.content)
-                            if total_content_size > max_message_size:
-                                # Keep only first few blocks or truncate
-                                truncated_content = []
-                                current_size = 0
-                                for block in msg.content:
-                                    block_str = str(block)
-                                    if current_size + len(block_str) > max_message_size:
-                                        break
-                                    truncated_content.append(block)
-                                    current_size += len(block_str)
-                                if len(truncated_content) < len(msg.content):
-                                    truncated_content.append("[... additional content truncated ...]")
-                                    msg.content = truncated_content
-                                    truncated = True
-                    
-                    # Format 2: Message with text attribute
-                    elif hasattr(msg, 'text'):
-                        if len(str(msg.text)) > max_message_size:
-                            msg.text = str(msg.text)[:max_message_size] + "\n\n[Response truncated - too large for request]"
-                            truncated = True
-                    
-                    # Format 3: Dictionary format
-                    elif isinstance(msg, dict):
-                        if 'content' in msg and isinstance(msg['content'], str) and len(msg['content']) > max_message_size:
-                            msg['content'] = msg['content'][:max_message_size] + "\n\n[Response truncated - too large for request]"
-                            truncated = True
-                    
-                    if truncated:
-                        truncated_count += 1
-            
-            if truncated_count > 0:
-                new_size = sum(len(str(msg)) for msg in agent.messages)
-                logger.info(f"📉 Truncated {truncated_count} large tool response messages: {original_size:,} -> {new_size:,} chars")
-        
-        removed = original_count - len(agent.messages)
-        if removed > 0 or original_size > max_total_size:
-            final_size = sum(len(str(msg)) for msg in agent.messages)
-            logger.info(f"✅ Message truncation complete: {original_count} messages ({original_size:,} chars) -> {len(agent.messages)} messages ({final_size:,} chars)")
-        
-        return removed
-    except Exception as e:
-        logger.warning(f"⚠️ Error truncating agent messages: {str(e)}")
-        import traceback
-        logger.debug(traceback.format_exc())
-        return 0
-
 
 def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_id, user_id, session_context, ai_message_id, ws_handler, streaming_used, accumulated_streaming_content):
     """
@@ -326,9 +211,6 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             def agent_with_streaming_wrapper():
                 """Wrapper to capture streaming output from agent"""
                 try:
-                    # Truncate agent messages before processing to prevent request size limit errors
-                    truncate_agent_messages(agent, max_messages=20, max_total_size=500000)
-                    
                     # Check if agent has a stream method (Strands may support this)
                     if hasattr(agent, 'stream'):
                         # Use streaming method if available
@@ -715,7 +597,7 @@ def handle_rest_api_request(event: Dict[str, Any], cors_headers: Dict[str, str])
         agent_logger = get_agent_logger(session_id, user_id)
         # Update agent module's logger
         try:
-            import agent as agent_module
+            from planner import agent as agent_module
             agent_module.agent_logger = agent_logger
         except:
             pass
@@ -758,7 +640,7 @@ def handle_rest_api_request(event: Dict[str, Any], cors_headers: Dict[str, str])
         user_id = user_id_from_body
         # Update agent module's logger
         try:
-            import agent as agent_module
+            from planner import agent as agent_module
             agent_module.agent_logger = agent_logger
         except:
             pass
@@ -1000,7 +882,7 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
             agent_logger = get_agent_logger(session_id, user_id)
             # Update agent module's logger
             try:
-                import agent as agent_module
+                from planner import agent as agent_module
                 agent_module.agent_logger = agent_logger
             except:
                 pass
@@ -1075,25 +957,11 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
         # Get session-aware agent with the specified model
         if session_context:
             logger.debug(f"Getting session-aware agent for session {session_id} with model {model}")
-            
-            # Check if we need to clear agent cache due to large message history
-            # This prevents request size limit errors by forcing fresh agent creation
-            try:
-                # Try to get a temporary agent to check message size
-                temp_agent = context_aware_agent.get_session_agent(session_context, model)
-                if hasattr(temp_agent, 'messages') and temp_agent.messages:
-                    total_size = sum(len(str(msg)) for msg in temp_agent.messages)
-                    if total_size > 400000:  # 400KB threshold
-                        logger.warning(f"⚠️ Agent message history too large ({total_size:,} chars), clearing cache to force fresh agent")
-                        context_aware_agent.clear_session_cache(session_id)
-            except Exception as e:
-                logger.debug(f"Could not check agent message size: {str(e)}")
-            
             agent = context_aware_agent.get_session_agent(session_context, model)
         else:
             # Fallback to base agent with specified model
             logger.debug(f"Using base financial agent as fallback with model {model}")
-            from agent import create_financial_agent
+            from planner.agent import create_financial_agent
             agent = create_financial_agent(model)
         
         # No automatic welcome message - let the user start the conversation
@@ -1188,7 +1056,7 @@ Context Items Available: {len(context_items)} items
             
             # Flush any remaining logs to WebSocket before returning
             try:
-                import agent as agent_module  # Import with alias to avoid shadowing
+                from planner import agent as agent_module  # Import with alias to avoid shadowing
                 if hasattr(agent_module, 'agent_logger'):
                     agent_module.agent_logger.flush()
             except Exception as flush_error:
