@@ -81,7 +81,7 @@ class Orchestrator:
             
             try:
                 # Resolve placeholders in parameters
-                parameters = self._resolve_placeholders(parameters, results, step_num)
+                parameters = self._resolve_placeholders(parameters, results, step_num, tool_name)
                 
                 # Execute tool
                 tool_result = self.tool_executor.execute_tool(tool_name, parameters, session_id, user_id)
@@ -132,32 +132,87 @@ class Orchestrator:
         
         return results
     
-    def _resolve_placeholders(self, parameters: Dict[str, Any], results: Dict[str, Any], current_step: int) -> Dict[str, Any]:
+    def _resolve_placeholders(self, parameters: Dict[str, Any], results: Dict[str, Any], current_step: int, tool_name: str = None) -> Dict[str, Any]:
         """Resolve placeholders like {{step_1.result}} in parameters"""
         import re
+        import json
         
-        def resolve_value(value):
+        # Tools that need actual data (not S3 keys) for certain parameters
+        # When these tools receive an S3 key for these parameters, we read the data from S3
+        DATA_PARAMETERS = {
+            'generate_chart_tool': ['data_json'],
+            'generate_excel_file_tool': ['content'],
+        }
+        
+        def resolve_value(value, param_name: str = None):
             if isinstance(value, str):
                 # Find placeholders like {{step_N.result}}
                 placeholder_pattern = r'\{\{step_(\d+)\.result\}\}'
                 matches = re.findall(placeholder_pattern, value)
                 
+                if not matches:
+                    return value
+                
+                # Replace all placeholders in the string
+                resolved_string = value
                 for step_num_str in matches:
                     step_num = int(step_num_str)
                     if step_num < current_step:
                         # Get result from previous step
+                        resolved_value = None
+                        found = False
+                        
                         for result in results.get('results', []):
                             if result.get('step') == step_num:
+                                found = True
+                                
                                 if 'file_reference' in result:
-                                    # Return S3 key for file references
-                                    return result['file_reference'].get('s3_key', '')
+                                    s3_key = result['file_reference'].get('s3_key', '')
+                                    
+                                    # Check if this parameter needs actual data (not S3 key)
+                                    needs_data = False
+                                    if tool_name and tool_name in DATA_PARAMETERS:
+                                        if param_name in DATA_PARAMETERS[tool_name]:
+                                            needs_data = True
+                                    
+                                    if needs_data and s3_key:
+                                        # Read actual data from S3
+                                        try:
+                                            logger.info(f"Reading data from S3 for {param_name}: {s3_key[:100]}...")
+                                            retrieved_data = self.data_storage.retrieve_result(result['file_reference'])
+                                            # Convert to JSON string if it's a dict/list
+                                            if isinstance(retrieved_data, (dict, list)):
+                                                resolved_value = json.dumps(retrieved_data)
+                                            else:
+                                                resolved_value = str(retrieved_data)
+                                            logger.info(f"Successfully read {len(resolved_value)} chars from S3")
+                                        except Exception as e:
+                                            logger.error(f"Error reading from S3: {str(e)}, using S3 key instead")
+                                            resolved_value = s3_key
+                                    else:
+                                        # Return S3 key for file references
+                                        resolved_value = s3_key
+                                    
                                 elif 'result' in result:
-                                    return result['result']
+                                    resolved_value = result['result']
+                                    # If result is a dict/list and parameter needs JSON string, convert it
+                                    if tool_name and tool_name in DATA_PARAMETERS:
+                                        if param_name in DATA_PARAMETERS[tool_name]:
+                                            if isinstance(resolved_value, (dict, list)):
+                                                resolved_value = json.dumps(resolved_value)
+                                
                                 break
+                        
+                        if found and resolved_value is not None:
+                            # Replace the placeholder in the string
+                            placeholder = f"{{{{step_{step_num}.result}}}}"
+                            resolved_string = resolved_string.replace(placeholder, str(resolved_value))
+                        else:
+                            logger.warning(f"Could not resolve placeholder for step {step_num}")
                 
-                return value
+                return resolved_string
             elif isinstance(value, dict):
-                return {k: resolve_value(v) for k, v in value.items()}
+                return {k: resolve_value(v, k) for k, v in value.items()}
             elif isinstance(value, list):
                 return [resolve_value(item) for item in value]
             else:
