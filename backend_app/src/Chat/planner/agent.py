@@ -2356,17 +2356,27 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                     decimal_pattern = r'(-?\d+\.\d+)'
                     
                     # Check if this line contains a metric label
+                    # Handle markdown formatting like **CAGR:** or **Volatility:**
                     if 'cagr' in line_lower or 'compound annual growth rate' in line_lower:
-                        # Format as percentage
+                        # Format as percentage - match decimal after colon or equals
+                        line = re.sub(r':\s*(-?\d+\.\d+)', lambda m: f": {float(m.group(1)):.2%}", line)
+                        line = re.sub(r'=\s*(-?\d+\.\d+)', lambda m: f"= {float(m.group(1)):.2%}", line)
+                        # Also handle standalone decimals
                         line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2%}", line)
                     elif 'volatility' in line_lower:
                         # Format as percentage
+                        line = re.sub(r':\s*(-?\d+\.\d+)', lambda m: f": {float(m.group(1)):.2%}", line)
+                        line = re.sub(r'=\s*(-?\d+\.\d+)', lambda m: f"= {float(m.group(1)):.2%}", line)
                         line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2%}", line)
                     elif 'drawdown' in line_lower and 'max' in line_lower:
                         # Format as percentage (already negative if needed)
+                        line = re.sub(r':\s*(-?\d+\.\d+)', lambda m: f": {float(m.group(1)):.2%}", line)
+                        line = re.sub(r'=\s*(-?\d+\.\d+)', lambda m: f"= {float(m.group(1)):.2%}", line)
                         line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2%}", line)
                     elif 'sharpe' in line_lower and 'ratio' in line_lower:
                         # Format as decimal (2 decimal places)
+                        line = re.sub(r':\s*(-?\d+\.\d+)', lambda m: f": {float(m.group(1)):.2f}", line)
+                        line = re.sub(r'=\s*(-?\d+\.\d+)', lambda m: f"= {float(m.group(1)):.2f}", line)
                         line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2f}", line)
                     elif 'rolling' in line_lower and ('12' in line_lower or 'month' in line_lower) and 'return' in line_lower:
                         # Check if this line or subsequent lines contain a JSON object (rolling returns data)
@@ -2541,7 +2551,8 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                 
                 # Check for S3 key references (format: users/.../agent-files/...png)
                 # Also check for markdown image syntax: ![Chart](s3_key)
-                markdown_img_match = re.search(r'!\[.*?\]\((users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>\)]+\.png)\)', line)
+                # Note: S3 keys can contain spaces, so we need to match until the closing parenthesis
+                markdown_img_match = re.search(r'!\[.*?\]\((users/[^)]+\.png)\)', line)
                 if markdown_img_match:
                     s3_key = markdown_img_match.group(1)
                     logger.info(f"Found markdown chart image reference: {s3_key}")
@@ -2556,7 +2567,9 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                         # Remove the markdown image syntax from the line
                         line = re.sub(r'!\[.*?\]\(users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>\)]+\.png\)', '[Chart embedded above]', line)
                 
-                s3_key_match = re.search(r'users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>]+\.png', line)
+                # S3 keys can contain spaces, so match from users/ to .png (allowing spaces)
+                # Pattern: users/.../sessions/.../agent-files/...png (where ... can contain spaces)
+                s3_key_match = re.search(r'users/[^/]+/sessions/[^/]+/agent-files/[^"\'<>\)\n]+\.png', line)
                 if s3_key_match:
                     s3_key = s3_key_match.group(0)
                     logger.info(f"Found chart image reference in content: {s3_key}")
@@ -2570,7 +2583,7 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                         story.append(img)
                         story.append(Spacer(1, 0.2*inch))
                         # Remove the S3 key from the line and continue processing the rest
-                        line = re.sub(r'users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>]+\.png', '[Chart embedded above]', line)
+                        line = re.sub(r'users/[^/]+/sessions/[^/]+/agent-files/[^"\'<>\)\n]+\.png', '[Chart embedded above]', line)
                 
                 # Check for JSON chart references (format: {"s3_key": "users/.../agent-files/...png"})
                 # Also handle full chart result JSON: {"message": "...", "s3_key": "...", "filename": "...", "file_type": "png"}
