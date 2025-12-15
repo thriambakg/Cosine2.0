@@ -141,11 +141,35 @@ class Orchestrator:
         # When these tools receive an S3 key for these parameters, we read the data from S3
         DATA_PARAMETERS = {
             'generate_chart_tool': ['data_json'],
+            'generate_chart_image': ['data_json'],  # New deterministic chart tool
+            'calculate_summary_metrics': ['data_json'],  # New deterministic metrics tool
             'generate_excel_file_tool': ['content'],
         }
         
         def resolve_value(value, param_name: str = None):
             if isinstance(value, str):
+                # First, check if this is already an S3 key that needs data retrieval
+                # (e.g., if placeholder was resolved to S3 key in previous iteration)
+                if param_name and tool_name and tool_name in DATA_PARAMETERS:
+                    if param_name in DATA_PARAMETERS[tool_name]:
+                        # Check if value looks like an S3 key (starts with "users/" or contains "data-files")
+                        if value.startswith('users/') or '/data-files/' in value or '/agent-files/' in value:
+                            try:
+                                logger.info(f"Detected S3 key for {param_name}, reading data from S3: {value[:100]}...")
+                                # Create a temporary file_reference to use retrieve_result
+                                file_ref = {'s3_key': value}
+                                retrieved_data = self.data_storage.retrieve_result(file_ref)
+                                # Convert to JSON string if it's a dict/list
+                                if isinstance(retrieved_data, (dict, list)):
+                                    resolved_value = json.dumps(retrieved_data)
+                                else:
+                                    resolved_value = str(retrieved_data)
+                                logger.info(f"Successfully read {len(resolved_value)} chars from S3")
+                                return resolved_value
+                            except Exception as e:
+                                logger.warning(f"Error reading S3 key as data: {str(e)}, treating as normal string")
+                                # Continue with normal placeholder resolution
+                
                 # Find placeholders like {{step_N.result}}, {{step_N.s3_key}}, {{step_N.result.field}}
                 # Pattern 1: {{step_N.result}}
                 # Pattern 2: {{step_N.s3_key}}
@@ -264,6 +288,23 @@ class Orchestrator:
                                 resolved_string = resolved_string.replace(placeholder, str(resolved_value))
                             else:
                                 logger.warning(f"Could not resolve placeholder for step {step_num}, type: {placeholder_type}")
+                
+                # After placeholder resolution, check if the resolved string is an S3 key that needs data
+                if param_name and tool_name and tool_name in DATA_PARAMETERS:
+                    if param_name in DATA_PARAMETERS[tool_name]:
+                        # Check if resolved string looks like an S3 key
+                        if resolved_string.startswith('users/') or '/data-files/' in resolved_string or '/agent-files/' in resolved_string:
+                            try:
+                                logger.info(f"Resolved value is S3 key for {param_name}, reading data: {resolved_string[:100]}...")
+                                file_ref = {'s3_key': resolved_string}
+                                retrieved_data = self.data_storage.retrieve_result(file_ref)
+                                # Convert to JSON string if it's a dict/list
+                                if isinstance(retrieved_data, (dict, list)):
+                                    return json.dumps(retrieved_data)
+                                else:
+                                    return str(retrieved_data)
+                            except Exception as e:
+                                logger.warning(f"Error reading S3 key after resolution: {str(e)}, using as-is")
                 
                 return resolved_string
             elif isinstance(value, dict):
