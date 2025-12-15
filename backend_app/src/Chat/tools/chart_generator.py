@@ -257,6 +257,58 @@ class UnifiedChartGenerator:
             logger.info(f"🔍 DEBUG: After JSON parsing, data type: {type(data_dict)}")
             logger.info(f"🔍 DEBUG: After JSON parsing, keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
             
+            # Check if data contains an S3 key (from get_multiple_financial_data when data is large)
+            # get_multiple_financial_data returns: {"status": "success", "s3_key": "...", "stocks_summary": [...]}
+            if isinstance(data_dict, dict) and 's3_key' in data_dict:
+                # Check if this is a consolidated result from get_multiple_financial_data
+                if 'stocks_summary' in data_dict or 'total_symbols' in data_dict:
+                    # This is the consolidated result - read the full data from S3
+                    s3_key = data_dict['s3_key']
+                    logger.info(f"📦 Consolidated data stored in S3, reading from: {s3_key}")
+                    try:
+                        bucket_name = self._get_bucket_name()
+                        s3_response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+                        s3_content = s3_response['Body'].read().decode('utf-8')
+                        data_dict = json.loads(s3_content)
+                        logger.info(f"✅ Successfully read {len(s3_content)} chars from S3")
+                    except Exception as s3_error:
+                        logger.error(f"❌ Failed to read from S3: {str(s3_error)}")
+                        return f"Error: Failed to read data from S3: {str(s3_error)}"
+                elif 'stocks' not in data_dict:
+                    # This is a single stock result with S3 key - read from S3
+                    s3_key = data_dict['s3_key']
+                    logger.info(f"📦 Single stock data stored in S3, reading from: {s3_key}")
+                    try:
+                        bucket_name = self._get_bucket_name()
+                        s3_response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+                        s3_content = s3_response['Body'].read().decode('utf-8')
+                        data_dict = json.loads(s3_content)
+                        logger.info(f"✅ Successfully read {len(s3_content)} chars from S3")
+                    except Exception as s3_error:
+                        logger.error(f"❌ Failed to read from S3: {str(s3_error)}")
+                        return f"Error: Failed to read data from S3: {str(s3_error)}"
+            
+            # Check if stocks array contains individual S3 keys
+            if isinstance(data_dict, dict) and 'stocks' in data_dict:
+                # Check if any stock in the stocks array has an s3_key
+                stocks = data_dict.get('stocks', [])
+                for i, stock in enumerate(stocks):
+                    if isinstance(stock, dict) and 's3_key' in stock and 'historical_data' not in stock:
+                        # This stock's data is in S3 - read it
+                        s3_key = stock['s3_key']
+                        logger.info(f"📦 Stock {stock.get('symbol', 'UNKNOWN')} data stored in S3, reading from: {s3_key}")
+                        try:
+                            bucket_name = self._get_bucket_name()
+                            s3_response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+                            s3_content = s3_response['Body'].read().decode('utf-8')
+                            stock_data = json.loads(s3_content)
+                            # Replace the stock entry with the actual data
+                            stocks[i] = stock_data
+                            logger.info(f"✅ Successfully read stock data from S3")
+                        except Exception as s3_error:
+                            logger.error(f"❌ Failed to read stock data from S3: {str(s3_error)}")
+                            # Continue with other stocks
+            
             # Decompress data if it's compressed
             import sys
             import os
