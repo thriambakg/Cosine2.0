@@ -469,6 +469,27 @@ class Orchestrator:
                                         replacement = step_result['actual_data_s3_key']
                                     elif 'file_reference' in step_result:
                                         replacement = step_result['file_reference'].get('s3_key', '')
+                                    elif 'result' in step_result:
+                                        # Try to extract s3_key from result (which might be a JSON string)
+                                        result_data = step_result['result']
+                                        if isinstance(result_data, str):
+                                            try:
+                                                parsed = json.loads(result_data)
+                                                if isinstance(parsed, dict) and 's3_key' in parsed:
+                                                    replacement = parsed['s3_key']
+                                                else:
+                                                    replacement = ''
+                                            except json.JSONDecodeError:
+                                                # Not JSON, try regex to find s3_key pattern
+                                                s3_key_match = re.search(r'"s3_key":\s*"([^"]+)"', result_data)
+                                                if s3_key_match:
+                                                    replacement = s3_key_match.group(1)
+                                                else:
+                                                    replacement = ''
+                                        elif isinstance(result_data, dict) and 's3_key' in result_data:
+                                            replacement = result_data['s3_key']
+                                        else:
+                                            replacement = ''
                                     else:
                                         replacement = ''
                                 elif field == 'file_reference' and 'file_reference' in step_result:

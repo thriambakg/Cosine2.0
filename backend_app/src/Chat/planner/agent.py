@@ -1901,6 +1901,48 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
         if not filename.endswith(f'.{file_type}'):
             filename = f"{filename}.{file_type}"
         
+        # Format metrics_table if it's a raw JSON array (for PDF reports)
+        if file_type == 'pdf' and content:
+            try:
+                import json
+                import re
+                # Check if content contains a raw JSON array (metrics_table)
+                # Pattern: [["Metric", "Portfolio", "Benchmark"], ["CAGR", "29.71%", "13.09%"], ...]
+                # More flexible pattern that handles nested arrays
+                json_array_patterns = [
+                    r'\[\["[^"]+",\s*"[^"]+",\s*"[^"]+"\](?:,\s*\["[^"]+",\s*"[^"]+",\s*"[^"]+"\])*\]',  # Full array
+                    r'\[\[[^\]]+\](?:,\s*\[[^\]]+\])+\]',  # More general nested array
+                ]
+                
+                for pattern in json_array_patterns:
+                    json_array_match = re.search(pattern, content)
+                    if json_array_match:
+                        try:
+                            metrics_array = json.loads(json_array_match.group(0))
+                            if isinstance(metrics_array, list) and len(metrics_array) > 0 and isinstance(metrics_array[0], list):
+                                # Format as markdown table
+                                table_lines = []
+                                for row in metrics_array:
+                                    if isinstance(row, list):
+                                        # Escape pipe characters in cells
+                                        escaped_cells = [str(cell).replace('|', '\\|') for cell in row]
+                                        table_lines.append('| ' + ' | '.join(escaped_cells) + ' |')
+                                
+                                # Replace the JSON array with formatted table
+                                if len(table_lines) > 0:
+                                    # Add header separator after first row
+                                    header_sep = '| ' + ' | '.join(['---'] * len(metrics_array[0])) + ' |'
+                                    formatted_table = table_lines[0] + '\n' + header_sep + '\n' + '\n'.join(table_lines[1:])
+                                    
+                                    content = content.replace(json_array_match.group(0), formatted_table)
+                                    logger.info(f"Formatted metrics_table as markdown table in PDF content ({len(metrics_array)} rows)")
+                                    break  # Only replace first match
+                        except (json.JSONDecodeError, ValueError) as e:
+                            logger.debug(f"Could not parse JSON array: {str(e)}")
+                            continue
+            except Exception as e:
+                logger.warning(f"Error formatting metrics_table: {str(e)}")
+        
         # Decompress content if it's compressed (e.g., from web scraper tool)
         # This handles compressed data from tools like fetch_web_content_tool
         original_size = len(content) if isinstance(content, str) else len(str(content))
@@ -2297,11 +2339,15 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                     story.append(Paragraph(line[4:], heading_style))
                     story.append(Spacer(1, 0.1*inch))
                 elif line.startswith('|') and '|' in line[1:]:
-                    # Table row - format as simple text for now
-                    # Remove markdown table formatting
+                    # Markdown table row - format properly
                     cells = [cell.strip() for cell in line.split('|')[1:-1]]
-                    table_text = ' | '.join(cells)
-                    current_section.append(Paragraph(table_text, normal_style))
+                    if cells and cells[0] and not cells[0].startswith('---'):
+                        # Regular table row
+                        table_text = ' | '.join(cells)
+                        current_section.append(Paragraph(table_text, normal_style))
+                    elif cells and cells[0] and cells[0].startswith('---'):
+                        # Table separator row - skip it
+                        continue
                 elif line.startswith('- ') or line.startswith('* '):
                     # Bullet point
                     bullet_text = line[2:].strip()

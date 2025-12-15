@@ -226,11 +226,19 @@ CHECKPOINT DATA:
 {json.dumps(checkpoint_data, indent=2)}
 
 AVAILABLE TOOLS FOR VALIDATION:
-- read_s3_file_tool(s3_key) - Read files from S3
-- read_image_tool(s3_key) - Read and validate images
-- read_pdf_tool(s3_key) - Read and analyze PDFs
+- read_s3_file_tool(s3_key, file_type) - Read and analyze ALL file types from S3 (PDF, images, JSON, CSV, HTML, text, binary). Auto-detects file type. Use this to inspect intermediate results.
 
-You can use these tools to inspect the intermediate results before deciding.
+You MUST use read_s3_file_tool to actually inspect the generated files (PDFs, images, etc.) before deciding. Do not make decisions without reading the actual file content.
+
+For PDF files: Use read_s3_file_tool to verify the PDF contains:
+- Properly formatted content (not raw JSON)
+- Embedded chart images (not empty image placeholders)
+- Professional formatting
+
+For chart images: Use read_s3_file_tool to verify:
+- Image was generated successfully
+- Image has valid dimensions
+- Image is readable
 
 DECISION FORMAT (return JSON only):
 {{
@@ -241,9 +249,11 @@ DECISION FORMAT (return JSON only):
 }}
 
 ACTIONS:
-- "continue": Results look good, proceed with remaining steps
-- "rework": Need to modify the plan based on results (provide updated_plan with remaining steps)
+- "continue": Results look good (files are properly formatted, charts embedded, content is professional), proceed with remaining steps
+- "rework": Files are missing content, charts not embedded, or formatting issues detected. Provide updated_plan with remaining steps to fix.
 - "update_user": Provide progress update to user (provide message)
+
+IMPORTANT: You MUST actually read the files using read_s3_file_tool before making a decision. Do not assume files are correct without inspection.
 
 Return ONLY JSON, no other text."""
             
