@@ -1,14 +1,13 @@
 """
-Orchestrator - Deterministic execution system
-Executes plans created by the planner
+Orchestrator - Executes deterministic plans step-by-step
 """
 
 import logging
-import re
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
+
 
 class Orchestrator:
     """
@@ -16,41 +15,33 @@ class Orchestrator:
     No LLM calls - purely deterministic execution.
     """
     
-    def __init__(self, tool_executor, data_storage, status_reporter, planner=None, checkpoint_manager=None):
+    def __init__(self, tool_executor, data_storage):
         """
         Initialize the orchestrator.
         
         Args:
-            tool_executor: ToolExecutor instance for executing tools
-            data_storage: DataStorage instance for storing large data
-            status_reporter: StatusReporter instance for WebSocket status updates
-            planner: Optional Planner instance for checkpoint validation
-            checkpoint_manager: Optional CheckpointManager instance
+            tool_executor: ToolExecutor instance
+            data_storage: DataStorage instance for S3 operations
         """
         self.tool_executor = tool_executor
         self.data_storage = data_storage
-        self.status_reporter = status_reporter
-        self.planner = planner
-        self.checkpoint_manager = checkpoint_manager
         logger.info("Orchestrator initialized")
     
-    def execute_plan(self, plan: Dict[str, Any], session_id: str, user_id: str, message_id: str) -> Dict[str, Any]:
+    def execute_plan(self, plan: Dict[str, Any], session_id: str, user_id: str) -> Dict[str, Any]:
         """
         Execute an execution plan step-by-step.
         
         Args:
-            plan: The execution plan to execute
-            session_id: Session ID for status reporting
-            user_id: User ID for status reporting
-            message_id: Message ID for status reporting
+            plan: The execution plan
+            session_id: Session ID
+            user_id: User ID
             
         Returns:
-            Execution results with file references for large data
+            Execution results
         """
         logger.info(f"Executing plan with {len(plan.get('steps', []))} steps")
         
         results = {
-            'plan_id': plan.get('plan_id', 'unknown'),
             'steps_completed': 0,
             'steps_failed': 0,
             'results': [],
@@ -67,153 +58,30 @@ class Orchestrator:
             logger.info(f"Executing step {step_num}/{len(steps)}: {tool_name}")
             
             try:
-                # Resolve placeholders in parameters using previous step results
-                logger.debug(f"Resolving placeholders for step {step_num}, parameters before resolution: {parameters}")
+                # Resolve placeholders in parameters
                 parameters = self._resolve_placeholders(parameters, results, step_num)
-                logger.info(f"Parameters after resolution for step {step_num}: {list(parameters.keys())}")
-                # Log parameter values (truncated for large values)
-                for key, value in parameters.items():
-                    if isinstance(value, str):
-                        if len(value) > 100:
-                            logger.info(f"  {key}: (string, length={len(value)}, preview={value[:100]}...)")
-                        elif value == '':
-                            logger.error(f"  {key}: EMPTY STRING!")
-                        else:
-                            logger.info(f"  {key}: {value} (length={len(value)})")
-                    elif value is None:
-                        logger.error(f"  {key}: None!")
-                    else:
-                        logger.info(f"  {key}: {value}")
-                
-                # Check if any placeholders failed to resolve (empty string values that should have been replaced)
-                unresolved_placeholders = []
-                missing_required_params = []
-                
-                # Get tool function signature to check required parameters
-                try:
-                    import inspect
-                    tool_func = self.tool_executor._get_tool_function(tool_name)
-                    sig = inspect.signature(tool_func)
-                    
-                    for key, value in parameters.items():
-                        param = sig.parameters.get(key)
-                        is_required = param and param.default == inspect.Parameter.empty
-                        
-                        if isinstance(value, str):
-                            # Check for unresolved placeholder patterns
-                            if re.search(r'\{\{?step[_\s]*\d+[._].*\}\}?', value):
-                                unresolved_placeholders.append(f"{key}={value}")
-                                if is_required:
-                                    missing_required_params.append(key)
-                                    logger.error(f"Required parameter '{key}' has unresolved placeholder: {value}")
-                            # Also check if required parameter is empty string (placeholder resolved to empty)
-                            elif is_required and (not value or value.strip() == ''):
-                                missing_required_params.append(key)
-                                logger.error(f"Required parameter '{key}' resolved to empty string (length: {len(value) if value else 0})")
-                        elif value is None or value == '':
-                            # Check if this is a required parameter
-                            if is_required:
-                                missing_required_params.append(key)
-                                logger.error(f"Required parameter '{key}' is None or empty")
-                        elif is_required:
-                            # Parameter exists but check if it's a falsy value that shouldn't be
-                            logger.debug(f"Required parameter '{key}' has value: {type(value)}")
-                    
-                    # Check for missing required parameters that weren't provided at all
-                    for param_name, param in sig.parameters.items():
-                        if param.default == inspect.Parameter.empty and param_name not in parameters:
-                            # Skip session_id and user_id as they're added automatically
-                            if param_name not in ['session_id', 'user_id']:
-                                missing_required_params.append(param_name)
-                except Exception as e:
-                    logger.warning(f"Could not check tool signature for {tool_name}: {e}")
-                
-                if unresolved_placeholders:
-                    logger.warning(f"Unresolved placeholders in step {step_num}: {unresolved_placeholders}")
-                
-                if missing_required_params:
-                    error_msg = f"Step {step_num} failed: Missing required parameters: {', '.join(missing_required_params)}"
-                    if unresolved_placeholders:
-                        error_msg += f" (unresolved placeholders: {', '.join(unresolved_placeholders)})"
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
-                
-                # Report tool starting
-                self.status_reporter.report_tool_starting(
-                    tool_name, parameters, session_id, user_id, message_id, step_num, len(steps)
-                )
                 
                 # Execute tool
                 tool_result = self.tool_executor.execute_tool(tool_name, parameters, session_id, user_id)
                 
-                # Check if tool_result is a JSON string that contains a file_reference (from get_multiple_financial_data)
-                # If so, extract the actual data file's S3 key for easier placeholder resolution
-                actual_data_s3_key = None
-                if isinstance(tool_result, str):
-                    try:
-                        parsed_result = json.loads(tool_result)
-                        if isinstance(parsed_result, dict) and 'file_reference' in parsed_result:
-                            file_ref = parsed_result.get('file_reference', {})
-                            if isinstance(file_ref, dict) and 's3_key' in file_ref:
-                                # This is the actual data file's S3 key
-                                actual_data_s3_key = file_ref.get('s3_key')
-                    except:
-                        pass
-                
-                # Check if result needs storage (either explicitly requested or if result is large)
+                # Check if result needs storage
                 should_store = step.get('store_result', False) or self._is_large_result(tool_result)
                 
                 if should_store:
-                    try:
-                        # Store in S3 and return file reference
-                        file_reference = self.data_storage.store_result(
-                            tool_result, tool_name, session_id, user_id
-                        )
-                        results['file_references'].append(file_reference)
-                        
-                        # Report completion with file reference
-                        self.status_reporter.report_tool_completed(
-                            tool_name, f"Data stored in {file_reference['filename']}", 
-                            session_id, user_id, message_id, step_num, len(steps)
-                        )
-                        
-                        # Store both the orchestrator's file_reference and the actual data file's S3 key
-                        result_entry = {
-                            'step': step_num,
-                            'tool': tool_name,
-                            'status': 'completed',
-                            'file_reference': file_reference
-                        }
-                        # If we found an actual data file S3 key, store it for easier placeholder resolution
-                        if actual_data_s3_key:
-                            result_entry['actual_data_s3_key'] = actual_data_s3_key
-                        
-                        results['results'].append(result_entry)
-                    except ValueError as e:
-                        # S3 bucket not configured - continue without storing
-                        logger.warning(f"S3 storage not available for step {step_num}, continuing without storage: {str(e)}")
-                        
-                        # Report completion without file reference
-                        self.status_reporter.report_tool_completed(
-                            tool_name, "Completed successfully (data not stored - S3 not configured)", 
-                            session_id, user_id, message_id, step_num, len(steps)
-                        )
-                        
-                        # Store result directly (even though it's large, we have no choice)
-                        results['results'].append({
-                            'step': step_num,
-                            'tool': tool_name,
-                            'status': 'completed',
-                            'result': tool_result,
-                            'storage_warning': 'S3 bucket not configured, result not stored'
-                        })
-                else:
-                    # Return result directly (small data)
-                    self.status_reporter.report_tool_completed(
-                        tool_name, "Completed successfully", 
-                        session_id, user_id, message_id, step_num, len(steps)
+                    # Store in S3
+                    file_reference = self.data_storage.store_result(
+                        tool_result, tool_name, session_id, user_id
                     )
+                    results['file_references'].append(file_reference)
                     
+                    results['results'].append({
+                        'step': step_num,
+                        'tool': tool_name,
+                        'status': 'completed',
+                        'file_reference': file_reference
+                    })
+                else:
+                    # Return result directly
                     results['results'].append({
                         'step': step_num,
                         'tool': tool_name,
@@ -221,742 +89,71 @@ class Orchestrator:
                         'result': tool_result
                     })
                 
-                # Check if we should checkpoint after this step
-                if self.checkpoint_manager and self.planner:
-                    if self.checkpoint_manager.should_checkpoint(tool_name, step_num, len(steps)):
-                        logger.info(f"🛑 Checkpoint triggered after step {step_num}: {tool_name}")
-                        
-                        # Create checkpoint data
-                        checkpoint_data = self.checkpoint_manager.create_checkpoint_data(
-                            step_num, tool_name, tool_result, results, plan
-                        )
-                        
-                        # Get session context for planner (simplified - would need full context in real implementation)
-                        session_context = {
-                            'session_id': session_id,
-                            'user_id': user_id
-                        }
-                        
-                        # Validate checkpoint with planner
-                        validation_decision = self.planner.validate_checkpoint(
-                            checkpoint_data, session_context
-                        )
-                        
-                        action = validation_decision.get('action', 'continue')
-                        
-                        if action == 'rework':
-                            # Planner wants to rework the plan
-                            updated_plan = validation_decision.get('updated_plan', {})
-                            if 'steps' in updated_plan:
-                                logger.info(f"📝 Planner reworking plan: {len(updated_plan['steps'])} steps remaining")
-                                # Update plan with remaining steps
-                                plan['steps'] = updated_plan['steps']
-                                steps = plan['steps']
-                                # Continue with updated plan
-                            else:
-                                logger.warning("Planner requested rework but no updated_plan provided, continuing")
-                        elif action == 'update_user':
-                            # Planner wants to provide update to user
-                            message = validation_decision.get('message', '')
-                            if message:
-                                logger.info(f"💬 Planner update: {message}")
-                                # Could send update via status_reporter here
-                                self.status_reporter.report_tool_completed(
-                                    tool_name, f"Checkpoint: {message}",
-                                    session_id, user_id, message_id, step_num, len(steps)
-                                )
-                        # If action is 'continue', just proceed
-                        logger.info(f"✅ Checkpoint validation complete: {action}")
-                
                 results['steps_completed'] += 1
                 
             except Exception as e:
                 logger.error(f"Step {step_num} failed: {str(e)}")
-                
-                # Report failure
-                self.status_reporter.report_tool_failed(
-                    tool_name, str(e), session_id, user_id, message_id, step_num, len(steps)
-                )
-                
                 results['results'].append({
                     'step': step_num,
                     'tool': tool_name,
                     'status': 'failed',
                     'error': str(e)
                 })
-                
                 results['steps_failed'] += 1
                 
-                # Decide whether to continue or stop on error
+                # Stop on critical failures
                 if step.get('critical', False):
-                    logger.error(f"Critical step {step_num} failed, stopping execution")
                     break
         
-        logger.info(f"Plan execution completed: {results['steps_completed']} succeeded, {results['steps_failed']} failed")
-        
-        # Set final status
-        if results['steps_failed'] == 0:
-            results['status'] = 'completed'
-        elif results['steps_completed'] > 0:
-            results['status'] = 'partial'
-        else:
-            results['status'] = 'failed'
-        
-        # Create structured summary for Reasoning LLM
-        summary = self._create_execution_summary(plan, results)
-        results['summary'] = summary
+        # Create summary
+        results['summary'] = self._create_summary(plan, results)
         
         return results
     
-    def _is_large_result(self, result: Any) -> bool:
-        """
-        Check if a result is large enough to require S3 storage.
-        
-        Args:
-            result: Tool result to check
-            
-        Returns:
-            True if result should be stored in S3
-        """
-        # Threshold: 10KB (10,000 characters)
-        LARGE_RESULT_THRESHOLD = 10000
-        
-        if isinstance(result, str):
-            return len(result) > LARGE_RESULT_THRESHOLD
-        elif isinstance(result, dict):
-            import json
-            result_str = json.dumps(result)
-            return len(result_str) > LARGE_RESULT_THRESHOLD
-        elif isinstance(result, (list, tuple)):
-            import json
-            result_str = json.dumps(result)
-            return len(result_str) > LARGE_RESULT_THRESHOLD
-        
-        return False
-    
     def _resolve_placeholders(self, parameters: Dict[str, Any], results: Dict[str, Any], current_step: int) -> Dict[str, Any]:
-        """
-        Resolve placeholders in parameters using results from previous steps.
-        
-        SIMPLIFIED: Only handles S3 file movement, no JSON parsing.
-        Tools are responsible for their own JSON parsing.
-        
-        Supports placeholders like:
-        - {{step_1.result}} - raw result from step 1 (S3 key string or raw data)
-        - {{step_2.s3_key}} - S3 key from step 2 result
-        
-        NOTE: Nested field extraction (e.g., {{step_2.result.metrics_table}}) is NOT supported.
-        Tools should receive the full result and parse it themselves using json_parser_helper.
-        
-        Args:
-            parameters: Parameters dictionary that may contain placeholders
-            results: Execution results from previous steps
-            current_step: Current step number (1-indexed)
-            
-        Returns:
-            Parameters with placeholders resolved (S3 keys or raw results only)
-        """
-        import json
+        """Resolve placeholders like {{step_1.result}} in parameters"""
         import re
         
         def resolve_value(value):
-            """Recursively resolve placeholders in a value"""
             if isinstance(value, str):
-                # Find all placeholders like {{step_N.field}} or {step_N.field} or {{field_from_step_N}}
-                # Support both {{...}} and {...} formats
-                placeholder_pattern = r'\{\{?([^}]+)\}\}?'
+                # Find placeholders like {{step_N.result}}
+                placeholder_pattern = r'\{\{step_(\d+)\.result\}\}'
                 matches = re.findall(placeholder_pattern, value)
                 
-                if not matches:
-                    return value
+                for step_num_str in matches:
+                    step_num = int(step_num_str)
+                    if step_num < current_step:
+                        # Get result from previous step
+                        for result in results.get('results', []):
+                            if result.get('step') == step_num:
+                                if 'file_reference' in result:
+                                    # Return S3 key for file references
+                                    return result['file_reference'].get('s3_key', '')
+                                elif 'result' in result:
+                                    return result['result']
+                                break
                 
-                resolved_value = value
-                for placeholder in matches:
-                    placeholder = placeholder.strip()
-                    
-                    # Try to extract step number and field
-                    # Pattern 1: {{step_N.field}} or {{step_N.result}} or {{step_N.result.field}}
-                    step_match = re.match(r'step[_\s]*(\d+)[._]?(.*)', placeholder, re.IGNORECASE)
-                    if step_match:
-                        step_num = int(step_match.group(1))
-                        field = step_match.group(2).strip() if step_match.group(2) else 'result'
-                        logger.debug(f"Parsed placeholder: step_num={step_num}, field='{field}'")
-                        # Handle "result.field" pattern - extract just the field part
-                        if field.startswith('result.'):
-                            field = field.replace('result.', '', 1)
-                            logger.debug(f"Stripped 'result.' prefix, new field='{field}'")
-                        replacement = ''  # Initialize replacement at the start
-                        
-                        if step_num < current_step:
-                            # Get result from previous step
-                            step_result = None
-                            for result in results.get('results', []):
-                                if result.get('step') == step_num:
-                                    step_result = result
-                                    break
-                            
-                            if step_result:
-                                # Extract field from result
-                                # Check if we need to read from S3 (when result is stored)
-                                needs_s3_read = False
-                                s3_key_to_read = None
-                                
-                                if 'file_reference' in step_result:
-                                    s3_key_to_read = step_result['file_reference'].get('s3_key', '')
-                                    needs_s3_read = True
-                                elif 'actual_data_s3_key' in step_result:
-                                    s3_key_to_read = step_result['actual_data_s3_key']
-                                    needs_s3_read = True
-                                
-                                # For nested fields (like time_series, metrics_table, result.s3_key), we need to read from S3 and extract
-                                # This is necessary because tools expect the actual data, not just the S3 key
-                                # Handle "result.field" pattern - strip "result." prefix if present
-                                actual_field = field
-                                if field.startswith('result.'):
-                                    actual_field = field.replace('result.', '', 1)
-                                
-                                # Special handling for s3_key extraction from chart results
-                                if actual_field == 's3_key' and not needs_s3_read:
-                                    # Try to extract s3_key from result (chart generation returns JSON with s3_key)
-                                    if 'result' in step_result:
-                                        result_data = step_result['result']
-                                        if isinstance(result_data, str):
-                                            try:
-                                                parsed = json.loads(result_data)
-                                                if isinstance(parsed, dict) and 's3_key' in parsed:
-                                                    replacement = parsed['s3_key']
-                                                    logger.info(f"Extracted s3_key from chart result: {replacement}")
-                                                    placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                                                    placeholder_single_brace = f'{{{placeholder}}}'
-                                                    if placeholder_with_braces in resolved_value:
-                                                        resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                                                    if placeholder_single_brace in resolved_value:
-                                                        resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                                                    continue
-                                            except json.JSONDecodeError:
-                                                pass
-                                        elif isinstance(result_data, dict) and 's3_key' in result_data:
-                                            replacement = result_data['s3_key']
-                                            logger.info(f"Extracted s3_key from chart result dict: {replacement}")
-                                            placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                                            placeholder_single_brace = f'{{{placeholder}}}'
-                                            if placeholder_with_braces in resolved_value:
-                                                resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                                            if placeholder_single_brace in resolved_value:
-                                                resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                                            continue
-                                
-                                if field and field != 'result' and field != 's3_key' and actual_field != 's3_key':
-                                    # Need to extract a specific field from the result
-                                    if needs_s3_read and s3_key_to_read:
-                                        # Read the full data from S3
-                                        logger.info(f"Reading from S3 for step {step_num}, field '{actual_field}', s3_key: {s3_key_to_read}")
-                                        try:
-                                            full_data = self.data_storage.retrieve_result({'s3_key': s3_key_to_read})
-                                            logger.info(f"Retrieved data from S3, type: {type(full_data)}, keys: {list(full_data.keys()) if isinstance(full_data, dict) else 'N/A'}")
-                                            
-                                            # Extract the nested field using actual_field (without "result." prefix)
-                                            if isinstance(full_data, dict):
-                                                if actual_field in full_data:
-                                                    extracted_value = full_data[actual_field]
-                                                    logger.info(f"Extracted direct field '{actual_field}' from result")
-                                                elif '.' in actual_field:
-                                                    # Handle nested field path like 'portfolio.cagr'
-                                                    parts = actual_field.split('.')
-                                                    current = full_data
-                                                    for part in parts:
-                                                        if isinstance(current, dict):
-                                                            current = current.get(part)
-                                                            if current is None:
-                                                                break
-                                                        else:
-                                                            current = None
-                                                            break
-                                                    extracted_value = current
-                                                    logger.info(f"Extracted nested field '{actual_field}' from result")
-                                                else:
-                                                    extracted_value = None
-                                                
-                                                if extracted_value is not None:
-                                                    # Convert to JSON string for the tool
-                                                    replacement = json.dumps(extracted_value)
-                                                    logger.info(f"Extracted replacement, type: {type(extracted_value)}, empty: {not extracted_value}")
-                                                    logger.info(f"Converted replacement to JSON string, length: {len(replacement)}")
-                                                else:
-                                                    logger.warning(f"Field '{field}' not found in retrieved data")
-                                                    replacement = ''
-                                            else:
-                                                logger.warning(f"Retrieved data is not a dict, cannot extract field '{field}'")
-                                                replacement = ''
-                                        except Exception as e:
-                                            logger.error(f"Error reading from S3 to extract field '{field}': {str(e)}")
-                                            replacement = ''
-                                    else:
-                                        # Data is not in S3, try to extract from step_result directly
-                                        if 'result' in step_result:
-                                            result_data = step_result['result']
-                                            if isinstance(result_data, dict):
-                                                # Handle nested field paths like 'result.s3_key' - use actual_field (already stripped)
-                                                if '.' in actual_field:
-                                                    parts = actual_field.split('.')
-                                                    current = result_data
-                                                    for part in parts:
-                                                        if isinstance(current, dict):
-                                                            current = current.get(part)
-                                                            if current is None:
-                                                                break
-                                                        else:
-                                                            current = None
-                                                            break
-                                                    replacement = str(current) if current is not None else ''
-                                                else:
-                                                    replacement = json.dumps(result_data.get(actual_field, '')) if isinstance(result_data.get(actual_field), (dict, list)) else str(result_data.get(actual_field, ''))
-                                            elif isinstance(result_data, str):
-                                                try:
-                                                    parsed = json.loads(result_data)
-                                                    if isinstance(parsed, dict):
-                                                        # Handle nested field paths - use actual_field (already stripped)
-                                                        if '.' in actual_field:
-                                                            parts = actual_field.split('.')
-                                                            current = parsed
-                                                            for part in parts:
-                                                                if isinstance(current, dict):
-                                                                    current = current.get(part)
-                                                                    if current is None:
-                                                                        break
-                                                                else:
-                                                                    current = None
-                                                                    break
-                                                            replacement = str(current) if current is not None else ''
-                                                        else:
-                                                            replacement = json.dumps(parsed.get(actual_field, '')) if isinstance(parsed.get(actual_field), (dict, list)) else str(parsed.get(actual_field, ''))
-                                                    else:
-                                                        replacement = ''
-                                                except json.JSONDecodeError:
-                                                    replacement = ''
-                                            else:
-                                                replacement = ''
-                                        else:
-                                            replacement = ''
-                                    
-                                    # Replace placeholder with extracted value
-                                    if replacement:
-                                        placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                                        placeholder_single_brace = f'{{{placeholder}}}'
-                                        if placeholder_with_braces in resolved_value:
-                                            resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                                            logger.info(f"Replaced placeholder {placeholder_with_braces} with data (length: {len(str(replacement))})")
-                                        if placeholder_single_brace in resolved_value:
-                                            resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                                            logger.info(f"Replaced placeholder {placeholder_single_brace} with data (length: {len(str(replacement))})")
-                                        continue
-                                    else:
-                                        logger.warning(f"Could not resolve placeholder {{step_{step_num}.{field}}}")
-                                        replacement = ''
-                                        continue
-                                
-                                # Handle simple field requests
-                                if field == 'result':
-                                    # If data was stored in S3, return file_reference or s3_key
-                                    # Check for actual_data_s3_key first (from tools that store data themselves)
-                                    if 'actual_data_s3_key' in step_result:
-                                        replacement = step_result['actual_data_s3_key']
-                                    elif 'file_reference' in step_result:
-                                        # Return the s3_key so tools can read from S3
-                                        replacement = step_result['file_reference'].get('s3_key', '')
-                                    elif 'result' in step_result:
-                                        replacement = step_result['result']
-                                    else:
-                                        replacement = ''
-                                elif field == 's3_key':
-                                    # Check for actual_data_s3_key first (from tools that store data themselves)
-                                    if 'actual_data_s3_key' in step_result:
-                                        replacement = step_result['actual_data_s3_key']
-                                    elif 'file_reference' in step_result:
-                                        replacement = step_result['file_reference'].get('s3_key', '')
-                                    elif 'result' in step_result:
-                                        # Try to extract s3_key from result (which might be a JSON string)
-                                        result_data = step_result['result']
-                                        if isinstance(result_data, str):
-                                            try:
-                                                parsed = json.loads(result_data)
-                                                if isinstance(parsed, dict) and 's3_key' in parsed:
-                                                    replacement = parsed['s3_key']
-                                                else:
-                                                    replacement = ''
-                                            except json.JSONDecodeError:
-                                                # Not JSON, try regex to find s3_key pattern
-                                                s3_key_match = re.search(r'"s3_key":\s*"([^"]+)"', result_data)
-                                                if s3_key_match:
-                                                    replacement = s3_key_match.group(1)
-                                                else:
-                                                    replacement = ''
-                                        elif isinstance(result_data, dict) and 's3_key' in result_data:
-                                            replacement = result_data['s3_key']
-                                        else:
-                                            replacement = ''
-                                    else:
-                                        replacement = ''
-                                elif field == 'file_reference' and 'file_reference' in step_result:
-                                    replacement = step_result['file_reference']
-                                elif field in step_result:
-                                    replacement = step_result[field]
-                                else:
-                                    # Try to extract from nested result
-                                    if 'result' in step_result:
-                                        result_data = step_result['result']
-                                        
-                                        # SIMPLIFIED: Only return raw result or S3 key
-                                        # Tools will parse JSON themselves
-                                        if isinstance(result_data, str):
-                                            # If it's a string, return it as-is (tool will parse if needed)
-                                            replacement = result_data
-                                        elif isinstance(result_data, dict):
-                                            # If it's a dict, check for file_reference or s3_key
-                                            if field == 's3_key':
-                                                # Extract s3_key from dict
-                                                if 'file_reference' in result_data:
-                                                    replacement = result_data['file_reference'].get('s3_key', '')
-                                                elif 's3_key' in result_data:
-                                                    replacement = result_data['s3_key']
-                                                else:
-                                                    replacement = ''
-                                            else:
-                                                # For other fields, return the dict as JSON string
-                                                # Tool will parse it
-                                                replacement = json.dumps(result_data)
-                                        else:
-                                            # For other types, convert to string
-                                            replacement = str(result_data) if result_data else ''
-                                    
-                                    if not replacement:
-                                        logger.warning(f"Could not resolve placeholder {{step_{step_num}.{field}}}")
-                                        replacement = ''
-                            else:
-                                # step_result is None - step hasn't completed yet or doesn't exist
-                                logger.warning(f"Step {step_num} result not found for placeholder {{step_{step_num}.{field}}}")
-                                replacement = ''
-                            
-                            # Convert replacement to string if needed
-                            if not isinstance(replacement, str):
-                                replacement = json.dumps(replacement) if replacement else ''
-                            
-                            # Replace placeholder (handle both {{...}} and {...} formats)
-                            placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                            placeholder_single_brace = f'{{{placeholder}}}'
-                            if placeholder_with_braces in resolved_value:
-                                resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                            if placeholder_single_brace in resolved_value:
-                                resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                            continue
-                    
-                    # Pattern 2: {{field_from_step_N}} - extract field from step N result
-                    field_match = re.match(r'(.+?)[_\s]+from[_\s]+step[_\s]*(\d+)', placeholder, re.IGNORECASE)
-                    if field_match:
-                        field_name = field_match.group(1).strip()
-                        step_num = int(field_match.group(2))
-                        replacement = ''  # Initialize replacement
-                        
-                        if step_num < current_step:
-                            # Get result from previous step
-                            step_result = None
-                            for result in results.get('results', []):
-                                if result.get('step') == step_num:
-                                    step_result = result
-                                    break
-                            
-                            if step_result and 'result' in step_result:
-                                result_data = step_result['result']
-                                
-                                # Try to extract field from result
-                                if isinstance(result_data, dict):
-                                    # Look for field in result dict
-                                    replacement = result_data.get(field_name, '')
-                                    
-                                    # If not found, try common variations
-                                    if not replacement:
-                                        # Try extracting portfolio tickers from context
-                                        if 'portfolio' in field_name.lower() or 'ticker' in field_name.lower():
-                                            # Look for tickers in context items or session context
-                                            if isinstance(result_data, dict):
-                                                # Check context_items array
-                                                context_items = result_data.get('context_items', [])
-                                                for item in context_items:
-                                                    if isinstance(item, dict):
-                                                        tickers = item.get('tickers', item.get('symbols', item.get('ticker', [])))
-                                                        if tickers:
-                                                            if isinstance(tickers, list):
-                                                                replacement = ','.join(str(t) for t in tickers)
-                                                            else:
-                                                                replacement = str(tickers)
-                                                            break
-                                                
-                                                # If still not found, check for portfolio data in other fields
-                                                if not replacement:
-                                                    # Check for portfolio in session_variables or other fields
-                                                    portfolio_data = result_data.get('portfolio', result_data.get('holdings', []))
-                                                    if portfolio_data and isinstance(portfolio_data, list):
-                                                        tickers = [item.get('ticker', item.get('symbol', '')) for item in portfolio_data if isinstance(item, dict)]
-                                                        tickers = [t for t in tickers if t]
-                                                        if tickers:
-                                                            replacement = ','.join(tickers)
-                                    
-                                    # Convert replacement to string if needed
-                                    if not isinstance(replacement, str):
-                                        replacement = json.dumps(replacement) if replacement else ''
-                                elif isinstance(result_data, str):
-                                    # Try to parse as JSON or extract from text
-                                    try:
-                                        parsed = json.loads(result_data)
-                                        if isinstance(parsed, dict):
-                                            # SIMPLIFIED: For nested fields, return the full parsed dict as JSON string
-                                            # Tool will parse it using json_parser_helper
-                                            replacement = json.dumps(parsed) if isinstance(parsed, dict) else str(parsed)
-                                            if not isinstance(replacement, str):
-                                                replacement = json.dumps(replacement) if replacement else ''
-                                    except:
-                                        replacement = ''
-                            
-                            # Replace placeholder (handle both {{...}} and {...} formats)
-                            placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                            placeholder_single_brace = f'{{{placeholder}}}'
-                            if placeholder_with_braces in resolved_value:
-                                resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                            if placeholder_single_brace in resolved_value:
-                                resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                            continue
-                    
-                    # If no pattern matched, log warning
-                    logger.warning(f"Could not resolve placeholder: {{{{placeholder}}}}")
-                
-                return resolved_value
+                return value
             elif isinstance(value, dict):
-                # Recursively resolve placeholders in dict values
                 return {k: resolve_value(v) for k, v in value.items()}
             elif isinstance(value, list):
-                # Recursively resolve placeholders in list items
                 return [resolve_value(item) for item in value]
             else:
                 return value
         
-        # Resolve all placeholders in parameters
-        resolved_params = resolve_value(parameters)
-        
-        # Log resolved parameters for debugging
-        logger.debug(f"Resolved parameters: {list(resolved_params.keys()) if isinstance(resolved_params, dict) else type(resolved_params)}")
-        if isinstance(resolved_params, dict):
-            for key, value in resolved_params.items():
-                if isinstance(value, str) and len(value) > 100:
-                    logger.debug(f"  {key}: (string, length={len(value)}, preview={value[:100]}...)")
-                elif value is None or value == '':
-                    logger.warning(f"  {key}: {value} (EMPTY OR NONE!)")
-                else:
-                    logger.debug(f"  {key}: {value}")
-        
-        return resolved_params
+        return resolve_value(parameters)
     
-    # REMOVED: _extract_nested_field method
-    # Tools should use json_parser_helper.JSONParserHelper.extract_nested_field() instead
-    # This keeps the orchestrator clean and focused on file movement only
+    def _is_large_result(self, result: Any) -> bool:
+        """Check if result is large enough to require S3 storage"""
+        if isinstance(result, str):
+            return len(result) > 10000  # 10KB threshold
+        return False
     
-    def _create_execution_summary(self, plan: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Create a structured summary of the execution for the Reasoning LLM.
-        
-        Args:
-            plan: The original execution plan
-            results: Execution results from execute_plan
-            
-        Returns:
-            Structured summary with task_completed, file_references, key_results, table, notes
-        """
-        import json
-        
-        # Extract task description from plan
-        task_completed = plan.get('query', 'Task execution completed')
-        
-        # Format file references
-        file_references = []
-        for file_ref in results.get('file_references', []):
-            file_references.append({
-                'filename': file_ref.get('filename', 'Unknown'),
-                's3_key': file_ref.get('s3_key', ''),
-                'type': self._infer_file_type(file_ref.get('filename', '')),
-                'description': self._generate_file_description(file_ref, results),
-                'size_bytes': file_ref.get('size_bytes', 0),
-                'stored_at': file_ref.get('stored_at', '')
-            })
-        
-        # Extract key results from execution
-        key_results = {}
-        table = []
-        notes = []
-        
-        # Process step results to extract key data
-        for step_result in results.get('results', []):
-            if step_result.get('status') == 'completed':
-                tool_name = step_result.get('tool', '')
-                
-                # Extract key metrics from results
-                if 'result' in step_result:
-                    result_data = step_result['result']
-                    key_results.update(self._extract_key_metrics(tool_name, result_data))
-                    
-                    # Create table rows for tabular data
-                    table_rows = self._extract_table_data(tool_name, result_data)
-                    if table_rows:
-                        table.extend(table_rows)
-                
-                # Add notes about what was accomplished
-                if 'file_reference' in step_result:
-                    file_ref = step_result['file_reference']
-                    notes.append(f"Generated {file_ref.get('filename', 'file')} using {tool_name}")
-                else:
-                    notes.append(f"Completed {tool_name} successfully")
-        
-        # Add execution summary notes
-        if results['status'] == 'completed':
-            notes.insert(0, f"Successfully completed {results['steps_completed']} step(s)")
-        elif results['status'] == 'partial':
-            notes.insert(0, f"Completed {results['steps_completed']} of {results['steps_completed'] + results['steps_failed']} steps")
-        else:
-            notes.insert(0, f"Execution failed: {results['steps_failed']} step(s) failed")
-        
-        # Create summary structure
-        summary = {
-            'task_completed': task_completed,
-            'file_references': file_references,
-            'key_results': key_results,
-            'table': table,
-            'notes': notes,
-            'execution_status': results['status'],
+    def _create_summary(self, plan: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
+        """Create execution summary"""
+        return {
+            'task': plan.get('query', 'Task completed'),
             'steps_completed': results['steps_completed'],
-            'steps_failed': results['steps_failed']
+            'steps_failed': results['steps_failed'],
+            'file_references': results['file_references']
         }
-        
-        return summary
-    
-    def _infer_file_type(self, filename: str) -> str:
-        """Infer file type from filename."""
-        if not filename:
-            return 'unknown'
-        
-        filename_lower = filename.lower()
-        if filename_lower.endswith('.csv') or filename_lower.endswith('.xlsx') or filename_lower.endswith('.xls'):
-            return 'csv'
-        elif filename_lower.endswith('.pdf'):
-            return 'pdf'
-        elif filename_lower.endswith('.json'):
-            return 'json'
-        elif filename_lower.endswith('.txt') or filename_lower.endswith('.md'):
-            return 'text'
-        elif filename_lower.endswith('.png') or filename_lower.endswith('.jpg') or filename_lower.endswith('.jpeg'):
-            return 'image'
-        else:
-            return 'unknown'
-    
-    def _generate_file_description(self, file_ref: Dict[str, Any], results: Dict[str, Any]) -> str:
-        """Generate a description for a file reference."""
-        tool_name = file_ref.get('tool_name', '')
-        filename = file_ref.get('filename', '')
-        
-        # Tool-specific descriptions
-        if 'portfolio' in filename.lower() or 'performance' in filename.lower():
-            return "Portfolio performance analysis and metrics"
-        elif 'chart' in filename.lower() or 'graph' in filename.lower():
-            return "Visualization chart or graph"
-        elif 'report' in filename.lower():
-            return "Analysis report"
-        elif tool_name == 'generate_excel_file_tool':
-            return "Financial data spreadsheet"
-        elif tool_name == 'generate_agent_file_tool':
-            return "Generated analysis document"
-        else:
-            return f"Output from {tool_name}"
-    
-    def _extract_key_metrics(self, tool_name: str, result_data: Any) -> Dict[str, Any]:
-        """Extract key metrics from tool results."""
-        key_metrics = {}
-        
-        try:
-            # Handle string results that might be JSON
-            if isinstance(result_data, str):
-                try:
-                    import json
-                    result_data = json.loads(result_data)
-                except:
-                    pass
-            
-            # Extract metrics based on tool type
-            if tool_name == 'python_financial_calculator':
-                # Try to extract common financial metrics
-                if isinstance(result_data, dict):
-                    for key in ['cagr', 'volatility', 'sharpe', 'max_drawdown', 'return', 'correlation']:
-                        if key in result_data:
-                            key_metrics[key] = result_data[key]
-            
-            elif tool_name in ['get_financial_data', 'get_multiple_financial_data']:
-                # Extract price data summary
-                if isinstance(result_data, dict):
-                    if 'data' in result_data:
-                        data = result_data['data']
-                        if isinstance(data, list) and len(data) > 0:
-                            key_metrics['data_points'] = len(data)
-                            if 'close' in str(data[0]):
-                                key_metrics['has_price_data'] = True
-            
-            elif tool_name == 'generate_chart_tool':
-                key_metrics['chart_generated'] = True
-            
-            # Generic extraction for dict results
-            if isinstance(result_data, dict):
-                # Look for common metric keys
-                metric_keys = ['value', 'result', 'output', 'metric', 'score', 'ratio', 'percentage']
-                for key in metric_keys:
-                    if key in result_data:
-                        key_metrics[key] = result_data[key]
-        
-        except Exception as e:
-            logger.debug(f"Error extracting key metrics: {str(e)}")
-        
-        return key_metrics
-    
-    def _extract_table_data(self, tool_name: str, result_data: Any) -> List[Dict[str, Any]]:
-        """Extract tabular data from tool results."""
-        table_rows = []
-        
-        try:
-            # Handle string results that might be JSON
-            if isinstance(result_data, str):
-                try:
-                    import json
-                    result_data = json.loads(result_data)
-                except:
-                    return table_rows
-            
-            # Extract table data based on tool type
-            if tool_name == 'python_financial_calculator':
-                # Try to extract comparison data (portfolio vs benchmark)
-                if isinstance(result_data, dict):
-                    # Look for comparison metrics
-                    if 'portfolio' in str(result_data) and 'benchmark' in str(result_data):
-                        for key in result_data:
-                            if isinstance(result_data[key], dict):
-                                if 'portfolio' in result_data[key] and 'benchmark' in result_data[key]:
-                                    table_rows.append({
-                                        'metric': key.replace('_', ' ').title(),
-                                        'portfolio': result_data[key].get('portfolio', 'N/A'),
-                                        'benchmark': result_data[key].get('benchmark', 'N/A')
-                                    })
-            
-            # Generic table extraction for list of dicts
-            if isinstance(result_data, list):
-                for item in result_data[:10]:  # Limit to first 10 rows
-                    if isinstance(item, dict):
-                        table_rows.append(item)
-        
-        except Exception as e:
-            logger.debug(f"Error extracting table data: {str(e)}")
-        
-        return table_rows
-

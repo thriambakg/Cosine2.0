@@ -1,132 +1,106 @@
 """
-Data Storage - S3 storage for large tool results
+Data Storage - Handles S3 storage for large results
 """
 
 import json
-import os
 import logging
-import uuid
+import os
 import boto3
 from datetime import datetime
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class DataStorage:
-    """
-    Handles storage of large tool results in S3.
-    Returns file references instead of raw data to prevent LLM context overflow.
-    
-    Note: This stores intermediate tool results in the data-files/ folder.
-    Completed agent-generated files (reports, CSVs, PDFs) should use agent-files/ folder
-    via generate_agent_file_tool or generate_excel_file_tool.
-    """
+    """Handles S3 storage for large tool results"""
     
     def __init__(self):
-        """Initialize data storage with S3 client."""
-        self.s3_client = boto3.client('s3')
-        # Try AGENT_FILES_BUCKET_NAME first, fallback to CHAT_FILES_BUCKET_NAME
-        self.bucket_name = os.environ.get('AGENT_FILES_BUCKET_NAME') or os.environ.get('CHAT_FILES_BUCKET_NAME')
-        
+        """Initialize data storage"""
+        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
         if not self.bucket_name:
-            logger.warning("Neither AGENT_FILES_BUCKET_NAME nor CHAT_FILES_BUCKET_NAME is set, data storage will not work")
+            logger.warning("S3 bucket not configured - data storage disabled")
+            self.s3_client = None
         else:
+            self.s3_client = boto3.client('s3')
             logger.info(f"DataStorage initialized with bucket: {self.bucket_name}")
     
-    def store_result(self, data: Any, tool_name: str, session_id: str, user_id: str) -> Dict[str, Any]:
+    def store_result(self, result: Any, tool_name: str, session_id: str, user_id: str) -> Dict[str, Any]:
         """
-        Store large tool result in S3 and return file reference.
+        Store a tool result in S3.
         
         Args:
-            data: Tool result data to store
-            tool_name: Name of the tool that produced the data
+            result: Tool result to store
+            tool_name: Name of the tool
             session_id: Session ID
             user_id: User ID
             
         Returns:
-            File reference with S3 key, filename, and metadata
+            File reference with S3 key
         """
-        if not self.bucket_name:
+        if not self.s3_client:
             raise ValueError("S3 bucket not configured")
         
-        try:
-            # Generate filename
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            file_id = uuid.uuid4().hex[:8]
-            filename = f"{tool_name}_{timestamp}_{file_id}.json"
-            
-            # Determine S3 key (path) - use data-files for intermediate tool results
-            # Structure: users/{user_id}/sessions/{session_id}/data-files/{filename}
-            # This matches the structure used for agent-files/ and files/ folders
-            s3_key = f"users/{user_id}/sessions/{session_id}/data-files/{filename}"
-            
-            # Convert data to JSON string
-            if isinstance(data, str):
-                data_str = data
-            else:
-                data_str = json.dumps(data, default=str)
-            
-            # Upload to S3
-            self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=s3_key,
-                Body=data_str.encode('utf-8'),
-                ContentType='application/json',
-                Metadata={
-                    'tool_name': tool_name,
-                    'session_id': session_id,
-                    'user_id': user_id,
-                    'stored_at': datetime.now().isoformat(),
-                    'data_size': str(len(data_str))
-                }
-            )
-            
-            logger.info(f"Stored tool result in S3: {s3_key} ({len(data_str)} bytes)")
-            
-            # Return file reference
-            return {
-                's3_key': s3_key,
-                'filename': filename,
-                'bucket': self.bucket_name,
-                'tool_name': tool_name,
-                'size_bytes': len(data_str),
-                'stored_at': datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Error storing data in S3: {str(e)}")
-            raise
+        # Convert result to JSON string
+        if isinstance(result, str):
+            try:
+                # Try to parse as JSON to validate
+                json.loads(result)
+                result_str = result
+            except:
+                result_str = json.dumps(result)
+        else:
+            result_str = json.dumps(result)
+        
+        # Generate S3 key
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{tool_name}_{timestamp}.json"
+        s3_key = f"users/{user_id}/sessions/{session_id}/data-files/{filename}"
+        
+        # Upload to S3
+        self.s3_client.put_object(
+            Bucket=self.bucket_name,
+            Key=s3_key,
+            Body=result_str.encode('utf-8'),
+            ContentType='application/json'
+        )
+        
+        logger.info(f"Stored result in S3: {s3_key} ({len(result_str)} bytes)")
+        
+        return {
+            's3_key': s3_key,
+            'filename': filename,
+            'tool_name': tool_name,
+            'size_bytes': len(result_str)
+        }
     
     def retrieve_result(self, file_reference: Dict[str, Any]) -> Any:
         """
-        Retrieve stored data from S3 using file reference.
+        Retrieve a stored result from S3.
         
         Args:
-            file_reference: File reference returned by store_result
+            file_reference: File reference with s3_key
             
         Returns:
-            Original data
+            Retrieved result
         """
+        if not self.s3_client:
+            raise ValueError("S3 bucket not configured")
+        
+        s3_key = file_reference.get('s3_key')
+        if not s3_key:
+            raise ValueError("No s3_key in file_reference")
+        
+        # Download from S3
+        response = self.s3_client.get_object(
+            Bucket=self.bucket_name,
+            Key=s3_key
+        )
+        
+        result_str = response['Body'].read().decode('utf-8')
+        
+        # Parse JSON
         try:
-            s3_key = file_reference.get('s3_key')
-            if not s3_key:
-                raise ValueError("File reference missing s3_key")
-            
-            # Download from S3
-            response = self.s3_client.get_object(
-                Bucket=self.bucket_name,
-                Key=s3_key
-            )
-            
-            data_str = response['Body'].read().decode('utf-8')
-            
-            # Try to parse as JSON, otherwise return as string
-            try:
-                return json.loads(data_str)
-            except json.JSONDecodeError:
-                return data_str
-                
-        except Exception as e:
-            logger.error(f"Error retrieving data from S3: {str(e)}")
-            raise
-
+            return json.loads(result_str)
+        except:
+            return result_str

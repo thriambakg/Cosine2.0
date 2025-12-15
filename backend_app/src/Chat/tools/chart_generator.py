@@ -93,11 +93,6 @@ class UnifiedChartGenerator:
         - Has 'name' key (coin name)
         - Chart data has 'time' and 'price' keys (not 'close')
         """
-        # Check for portfolio time series data (from portfolio analysis tool)
-        if 'time_series' in data_dict and isinstance(data_dict['time_series'], dict):
-            if 'dates' in data_dict['time_series'] and 'portfolio_values' in data_dict['time_series']:
-                return 'portfolio_time_series'
-        
         # Check for multiple stocks data
         if 'stocks' in data_dict and isinstance(data_dict['stocks'], list):
             return 'multiple_stocks'
@@ -189,41 +184,6 @@ class UnifiedChartGenerator:
                 })
             return normalized_data, data_dict.get('timeframe', 'Custom Range')
         
-        elif data_type == 'portfolio_time_series':
-            # Portfolio time series data from portfolio analysis tool
-            time_series = data_dict.get('time_series', {})
-            dates = time_series.get('dates', [])
-            portfolio_values = time_series.get('portfolio_values', [])
-            benchmark_values = time_series.get('benchmark_values', [])
-            
-            # Normalize to format: {'Portfolio': [...], 'Benchmark': [...]} for multiple_stocks handling
-            normalized_data = {}
-            
-            # Portfolio data
-            portfolio_data = []
-            for i, date_str in enumerate(dates):
-                if i < len(portfolio_values):
-                    portfolio_data.append({
-                        'time': date_str,
-                        'close': portfolio_values[i] if portfolio_values[i] is not None else 0
-                    })
-            if portfolio_data:
-                normalized_data['Portfolio'] = portfolio_data
-            
-            # Benchmark data (if available)
-            if benchmark_values:
-                benchmark_data = []
-                for i, date_str in enumerate(dates):
-                    if i < len(benchmark_values) and benchmark_values[i] is not None:
-                        benchmark_data.append({
-                            'time': date_str,
-                            'close': benchmark_values[i]
-                        })
-                if benchmark_data:
-                    normalized_data['Benchmark'] = benchmark_data
-            
-            return normalized_data, 'Portfolio Analysis'
-        
         return [], 'Unknown'
 
     def _save_chart_to_s3(self, fig, filename: str, symbol: str, chart_type: str, timeframe: str, data_points: int, asset_type: str) -> str:
@@ -262,18 +222,7 @@ class UnifiedChartGenerator:
             )
             
             logger.info(f"Generated chart: {filename}")
-            
-            # Construct S3 key for embedding in PDFs
-            s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
-            
-            # Return JSON string with both message and S3 key for PDF embedding
-            import json
-            return json.dumps({
-                "message": result,
-                "s3_key": s3_key,
-                "filename": filename,
-                "file_type": "png"
-            })
+            return result
             
         except ImportError:
             logger.warning("lambda_invocation module not available - falling back to manual upload")
@@ -307,12 +256,6 @@ class UnifiedChartGenerator:
             data_dict = json.loads(data_json)
             logger.info(f"🔍 DEBUG: After JSON parsing, data type: {type(data_dict)}")
             logger.info(f"🔍 DEBUG: After JSON parsing, keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
-            
-            # Handle case where data_json is directly a time_series object (from placeholder resolution)
-            if isinstance(data_dict, dict) and 'dates' in data_dict and 'portfolio_values' in data_dict:
-                # This is a time_series object directly - wrap it in the expected structure
-                logger.info("🔍 DEBUG: Detected time_series object directly, wrapping in structure")
-                data_dict = {'time_series': data_dict}
             
             # Decompress data if it's compressed
             import sys
@@ -417,42 +360,35 @@ class UnifiedChartGenerator:
             logger.info(f"🔍 DEBUG: Chart maker processing {total_data_points} total data points")
             
             # Handle different data types
-            if data_type == 'multiple_stocks' or data_type == 'portfolio_time_series':
-                # Handle multiple stocks comparison or portfolio vs benchmark
+            if data_type == 'multiple_stocks':
+                # Handle multiple stocks comparison
                 colors = ['#F06292', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD']
                 
-                for i, (series_name, series_data) in enumerate(normalized_data.items()):
-                    if not series_data:
+                for i, (stock_symbol, stock_data) in enumerate(normalized_data.items()):
+                    if not stock_data:
                         continue
                     
-                    logger.info(f"🔍 DEBUG: Processing {len(series_data)} data points for {series_name}")
+                    logger.info(f"🔍 DEBUG: Processing {len(stock_data)} data points for {stock_symbol}")
                         
                     # Convert to DataFrame
-                    df = pd.DataFrame(series_data)
+                    df = pd.DataFrame(stock_data)
                     
                     # Convert time to datetime
-                    if 'time' in df.columns:
-                        if df['time'].dtype == 'int64':
-                            df['time'] = pd.to_datetime(df['time'], unit='s')
-                        else:
-                            df['time'] = pd.to_datetime(df['time'])
-                        df.set_index('time', inplace=True)
+                    if df['time'].dtype == 'int64':
+                        df['time'] = pd.to_datetime(df['time'], unit='s')
                     else:
-                        logger.warning(f"No 'time' column found for {series_name}")
-                        continue
+                        df['time'] = pd.to_datetime(df['time'])
                     
-                    # Plot line for this series with professional styling
+                    df.set_index('time', inplace=True)
+                    
+                    # Plot line for this stock with professional styling
                     color = colors[i % len(colors)]
-                    ax.plot(df.index, df['close'], linewidth=3, color=color, alpha=0.9, label=series_name)
+                    ax.plot(df.index, df['close'], linewidth=3, color=color, alpha=0.9, label=stock_symbol)
                 
-                # Set title for multiple series
+                # Set title for multiple stocks
                 if not title:
-                    if data_type == 'portfolio_time_series':
-                        series_names = list(normalized_data.keys())
-                        title = f"Portfolio Performance Comparison - {', '.join(series_names)}"
-                    else:
-                        stock_symbols = list(normalized_data.keys())
-                        title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
+                    stock_symbols = list(normalized_data.keys())
+                    title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
                 ax.set_title(title, fontsize=18, fontweight='bold', pad=20)
                 ax.legend()
             else:
@@ -587,65 +523,32 @@ class UnifiedChartGenerator:
 # Global instance
 chart_generator = UnifiedChartGenerator()
 
-def generate_chart_tool(tool_use: ToolUse) -> ToolResult:
+@tool
+def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", title: str = None) -> str:
     """
     Generate a unified chart that works with both stock and cryptocurrency data.
     Automatically detects data type and generates appropriate charts.
     
-    Args (via ToolUse):
+    Args:
         symbol: Stock ticker or cryptocurrency symbol
         data_json: JSON string containing data from get_financial_data or get_crypto_data_tool
         chart_type: Type of chart ('line', 'candlestick', 'volume', 'ohlc') - defaults to 'line'
         title: Custom title for the chart (optional)
     
     Returns:
-        ToolResult with success message and file details
+        Success message with file details
     """
     try:
-        # Extract parameters from ToolUse object
-        input_data = tool_use["input"]
-        symbol = input_data.get("symbol")
-        data_json = input_data.get("data_json")
-        chart_type = input_data.get("chart_type", "line")
-        title = input_data.get("title")
-        
-        if not symbol:
-            return {
-                "toolUseId": tool_use["toolUseId"],
-                "status": "error",
-                "content": [{"text": "Error: symbol parameter is required"}]
-            }
-        
-        if not data_json:
-            return {
-                "toolUseId": tool_use["toolUseId"],
-                "status": "error",
-                "content": [{"text": "Error: data_json parameter is required"}]
-            }
-        
         agent_logger.info(f"Generating {chart_type} chart for {symbol}")
+        # Debug logging to see what data is being passed
         logger.info(f"🔍 DEBUG: generate_chart_tool called with symbol={symbol}, chart_type={chart_type}")
         logger.info(f"🔍 DEBUG: data_json length: {len(data_json)} characters")
         logger.info(f"🔍 DEBUG: data_json preview: {data_json[:200]}...")
         
-        result = chart_generator.generate_chart(symbol, data_json, chart_type, title)
-        
-        # The result is already a JSON string with s3_key from generate_chart
-        # Return it as-is for PDF embedding
-        return {
-            "toolUseId": tool_use.get("toolUseId", "unknown"),
-            "status": "success",
-            "content": [{"text": result}]
-        }
+        return chart_generator.generate_chart(symbol, data_json, chart_type, title)
     except Exception as e:
-        logger.error(f"Error generating chart: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return {
-            "toolUseId": tool_use.get("toolUseId", "unknown"),
-            "status": "error",
-            "content": [{"text": f"❌ Error generating chart: {str(e)}"}]
-        }
+        logger.error(f"Error generating chart for {symbol}: {str(e)}")
+        return f"❌ Error generating chart: {str(e)}"
 
 @tool
 def generate_stock_chart(symbol: str, timeframe: str = "1y", chart_type: str = "line", title: str = None, start_date: str = None, end_date: str = None) -> str:
@@ -677,12 +580,12 @@ def generate_stock_chart(symbol: str, timeframe: str = "1y", chart_type: str = "
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         try:
-            from planner.agent import FinancialTools
+            from agent import FinancialTools
         except ImportError:
             # Fallback: try importing from parent directory
             parent_dir = os.path.dirname(os.path.dirname(__file__))
             sys.path.append(parent_dir)
-            from planner.agent import FinancialTools
+            from agent import FinancialTools
         
         # Fetch stock data
         logger.info(f"📊 Fetching stock data for {symbol}...")

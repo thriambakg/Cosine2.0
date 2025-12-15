@@ -155,7 +155,7 @@ class WebSocketHandler:
             )
             
             connection_ids = [item['connection_id'] for item in response['Items']]
-            logger.debug(f"Found {len(connection_ids)} active connections for user {user_id}, session {session_id}")
+            logger.info(f"Found {len(connection_ids)} active connections for user {user_id}, session {session_id}")
             
             return connection_ids
         except Exception as e:

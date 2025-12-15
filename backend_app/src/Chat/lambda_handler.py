@@ -51,13 +51,11 @@ def get_financial_agent():
         logger.info("🔍 DEBUG: Loading financial agent (first time)")
         try:
             logger.info("🔍 DEBUG: Attempting to import agent module...")
-            # Note: financial_agent and analyze_stock are not used by planner
-            # Planner uses context_aware_agent instead
-            from planner.agent import FinancialTools
+            from agent import financial_agent, analyze_stock, FinancialTools
             logger.info("🔍 DEBUG: Successfully imported agent module")
             
-            _financial_agent = None  # Not used - planner uses context_aware_agent
-            _analyze_stock = None  # Not used - planner uses context_aware_agent
+            _financial_agent = financial_agent
+            _analyze_stock = analyze_stock
             _financial_tools = FinancialTools
             logger.info("🔍 DEBUG: Financial agent loaded successfully")
         except ImportError as e:
@@ -105,7 +103,7 @@ def get_context_aware_agent():
     if _context_aware_agent is None:
         logger.info("🔍 DEBUG: Loading context-aware agent (first time)")
         try:
-            from planner.context_aware_agent import context_aware_agent
+            from context_aware_agent import context_aware_agent
             _context_aware_agent = context_aware_agent
             logger.info("🔍 DEBUG: Context-aware agent loaded successfully")
         except ImportError as e:
@@ -599,7 +597,7 @@ def handle_rest_api_request(event: Dict[str, Any], cors_headers: Dict[str, str])
         agent_logger = get_agent_logger(session_id, user_id)
         # Update agent module's logger
         try:
-            from planner import agent as agent_module
+            import agent as agent_module
             agent_module.agent_logger = agent_logger
         except:
             pass
@@ -642,7 +640,7 @@ def handle_rest_api_request(event: Dict[str, Any], cors_headers: Dict[str, str])
         user_id = user_id_from_body
         # Update agent module's logger
         try:
-            from planner import agent as agent_module
+            import agent as agent_module
             agent_module.agent_logger = agent_logger
         except:
             pass
@@ -884,7 +882,7 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
             agent_logger = get_agent_logger(session_id, user_id)
             # Update agent module's logger
             try:
-                from planner import agent as agent_module
+                import agent as agent_module
                 agent_module.agent_logger = agent_logger
             except:
                 pass
@@ -956,232 +954,261 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
                     }
                 }
         
+        # Get session-aware agent with the specified model
+        if session_context:
+            logger.debug(f"Getting session-aware agent for session {session_id} with model {model}")
+            agent = context_aware_agent.get_session_agent(session_context, model)
+        else:
+            # Fallback to base agent with specified model
+            logger.debug(f"Using base financial agent as fallback with model {model}")
+            from agent import create_financial_agent
+            agent = create_financial_agent(model)
+        
+        # No automatic welcome message - let the user start the conversation
+        
         # Set environment variables for tools to access session and user info
         os.environ['CURRENT_SESSION_ID'] = session_id
         os.environ['CURRENT_USER_ID'] = user_id
         os.environ['SESSION_ID'] = session_id
         os.environ['USER_ID'] = user_id
         
-        # Generate UNIQUE message ID for AI response (don't reuse user's message_id!)
-        ai_message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-        
         # Re-initialize agent logger with message_id for this specific message
-        agent_logger = get_agent_logger(session_id, user_id, ai_message_id)
+        message_id = event_body.get('messageId') or f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+        agent_logger = get_agent_logger(session_id, user_id, message_id)
         
-        # Update the global agent_logger instance in planner.agent module
-        from planner import agent as agent_module
+        # Update the global agent_logger instance in agent.py module
+        import agent as agent_module  # Import with alias to avoid shadowing the agent instance variable
         agent_module.agent_logger = agent_logger
         
-        # Check for kill signal before processing
-        if session_context and session_context.get('killed_at'):
-            logger.warning(f"Session {session_id} has been killed before agent processing")
-            return {
-                'statusCode': 410,
-                'body': {
-                    'error': 'Session terminated',
-                    'message': f'Session {session_id} has been terminated',
-                    'session_id': session_id,
-                    'user_id': user_id,
-                    'killed_at': session_context.get('killed_at'),
-                    'kill_reason': session_context.get('kill_reason', 'unknown')
-                }
-            }
+        # Check if new context items were added (flag from WebSocket processor)
+        has_new_context_items = event_body.get('hasNewContextItems', False)
         
-        # NEW FLOW: Always route through Planner → Orchestrator → Reasoning LLM
+        # Create enhanced message with session context for the agent
+        enhanced_message = f"""
+User Message: {user_message}
+
+Session Context:
+- Session ID: {session_id}
+- User ID: {user_id}
+- Model: {model}
+- Mode: CHATTING MODE
+- SECURITY: You have access to the full conversation history through the CONVERSATION HISTORY section in your system prompt
+- Use the conversation history in your system prompt to reference previous messages in THIS conversation
+"""
+        
+        # Add note about new context items if present
+        if has_new_context_items:
+            enhanced_message += f"""
+🚨 IMPORTANT: NEW CONTEXT ITEMS DETECTED
+========================================
+The user has just added new context items to this session (articles, stock tiles, etc.).
+You MUST call get_session_context_tool(session_id="{session_id}", user_id="{user_id}") immediately 
+to discover and access these new context items before responding to the user's question.
+
+The user's question "{user_message}" likely references these newly added context items.
+Do NOT respond without first checking what context items are available in the session.
+
+"""
+
+        # Add context items to the enhanced message if present
+        if context_items:
+            context_items_json = json.dumps(context_items)
+            enhanced_message += f"""
+Context Items Available: {len(context_items)} items
+- Use process_chat_session_context_tool(session_id="{session_id}", user_id="{user_id}", context_items='{context_items_json}') to process these context items
+- Use analyze_chat_session_context_tool(session_id="{session_id}", user_id="{user_id}", context_items='{context_items_json}', analysis_type="summary") to analyze these context items
+- Context items contain chat session data that was added from the history sidebar
+- The context_items parameter should be passed as a JSON string
+"""
+        
         try:
-            from planner import Planner
-            from orchestrator import Orchestrator, ToolExecutor, DataStorage, StatusReporter
-            from reasoning import ReasoningLLM
-            from websocket_handler import WebSocketHandler
+            logger.debug("Calling session-aware agent...")
             
-            logger.info(f"Routing message through Planner → Orchestrator → Reasoning LLM")
-            
-            # Step 1: Create plan using Planner
-            planner = Planner(context_aware_agent)
-            plan = planner.create_plan(user_message, session_context, model)
-            
-            # Check if planner needs more information from user
-            if plan.get('need_info', False):
-                logger.info("Planner needs more information from user")
-                # Route to Reasoning LLM to format the question nicely
-                reasoning_llm = ReasoningLLM(context_aware_agent)
-                missing_info = plan.get('missing_info', 'additional information')
-                question = plan.get('question', f'Could you please provide {missing_info}?')
-                
-                # Create a chat payload for the reasoning LLM
-                chat_payload = {
-                    'task_completed': f"Need {missing_info} to proceed",
-                    'file_references': [],
-                    'key_results': {},
-                    'table': [],
-                    'notes': [f"Planner needs: {missing_info}", f"Question: {question}"]
-                }
-                
-                # Format the question using Reasoning LLM with streaming
-                ws_handler = WebSocketHandler()
-                response_content, was_streamed = reasoning_llm.format_response(
-                    user_message,
-                    chat_payload,
-                    session_context,
-                    model,
-                    ws_handler=ws_handler,
-                    message_id=ai_message_id,
-                    user_id=user_id,
-                    session_id=session_id
-                )
-                
-                # Send response via WebSocket (if not already streamed)
-                if not was_streamed:
-                    ws_handler.send_chat_response(
-                        user_id=user_id,
-                        session_id=session_id,
-                        message_id=ai_message_id,
-                        response_content=response_content
-                    )
-                
-                # Save to DynamoDB
-                try:
-                    import boto3
-                    dynamodb = boto3.resource('dynamodb')
-                    chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
-                    
-                    # Get current session to append message
-                    session_response = chat_sessions_table.get_item(
-                        Key={'user_id': user_id, 'session_id': session_id}
-                    )
-                    
-                    if 'Item' in session_response:
-                        messages = session_response['Item'].get('messages', [])
-                        timestamp = int(time.time() * 1000)
-                        
-                        ai_message = {
-                            'id': ai_message_id,
-                            'text': response_content,
-                            'sender': 'bot',
-                            'timestamp': timestamp,
-                            'message_type': 'text'
-                        }
-                        
-                        messages.append(ai_message)
-                        
-                        chat_sessions_table.update_item(
-                            Key={'user_id': user_id, 'session_id': session_id},
-                            UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
-                            ExpressionAttributeValues={
-                                ':messages': messages,
-                                ':count': len(messages),
-                                ':timestamp': timestamp
-                            }
-                        )
-                        logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (length: {len(response_content)})")
-                    else:
-                        logger.warning(f"Session not found for user {user_id}, session {session_id}")
-                except Exception as db_error:
-                    logger.error(f"Error saving AI response to DynamoDB: {str(db_error)}")
-                
+            # Check for kill signal before processing
+            if session_context and session_context.get('killed_at'):
+                logger.warning(f"Session {session_id} has been killed before agent processing")
                 return {
-                    'statusCode': 200,
+                    'statusCode': 410,
                     'body': {
-                        'message': 'Response sent',
+                        'error': 'Session terminated',
+                        'message': f'Session {session_id} has been terminated',
                         'session_id': session_id,
                         'user_id': user_id,
-                        'message_id': ai_message_id,
-                        'response_type': 'need_info'
+                        'killed_at': session_context.get('killed_at'),
+                        'kill_reason': session_context.get('kill_reason', 'unknown')
                     }
                 }
             
-            if not plan or 'steps' not in plan or len(plan.get('steps', [])) == 0:
-                logger.error("Planner did not return a valid plan")
-                return {
-                    'statusCode': 500,
-                    'body': {
-                        'error': 'Planning failed',
-                        'message': 'Planner did not generate a valid execution plan',
-                        'session_id': session_id,
-                        'user_id': user_id
-                    }
-                }
+            # Generate UNIQUE message ID for AI response (don't reuse user's message_id!)
+            ai_message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
             
-            logger.info(f"Planner created plan with {len(plan['steps'])} steps")
+            # HYBRID ARCHITECTURE: Check if query needs deterministic processing
+            # If yes, route through planner/orchestrator first, then agent handles report generation
+            try:
+                from planner import Planner
+                from orchestrator import Orchestrator, ToolExecutor, DataStorage
+                
+                planner = Planner(agent)
+                plan = planner.create_plan(user_message, session_context)
+                
+                if plan.get('needs_planning', False) and plan.get('steps'):
+                    logger.info(f"Query requires deterministic processing - routing through planner/orchestrator")
+                    
+                    # Execute plan with orchestrator
+                    tool_executor = ToolExecutor()
+                    data_storage = DataStorage()
+                    orchestrator = Orchestrator(tool_executor, data_storage)
+                    
+                    execution_results = orchestrator.execute_plan(plan, session_id, user_id)
+                    
+                    # Add execution results to enhanced message for agent
+                    enhanced_message += f"""
+
+DETERMINISTIC PROCESSING COMPLETED:
+====================================
+The following deterministic tasks have been completed:
+- Steps completed: {execution_results.get('steps_completed', 0)}
+- File references: {len(execution_results.get('file_references', []))} files generated
+
+Results are available in S3. Use read_s3_file_tool to access them if needed.
+The agent should now generate reports or provide explanations based on these results.
+"""
+                    
+                    logger.info("Deterministic processing complete, agent will handle report generation")
+                    
+            except Exception as e:
+                logger.warning(f"Planner/orchestrator not available or failed: {str(e)}, continuing with direct agent processing")
             
-            # Step 2: Execute plan using Orchestrator
+            # Process with streaming support and kill signal monitoring
+            # Pass WebSocket handler for streaming callbacks
+            from websocket_handler import WebSocketHandler
             ws_handler = WebSocketHandler()
-            tool_executor = ToolExecutor()
-            data_storage = DataStorage()
-            status_reporter = StatusReporter(ws_handler)
             
-            # Initialize checkpoint manager and pass planner for validation
-            from orchestrator.checkpoint_manager import CheckpointManager
-            checkpoint_manager = CheckpointManager()
-            orchestrator = Orchestrator(tool_executor, data_storage, status_reporter, planner, checkpoint_manager)
-            
-            execution_results = orchestrator.execute_plan(plan, session_id, user_id, ai_message_id)
-            
-            if execution_results.get('status') == 'failed' and execution_results.get('steps_completed', 0) == 0:
-                logger.error("Orchestrator execution failed completely")
-                return {
-                    'statusCode': 500,
-                    'body': {
-                        'error': 'Execution failed',
-                        'message': 'All plan steps failed during execution',
-                        'session_id': session_id,
-                        'user_id': user_id
-                    }
-                }
-            
-            # Step 3: Format response using Reasoning LLM
-            chat_payload = execution_results.get('summary', {})
-            reasoning_llm = ReasoningLLM(context_aware_agent)
-            
-            # Get reasoning response with streaming enabled
-            response_content, was_streamed = reasoning_llm.format_response(
-                user_message, 
-                chat_payload, 
-                session_context, 
-                model,
-                ws_handler=ws_handler,
-                message_id=ai_message_id,
-                user_id=user_id,
-                session_id=session_id
+            # Create a shared variable to track if streaming was used
+            streaming_used = {'value': False}
+            accumulated_streaming_content = {'value': ''}
+            agent_response = process_with_kill_monitoring_and_streaming(
+                agent, enhanced_message, session_id, user_id, session_context, ai_message_id, ws_handler, streaming_used, accumulated_streaming_content
             )
             
-            # Note: File references and data outputs are already handled by orchestrator
-            # and will be available to the user through the file system
+            # Flush any remaining logs to WebSocket before returning
+            try:
+                import agent as agent_module  # Import with alias to avoid shadowing
+                if hasattr(agent_module, 'agent_logger'):
+                    agent_module.agent_logger.flush()
+            except Exception as flush_error:
+                logger.warning(f"Failed to flush agent logs: {str(flush_error)}")
             
+            logger.debug(f"Agent response received: {type(agent_response)}")
         except Exception as e:
-            logger.error(f"Error in Planner → Orchestrator → Reasoning LLM flow: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
+            # Handle other exceptions
+            logger.error(f"Error in agent processing: {str(e)}")
+            raise
+        
+        # Extract the actual response content from AgentResult
+        # If streaming was used, prefer the accumulated streaming content (it's already clean)
+        response_content = ""
+        if streaming_used.get('value', False) and accumulated_streaming_content.get('value') and accumulated_streaming_content['value'].strip():
+            response_content = accumulated_streaming_content['value']
+            logger.debug(f"Using accumulated streaming content: {len(response_content)} chars")
+        else:
+            # Extract from agent_response
+            if hasattr(agent_response, 'message') and hasattr(agent_response.message, 'content'):
+                # Handle structured content (list of content blocks)
+                if isinstance(agent_response.message.content, list):
+                    for content_block in agent_response.message.content:
+                        if hasattr(content_block, 'text'):
+                            response_content += content_block.text
+                        elif isinstance(content_block, str):
+                            response_content += content_block
+                else:
+                    response_content = str(agent_response.message.content)
+            else:
+                # Fallback: convert to string
+                response_content = str(agent_response)
+                
+                # Clean up response content by removing metadata
+                def clean_response_content(content):
+                    """Remove metadata tags from agent response"""
+                    import re
+                    
+                    # Remove search_quality_reflection blocks
+                    content = re.sub(r'<search_quality_reflection>.*?</search_quality_reflection>', '', content, flags=re.DOTALL)
+                    
+                    # Remove search_quality_score blocks
+                    content = re.sub(r'<search_quality_score>\d+</search_quality_score>', '', content)
+                    
+                    # Remove result tags
+                    content = re.sub(r'<result>', '', content)
+                    content = re.sub(r'</result>', '', content)
+                    
+                    # Clean up extra whitespace
+                    content = content.strip()
+                    
+                    return content
+                
+                response_content = clean_response_content(response_content)
+            
+            logger.debug(f"Extracted response content: {len(response_content)} chars")
+            
+            # If we still don't have content and streaming was used, try accumulated content as fallback
+            if not response_content or not response_content.strip():
+                if accumulated_streaming_content.get('value') and accumulated_streaming_content['value'].strip():
+                    response_content = accumulated_streaming_content['value']
+                    logger.debug(f"Using accumulated streaming content as fallback: {len(response_content)} chars")
+        
+        # Ensure we have response content - check both response_content and accumulated_streaming_content
+        # If streaming was used, accumulated_streaming_content should have the full response
+        final_content = response_content
+        if (not final_content or not final_content.strip()) and accumulated_streaming_content.get('value') and accumulated_streaming_content['value'].strip():
+            final_content = accumulated_streaming_content['value']
+            logger.debug(f"Using accumulated streaming content as final fallback: {len(final_content)} chars")
+        
+        if not final_content or not final_content.strip():
+            logger.error(f"No response content extracted from agent response (streaming_used: {streaming_used.get('value', False)}, accumulated: {len(accumulated_streaming_content.get('value', ''))} chars, response_content: {len(response_content)} chars)")
             return {
                 'statusCode': 500,
                 'body': {
-                    'error': 'Processing failed',
-                    'message': f'Error in processing pipeline: {str(e)}',
+                    'error': 'No response content',
+                    'message': 'Agent did not generate a response',
                     'session_id': session_id,
                     'user_id': user_id
                 }
             }
+        
+        # Update response_content with final content
+        response_content = final_content
         
         # WebSocket processor now handles all user message saving
         # Chat agent only processes and generates responses - no message saving needed
         is_edit = event_body.get('is_edit', False)
         edited_message_id = event_body.get('edited_message_id')
         
-        # Send response directly to WebSocket (if not already streamed)
+        # Send response directly to WebSocket (no SQS queue needed!)
         try:
             from websocket_handler import WebSocketHandler
             ws_handler = WebSocketHandler()
             
-            # Only send complete response if it wasn't already streamed
-            if not was_streamed:
+            # Only send complete response if streaming wasn't used
+            # If streaming was used, chunks were already sent incrementally
+            if not streaming_used.get('value', False):
                 ws_handler.send_chat_response(user_id, session_id, response_content, ai_message_id)
-                logger.info(f"✅ Sent reasoning response to WebSocket (session: {session_id}, user: {user_id})")
             else:
-                # Response was streamed in chunks, just log
-                logger.info(f"✅ Reasoning response was streamed to WebSocket (session: {session_id}, user: {user_id})")
+                logger.info(f"✅ Streaming was used, skipping complete response send (chunks already sent)")
             
-            # Save AI response to DynamoDB
-            if response_content and response_content.strip():
+            logger.info(f"✅ Sent chat response directly to WebSocket (session: {session_id}, user: {user_id})")
+            
+            # Always save AI response to DynamoDB (whether streaming was used or not)
+            # Use accumulated streaming content if available and not empty, otherwise use response_content
+            if streaming_used.get('value', False) and accumulated_streaming_content.get('value') and accumulated_streaming_content['value'].strip():
+                content_to_save = accumulated_streaming_content['value']
+                logger.info(f"💾 Using accumulated streaming content for DynamoDB save: {len(content_to_save)} chars")
+            else:
+                content_to_save = response_content
+                logger.info(f"💾 Using response_content for DynamoDB save: {len(content_to_save)} chars")
+            
+            # Only save if we have content
+            if content_to_save and content_to_save.strip():
                 try:
                     import boto3
                     from decimal import Decimal
@@ -1208,7 +1235,7 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
                             # Only check content if it's a bot message to avoid false positives
                             existing_by_content = any(
                                 m.get('sender') == 'bot' and 
-                                m.get('text') == response_content and 
+                                m.get('text') == content_to_save and 
                                 m.get('id') != ai_message_id  # Different ID but same content
                                 for m in messages
                             )
@@ -1217,8 +1244,8 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
                             else:
                                 # Add AI response message with unique ID
                                 ai_message = {
-                                    'id': ai_message_id,
-                                    'text': response_content,
+                                    'id': ai_message_id,  # Use unique AI message ID, not user's message_id
+                                    'text': content_to_save,  # Use accumulated content if streaming was used
                                     'sender': 'bot',
                                     'timestamp': timestamp,
                                     'message_type': 'text'
@@ -1235,12 +1262,12 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
                                         ':timestamp': timestamp
                                     }
                                 )
-                                logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (length: {len(response_content)})")
+                                logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (streaming: {streaming_used.get('value', False)}, length: {len(content_to_save)})")
                 except Exception as db_error:
                     logger.warning(f"Failed to save AI response to DynamoDB: {str(db_error)}")
                     # Continue - response was sent via WebSocket
             else:
-                logger.warning(f"⚠️ No content to save for AI message {ai_message_id}, skipping DynamoDB save")
+                logger.warning(f"⚠️ No content to save for AI message {ai_message_id}, skipping DynamoDB save (streaming_used: {streaming_used.get('value', False)}, accumulated_length: {len(accumulated_streaming_content.get('value', ''))}, response_length: {len(response_content)})")
             
             # Return acknowledgment
             return {

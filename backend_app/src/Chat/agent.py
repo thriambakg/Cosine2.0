@@ -141,13 +141,17 @@ from strands_tools import calculator
 from strands import tool
 
 # Import our custom financial calculator tool module
-from tools import financial_calculator
+import financial_calculator
 
-# NOTE: PLANNER DOES NOT IMPORT ACTUAL TOOL IMPLEMENTATIONS
-# The planner only needs tool specifications for planning, not actual tool functions
-# Tool implementations are in the tools/ directory and are executed by the orchestrator
-# Import tool specifications instead
-from .tool_specifications import TOOL_SPECIFICATIONS, get_tool_specification, get_all_tool_names
+# Import our custom session database access tool
+from tools.session_database_access import get_session_files_tool, get_session_context_tool, SessionDatabaseAccess
+from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
+from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
+from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
+from tools.chart_generator import generate_chart_tool, generate_stock_chart
+from tools.chat_history_tool import get_chat_history_tool, search_chat_history_tool
+from tools.chat_session_context_tool import process_chat_session_context_tool, analyze_chat_session_context_tool
+from tools.web_scraper import fetch_web_content_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -308,7 +312,7 @@ class FinancialTools:
     @staticmethod
     def get_stock_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """
-        Get stock data using yfinance
+        Get stock data - checks S3 first, then falls back to yfinance
         
         Args:
             symbol: Stock ticker symbol
@@ -319,7 +323,29 @@ class FinancialTools:
         try:
             logger.debug(f"get_stock_data called with symbol={symbol}, timeframe={timeframe}")
             
-            # Use yfinance for all data
+            # Try S3 first (for high-priority stocks)
+            try:
+                from tools.s3_historical_data_helper import S3HistoricalDataHelper
+                s3_helper = S3HistoricalDataHelper()
+                
+                # Try high priority first, then medium, then low
+                for priority in ['high', 'medium', 'low']:
+                    s3_data = s3_helper.get_stock_data_from_s3(symbol, timeframe, priority)
+                    if s3_data:
+                        # Convert S3 format to expected format
+                        result = FinancialTools._convert_s3_to_standard_format(s3_data, symbol)
+                        
+                        # Compress if needed
+                        from compression_helper import CompressionHelper
+                        compressed_result = CompressionHelper.compress_data(result, compression_threshold=2000)
+                        
+                        logger.info(f"✅ Loaded {symbol} from S3 historical data (priority: {priority})")
+                        return compressed_result
+            except Exception as e:
+                logger.debug(f"Could not load from S3: {str(e)}, falling back to yfinance")
+            
+            # Fallback to yfinance
+            logger.debug(f"S3 historical data not available for {symbol}, using yfinance")
             result = FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
             
             # Check for errors
@@ -343,6 +369,51 @@ class FinancialTools:
         except Exception as e:
             logger.error(f"Error in get_stock_data: {str(e)}")
             return {"symbol": symbol, "status": "error", "message": str(e)}
+    
+    @staticmethod
+    def _convert_s3_to_standard_format(s3_data: Dict[str, Any], symbol: str) -> Dict[str, Any]:
+        """
+        Convert S3 historical data format to standard format expected by the agent.
+        
+        Args:
+            s3_data: Data from S3 in historical format
+            symbol: Stock symbol
+            
+        Returns:
+            Standard format data
+        """
+        history = s3_data.get('history', [])
+        
+        # Convert history to historical_data format
+        historical_data = []
+        for point in history:
+            historical_data.append({
+                'date': point.get('date', ''),
+                'timestamp': point.get('timestamp', 0),
+                'open': point.get('open', 0),
+                'high': point.get('high', 0),
+                'low': point.get('low', 0),
+                'close': point.get('close', 0),
+                'volume': point.get('volume', 0)
+            })
+        
+        # Get current price from most recent data point
+        current_price = 0
+        if historical_data:
+            current_price = historical_data[-1].get('close', 0)
+        
+        return {
+            'symbol': symbol.upper(),
+            'status': 'success',
+            'currency': s3_data.get('currency', 'USD'),
+            'exchange': s3_data.get('exchange', ''),
+            'current_price': current_price,
+            'historical_data': historical_data,
+            'data_points': len(historical_data),
+            'first_date': historical_data[0].get('date', '') if historical_data else '',
+            'last_date': historical_data[-1].get('date', '') if historical_data else '',
+            'data_source': 'S3 Historical Data'
+        }
     
     @staticmethod
     def calculate_portfolio_metrics(portfolio_data: str, period: str = "1y", risk_free_rate: float = 0.05) -> Dict[str, Any]:
@@ -1292,54 +1363,24 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
         if not symbols:
             return "Error: symbols parameter is required"
         
-        # Parse symbols - handle both string and list inputs
-        if isinstance(symbols, list):
-            symbol_list = [str(s).strip().upper() for s in symbols]
-        elif isinstance(symbols, str):
-            symbol_list = [s.strip().upper() for s in symbols.split(',')]
-        else:
-            return "Error: symbols parameter must be a string or list"
+        # Parse symbols
+        symbol_list = [s.strip().upper() for s in symbols.split(',')]
         
         if len(symbol_list) > 10:
             return "Error: Maximum 10 stocks can be fetched at once"
         
         # Fetch data for each symbol
-        # First try S3 historical data, then fall back to yfinance
         results = []
         for symbol in symbol_list:
             try:
-                # Try S3 historical data first (via helper function used by tools)
-                from tools.s3_historical_data_helper import fetch_stock_from_s3_historical
-                
-                s3_data = fetch_stock_from_s3_historical(symbol, timeframe, start_date, end_date)
-                
-                if s3_data:
-                    # Import compression utility
-                    from compression_helper import CompressionHelper
-                    compressed_result = CompressionHelper.compress_data(s3_data, compression_threshold=2000)
-                    results.append(compressed_result)
-                    agent_logger.info(f"✅ Loaded {symbol} from S3 historical data")
-                else:
-                    # Fall back to yfinance if S3 data not available
-                    agent_logger.info(f"S3 historical data not available for {symbol}, using yfinance")
-                    data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
-                    results.append(data)
-            except ImportError:
-                # If helper not available, fall back to yfinance
-                agent_logger.warning(f"S3 historical helper not available, using yfinance for {symbol}")
                 data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
                 results.append(data)
             except Exception as e:
-                agent_logger.warning(f"Error fetching {symbol} from S3: {str(e)}, falling back to yfinance")
-                try:
-                    data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
-                    results.append(data)
-                except Exception as fallback_error:
-                    results.append({
-                        "symbol": symbol,
-                        "status": "error",
-                        "message": f"Failed to fetch data: {str(fallback_error)}"
-                    })
+                results.append({
+                    "symbol": symbol,
+                    "status": "error",
+                    "message": f"Failed to fetch data: {str(e)}"
+                })
         
         # Return consolidated results
         consolidated_data = {
@@ -1351,44 +1392,7 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
             "stocks": results
         }
         
-        result_json = json.dumps(consolidated_data, indent=2)
-        
-        # Check if result is large (>10KB) and should be stored in S3
-        LARGE_DATA_THRESHOLD = 10000  # 10KB
-        if len(result_json) > LARGE_DATA_THRESHOLD:
-            try:
-                # Store in S3 and return file reference
-                from orchestrator.data_storage import DataStorage
-                storage = DataStorage()
-                
-                session_id = os.environ.get('SESSION_ID', 'default')
-                user_id = os.environ.get('USER_ID', 'default')
-                
-                file_ref = storage.store_result(
-                    consolidated_data,
-                    'get_multiple_financial_data',
-                    session_id,
-                    user_id
-                )
-                
-                agent_logger.info(f"Large dataset stored in S3: {file_ref['filename']} ({file_ref['size_bytes']} bytes)")
-                
-                # Return file reference instead of data
-                return json.dumps({
-                    "status": "success",
-                    "message": f"Large dataset stored in S3 ({(file_ref['size_bytes']/1024):.1f}KB). Use read_s3_file_tool to retrieve.",
-                    "file_reference": file_ref,
-                    "summary": {
-                        "total_symbols": len(symbol_list),
-                        "successful_symbols": len([r for r in results if r.get("status") == "success"]),
-                        "timeframe": timeframe
-                    }
-                }, indent=2)
-            except Exception as e:
-                agent_logger.warning(f"Failed to store large data in S3: {str(e)}, returning data directly")
-                # Fall through to return data directly
-        
-        return result_json
+        return json.dumps(consolidated_data, indent=2)
         
     except Exception as e:
         return f"Error getting multiple financial data: {str(e)}"
@@ -1446,14 +1450,13 @@ def get_volatility_surface(symbol: str) -> str:
 
 @tool
 def python_financial_calculator(calculation: str) -> str:
-    """Execute advanced financial calculations including Fama-French 5-factor regression analysis, correlations, cointegration tests, Sharpe ratios, and Value at Risk calculations. Large results (>10KB) are automatically stored in S3."""
+    """Execute advanced financial calculations including Fama-French 5-factor regression analysis, correlations, cointegration tests, Sharpe ratios, and Value at Risk calculations."""
     try:
         agent_logger.info(f"Running financial calculation: {calculation[:50]}...")
         # Use the enhanced financial calculator from our module
         calculator = financial_calculator.EnhancedFinancialCalculator()
         
         calc_lower = calculation.lower()
-        result = None
         
         if any(term in calc_lower for term in ["fama", "french", "factor", "regression"]):
             # Extract symbol if provided
@@ -1463,10 +1466,10 @@ def python_financial_calculator(calculation: str) -> str:
             if symbol_match:
                 symbol = symbol_match.group()
             
-            result = calculator.fama_french_analysis(symbol)
+            return calculator.fama_french_analysis(symbol)
             
         elif any(term in calc_lower for term in ["correlation", "corr"]):
-            result = """
+            return """
 CORRELATION ANALYSIS:
 ====================
 Stock A vs Stock B Correlation: 0.74***
@@ -1481,7 +1484,7 @@ ROLLING CORRELATION (12-month):
 """
             
         elif any(term in calc_lower for term in ["cointegration", "coint"]):
-            result = """
+            return """
 COINTEGRATION ANALYSIS:
 ======================
 Engle-Granger Test:
@@ -1497,7 +1500,7 @@ Johansen Test:
 """
             
         elif any(term in calc_lower for term in ["sharpe", "ratio"]):
-            result = """
+            return """
 SHARPE RATIO ANALYSIS:
 =====================
 • Sharpe Ratio: 1.42
@@ -1508,7 +1511,7 @@ SHARPE RATIO ANALYSIS:
 """
             
         elif any(term in calc_lower for term in ["var", "value at risk", "risk"]):
-            result = """
+            return """
 VALUE AT RISK (VaR) ANALYSIS:
 =============================
 1-Day VaR (95% confidence): -2.1%
@@ -1526,7 +1529,7 @@ RISK METRICS:
 """
         
         elif any(term in calc_lower for term in ["volatility", "surface", "implied"]):
-            result = """
+            return """
 VOLATILITY SURFACE ANALYSIS:
 ============================
 Current Implied Volatility Levels:
@@ -1553,49 +1556,7 @@ Term Structure:
 """
         
         else:
-            result = "Financial calculation completed. For specific analyses, mention keywords like 'Fama-French', 'correlation', 'cointegration', 'Sharpe ratio', 'VaR', or 'volatility surface'."
-        
-        # Convert result to string if needed
-        if result is None:
-            result = "Calculation completed but no result returned."
-        
-        result_str = result if isinstance(result, str) else json.dumps(result, indent=2)
-        
-        # Check if result is large (>10KB) and should be stored in S3
-        LARGE_DATA_THRESHOLD = 10000  # 10KB
-        if len(result_str) > LARGE_DATA_THRESHOLD:
-            try:
-                # Store in S3 and return file reference
-                from orchestrator.data_storage import DataStorage
-                storage = DataStorage()
-                
-                session_id = os.environ.get('SESSION_ID', 'default')
-                user_id = os.environ.get('USER_ID', 'default')
-                
-                # Prepare data for storage
-                data_to_store = result if isinstance(result, (dict, list)) else {"result": result_str}
-                
-                file_ref = storage.store_result(
-                    data_to_store,
-                    'python_financial_calculator',
-                    session_id,
-                    user_id
-                )
-                
-                agent_logger.info(f"Large calculation result stored in S3: {file_ref['filename']} ({file_ref['size_bytes']} bytes)")
-                
-                # Return file reference with summary
-                return json.dumps({
-                    "status": "success",
-                    "message": f"Large calculation result stored in S3 ({(file_ref['size_bytes']/1024):.1f}KB). Use read_s3_file_tool to retrieve.",
-                    "file_reference": file_ref,
-                    "summary": f"Calculation completed: {calculation[:100]}..."
-                }, indent=2)
-            except Exception as e:
-                agent_logger.warning(f"Failed to store large calculation result in S3: {str(e)}, returning data directly")
-                # Fall through to return data directly
-        
-        return result_str
+            return "Financial calculation completed. For specific analyses, mention keywords like 'Fama-French', 'correlation', 'cointegration', 'Sharpe ratio', 'VaR', or 'volatility surface'."
             
     except Exception as e:
         return f"Error in financial calculation: {str(e)}"
@@ -1617,180 +1578,42 @@ class S3FileReader:
     
     def read_file(self, s3_key: str, file_type: str = "auto") -> str:
         """
-        Read file content from S3. Handles all common file types: PDF, images, JSON, CSV, HTML, text, etc.
+        Read file content from S3
         
         Args:
             s3_key: The S3 key/path of the file to read
             file_type: The type of file (auto-detect if not specified)
             
         Returns:
-            String with file content and analysis
+            String with file content
         """
         try:
             bucket_name = self.get_bucket_name()
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
             content = response['Body'].read()
+            
+            # Determine content type
             content_type = response.get('ContentType', '')
-            
-            # Auto-detect file type from extension if not provided
-            if file_type == "auto":
-                if s3_key.endswith('.pdf'):
-                    file_type = 'pdf'
-                elif s3_key.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
-                    file_type = 'image'
-                elif s3_key.endswith('.json'):
-                    file_type = 'json'
-                elif s3_key.endswith('.csv'):
-                    file_type = 'csv'
-                elif s3_key.endswith(('.html', '.htm')):
-                    file_type = 'html'
-                elif s3_key.endswith(('.txt', '.md', '.markdown')):
-                    file_type = 'text'
-                elif 'pdf' in content_type:
-                    file_type = 'pdf'
-                elif 'image' in content_type:
-                    file_type = 'image'
-                elif 'json' in content_type:
-                    file_type = 'json'
-                elif 'csv' in content_type:
-                    file_type = 'csv'
-                elif 'html' in content_type:
-                    file_type = 'html'
-                elif 'text' in content_type:
-                    file_type = 'text'
-                else:
-                    file_type = 'auto'
-            
-            # Handle PDF files
-            if file_type == 'pdf' or s3_key.endswith('.pdf'):
-                try:
-                    from planner.agent_tools.pdf_reader import PDFReader
-                    pdf_reader = PDFReader()
-                    result = pdf_reader.read_pdf_from_s3(s3_key)
-                    if result.get('success'):
-                        return f"""PDF File Analysis:
-File: {s3_key}
-Size: {result.get('file_size', 0):,} bytes
-Text Length: {result.get('text_length', 0):,} characters
-
-Extracted Text:
-{result.get('text_content', '')[:5000]}{'...' if len(result.get('text_content', '')) > 5000 else ''}
-
-Analysis:
-{json.dumps(result.get('analysis', {}), indent=2)}"""
-                    else:
-                        return f"Error reading PDF: {result.get('error', 'Unknown error')}"
-                except Exception as e:
-                    logger.warning(f"PDF reader not available, falling back to basic read: {str(e)}")
-                    import base64
-                    return f"PDF file (binary, {len(content):,} bytes). Base64: {base64.b64encode(content[:1000]).decode('utf-8')}... (truncated)"
-            
-            # Handle image files
-            elif file_type == 'image' or s3_key.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
-                try:
-                    import base64
-                    from io import BytesIO
-                    from PIL import Image as PILImage
-                    
-                    # Try to get image metadata
-                    img = PILImage.open(BytesIO(content))
-                    image_format = img.format or 'unknown'
-                    width, height = img.size
-                    mode = img.mode
-                    
-                    # Encode as base64 for reference
-                    image_base64 = base64.b64encode(content).decode('utf-8')
-                    
-                    # Determine MIME type
-                    mime_type = 'image/png'
-                    if s3_key.endswith('.jpg') or s3_key.endswith('.jpeg'):
-                        mime_type = 'image/jpeg'
-                    elif s3_key.endswith('.gif'):
-                        mime_type = 'image/gif'
-                    elif s3_key.endswith('.webp'):
-                        mime_type = 'image/webp'
-                    
-                    return f"""Image File Analysis:
-File: {s3_key}
-Size: {len(content):,} bytes
-Format: {image_format}
-Dimensions: {width} x {height} pixels
-Color Mode: {mode}
-Content Type: {mime_type}
-
-Base64 Data URI (first 200 chars): data:{mime_type};base64,{image_base64[:200]}...
-(Full base64 data available in result)"""
-                except ImportError:
-                    # PIL not available, return basic info
-                    import base64
-                    return f"Image file (binary, {len(content):,} bytes). Base64: {base64.b64encode(content[:500]).decode('utf-8')}... (truncated)"
-                except Exception as e:
-                    logger.warning(f"Error analyzing image: {str(e)}")
-                    import base64
-                    return f"Image file (binary, {len(content):,} bytes). Base64: {base64.b64encode(content[:500]).decode('utf-8')}... (truncated)"
-            
-            # Handle JSON files
-            elif file_type == 'json' or s3_key.endswith('.json') or 'json' in content_type:
+            if 'json' in content_type or file_type == 'json' or s3_key.endswith('.json'):
+                # JSON file
                 try:
                     json_data = json.loads(content.decode('utf-8'))
                     return json.dumps(json_data, indent=2)
                 except json.JSONDecodeError as e:
-                    return f"Error parsing JSON: {str(e)}\nRaw content (first 1000 chars): {content.decode('utf-8', errors='ignore')[:1000]}"
-            
-            # Handle CSV files
-            elif file_type == 'csv' or s3_key.endswith('.csv') or 'csv' in content_type:
-                csv_content = content.decode('utf-8')
-                # Show first 100 lines for large CSVs
-                lines = csv_content.split('\n')
-                if len(lines) > 100:
-                    preview = '\n'.join(lines[:100])
-                    return f"{preview}\n\n... ({len(lines) - 100} more lines)"
-                return csv_content
-            
-            # Handle HTML files
-            elif file_type == 'html' or s3_key.endswith(('.html', '.htm')) or 'html' in content_type:
-                html_content = content.decode('utf-8')
-                # Extract text content (remove tags for readability)
-                import re
-                text_content = re.sub(r'<[^>]+>', ' ', html_content)
-                text_content = ' '.join(text_content.split())
-                return f"""HTML File Content:
-File: {s3_key}
-Size: {len(content):,} bytes
-
-Extracted Text Content:
-{text_content[:2000]}{'...' if len(text_content) > 2000 else ''}
-
-Full HTML (first 5000 chars):
-{html_content[:5000]}{'...' if len(html_content) > 5000 else ''}"""
-            
-            # Handle text files
-            elif file_type == 'text' or s3_key.endswith(('.txt', '.md', '.markdown')) or 'text' in content_type:
-                text_content = content.decode('utf-8')
-                # Show first 5000 chars for large text files
-                if len(text_content) > 5000:
-                    return f"{text_content[:5000]}\n\n... ({len(text_content) - 5000} more characters)"
-                return text_content
-            
-            # Handle other text-based files
+                    return f"Error parsing JSON: {str(e)}\nRaw content: {content.decode('utf-8')}"
+            elif 'csv' in content_type or file_type == 'csv' or s3_key.endswith('.csv'):
+                # CSV file
+                return content.decode('utf-8')
+            elif 'text' in content_type or file_type == 'txt' or s3_key.endswith('.txt'):
+                # Text file
+                return content.decode('utf-8')
             else:
-                # Try to decode as UTF-8
+                # Try to decode as UTF-8, fallback to base64 if it fails
                 try:
-                    text_content = content.decode('utf-8')
-                    # If it's valid UTF-8 and looks like text, return it
-                    if len(text_content) > 0 and not any(ord(c) < 32 and c not in '\n\r\t' for c in text_content[:100]):
-                        if len(text_content) > 5000:
-                            return f"{text_content[:5000]}\n\n... ({len(text_content) - 5000} more characters)"
-                        return text_content
+                    return content.decode('utf-8')
                 except UnicodeDecodeError:
-                    pass
-                
-                # Binary file - return base64
-                import base64
-                base64_content = base64.b64encode(content).decode('utf-8')
-                if len(base64_content) > 1000:
-                    return f"Binary file (size: {len(content):,} bytes)\nBase64 (first 1000 chars): {base64_content[:1000]}...\n(Full base64 available in result)"
-                return f"Binary file (size: {len(content):,} bytes)\nBase64: {base64_content}"
+                    import base64
+                    return f"Binary file content (base64): {base64.b64encode(content).decode('utf-8')}"
                     
         except ClientError as e:
             error_code = e.response['Error']['Code']
@@ -1801,9 +1624,6 @@ Full HTML (first 5000 chars):
             else:
                 return f"S3 error: {str(e)}"
         except Exception as e:
-            logger.error(f"Error reading file: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
             return f"Error reading file: {str(e)}"
     
     def get_file_info(self, s3_key: str) -> Dict[str, Any]:
@@ -1833,25 +1653,7 @@ Full HTML (first 5000 chars):
 
 @tool
 def read_s3_file_tool(s3_key: str, file_type: str = "auto") -> str:
-    """
-    Read and analyze files from S3 storage. Handles all common file types:
-    - PDF files: Extracts text and provides analysis
-    - Image files (PNG, JPG, GIF, WebP): Provides metadata and base64 data
-    - JSON files: Parses and formats JSON
-    - CSV files: Returns CSV content
-    - HTML files: Extracts text and shows HTML structure
-    - Text files (TXT, MD): Returns text content
-    - Other files: Returns base64-encoded binary content
-    
-    Use this tool during checkpoint validation to inspect intermediate results.
-    When you see an uploaded file context with an S3 key, use this tool to read the file content.
-    Pass the S3 key exactly as provided in the context.
-    
-    Args:
-        s3_key: The S3 key/path of the file to read
-        file_type: File type hint ("auto", "pdf", "image", "json", "csv", "html", "text")
-                   Auto-detection works for most files based on extension
-    """
+    """Read uploaded files from S3 storage. When you see an uploaded file context with an S3 key, use this tool to read the file content. Pass the S3 key exactly as provided in the context."""
     try:
         agent_logger.info(f"Reading S3 file: {s3_key}")
         if not s3_key:
@@ -1901,53 +1703,10 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
         if not filename.endswith(f'.{file_type}'):
             filename = f"{filename}.{file_type}"
         
-        # Format metrics_table if it's a raw JSON array (for PDF reports)
-        if file_type == 'pdf' and content:
-            try:
-                import json
-                import re
-                # Check if content contains a raw JSON array (metrics_table)
-                # Pattern: [["Metric", "Portfolio", "Benchmark"], ["CAGR", "29.71%", "13.09%"], ...]
-                # More flexible pattern that handles nested arrays
-                json_array_patterns = [
-                    r'\[\["[^"]+",\s*"[^"]+",\s*"[^"]+"\](?:,\s*\["[^"]+",\s*"[^"]+",\s*"[^"]+"\])*\]',  # Full array
-                    r'\[\[[^\]]+\](?:,\s*\[[^\]]+\])+\]',  # More general nested array
-                ]
-                
-                for pattern in json_array_patterns:
-                    json_array_match = re.search(pattern, content)
-                    if json_array_match:
-                        try:
-                            metrics_array = json.loads(json_array_match.group(0))
-                            if isinstance(metrics_array, list) and len(metrics_array) > 0 and isinstance(metrics_array[0], list):
-                                # Format as markdown table
-                                table_lines = []
-                                for row in metrics_array:
-                                    if isinstance(row, list):
-                                        # Escape pipe characters in cells
-                                        escaped_cells = [str(cell).replace('|', '\\|') for cell in row]
-                                        table_lines.append('| ' + ' | '.join(escaped_cells) + ' |')
-                                
-                                # Replace the JSON array with formatted table
-                                if len(table_lines) > 0:
-                                    # Add header separator after first row
-                                    header_sep = '| ' + ' | '.join(['---'] * len(metrics_array[0])) + ' |'
-                                    formatted_table = table_lines[0] + '\n' + header_sep + '\n' + '\n'.join(table_lines[1:])
-                                    
-                                    content = content.replace(json_array_match.group(0), formatted_table)
-                                    logger.info(f"Formatted metrics_table as markdown table in PDF content ({len(metrics_array)} rows)")
-                                    break  # Only replace first match
-                        except (json.JSONDecodeError, ValueError) as e:
-                            logger.debug(f"Could not parse JSON array: {str(e)}")
-                            continue
-            except Exception as e:
-                logger.warning(f"Error formatting metrics_table: {str(e)}")
-        
         # Decompress content if it's compressed (e.g., from web scraper tool)
         # This handles compressed data from tools like fetch_web_content_tool
-        original_size = len(content) if isinstance(content, str) else len(str(content))
+        original_size = len(content)
         is_compressed = False
-        is_binary = False
         
         try:
             import json
@@ -1978,34 +1737,9 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
         except Exception as decomp_error:
             logger.warning(f"Decompression check failed, using content as-is: {str(decomp_error)}")
         
-        # Generate PDF or HTML if file_type matches (after decompression)
-        is_binary = False
-        if file_type.lower() == 'pdf':
-            try:
-                pdf_bytes = generate_pdf_content(content, filename)
-                # Content is now PDF bytes
-                content = pdf_bytes
-                # Mark that content is binary for upload
-                is_binary = True
-                logger.info(f"Generated PDF file: {filename} ({len(pdf_bytes)} bytes)")
-            except Exception as pdf_error:
-                logger.error(f"Error generating PDF: {str(pdf_error)}")
-                import traceback
-                logger.error(traceback.format_exc())
-                # Fallback to text file with .pdf extension (not ideal but better than failing)
-                logger.warning(f"Falling back to text content for PDF file")
-                is_binary = False
-        # Note: HTML generation is now handled by planner/agent_tools/ (generate_html_report_tool)
-        # This tool only handles txt, pdf, and markdown files
-        
         # Use unified file upload function
         try:
             from lambda_invocation import upload_file_and_notify
-            
-            # Set content type for PDF
-            content_type = None
-            if file_type.lower() == 'pdf' and is_binary:
-                content_type = 'application/pdf'
             
             result = upload_file_and_notify(
                 content=content,
@@ -2013,7 +1747,6 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
                 user_id=user_id,
                 session_id=session_id,
                 file_type=file_type,
-                content_type=content_type,
                 folder="agent-files",
                 metadata={
                     'generated_by': 'agent',
@@ -2140,707 +1873,6 @@ def generate_excel_content(template_type: str, content: str, include_charts: boo
         fallback_content = f"# {template_type.upper().replace('_', ' ')} TEMPLATE\n# Generated by Cosine Financial Analysis Agent\n\n{content}"
         return fallback_content.encode('utf-8')
 
-def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
-    """
-    Generate PDF content from text/markdown content.
-    Creates a proper PDF file that can be opened by PDF readers.
-    
-    Args:
-        content: Text content to convert to PDF
-        filename: Filename (for metadata)
-        
-    Returns:
-        PDF file as bytes
-    """
-    try:
-        # Try using reportlab (preferred for Lambda)
-        try:
-            from reportlab.lib.pagesizes import letter, A4
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.units import inch
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image
-            from reportlab.lib.enums import TA_LEFT, TA_CENTER
-            from io import BytesIO
-            import boto3
-            import re
-            import json
-            import os
-            
-            # Create PDF in memory
-            buffer = BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
-            
-            # Build PDF content
-            story = []
-            styles = getSampleStyleSheet()
-            
-            # Title style
-            title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=styles['Heading1'],
-                fontSize=18,
-                textColor='#1a1a1a',
-                spaceAfter=12,
-                alignment=TA_CENTER
-            )
-            
-            # Heading style
-            heading_style = ParagraphStyle(
-                'CustomHeading',
-                parent=styles['Heading2'],
-                fontSize=14,
-                textColor='#2c3e50',
-                spaceAfter=8,
-                spaceBefore=12
-            )
-            
-            # Normal text style
-            normal_style = ParagraphStyle(
-                'CustomNormal',
-                parent=styles['Normal'],
-                fontSize=10,
-                textColor='#333333',
-                spaceAfter=6,
-                leading=12
-            )
-            
-            # Helper function to download image from S3 and embed in PDF
-            def embed_image_from_s3(s3_key: str, max_width: float = None, max_height: float = None):
-                """Download image from S3 and return Image element for PDF"""
-                try:
-                    # Set defaults using inch (now available in scope)
-                    if max_width is None:
-                        max_width = 6 * inch
-                    if max_height is None:
-                        max_height = 4 * inch
-                    
-                    s3_client = boto3.client('s3')
-                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
-                    
-                    if not bucket_name:
-                        logger.warning(f"Cannot embed image: bucket name not configured")
-                        return None
-                    
-                    # Download image from S3
-                    response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
-                    image_data = response['Body'].read()
-                    
-                    # Create Image from bytes
-                    img_buffer = BytesIO(image_data)
-                    img = Image(img_buffer, width=max_width, height=max_height, kind='proportional')
-                    logger.info(f"✅ Successfully embedded image from S3: {s3_key} ({len(image_data)} bytes)")
-                    return img
-                except Exception as e:
-                    logger.error(f"❌ Error embedding image from S3 {s3_key}: {str(e)}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    return None
-            
-            # Helper function to resolve S3 JSON references in content
-            def resolve_json_references(content_text: str) -> str:
-                """
-                Detect S3 keys pointing to JSON files in content and replace with actual values.
-                Handles patterns like:
-                - CAGR: users/.../data-files/...json
-                - Volatility: users/.../data-files/...json
-                """
-                from tools.json_parser_helper import JSONParserHelper
-                
-                # Pattern to match S3 keys ending in .json (more flexible to handle line breaks)
-                s3_json_pattern = r'users/[^/]+/sessions/[^/]+/data-files/[^\s"\'<>\)\n]+\.json'
-                
-                # Map metric names to their field paths in the JSON (case-insensitive matching)
-                metric_field_map = {
-                    'cagr': 'portfolio.cagr',
-                    'volatility': 'portfolio.volatility',
-                    'max drawdown': 'portfolio.max_drawdown',
-                    'max_drawdown': 'portfolio.max_drawdown',
-                    'sharpe ratio': 'portfolio.sharpe_ratio',
-                    'sharpe_ratio': 'portfolio.sharpe_ratio',
-                    'rolling 12-month returns': 'portfolio.rolling_12m_returns',
-                    'rolling_12m_returns': 'portfolio.rolling_12m_returns',
-                    'total return': 'portfolio.total_return',
-                    'total_return': 'portfolio.total_return',
-                }
-                
-                # Split content into lines for better context detection
-                lines = content_text.split('\n')
-                resolved_lines = []
-                
-                for line in lines:
-                    # Find all S3 JSON references in this line
-                    matches = list(re.finditer(s3_json_pattern, line))
-                    if not matches:
-                        resolved_lines.append(line)
-                        continue
-                    
-                    # Process each match in reverse order to preserve positions
-                    resolved_line = line
-                    for match in reversed(matches):
-                        s3_key = match.group(0)
-                        try:
-                            # Read JSON from S3
-                            data = JSONParserHelper.parse_json_data(s3_key)
-                            
-                            # Use the entire line as context (case-insensitive)
-                            line_context_lower = line.lower()
-                            
-                            # Find which metric this line refers to
-                            extracted_value = None
-                            for metric_name, field_path in metric_field_map.items():
-                                if metric_name in line_context_lower:
-                                    extracted_value = JSONParserHelper.extract_nested_field(data, field_path)
-                                    if extracted_value is not None:
-                                        break
-                            
-                            # If no specific metric found, try common fields
-                            if extracted_value is None:
-                                # Try direct portfolio fields
-                                if 'portfolio' in data:
-                                    portfolio = data.get('portfolio', {})
-                                    if isinstance(portfolio, dict):
-                                        # Try common fields in order
-                                        for field in ['cagr', 'volatility', 'max_drawdown', 'sharpe_ratio', 'total_return']:
-                                            if field in portfolio:
-                                                extracted_value = portfolio[field]
-                                                break
-                            
-                            # Format the value
-                            if extracted_value is not None:
-                                if isinstance(extracted_value, (int, float)):
-                                    if 'ratio' in line_context_lower or 'sharpe' in line_context_lower:
-                                        replacement = f"{extracted_value:.2f}"
-                                    elif 'drawdown' in line_context_lower:
-                                        # Drawdown is typically negative, show as percentage
-                                        replacement = f"{extracted_value:.2%}"
-                                    elif 'return' in line_context_lower or 'cagr' in line_context_lower:
-                                        replacement = f"{extracted_value:.2%}"
-                                    else:
-                                        replacement = f"{extracted_value:.2f}"
-                                else:
-                                    replacement = str(extracted_value)
-                                
-                                # Replace the S3 key with the actual value
-                                resolved_line = resolved_line.replace(s3_key, replacement)
-                                logger.info(f"Resolved {s3_key} to {replacement} based on context: {line[:50]}")
-                            else:
-                                logger.warning(f"Could not extract metric value from {s3_key} in line: {line[:100]}")
-                                resolved_line = resolved_line.replace(s3_key, "[Value not available]")
-                        except Exception as e:
-                            logger.error(f"Error resolving JSON reference {s3_key}: {str(e)}")
-                            resolved_line = resolved_line.replace(s3_key, "[Error reading data]")
-                    
-                    resolved_lines.append(resolved_line)
-                
-                return '\n'.join(resolved_lines)
-            
-            # Helper function to format raw decimal values in content
-            def format_decimal_values(content_text: str) -> str:
-                """
-                Format raw decimal values in content based on their context.
-                Handles cases where orchestrator has already extracted values but they're not formatted.
-                
-                Examples:
-                - CAGR: 0.2977067600527421 → 29.77%
-                - Volatility: 0.3058089933708457 → 30.58%
-                - Max Drawdown: -0.35553266553567237 → -35.55%
-                - Sharpe Ratio: 0.9420121008306779 → 0.94
-                - Rolling 12-month returns: {...} → Summary text
-                """
-                lines = content_text.split('\n')
-                formatted_lines = []
-                i = 0
-                
-                while i < len(lines):
-                    line = lines[i]
-                    line_lower = line.lower()
-                    
-                    # Pattern to match decimal numbers (including negative)
-                    decimal_pattern = r'(-?\d+\.\d+)'
-                    
-                    # Check if this line contains a metric label
-                    # Handle markdown formatting like **CAGR:** or **Volatility:**
-                    if 'cagr' in line_lower or 'compound annual growth rate' in line_lower:
-                        # Format as percentage - match decimal after colon or equals
-                        line = re.sub(r':\s*(-?\d+\.\d+)', lambda m: f": {float(m.group(1)):.2%}", line)
-                        line = re.sub(r'=\s*(-?\d+\.\d+)', lambda m: f"= {float(m.group(1)):.2%}", line)
-                        # Also handle standalone decimals
-                        line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2%}", line)
-                    elif 'volatility' in line_lower:
-                        # Format as percentage
-                        line = re.sub(r':\s*(-?\d+\.\d+)', lambda m: f": {float(m.group(1)):.2%}", line)
-                        line = re.sub(r'=\s*(-?\d+\.\d+)', lambda m: f"= {float(m.group(1)):.2%}", line)
-                        line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2%}", line)
-                    elif 'drawdown' in line_lower and 'max' in line_lower:
-                        # Format as percentage (already negative if needed)
-                        line = re.sub(r':\s*(-?\d+\.\d+)', lambda m: f": {float(m.group(1)):.2%}", line)
-                        line = re.sub(r'=\s*(-?\d+\.\d+)', lambda m: f"= {float(m.group(1)):.2%}", line)
-                        line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2%}", line)
-                    elif 'sharpe' in line_lower and 'ratio' in line_lower:
-                        # Format as decimal (2 decimal places)
-                        line = re.sub(r':\s*(-?\d+\.\d+)', lambda m: f": {float(m.group(1)):.2f}", line)
-                        line = re.sub(r'=\s*(-?\d+\.\d+)', lambda m: f"= {float(m.group(1)):.2f}", line)
-                        line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2f}", line)
-                    elif 'rolling' in line_lower and ('12' in line_lower or 'month' in line_lower) and 'return' in line_lower:
-                        # Check if this line or subsequent lines contain a JSON object (rolling returns data)
-                        # First, check if line is very long (likely contains entire JSON)
-                        # If line is extremely long (> 10000 chars), just replace with summary to avoid parsing issues
-                        if len(line) > 10000 and '{' in line and '"dates"' in line:
-                            json_start = line.find('{')
-                            if json_start != -1:
-                                # Too long to parse efficiently, just replace with summary
-                                line = line[:json_start] + "(Rolling 12-month returns data - see CSV for detailed time series)"
-                        elif len(line) > 500 and '{' in line and '"dates"' in line:
-                            # Try to extract and parse JSON
-                            json_start = line.find('{')
-                            if json_start != -1:
-                                # Try to find the matching closing brace
-                                brace_count = 0
-                                json_end = -1
-                                for j in range(json_start, len(line)):
-                                    if line[j] == '{':
-                                        brace_count += 1
-                                    elif line[j] == '}':
-                                        brace_count -= 1
-                                        if brace_count == 0:
-                                            json_end = j + 1
-                                            break
-                                
-                                if json_end > json_start:
-                                    try:
-                                        json_str = line[json_start:json_end]
-                                        rolling_data = json.loads(json_str)
-                                        if isinstance(rolling_data, dict) and 'dates' in rolling_data:
-                                            # Replace with summary
-                                            num_points = len(rolling_data.get('dates', []))
-                                            if 'returns' in rolling_data:
-                                                returns = rolling_data['returns']
-                                                if isinstance(returns, list) and len(returns) > 0:
-                                                    avg_return = sum(returns) / len(returns)
-                                                    min_return = min(returns)
-                                                    max_return = max(returns)
-                                                    summary = f"Average: {avg_return:.2%}, Range: {min_return:.2%} to {max_return:.2%} ({num_points} data points)"
-                                                    line = line[:json_start] + summary
-                                                else:
-                                                    line = line[:json_start] + f"({num_points} data points available)"
-                                            else:
-                                                line = line[:json_start] + f"({num_points} data points available)"
-                                    except (json.JSONDecodeError, ValueError):
-                                        # If parsing fails, replace with simple note
-                                        line = line[:json_start] + "(Rolling 12-month returns data - see CSV for details)"
-                                else:
-                                    # JSON spans multiple lines - collect them
-                                    collected_lines = [line]
-                                    brace_count = line.count('{') - line.count('}')
-                                    j = i + 1
-                                    while j < len(lines) and brace_count > 0:
-                                        collected_lines.append(lines[j])
-                                        brace_count += lines[j].count('{') - lines[j].count('}')
-                                        j += 1
-                                    
-                                    # Try to parse the collected JSON
-                                    full_json = '\n'.join(collected_lines)
-                                    json_start = full_json.find('{')
-                                    if json_start != -1:
-                                        try:
-                                            # Find matching closing brace
-                                            brace_count = 0
-                                            json_end = -1
-                                            for k in range(json_start, len(full_json)):
-                                                if full_json[k] == '{':
-                                                    brace_count += 1
-                                                elif full_json[k] == '}':
-                                                    brace_count -= 1
-                                                    if brace_count == 0:
-                                                        json_end = k + 1
-                                                        break
-                                            
-                                            if json_end > json_start:
-                                                json_str = full_json[json_start:json_end]
-                                                rolling_data = json.loads(json_str)
-                                                if isinstance(rolling_data, dict) and 'dates' in rolling_data:
-                                                    num_points = len(rolling_data.get('dates', []))
-                                                    summary = f"(Rolling 12-month returns: {num_points} data points - see CSV for details)"
-                                                    # Replace the first line and skip the rest
-                                                    line = line[:line.find('{')] + summary
-                                                    i = j - 1  # Skip processed lines
-                                        except (json.JSONDecodeError, ValueError):
-                                            # If parsing fails, replace with simple note
-                                            line = line[:line.find('{')] + "(Rolling 12-month returns data - see CSV for details)"
-                                            # Skip lines that are part of the JSON
-                                            while i + 1 < len(lines) and ('"' in lines[i+1] or '}' in lines[i+1] or ']' in lines[i+1]):
-                                                i += 1
-                                                if lines[i].strip().endswith('}'):
-                                                    break
-                    else:
-                        # For other numeric values, try to detect if they should be percentages
-                        # If the value is between -1 and 1 and not already formatted, it might be a percentage
-                        matches = list(re.finditer(decimal_pattern, line))
-                        for match in matches:
-                            value = float(match.group(1))
-                            # If it's a small decimal (likely a percentage), format it
-                            if -1 <= value <= 1 and abs(value) < 0.5:
-                                # Check context - if it's near words like "return", "rate", "growth", format as percentage
-                                context = line[max(0, match.start()-20):min(len(line), match.end()+20)].lower()
-                                if any(word in context for word in ['return', 'rate', 'growth', 'yield', 'cagr']):
-                                    line = line.replace(match.group(1), f"{value:.2%}")
-                    
-                    formatted_lines.append(line)
-                    i += 1
-                
-                return '\n'.join(formatted_lines)
-            
-            # Helper function to remove template syntax (Handlebars/Mustache)
-            def remove_template_syntax(content_text: str) -> str:
-                """
-                Remove all Handlebars/Mustache template syntax from content.
-                Agents should never emit templates - this is a safety net.
-                
-                Removes:
-                - {{#each ...}} ... {{/each}}
-                - {{#if ...}} ... {{/if}}
-                - {{@index}}, {{this}}, {{../field}}
-                - Any {{...}} that looks like template logic
-                """
-                import re
-                
-                # Remove block helpers: {{#each}}, {{#if}}, {{#unless}}, etc.
-                # Match: {{#each ...}} ... {{/each}}
-                content_text = re.sub(r'\{\{#each[^}]+\}\}.*?\{\{/each\}\}', '', content_text, flags=re.DOTALL)
-                content_text = re.sub(r'\{\{#if[^}]+\}\}.*?\{\{/if\}\}', '', content_text, flags=re.DOTALL)
-                content_text = re.sub(r'\{\{#unless[^}]+\}\}.*?\{\{/unless\}\}', '', content_text, flags=re.DOTALL)
-                content_text = re.sub(r'\{\{#with[^}]+\}\}.*?\{\{/with\}\}', '', content_text, flags=re.DOTALL)
-                
-                # Remove template variables that look like loops/conditionals
-                # {{@index}}, {{this}}, {{../field}}, {{@key}}, etc.
-                content_text = re.sub(r'\{\{@[^}]+\}\}', '', content_text)
-                content_text = re.sub(r'\{\{this\}\}', '', content_text)
-                content_text = re.sub(r'\{\{\.\.\/[^}]+\}\}', '', content_text)
-                
-                # Remove any remaining template syntax that contains step references with array notation
-                # e.g., {{step_2.result.portfolio.rolling_12m_returns.returns[@index]}}
-                content_text = re.sub(r'\{\{[^}]*\[@[^\]]+\][^}]*\}\}', '', content_text)
-                
-                # Remove lines that are entirely template syntax
-                lines = content_text.split('\n')
-                cleaned_lines = []
-                for line in lines:
-                    line_stripped = line.strip()
-                    # Skip lines that are only template syntax
-                    if re.match(r'^\{\{[#/]', line_stripped) or re.match(r'^\{\{.*\}\}$', line_stripped):
-                        continue
-                    # Remove template syntax from within lines but keep the line
-                    cleaned_line = re.sub(r'\{\{[^}]+\}\}', '', line)
-                    if cleaned_line.strip():  # Only add non-empty lines
-                        cleaned_lines.append(cleaned_line)
-                
-                return '\n'.join(cleaned_lines)
-            
-            # Resolve JSON references in content before processing
-            content = resolve_json_references(content)
-            
-            # Format raw decimal values that were extracted by orchestrator
-            content = format_decimal_values(content)
-            
-            # Remove any template syntax (safety net - agents shouldn't emit templates)
-            content = remove_template_syntax(content)
-            
-            # First, try to parse entire content as JSON to extract chart references
-            chart_s3_keys = []
-            try:
-                # Try to parse as JSON
-                content_json = json.loads(content)
-                if isinstance(content_json, dict) and 's3_key' in content_json:
-                    chart_s3_keys.append(content_json['s3_key'])
-                    logger.info(f"Found chart S3 key in JSON content: {content_json['s3_key']}")
-                elif isinstance(content_json, list):
-                    # Check if any item in the list has s3_key
-                    for item in content_json:
-                        if isinstance(item, dict) and 's3_key' in item:
-                            chart_s3_keys.append(item['s3_key'])
-                            logger.info(f"Found chart S3 key in JSON list: {item['s3_key']}")
-            except (json.JSONDecodeError, ValueError):
-                # Not JSON, try to find JSON objects embedded in the content string
-                # Look for chart result JSON (e.g., from generate_chart_tool)
-                json_pattern = r'\{"message":\s*"[^"]*",\s*"s3_key":\s*"([^"]+)"'
-                matches = re.findall(json_pattern, content)
-                for match in matches:
-                    if match.endswith('.png'):
-                        chart_s3_keys.append(match)
-                        logger.info(f"Found chart S3 key in embedded JSON: {match}")
-                
-                # Also look for simple JSON objects with s3_key
-                simple_json_pattern = r'\{"s3_key":\s*"([^"]+)"'
-                simple_matches = re.findall(simple_json_pattern, content)
-                for match in simple_matches:
-                    if match.endswith('.png') and match not in chart_s3_keys:
-                        chart_s3_keys.append(match)
-                        logger.info(f"Found chart S3 key in simple JSON: {match}")
-            
-            # Parse content and convert to PDF elements
-            lines = content.split('\n')
-            current_section = []
-            s3_client = None
-            
-            # If we found chart S3 keys from JSON parsing, embed them first
-            for s3_key in chart_s3_keys:
-                if s3_key.endswith('.png'):
-                    logger.info(f"Embedding chart image from JSON: {s3_key}")
-                    img = embed_image_from_s3(s3_key)
-                    if img:
-                        story.append(Spacer(1, 0.2*inch))
-                        story.append(img)
-                        story.append(Spacer(1, 0.2*inch))
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    if current_section:
-                        story.extend(current_section)
-                        current_section = []
-                    story.append(Spacer(1, 0.1*inch))
-                    continue
-                
-                # Check for S3 key references (format: users/.../agent-files/...png)
-                # Also check for markdown image syntax: ![Chart](s3_key)
-                # Note: S3 keys can contain spaces, so we need to match until the closing parenthesis
-                markdown_img_match = re.search(r'!\[.*?\]\((users/[^)]+\.png)\)', line)
-                if markdown_img_match:
-                    s3_key = markdown_img_match.group(1)
-                    logger.info(f"Found markdown chart image reference: {s3_key}")
-                    img = embed_image_from_s3(s3_key)
-                    if img:
-                        if current_section:
-                            story.extend(current_section)
-                            current_section = []
-                        story.append(Spacer(1, 0.2*inch))
-                        story.append(img)
-                        story.append(Spacer(1, 0.2*inch))
-                        # Remove the markdown image syntax from the line (handle spaces in S3 keys)
-                        line = re.sub(r'!\[.*?\]\(users/[^)]+\.png\)', '[Chart embedded above]', line)
-                
-                # S3 keys can contain spaces, so match from users/ to .png (allowing spaces)
-                # Pattern: users/.../sessions/.../agent-files/...png (where ... can contain spaces)
-                s3_key_match = re.search(r'users/[^/]+/sessions/[^/]+/agent-files/[^"\'<>\)\n]+\.png', line)
-                if s3_key_match:
-                    s3_key = s3_key_match.group(0)
-                    logger.info(f"Found chart image reference in content: {s3_key}")
-                    # Embed the image
-                    img = embed_image_from_s3(s3_key)
-                    if img:
-                        if current_section:
-                            story.extend(current_section)
-                            current_section = []
-                        story.append(Spacer(1, 0.2*inch))
-                        story.append(img)
-                        story.append(Spacer(1, 0.2*inch))
-                        # Remove the S3 key from the line and continue processing the rest
-                        line = re.sub(r'users/[^/]+/sessions/[^/]+/agent-files/[^"\'<>\)\n]+\.png', '[Chart embedded above]', line)
-                
-                # Check for JSON chart references (format: {"s3_key": "users/.../agent-files/...png"})
-                # Also handle full chart result JSON: {"message": "...", "s3_key": "...", "filename": "...", "file_type": "png"}
-                json_match = re.search(r'\{"(?:message|s3_key)":\s*"[^"]*",\s*"s3_key":\s*"([^"]+)"', line)
-                if not json_match:
-                    # Try simpler pattern
-                    json_match = re.search(r'\{"s3_key":\s*"([^"]+)"', line)
-                if json_match:
-                    s3_key = json_match.group(1)
-                    # Only process if it's an image file
-                    if s3_key.endswith(('.png', '.jpg', '.jpeg', '.gif')):
-                        logger.info(f"Found JSON chart reference: {s3_key}")
-                        img = embed_image_from_s3(s3_key)
-                        if img:
-                            if current_section:
-                                story.extend(current_section)
-                                current_section = []
-                            story.append(Spacer(1, 0.2*inch))
-                            story.append(img)
-                            story.append(Spacer(1, 0.2*inch))
-                            # Remove the JSON reference from the line (handle both full and simple JSON)
-                            line = re.sub(r'\{"(?:message|s3_key)":\s*"[^"]*",\s*"s3_key":\s*"[^"]+"[^}]*\}', '[Chart embedded above]', line)
-                            line = re.sub(r'\{"s3_key":\s*"[^"]+"[^}]*\}', '[Chart embedded above]', line)
-                
-                # Detect headings (markdown style or plain text)
-                if line.startswith('# '):
-                    # H1
-                    if current_section:
-                        story.extend(current_section)
-                        current_section = []
-                    story.append(Paragraph(line[2:], title_style))
-                    story.append(Spacer(1, 0.2*inch))
-                elif line.startswith('## '):
-                    # H2
-                    if current_section:
-                        story.extend(current_section)
-                        current_section = []
-                    story.append(Paragraph(line[3:], heading_style))
-                    story.append(Spacer(1, 0.15*inch))
-                elif line.startswith('### '):
-                    # H3
-                    if current_section:
-                        story.extend(current_section)
-                        current_section = []
-                    story.append(Paragraph(line[4:], heading_style))
-                    story.append(Spacer(1, 0.1*inch))
-                elif line.startswith('|') and '|' in line[1:]:
-                    # Markdown table row - format properly
-                    cells = [cell.strip() for cell in line.split('|')[1:-1]]
-                    if cells and cells[0] and not cells[0].startswith('---'):
-                        # Regular table row
-                        table_text = ' | '.join(cells)
-                        current_section.append(Paragraph(table_text, normal_style))
-                    elif cells and cells[0] and cells[0].startswith('---'):
-                        # Table separator row - skip it
-                        continue
-                elif line.startswith('- ') or line.startswith('* '):
-                    # Bullet point
-                    bullet_text = line[2:].strip()
-                    current_section.append(Paragraph(f"• {bullet_text}", normal_style))
-                else:
-                    # Regular paragraph
-                    # Escape HTML entities and handle basic formatting
-                    para_text = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                    current_section.append(Paragraph(para_text, normal_style))
-            
-            # Add remaining content
-            if current_section:
-                story.extend(current_section)
-            
-            # Build PDF
-            doc.build(story)
-            
-            # Get PDF bytes
-            pdf_bytes = buffer.getvalue()
-            buffer.close()
-            
-            logger.info(f"Generated PDF: {len(pdf_bytes)} bytes")
-            return pdf_bytes
-            
-        except ImportError:
-            # reportlab not available, try fpdf
-            logger.warning("reportlab not available, trying fpdf")
-            try:
-                from fpdf import FPDF
-                
-                pdf = FPDF()
-                pdf.set_auto_page_break(auto=True, margin=15)
-                pdf.add_page()
-                pdf.set_font("Arial", size=10)
-                
-                # Split content into lines and add to PDF
-                lines = content.split('\n')
-                for line in lines:
-                    # Remove markdown formatting
-                    line = line.replace('#', '').replace('*', '').replace('|', ' ')
-                    line = line.strip()
-                    if line:
-                        # Handle long lines by wrapping
-                        if len(line) > 80:
-                            # Simple word wrap
-                            words = line.split()
-                            current_line = ""
-                            for word in words:
-                                if len(current_line + word) < 80:
-                                    current_line += word + " "
-                                else:
-                                    if current_line:
-                                        pdf.cell(0, 5, current_line, ln=1)
-                                    current_line = word + " "
-                            if current_line:
-                                pdf.cell(0, 5, current_line, ln=1)
-                        else:
-                            pdf.cell(0, 5, line, ln=1)
-                
-                pdf_bytes = pdf.output(dest='S').encode('latin-1')
-                logger.info(f"Generated PDF with fpdf: {len(pdf_bytes)} bytes")
-                return pdf_bytes
-                
-            except ImportError:
-                # Neither library available - create minimal PDF manually
-                logger.warning("Neither reportlab nor fpdf available, creating minimal PDF")
-                # Create a minimal valid PDF structure
-                # Escape content for PDF
-                escaped_content = content[:500].replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
-                
-                pdf_content = f"""%PDF-1.4
-1 0 obj
-<<
-/Type /Catalog
-/Pages 2 0 R
->>
-endobj
-2 0 obj
-<<
-/Type /Pages
-/Kids [3 0 R]
-/Count 1
->>
-endobj
-3 0 obj
-<<
-/Type /Page
-/Parent 2 0 R
-/MediaBox [0 0 612 792]
-/Contents 4 0 R
-/Resources <<
-/Font <<
-/F1 <<
-/Type /Font
-/Subtype /Type1
-/BaseFont /Helvetica
->>
->>
->>
->>
-endobj
-4 0 obj
-<<
-/Length {len(escaped_content) + 100}
->>
-stream
-BT
-/F1 12 Tf
-100 700 Td
-({escaped_content}) Tj
-ET
-endstream
-endobj
-xref
-0 5
-0000000000 65535 f
-0000000009 00000 n
-0000000058 00000 n
-0000000115 00000 n
-0000000277 00000 n
-trailer
-<<
-/Size 5
-/Root 1 0 R
->>
-startxref
-{400 + len(escaped_content)}
-%%EOF"""
-                return pdf_content.encode('utf-8')
-                
-    except Exception as e:
-        logger.error(f"Error in generate_pdf_content: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        # Return minimal PDF as fallback
-        escaped_content = content[:100].replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
-        minimal_pdf = f"""%PDF-1.4
-1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
-2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
-3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>>>>>>>endobj
-4 0 obj<</Length 50>>stream
-BT/F1 12 Tf 100 700 Td({escaped_content})Tj ET
-endstream endobj
-xref 0 5
-trailer<</Size 5/Root 1 0 R>>
-startxref 200
-%%EOF"""
-        return minimal_pdf.encode('utf-8')
-
 def generate_financial_model_content(data):
     """Generate content for financial model template"""
     lines = []
@@ -2945,121 +1977,9 @@ def generate_dcf_model_content(data):
     return lines
 
 def generate_portfolio_analysis_content(data):
-    """Generate content for portfolio analysis template using actual metrics data"""
+    """Generate content for portfolio analysis template"""
     lines = []
     
-    # Try to parse data as JSON if it's a string
-    if isinstance(data, str):
-        try:
-            data = json.loads(data)
-        except:
-            # If not JSON, try to extract metrics from text
-            pass
-    
-    # Handle case where data is directly the metrics_table array
-    if isinstance(data, list):
-        # Check if it looks like a metrics_table (array of arrays)
-        if len(data) > 0 and isinstance(data[0], list):
-            # This is a metrics_table array - use it directly
-            for row in data:
-                if isinstance(row, list):
-                    lines.append(','.join(str(cell) for cell in row))
-                else:
-                    lines.append(str(row))
-            return lines
-    
-    # Check if data contains portfolio analysis metrics
-    if isinstance(data, dict):
-        # Check for portfolio analysis tool output structure
-        if 'portfolio' in data and isinstance(data['portfolio'], dict):
-            portfolio_metrics = data['portfolio']
-            benchmark_metrics = data.get('benchmark', {})
-            metrics_table = data.get('metrics_table', [])
-            time_series = data.get('time_series', {})
-            rolling_returns = portfolio_metrics.get('rolling_12m_returns', {})
-            
-            # Portfolio Summary Section
-            lines.append("# PORTFOLIO ANALYSIS")
-            lines.append("# Generated by Cosine Financial Analysis Agent")
-            lines.append("")
-            lines.append("# PORTFOLIO SUMMARY")
-            lines.append("Metric,Portfolio,Benchmark")
-            
-            # Add metrics from portfolio analysis
-            cagr = portfolio_metrics.get('cagr', 0) * 100
-            volatility = portfolio_metrics.get('volatility', 0) * 100
-            max_drawdown = portfolio_metrics.get('max_drawdown', 0) * 100
-            sharpe_ratio = portfolio_metrics.get('sharpe_ratio', 0)
-            total_return = portfolio_metrics.get('total_return', 0) * 100
-            
-            bench_cagr = benchmark_metrics.get('cagr', 0) * 100 if benchmark_metrics else 0
-            bench_volatility = benchmark_metrics.get('volatility', 0) * 100 if benchmark_metrics else 0
-            bench_max_drawdown = benchmark_metrics.get('max_drawdown', 0) * 100 if benchmark_metrics else 0
-            bench_sharpe = benchmark_metrics.get('sharpe_ratio', 0) if benchmark_metrics else 0
-            bench_total_return = benchmark_metrics.get('total_return', 0) * 100 if benchmark_metrics else 0
-            
-            lines.append(f"CAGR,{cagr:.2f}%,{bench_cagr:.2f}%")
-            lines.append(f"Volatility,{volatility:.2f}%,{bench_volatility:.2f}%")
-            lines.append(f"Max Drawdown,{max_drawdown:.2f}%,{bench_max_drawdown:.2f}%")
-            lines.append(f"Sharpe Ratio,{sharpe_ratio:.2f},{bench_sharpe:.2f}")
-            lines.append(f"Total Return,{total_return:.2f}%,{bench_total_return:.2f}%")
-            
-            # Portfolio Values Over Time
-            if time_series and 'dates' in time_series and 'portfolio_values' in time_series:
-                lines.append("")
-                lines.append("# PORTFOLIO VALUES OVER TIME")
-                lines.append("Date,Portfolio Value,Benchmark Value")
-                
-                dates = time_series['dates']
-                portfolio_values = time_series['portfolio_values']
-                benchmark_values = time_series.get('benchmark_values', [])
-                
-                # Include all dates or sample if too many
-                max_rows = 1000
-                step = max(1, len(dates) // max_rows) if len(dates) > max_rows else 1
-                
-                for i in range(0, len(dates), step):
-                    date = dates[i]
-                    port_val = portfolio_values[i] if i < len(portfolio_values) else ''
-                    bench_val = benchmark_values[i] if i < len(benchmark_values) and benchmark_values[i] is not None else ''
-                    lines.append(f"{date},{port_val},{bench_val}")
-            
-            # Rolling 12-Month Returns
-            if rolling_returns and 'dates' in rolling_returns and 'returns' in rolling_returns:
-                lines.append("")
-                lines.append("# ROLLING 12-MONTH RETURNS")
-                lines.append("Date,12-Month Return")
-                
-                roll_dates = rolling_returns['dates']
-                roll_returns = rolling_returns['returns']
-                
-                for i in range(len(roll_dates)):
-                    date = roll_dates[i]
-                    ret = roll_returns[i] * 100 if i < len(roll_returns) else ''
-                    lines.append(f"{date},{ret:.2f}%")
-                
-                # Add summary statistics
-                if 'mean' in rolling_returns:
-                    lines.append("")
-                    lines.append("# ROLLING RETURNS STATISTICS")
-                    lines.append("Statistic,Value")
-                    lines.append(f"Mean,{rolling_returns['mean']*100:.2f}%")
-                    lines.append(f"Std Dev,{rolling_returns['std']*100:.2f}%")
-                    lines.append(f"Min,{rolling_returns['min']*100:.2f}%")
-                    lines.append(f"Max,{rolling_returns['max']*100:.2f}%")
-            
-            return lines
-        
-        # Fallback: try to use metrics_table if available
-        if 'metrics_table' in data and isinstance(data['metrics_table'], list):
-            for row in data['metrics_table']:
-                if isinstance(row, list):
-                    lines.append(','.join(str(cell) for cell in row))
-                else:
-                    lines.append(str(row))
-            return lines
-    
-    # Original fallback logic for simple data structures
     lines.append("# PORTFOLIO SUMMARY")
     lines.append("Symbol,Weight,Return,Beta,Sharpe Ratio")
     
@@ -3187,42 +2107,42 @@ def get_excel_formatting(template_type: str) -> dict:
         "dates": {"number_format": "mm/dd/yyyy"}
     }
 
-# NOTE: PLANNER TOOLS - Document Generation Only
-# The planner has access to document generation tools for creating nuanced reports.
-# These tools are available to the planner (LLM) for intelligent document generation.
-# The orchestrator handles deterministic tasks (data fetching, calculations, charts).
-# Other tools are in the tools/ directory and are executed by the orchestrator.
-
-# Import planner agent tools (document generation and non-deterministic tasks)
-try:
-    from planner.agent_tools.planner_tools import (
-        generate_html_report_tool,
-        generate_pdf_report_tool,
-        format_financial_metrics_tool,
-        format_portfolio_data_to_markdown_tool,
-        read_image_tool,
-        embed_images_tool,
-        read_pdf_tool,
-        analyze_pdf_content_tool,
-        manipulate_pdf_tool,
-        generate_html_template_tool
-    )
-    enhanced_tools = [
-        generate_html_report_tool,
-        generate_pdf_report_tool,
-        format_financial_metrics_tool,
-        format_portfolio_data_to_markdown_tool,
-        read_image_tool,
-        embed_images_tool,
-        read_pdf_tool,
-        analyze_pdf_content_tool,
-        manipulate_pdf_tool,
-        generate_html_template_tool
-    ]
-    logger.info(f"✅ Loaded {len(enhanced_tools)} planner tools (document generation and non-deterministic tasks)")
-except ImportError as e:
-    logger.warning(f"Could not import planner agent tools: {e}")
-    enhanced_tools = []  # Fallback to empty if import fails
+# Define the tools list that Strands can automatically detect
+enhanced_tools = [
+    fetch_web_content_tool,  # Web content fetcher for article context items
+    get_financial_data,
+    get_multiple_financial_data,
+    search_financial_news, 
+    get_technical_analysis,
+    analyze_portfolio,  # Portfolio analysis with live yfinance data
+    calculate_stock_correlation,  # Live correlation analysis
+    get_volatility_surface,  # New volatility surface analysis
+    python_financial_calculator,  # Advanced financial calculations
+    http_request,  # Web request tool
+    read_s3_file_tool,  # S3 file reader tool
+    get_session_files_tool,  # Session database access tool
+    generate_agent_file_tool,  # Generate files in agent-files folder
+    generate_excel_file_tool,  # Generate Excel files for financial analysis
+    get_session_context_tool,  # Complete session context tool
+    get_crypto_data_tool,  # Real-time cryptocurrency data tool
+    compare_crypto_tool,  # Cryptocurrency comparison tool
+    read_pdf_tool,  # PDF file reader tool
+    analyze_pdf_content_tool,  # PDF content analysis tool
+    analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
+    get_company_cik,  # Get company CIK from ticker symbol
+    get_company_filings,  # Get SEC filings for a company
+    get_filing_document,  # Get full text of SEC filing
+    search_sec_filings,  # Search SEC filings by criteria
+    get_filing_exhibits,  # Get exhibits for SEC filing
+    download_filing_pdf,  # Download SEC filing as PDF
+    generate_chart_tool,  # Generate unified charts for both stocks and crypto (requires pre-fetched data)
+    generate_stock_chart,  # Convenience tool: fetch stock data and generate chart in one step
+    get_chat_history_tool,  # Get chat history on-demand with pagination
+    search_chat_history_tool,  # Search chat history for specific terms
+    process_chat_session_context_tool,  # Process chat session context from history sidebar
+    analyze_chat_session_context_tool,  # Analyze chat session context for insights
+    fetch_web_content_tool,  # Fetch and extract content from web URLs (for article context items)
+]
 
 # Function to create agents with different models
 def create_financial_agent(model_name: str = 'claude-sonnet-4') -> Agent:

@@ -94,49 +94,6 @@ def python_financial_calculator(tool_use: ToolUse) -> ToolResult:
         calculation = tool_use["input"]["calculation"]
         calc_lower = calculation.lower()
         
-        # Check if this is a portfolio analysis request
-        # Look for portfolio-related keywords and data source references
-        portfolio_keywords = ["portfolio", "cagr", "volatility", "max drawdown", "sharpe", "rolling returns", "risk-adjusted"]
-        has_portfolio_keywords = any(keyword in calc_lower for keyword in portfolio_keywords)
-        
-        # Check if calculation mentions step references (indicating data from previous step)
-        has_step_reference = "step" in calc_lower or "from step" in calc_lower or "stored data" in calc_lower
-        
-        # If portfolio analysis with data source, route to portfolio analysis tool
-        if has_portfolio_keywords and has_step_reference:
-            try:
-                # Try to extract data source and holdings from calculation
-                # This is a fallback - ideally the planner should use analyze_portfolio_performance directly
-                # But we can try to parse it from the calculation string
-                from tools.portfolio_analysis_tool import analyze_portfolio_performance
-                
-                # Try to extract portfolio holdings
-                holdings_match = re.search(r'(\d+\s+shares?\s+[A-Z]+(?:\s*,\s*\d+\s+shares?\s+[A-Z]+)*)', calculation, re.IGNORECASE)
-                if holdings_match:
-                    portfolio_holdings = holdings_match.group(1)
-                    
-                    # Try to extract S3 key or step reference
-                    s3_key_match = re.search(r'(data-files/[^\s]+|step\s*\d+)', calculation, re.IGNORECASE)
-                    if s3_key_match:
-                        data_source = s3_key_match.group(1)
-                        
-                        # Create a new ToolUse for portfolio analysis
-                        portfolio_tool_use = {
-                            'toolUseId': tool_use["toolUseId"],
-                            'toolName': 'analyze_portfolio_performance',
-                            'input': {
-                                'data_source': data_source,
-                                'portfolio_holdings': portfolio_holdings,
-                                'benchmark_symbol': '^GSPC',
-                                'risk_free_rate': 0.02
-                            }
-                        }
-                        
-                        return analyze_portfolio_performance(ToolUse(portfolio_tool_use))
-            except Exception as e:
-                logger.warning(f"Failed to route to portfolio analysis tool: {e}, using default calculator")
-                # Fall through to default behavior
-        
         # Route to appropriate analysis based on keywords
         if any(term in calc_lower for term in ["fama", "french", "factor", "regression", "attribution"]):
             # Extract symbol if mentioned
