@@ -1687,6 +1687,89 @@ File Information:
         logger.error(f"Error in read_s3_file_tool: {str(e)}")
         return f"Error reading file: {str(e)}"
 
+def _resolve_placeholders_in_content(content: str, user_id: str, session_id: str) -> str:
+    """
+    Resolve placeholders like {{step_N.result.s3_key}} in content.
+    Tries to extract S3 keys from session files, prioritizing chart/image files.
+    """
+    import re
+    
+    # Find placeholders like {{step_N.result.s3_key}}, {{step_N.s3_key}}, {{step_N.result}}
+    placeholder_patterns = [
+        (r'\{\{step_(\d+)\.s3_key\}\}', 's3_key'),
+        (r'\{\{step_(\d+)\.result\.s3_key\}\}', 'result.s3_key'),
+        (r'\{\{step_(\d+)\.result\}\}', 'result'),
+    ]
+    
+    resolved_content = content
+    
+    # Check if there are any placeholders to resolve
+    has_placeholders = any(re.search(pattern, resolved_content) for pattern, _ in placeholder_patterns)
+    if not has_placeholders:
+        return resolved_content
+    
+    for pattern, placeholder_type in placeholder_patterns:
+        matches = re.findall(pattern, resolved_content)
+        if not matches:
+            continue
+        
+        for step_num_str in matches:
+            step_num = int(step_num_str)
+            s3_key = None
+            
+            # Try to get S3 key from session files
+            # Look for files that match the pattern of step results
+            try:
+                bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
+                if bucket_name:
+                    import boto3
+                    s3_client = boto3.client('s3')
+                    
+                    # List files in agent-files folder, prioritizing image files (charts)
+                    prefix = f"users/{user_id}/sessions/{session_id}/agent-files/"
+                    try:
+                        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=100)
+                        if 'Contents' in response:
+                            # Sort by last modified (most recent first)
+                            files = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)
+                            
+                            # For image placeholders, prioritize PNG files (charts)
+                            if 's3_key' in placeholder_type or 'image' in content.lower() or 'chart' in content.lower():
+                                # Look for PNG files first (charts are typically PNG)
+                                png_files = [f for f in files if f['Key'].endswith('.png')]
+                                if png_files:
+                                    s3_key = png_files[0]['Key']
+                                    logger.info(f"Resolved placeholder {{step_{step_num}.s3_key}} to chart: {s3_key}")
+                                elif files:
+                                    # Fallback to most recent file
+                                    s3_key = files[0]['Key']
+                                    logger.info(f"Resolved placeholder {{step_{step_num}.s3_key}} to: {s3_key}")
+                            else:
+                                # For other placeholders, use most recent file
+                                if files:
+                                    s3_key = files[0]['Key']
+                                    logger.info(f"Resolved placeholder {{step_{step_num}.result}} to: {s3_key}")
+                    except Exception as e:
+                        logger.warning(f"Could not list S3 files to resolve placeholder: {str(e)}")
+            except Exception as e:
+                logger.warning(f"Error resolving placeholder {{step_{step_num}.s3_key}}: {str(e)}")
+            
+            # Replace placeholders if we found an S3 key
+            if s3_key:
+                if placeholder_type == 's3_key':
+                    placeholder = f"{{{{step_{step_num}.s3_key}}}}"
+                    resolved_content = resolved_content.replace(placeholder, s3_key)
+                elif placeholder_type == 'result.s3_key':
+                    placeholder = f"{{{{step_{step_num}.result.s3_key}}}}"
+                    resolved_content = resolved_content.replace(placeholder, s3_key)
+                elif placeholder_type == 'result':
+                    placeholder = f"{{{{step_{step_num}.result}}}}"
+                    resolved_content = resolved_content.replace(placeholder, s3_key)
+            else:
+                logger.warning(f"Could not resolve placeholder {{step_{step_num}.s3_key}} - no matching file found")
+    
+    return resolved_content
+
 @tool
 def generate_agent_file_tool(filename: str, content: str = "", file_type: str = "txt") -> str:
     """Generate a file in the agent-files folder for the current session. Use this to create files that the user can download."""
@@ -1767,6 +1850,10 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
             logger.warning("CompressionHelper not available, skipping decompression check")
         except Exception as decomp_error:
             logger.warning(f"Decompression check failed, using content as-is: {str(decomp_error)}")
+        
+        # Resolve placeholders in content (e.g., {{step_N.result.s3_key}})
+        # This handles cases where the agent generates HTML/PDF with placeholders
+        content = _resolve_placeholders_in_content(content, user_id, session_id)
         
         # Convert content to PDF bytes if file_type is 'pdf'
         if file_type == 'pdf':

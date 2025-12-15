@@ -1063,8 +1063,8 @@ Context Items Available: {len(context_items)} items
                     
                     execution_results = orchestrator.execute_plan(plan, session_id, user_id)
                     
-                    # Add execution results to enhanced message for agent
-                    enhanced_message += f"""
+                    # Build detailed results summary for agent
+                    results_summary = f"""
 
 DETERMINISTIC PROCESSING COMPLETED:
 ====================================
@@ -1072,9 +1072,30 @@ The following deterministic tasks have been completed:
 - Steps completed: {execution_results.get('steps_completed', 0)}
 - File references: {len(execution_results.get('file_references', []))} files generated
 
-Results are available in S3. Use read_s3_file_tool to access them if needed.
-The agent should now generate reports or provide explanations based on these results.
+STEP RESULTS:
 """
+                    # Add step-by-step results with S3 keys
+                    for result in execution_results.get('results', []):
+                        step_num = result.get('step')
+                        tool_name = result.get('tool')
+                        status = result.get('status')
+                        
+                        if status == 'completed':
+                            if 'file_reference' in result:
+                                s3_key = result['file_reference'].get('s3_key', '')
+                                results_summary += f"\nStep {step_num} ({tool_name}): File generated at S3 key: {s3_key}\n"
+                                results_summary += f"  - Use {{step_{step_num}.s3_key}} or {{step_{step_num}.result.s3_key}} to reference this file\n"
+                            elif 'result' in result:
+                                result_value = result['result']
+                                # If result is a string and looks like an S3 key or file path, include it
+                                if isinstance(result_value, str) and ('users/' in result_value or 's3_key' in result_value.lower()):
+                                    results_summary += f"\nStep {step_num} ({tool_name}): {result_value}\n"
+                                    results_summary += f"  - Use {{step_{step_num}.result}} to reference this result\n"
+                    
+                    results_summary += "\nThe agent should now generate reports or provide explanations based on these results."
+                    results_summary += "\nWhen referencing files in HTML/PDF, use the S3 keys provided above."
+                    
+                    enhanced_message += results_summary
                     
                     logger.info("Deterministic processing complete, agent will handle report generation")
                     

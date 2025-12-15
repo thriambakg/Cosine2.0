@@ -146,69 +146,124 @@ class Orchestrator:
         
         def resolve_value(value, param_name: str = None):
             if isinstance(value, str):
-                # Find placeholders like {{step_N.result}}
-                placeholder_pattern = r'\{\{step_(\d+)\.result\}\}'
-                matches = re.findall(placeholder_pattern, value)
+                # Find placeholders like {{step_N.result}}, {{step_N.s3_key}}, {{step_N.result.field}}
+                # Pattern 1: {{step_N.result}}
+                # Pattern 2: {{step_N.s3_key}}
+                # Pattern 3: {{step_N.result.field}} or {{step_N.result.nested.field}}
+                placeholder_patterns = [
+                    (r'\{\{step_(\d+)\.s3_key\}\}', 's3_key'),  # {{step_N.s3_key}}
+                    (r'\{\{step_(\d+)\.result\.s3_key\}\}', 'result.s3_key'),  # {{step_N.result.s3_key}}
+                    (r'\{\{step_(\d+)\.result\.([\w\.]+)\}\}', 'result.field'),  # {{step_N.result.field}}
+                    (r'\{\{step_(\d+)\.result\}\}', 'result'),  # {{step_N.result}}
+                ]
                 
-                if not matches:
-                    return value
-                
-                # Replace all placeholders in the string
                 resolved_string = value
-                for step_num_str in matches:
-                    step_num = int(step_num_str)
-                    if step_num < current_step:
-                        # Get result from previous step
-                        resolved_value = None
-                        found = False
+                
+                for pattern, placeholder_type in placeholder_patterns:
+                    matches = re.findall(pattern, resolved_string)
+                    if not matches:
+                        continue
+                    
+                    for match in matches:
+                        if placeholder_type == 's3_key':
+                            step_num = int(match)
+                            field_path = None
+                        elif placeholder_type == 'result.s3_key':
+                            step_num = int(match[0]) if isinstance(match, tuple) else int(match)
+                            field_path = 's3_key'
+                        elif placeholder_type == 'result.field':
+                            step_num = int(match[0])
+                            field_path = match[1] if isinstance(match, tuple) else match
+                        else:  # 'result'
+                            step_num = int(match) if isinstance(match, (str, int)) else int(match[0])
+                            field_path = None
                         
-                        for result in results.get('results', []):
-                            if result.get('step') == step_num:
-                                found = True
-                                
-                                if 'file_reference' in result:
-                                    s3_key = result['file_reference'].get('s3_key', '')
+                        if step_num < current_step:
+                            # Get result from previous step
+                            resolved_value = None
+                            found = False
+                            
+                            for result in results.get('results', []):
+                                if result.get('step') == step_num:
+                                    found = True
                                     
-                                    # Check if this parameter needs actual data (not S3 key)
-                                    needs_data = False
-                                    if tool_name and tool_name in DATA_PARAMETERS:
-                                        if param_name in DATA_PARAMETERS[tool_name]:
-                                            needs_data = True
-                                    
-                                    if needs_data and s3_key:
-                                        # Read actual data from S3
-                                        try:
-                                            logger.info(f"Reading data from S3 for {param_name}: {s3_key[:100]}...")
-                                            retrieved_data = self.data_storage.retrieve_result(result['file_reference'])
-                                            # Convert to JSON string if it's a dict/list
-                                            if isinstance(retrieved_data, (dict, list)):
-                                                resolved_value = json.dumps(retrieved_data)
-                                            else:
-                                                resolved_value = str(retrieved_data)
-                                            logger.info(f"Successfully read {len(resolved_value)} chars from S3")
-                                        except Exception as e:
-                                            logger.error(f"Error reading from S3: {str(e)}, using S3 key instead")
+                                    if 'file_reference' in result:
+                                        s3_key = result['file_reference'].get('s3_key', '')
+                                        
+                                        # Handle nested field access
+                                        if field_path == 's3_key':
                                             resolved_value = s3_key
-                                    else:
-                                        # Return S3 key for file references
-                                        resolved_value = s3_key
+                                        elif placeholder_type == 's3_key':
+                                            resolved_value = s3_key
+                                        else:
+                                            # Check if this parameter needs actual data (not S3 key)
+                                            needs_data = False
+                                            if tool_name and tool_name in DATA_PARAMETERS:
+                                                if param_name in DATA_PARAMETERS[tool_name]:
+                                                    needs_data = True
+                                            
+                                            if needs_data and s3_key:
+                                                # Read actual data from S3
+                                                try:
+                                                    logger.info(f"Reading data from S3 for {param_name}: {s3_key[:100]}...")
+                                                    retrieved_data = self.data_storage.retrieve_result(result['file_reference'])
+                                                    # Convert to JSON string if it's a dict/list
+                                                    if isinstance(retrieved_data, (dict, list)):
+                                                        resolved_value = json.dumps(retrieved_data)
+                                                    else:
+                                                        resolved_value = str(retrieved_data)
+                                                    logger.info(f"Successfully read {len(resolved_value)} chars from S3")
+                                                except Exception as e:
+                                                    logger.error(f"Error reading from S3: {str(e)}, using S3 key instead")
+                                                    resolved_value = s3_key
+                                            else:
+                                                # Return S3 key for file references
+                                                resolved_value = s3_key
+                                        
+                                    elif 'result' in result:
+                                        result_data = result['result']
+                                        
+                                        # Handle nested field access
+                                        if field_path:
+                                            # Try to extract nested field
+                                            if isinstance(result_data, dict):
+                                                # Support dot notation for nested fields
+                                                parts = field_path.split('.')
+                                                nested_value = result_data
+                                                for part in parts:
+                                                    if isinstance(nested_value, dict) and part in nested_value:
+                                                        nested_value = nested_value[part]
+                                                    else:
+                                                        nested_value = None
+                                                        break
+                                                resolved_value = nested_value if nested_value is not None else result_data
+                                            else:
+                                                resolved_value = result_data
+                                        else:
+                                            resolved_value = result_data
+                                        
+                                        # If result is a dict/list and parameter needs JSON string, convert it
+                                        if tool_name and tool_name in DATA_PARAMETERS:
+                                            if param_name in DATA_PARAMETERS[tool_name]:
+                                                if isinstance(resolved_value, (dict, list)):
+                                                    resolved_value = json.dumps(resolved_value)
                                     
-                                elif 'result' in result:
-                                    resolved_value = result['result']
-                                    # If result is a dict/list and parameter needs JSON string, convert it
-                                    if tool_name and tool_name in DATA_PARAMETERS:
-                                        if param_name in DATA_PARAMETERS[tool_name]:
-                                            if isinstance(resolved_value, (dict, list)):
-                                                resolved_value = json.dumps(resolved_value)
+                                    break
+                            
+                            if found and resolved_value is not None:
+                                # Replace the placeholder in the string
+                                if placeholder_type == 's3_key':
+                                    placeholder = f"{{{{step_{step_num}.s3_key}}}}"
+                                elif placeholder_type == 'result.s3_key':
+                                    placeholder = f"{{{{step_{step_num}.result.s3_key}}}}"
+                                elif placeholder_type == 'result.field':
+                                    placeholder = f"{{{{step_{step_num}.result.{field_path}}}}}"
+                                else:
+                                    placeholder = f"{{{{step_{step_num}.result}}}}"
                                 
-                                break
-                        
-                        if found and resolved_value is not None:
-                            # Replace the placeholder in the string
-                            placeholder = f"{{{{step_{step_num}.result}}}}"
-                            resolved_string = resolved_string.replace(placeholder, str(resolved_value))
-                        else:
-                            logger.warning(f"Could not resolve placeholder for step {step_num}")
+                                resolved_string = resolved_string.replace(placeholder, str(resolved_value))
+                            else:
+                                logger.warning(f"Could not resolve placeholder for step {step_num}, type: {placeholder_type}")
                 
                 return resolved_string
             elif isinstance(value, dict):

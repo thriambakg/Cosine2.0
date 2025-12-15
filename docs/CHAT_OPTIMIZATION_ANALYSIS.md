@@ -222,3 +222,4 @@ If consolidation is too risky, optimize current architecture:
 The WebSocket Connection Manager should remain separate as it handles connection lifecycle, not message processing.
 
 
+
