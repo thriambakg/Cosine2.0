@@ -258,6 +258,8 @@ class ContextAwareAgent:
 - generate_excel_file_tool(filename, content, template_type, include_charts) - Create CSV files
 - get_session_context_tool(session_id, user_id) - Get full session context when needed
 - get_session_files_tool(session_id, user_id, file_type) - Get specific files when needed
+- get_current_datetime(format) - Get current date/time (use "date" for YYYY-MM-DD format)
+- calculate_date_range(months_ago, days_ago, start_offset_days, end_offset_days) - Calculate date ranges (e.g., months_ago=2 for "past 2 months")
 - search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills in DynamoDB
 - search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards in DynamoDB
 - search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
@@ -327,6 +329,11 @@ When get_chat_history_tool returns data:
 - session_id and user_id are provided in the Session Context section of your input message
 - Look for "Session ID: {session_id}" and "User ID: {user_id}" in the message you receive
 - Use these exact values when calling the tools
+
+📅 DATETIME TOOLS:
+- ALWAYS use get_current_datetime("date") to get the current date (YYYY-MM-DD) when calculating timeframes
+- Use calculate_date_range(months_ago=2) to calculate "past 2 months" - returns start_date and end_date
+- Example: For "past 2 months", call calculate_date_range(months_ago=2) to get exact dates, then use start_date in filters
 
 🔍 SEARCH TOOLS (Government & Political Data):
 - search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills

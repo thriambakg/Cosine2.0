@@ -822,7 +822,14 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
           data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
           "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*",
           data.terraform_remote_state.base_infra.outputs.news_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.news_table_arn}/index/*"
+          "${data.terraform_remote_state.base_infra.outputs.news_table_arn}/index/*",
+          # Search tables for chat agent tools
+          data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn}/index/*",
+          data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*",
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}",
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}/index/*"
         ]
       }
     ]
@@ -1259,6 +1266,39 @@ resource "aws_iam_policy" "chat_agent_stock_historical_s3_read_policy" {
   })
 
   tags = var.common_tags
+}
+
+# IAM Policy for Chat Agent to read from Search Data S3 Buckets (READ ONLY)
+resource "aws_iam_policy" "chat_agent_search_data_s3_read_policy" {
+  name        = "${var.project_name}-chat-agent-search-data-s3-read-${var.environment}"
+  description = "Allows Chat Agent Lambda to read from search data S3 buckets (congress bills, usaspending) for oversized items (READ ONLY)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn}/*",
+          data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Attach Search Data S3 read policy for chat agent
+resource "aws_iam_role_policy_attachment" "chat_agent_search_data_s3_read_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.chat_agent_search_data_s3_read_policy.arn
 }
 
 # Attach Stock Historical S3 read policy for chat agent

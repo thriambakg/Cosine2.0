@@ -8,11 +8,13 @@ import os
 import logging
 import boto3
 from typing import Dict, Any, Optional
+from decimal import Decimal
 from datetime import datetime
 import sys
+from boto3.dynamodb.conditions import Key, Attr
 
 # Add parent directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'politician_trades_search', 'app'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -33,15 +35,152 @@ except ImportError as e:
     def tool(func):
         return func
 
-# Import search function from lambda
-try:
-    from lambda_function import search_trades
-except ImportError:
-    logger.error("Could not import search_trades from politician_trades_search lambda_function")
-    search_trades = None
-
 # AWS clients
-s3_client = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+
+# Environment variables
+DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME', 'cosine-politician-trades-production')
+
+# Get DynamoDB table
+trades_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if DYNAMODB_TABLE_NAME else None
+
+
+def convert_from_dynamodb_format(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert DynamoDB item to Python dict with proper types"""
+    result = {}
+    for key, value in item.items():
+        if isinstance(value, Decimal):
+            result[key] = int(value) if value % 1 == 0 else float(value)
+        elif isinstance(value, dict):
+            result[key] = convert_from_dynamodb_format(value)
+        elif isinstance(value, list):
+            result[key] = [
+                convert_from_dynamodb_format(v) if isinstance(v, dict) else
+                (int(v) if isinstance(v, Decimal) and v % 1 == 0 else float(v) if isinstance(v, Decimal) else v)
+                for v in value
+            ]
+        else:
+            result[key] = value
+    return result
+
+
+def search_trades_direct(
+    filters: Dict[str, Any],
+    page: int = 1,
+    page_size: int = 50,
+    last_evaluated_key: Optional[Dict] = None
+) -> Dict[str, Any]:
+    """
+    Search trades in DynamoDB directly
+    """
+    if not trades_table:
+        raise Exception("DynamoDB trades table not initialized")
+    
+    try:
+        # Try to use PoliticianTradeDateIndex if politician name filter is present
+        if filters.get('politicianName'):
+            politician_names = filters['politicianName'] if isinstance(filters['politicianName'], list) else [filters['politicianName']]
+            politician_name = politician_names[0] if politician_names else None
+            
+            if politician_name:
+                params = {
+                    'IndexName': 'PoliticianTradeDateIndex',
+                    'KeyConditionExpression': Key('politicianName').eq(politician_name),
+                    'Limit': page_size * 2,  # Fetch more to account for filtering
+                    'ScanIndexForward': False  # Most recent first
+                }
+                
+                # Add date range if provided
+                date_from = filters.get('dateFrom')
+                date_to = filters.get('dateTo')
+                
+                if date_from and date_to:
+                    try:
+                        date_from_obj = datetime.strptime(date_from, '%Y-%m-%d').date()
+                        date_to_obj = datetime.strptime(date_to, '%Y-%m-%d').date()
+                        date_from_num = int(date_from_obj.strftime('%Y%m%d'))
+                        date_to_num = int(date_to_obj.strftime('%Y%m%d'))
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key('transactionDate').between(date_from_num, date_to_num)
+                    except ValueError as e:
+                        logger.warning(f"Invalid date format: {e}")
+                elif date_from:
+                    try:
+                        date_from_obj = datetime.strptime(date_from, '%Y-%m-%d').date()
+                        date_from_num = int(date_from_obj.strftime('%Y%m%d'))
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key('transactionDate').gte(date_from_num)
+                    except ValueError as e:
+                        logger.warning(f"Invalid date format: {e}")
+                elif date_to:
+                    try:
+                        date_to_obj = datetime.strptime(date_to, '%Y-%m-%d').date()
+                        date_to_num = int(date_to_obj.strftime('%Y%m%d'))
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key('transactionDate').lte(date_to_num)
+                    except ValueError as e:
+                        logger.warning(f"Invalid date format: {e}")
+                
+                if last_evaluated_key:
+                    params['ExclusiveStartKey'] = last_evaluated_key
+                
+                response = trades_table.query(**params)
+                items = response.get('Items', [])
+                last_eval_key = response.get('LastEvaluatedKey')
+            else:
+                # Fall back to scan
+                scan_params = {'Limit': page_size * 10}
+                if last_evaluated_key:
+                    scan_params['ExclusiveStartKey'] = last_evaluated_key
+                response = trades_table.scan(**scan_params)
+                items = response.get('Items', [])
+                last_eval_key = response.get('LastEvaluatedKey')
+        else:
+            # Fall back to scan
+            scan_params = {'Limit': page_size * 10}
+            if last_evaluated_key:
+                scan_params['ExclusiveStartKey'] = last_evaluated_key
+            response = trades_table.scan(**scan_params)
+            items = response.get('Items', [])
+            last_eval_key = response.get('LastEvaluatedKey')
+        
+        # Convert from DynamoDB format
+        converted_items = [convert_from_dynamodb_format(item) for item in items]
+        
+        # Apply pagination
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_items = converted_items[start_idx:end_idx]
+        
+        # Convert last_evaluated_key
+        serializable_last_key = None
+        if last_eval_key:
+            try:
+                # Convert Decimal values in last_eval_key
+                serializable_last_key = {}
+                for k, v in last_eval_key.items():
+                    if isinstance(v, Decimal):
+                        serializable_last_key[k] = int(v) if v % 1 == 0 else float(v)
+                    else:
+                        serializable_last_key[k] = v
+            except Exception as e:
+                logger.warning(f"Error converting last_evaluated_key: {e}")
+        
+        total_count = len(converted_items)
+        total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
+        
+        return {
+            'success': True,
+            'results': paginated_items,
+            'count': len(paginated_items),
+            'total_found': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+            'has_more': last_eval_key is not None or end_idx < total_count,
+            'last_evaluated_key': serializable_last_key
+        }
+        
+    except Exception as e:
+        logger.error(f"Error searching trades: {str(e)}", exc_info=True)
+        raise
 
 
 class PoliticianTradesSearcher:
@@ -58,25 +197,10 @@ class PoliticianTradesSearcher:
     ) -> Dict[str, Any]:
         """
         Search trades and store large results in S3 if needed
-        
-        Args:
-            filters: Dictionary of filter fields
-            page: Page number (default: 1)
-            page_size: Number of results per page (default: 50)
-            last_evaluated_key: Pagination token from previous request
-            
-        Returns:
-            Dictionary with search results or S3 key reference
         """
-        if not search_trades:
-            return {
-                "success": False,
-                "error": "Politician trades search function not available"
-            }
-        
         try:
             # Perform search
-            result = search_trades(filters, page, page_size, last_evaluated_key)
+            result = search_trades_direct(filters, page, page_size, last_evaluated_key)
             
             # Check if result is large enough to store in S3
             result_json = json.dumps(result)
@@ -96,6 +220,7 @@ class PoliticianTradesSearcher:
                     user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID', 'default')
                     session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
                     bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+                    s3_client = boto3.client('s3')
                     
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"politician_trades_search_{timestamp}.json"
@@ -179,27 +304,7 @@ def search_politician_trades(
     
     Returns:
         JSON string with search results. For large results, returns S3 key reference.
-        Result structure:
-        {
-            "success": true,
-            "results": [...],  // Array of trade objects
-            "count": 10,  // Number of results
-            "page": 1,  // Current page
-            "page_size": 50,  // Results per page
-            "total_pages": 1,  // Total number of pages
-            "has_more": false,  // Whether more results are available
-            "last_evaluated_key": {...}  // Pagination token (if has_more is true)
-        }
         
-        For large results stored in S3:
-        {
-            "status": "success",
-            "s3_key": "users/.../data-files/politician_trades_search_...json",
-            "count": 100,
-            "has_more": true,
-            "summary": {...}
-        }
-    
     Example:
         search_politician_trades(
             '{"politicianName": "Nancy Pelosi", "dateFrom": "2023-01-01"}',
@@ -259,4 +364,3 @@ def search_politician_trades(
             "success": False,
             "error": error_msg
         })
-

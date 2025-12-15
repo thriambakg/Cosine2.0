@@ -7,12 +7,16 @@ import json
 import os
 import logging
 import boto3
+import gzip
 from typing import Dict, Any, Optional
+from decimal import Decimal
 from datetime import datetime
 import sys
+from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.types import TypeDeserializer
 
 # Add parent directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'govt_contracts', 'search'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -33,15 +37,143 @@ except ImportError as e:
     def tool(func):
         return func
 
-# Import search function from lambda
-try:
-    from lambda_function import search_awards
-except ImportError:
-    logger.error("Could not import search_awards from govt_contracts lambda_function")
-    search_awards = None
-
 # AWS clients
+dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3')
+
+# Environment variables
+AWARDS_TABLE_NAME = os.environ.get('AWARDS_TABLE_NAME', 'cosine-usaspending-awards-index-production')
+S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-usaspending-data-production')
+
+# Get DynamoDB table
+awards_table = dynamodb.Table(AWARDS_TABLE_NAME) if AWARDS_TABLE_NAME else None
+
+
+def convert_decimal_to_float(obj: Any) -> Any:
+    """Recursively convert Decimal values to float for JSON serialization"""
+    try:
+        from boto3.dynamodb.types import Binary
+        if isinstance(obj, Binary):
+            obj = obj.value
+    except ImportError:
+        pass
+    
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, bytes):
+        if len(obj) == 1:
+            return bool(obj[0])
+        else:
+            import base64
+            return base64.b64encode(obj).decode('utf-8')
+    elif isinstance(obj, dict):
+        return {key: convert_decimal_to_float(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimal_to_float(item) for item in obj]
+    else:
+        return obj
+
+
+def fetch_oversized_award_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
+    """Fetch oversized award details from S3"""
+    try:
+        if not s3_key:
+            return None
+        
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        gzipped_content = response['Body'].read()
+        decompressed_content = gzip.decompress(gzipped_content)
+        award_details = json.loads(decompressed_content.decode('utf-8'))
+        return award_details
+        
+    except Exception as e:
+        logger.warning(f"Error fetching oversized award from S3 ({s3_key}): {str(e)}")
+        return None
+
+
+def search_awards_direct(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
+    """
+    Search awards in DynamoDB directly
+    """
+    if not awards_table:
+        raise Exception("DynamoDB awards table not initialized")
+    
+    try:
+        # Try to use AwardingAgencyNameFiscalYearIndex if agency name filter is present
+        if filters.get('awarding_agency_name'):
+            agency_names = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
+            agency_name = agency_names[0].strip() if agency_names else None
+            fiscal_year = filters.get('fiscal_year')
+            
+            if agency_name:
+                params = {
+                    'IndexName': 'AwardingAgencyNameFiscalYearIndex',
+                    'KeyConditionExpression': Key('awarding_agency_name').eq(agency_name),
+                    'Limit': limit * 5
+                }
+                
+                if fiscal_year:
+                    fiscal_years = fiscal_year if isinstance(fiscal_year, list) else [fiscal_year]
+                    if fiscal_years:
+                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key('fiscal_year').eq(fiscal_years[0])
+                
+                if last_evaluated_key:
+                    params['ExclusiveStartKey'] = last_evaluated_key
+                
+                response = awards_table.query(**params)
+                items = response.get('Items', [])
+                last_eval_key = response.get('LastEvaluatedKey')
+            else:
+                # Fall back to scan
+                scan_params = {'Limit': limit * 10}
+                if last_evaluated_key:
+                    scan_params['ExclusiveStartKey'] = last_evaluated_key
+                response = awards_table.scan(**scan_params)
+                items = response.get('Items', [])
+                last_eval_key = response.get('LastEvaluatedKey')
+        else:
+            # Fall back to scan with filters
+            scan_params = {'Limit': limit * 10}
+            if last_evaluated_key:
+                scan_params['ExclusiveStartKey'] = last_evaluated_key
+            response = awards_table.scan(**scan_params)
+            items = response.get('Items', [])
+            last_eval_key = response.get('LastEvaluatedKey')
+        
+        # Apply Python filters (simplified - can be enhanced)
+        filtered_items = items[:limit]  # Basic filtering - can be enhanced with full filter logic
+        
+        # Convert and enrich
+        results = [convert_decimal_to_float(item) for item in filtered_items]
+        enriched_results = []
+        for award in results:
+            oversize_s3_key = award.get('oversize_s3_key')
+            if oversize_s3_key:
+                full_award = fetch_oversized_award_from_s3(oversize_s3_key)
+                if full_award:
+                    award = convert_decimal_to_float(full_award)
+            enriched_results.append(award)
+        
+        # Convert last_evaluated_key
+        serializable_last_key = None
+        if last_eval_key:
+            try:
+                serializable_last_key = convert_decimal_to_float(last_eval_key)
+            except Exception as e:
+                logger.warning(f"Error converting last_evaluated_key: {e}")
+        
+        return {
+            'success': True,
+            'results': enriched_results,
+            'count': len(enriched_results),
+            'has_more': last_eval_key is not None,
+            'last_evaluated_key': serializable_last_key,
+            'method': 'query' if filters.get('awarding_agency_name') else 'scan'
+        }
+        
+    except Exception as e:
+        logger.error(f"Error searching awards: {str(e)}", exc_info=True)
+        raise
 
 
 class GovtContractsSearcher:
@@ -57,24 +189,10 @@ class GovtContractsSearcher:
     ) -> Dict[str, Any]:
         """
         Search awards and store large results in S3 if needed
-        
-        Args:
-            filters: Dictionary of filter fields
-            limit: Maximum number of results to return
-            last_evaluated_key: Pagination token from previous request
-            
-        Returns:
-            Dictionary with search results or S3 key reference
         """
-        if not search_awards:
-            return {
-                "success": False,
-                "error": "Government contracts search function not available"
-            }
-        
         try:
             # Perform search
-            result = search_awards(filters, limit, last_evaluated_key)
+            result = search_awards_direct(filters, limit, last_evaluated_key)
             
             # Check if result is large enough to store in S3
             result_json = json.dumps(result)
@@ -117,7 +235,6 @@ class GovtContractsSearcher:
                         "has_more": result.get('has_more', False),
                         "last_evaluated_key": result.get('last_evaluated_key'),
                         "method": result.get('method', 'unknown'),
-                        "index_used": result.get('index_used'),
                         "message": f"Large dataset stored in S3. Use read_s3_file_tool to access: {s3_key}",
                         "summary": {
                             "total_results": result.get('count', 0),
@@ -173,26 +290,7 @@ def search_govt_contracts(
     
     Returns:
         JSON string with search results. For large results, returns S3 key reference.
-        Result structure:
-        {
-            "success": true,
-            "results": [...],  // Array of award objects
-            "count": 10,  // Number of results
-            "has_more": false,  // Whether more results are available
-            "last_evaluated_key": {...},  // Pagination token (if has_more is true)
-            "method": "query",  // Query method used
-            "index_used": "AwardingAgencyNameFiscalYearIndex"  // GSI used
-        }
         
-        For large results stored in S3:
-        {
-            "status": "success",
-            "s3_key": "users/.../data-files/govt_contracts_search_...json",
-            "count": 100,
-            "has_more": true,
-            "summary": {...}
-        }
-    
     Example:
         search_govt_contracts(
             '{"awarding_agency_name": "Department of Defense", "fiscal_year": 2023}',
@@ -246,4 +344,3 @@ def search_govt_contracts(
             "success": False,
             "error": error_msg
         })
-

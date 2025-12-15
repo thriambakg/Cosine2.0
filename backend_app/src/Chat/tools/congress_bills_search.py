@@ -7,12 +7,16 @@ import json
 import os
 import logging
 import boto3
-from typing import Dict, Any, Optional
+import gzip
+from typing import Dict, Any, Optional, List
+from decimal import Decimal
 from datetime import datetime
 import sys
+from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.types import TypeDeserializer
 
 # Add parent directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'congress_bills', 'search'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -33,15 +37,163 @@ except ImportError as e:
     def tool(func):
         return func
 
-# Import search function from lambda
-try:
-    from lambda_function import search_bills
-except ImportError:
-    logger.error("Could not import search_bills from congress_bills lambda_function")
-    search_bills = None
-
 # AWS clients
+dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3')
+
+# Environment variables
+BILLS_TABLE_NAME = os.environ.get('BILLS_TABLE_NAME', 'cosine-congress-bills-production')
+S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-congress-bills-data-production')
+
+# Get DynamoDB table
+bills_table = dynamodb.Table(BILLS_TABLE_NAME) if BILLS_TABLE_NAME else None
+
+
+def convert_decimal_to_float(obj: Any) -> Any:
+    """Recursively convert Decimal values to float for JSON serialization"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimal_to_float(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimal_to_float(item) for item in obj]
+    else:
+        return obj
+
+
+def fetch_oversized_bill_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
+    """Fetch oversized bill details from S3 (when oversize_s3_key exists)"""
+    try:
+        if not s3_key:
+            return None
+        
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        gzipped_content = response['Body'].read()
+        decompressed_content = gzip.decompress(gzipped_content)
+        bill_details = json.loads(decompressed_content.decode('utf-8'))
+        return bill_details
+        
+    except Exception as e:
+        logger.warning(f"Error fetching oversized bill from S3 ({s3_key}): {str(e)}")
+        return None
+
+
+def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
+    """Apply filters to an item in Python"""
+    # Bill title filter (case-insensitive substring match)
+    if filters.get('bill_title'):
+        bill_titles = filters['bill_title'] if isinstance(filters['bill_title'], list) else [filters['bill_title']]
+        bill_titles = [t for t in bill_titles if t and str(t).strip()]
+        if bill_titles:
+            item_title = str(item.get('bill_title') or '').strip()
+            matches = False
+            for title in bill_titles:
+                title_str = str(title).strip()
+                if item_title and title_str.lower() in item_title.lower():
+                    matches = True
+                    break
+            if not matches:
+                return False
+    
+    # Bipartisan filter
+    if filters.get('bipartisan') is not None:
+        bipartisan_value = filters['bipartisan']
+        item_bipartisan = item.get('bipartisan')
+        if isinstance(item_bipartisan, bool):
+            item_bipartisan = 1 if item_bipartisan else 0
+        if item_bipartisan != bipartisan_value:
+            return False
+    
+    # Date filters
+    if filters.get('introduced_date_from'):
+        item_date = item.get('introduced_date')
+        if not item_date or item_date < filters['introduced_date_from']:
+            return False
+    
+    if filters.get('introduced_date_to'):
+        item_date = item.get('introduced_date')
+        if not item_date or item_date > filters['introduced_date_to']:
+            return False
+    
+    return True
+
+
+def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
+    """
+    Search bills in DynamoDB directly
+    """
+    if not bills_table:
+        raise Exception("DynamoDB bills table not initialized")
+    
+    try:
+        # Try to use BipartisanDateIndex if bipartisan filter is present
+        if filters.get('bipartisan') is not None:
+            bipartisan_value = filters['bipartisan']
+            introduced_date = filters.get('introduced_date_from')
+            
+            params = {
+                'IndexName': 'BipartisanDateIndex',
+                'KeyConditionExpression': Key('bipartisan').eq(bipartisan_value),
+                'Limit': limit * 5  # Fetch more to account for filtering
+            }
+            
+            if introduced_date:
+                params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key('introduced_date').gte(introduced_date)
+            
+            if last_evaluated_key:
+                params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = bills_table.query(**params)
+            items = response.get('Items', [])
+            last_eval_key = response.get('LastEvaluatedKey')
+        else:
+            # Fall back to scan with filters
+            scan_params = {
+                'Limit': limit * 10
+            }
+            
+            if last_evaluated_key:
+                scan_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = bills_table.scan(**scan_params)
+            items = response.get('Items', [])
+            last_eval_key = response.get('LastEvaluatedKey')
+        
+        # Apply Python filters
+        filtered_items = [item for item in items if apply_python_filter(item, filters)]
+        filtered_items = filtered_items[:limit]
+        
+        # Convert and enrich
+        results = [convert_decimal_to_float(item) for item in filtered_items]
+        enriched_results = []
+        for bill in results:
+            oversize_s3_key = bill.get('oversize_s3_key')
+            if oversize_s3_key:
+                full_bill = fetch_oversized_bill_from_s3(oversize_s3_key)
+                if full_bill:
+                    bill = convert_decimal_to_float(full_bill)
+            enriched_results.append(bill)
+        
+        # Convert last_evaluated_key
+        serializable_last_key = None
+        if last_eval_key:
+            try:
+                serializable_last_key = convert_decimal_to_float(last_eval_key)
+            except Exception as e:
+                logger.warning(f"Error converting last_evaluated_key: {e}")
+        
+        return {
+            'success': True,
+            'results': enriched_results,
+            'count': len(enriched_results),
+            'has_more': last_eval_key is not None,
+            'last_evaluated_key': serializable_last_key,
+            'method': 'query' if filters.get('bipartisan') is not None else 'scan'
+        }
+        
+    except Exception as e:
+        logger.error(f"Error searching bills: {str(e)}", exc_info=True)
+        raise
 
 
 class CongressBillsSearcher:
@@ -57,24 +209,10 @@ class CongressBillsSearcher:
     ) -> Dict[str, Any]:
         """
         Search bills and store large results in S3 if needed
-        
-        Args:
-            filters: Dictionary of filter fields
-            limit: Maximum number of results to return
-            last_evaluated_key: Pagination token from previous request
-            
-        Returns:
-            Dictionary with search results or S3 key reference
         """
-        if not search_bills:
-            return {
-                "success": False,
-                "error": "Congress bills search function not available"
-            }
-        
         try:
             # Perform search
-            result = search_bills(filters, limit, last_evaluated_key)
+            result = search_bills_direct(filters, limit, last_evaluated_key)
             
             # Check if result is large enough to store in S3
             result_json = json.dumps(result)
@@ -117,7 +255,6 @@ class CongressBillsSearcher:
                         "has_more": result.get('has_more', False),
                         "last_evaluated_key": result.get('last_evaluated_key'),
                         "method": result.get('method', 'unknown'),
-                        "index_used": result.get('index_used'),
                         "message": f"Large dataset stored in S3. Use read_s3_file_tool to access: {s3_key}",
                         "summary": {
                             "total_results": result.get('count', 0),
@@ -158,7 +295,7 @@ def search_congress_bills(
             - sponsor_party: List or string of sponsor parties (e.g., "R", "D", "I")
             - sponsor_state: List or string of sponsor states (2-letter codes)
             - policy_area: List or string of policy areas (case-insensitive substring match)
-            - bipartisan: Boolean (1 for bipartisan, 0 for non-bipartisan)
+            - bipartisan: Integer (1 for bipartisan, 0 for non-bipartisan)
             - bill_number: Exact bill number
             - congress: Congress number (e.g., 118, 117)
             - introduced_date_from: Start date in YYYY-MM-DD format
@@ -170,29 +307,10 @@ def search_congress_bills(
     
     Returns:
         JSON string with search results. For large results, returns S3 key reference.
-        Result structure:
-        {
-            "success": true,
-            "results": [...],  // Array of bill objects
-            "count": 10,  // Number of results
-            "has_more": false,  // Whether more results are available
-            "last_evaluated_key": {...},  // Pagination token (if has_more is true)
-            "method": "query",  // Query method used
-            "index_used": "SponsorNameDateIndex"  // GSI used
-        }
         
-        For large results stored in S3:
-        {
-            "status": "success",
-            "s3_key": "users/.../data-files/congress_bills_search_...json",
-            "count": 100,
-            "has_more": true,
-            "summary": {...}
-        }
-    
     Example:
         search_congress_bills(
-            '{"sponsor_name": "Pelosi", "introduced_date_from": "2023-01-01"}',
+            '{"bipartisan": 1, "bill_title": "israel", "introduced_date_from": "2024-10-15"}',
             limit=50
         )
     """
@@ -243,4 +361,3 @@ def search_congress_bills(
             "success": False,
             "error": error_msg
         })
-

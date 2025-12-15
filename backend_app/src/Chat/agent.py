@@ -165,6 +165,7 @@ from tools.stock_data_fetcher import (
 from tools.congress_bills_search import search_congress_bills
 from tools.govt_contracts_search import search_govt_contracts
 from tools.politician_trades_search import search_politician_trades
+from tools.datetime_tool import get_current_datetime, calculate_date_range
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -2003,6 +2004,8 @@ enhanced_tools = [
     search_congress_bills,  # Search congressional bills in DynamoDB
     search_govt_contracts,  # Search government contracts/awards in DynamoDB
     search_politician_trades,  # Search politician stock trades in DynamoDB
+    get_current_datetime,  # Get current date/time for exact timeframe calculations
+    calculate_date_range,  # Calculate date ranges relative to current date
 ]
 
 # Function to create agents with different models
