@@ -3,41 +3,38 @@ Financial calculator tool for advanced financial analysis including Fama-French 
 correlation analysis, cointegration testing, and risk metrics.
 """
 
-from typing import Dict, Any, List
 import json
 import re
 import logging
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Configure logging
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
-# Import Strands types (available in Lambda layer)
+# Import agent_logger for WebSocket streaming
 try:
-    from strands.types.tools import ToolResult, ToolUse
-    # Import successful - no need to log
-except ImportError as e:
-    logger.error(f"Failed to import Strands types: {e}")
-    raise
+    from agent_logger import get_agent_logger
+    agent_logger = get_agent_logger()
+except:
+    agent_logger = logger
 
-# Tool specification following Strands pattern
-TOOL_SPEC = {
-    "name": "python_financial_calculator",
-    "description": "Execute advanced financial calculations including Fama-French 5-factor regression analysis, correlations, cointegration tests, Sharpe ratios, and Value at Risk calculations",
-    "inputSchema": {
-        "json": {
-            "type": "object",
-            "properties": {
-                "calculation": {
-                    "type": "string",
-                    "description": "Description of the financial calculation to perform. Examples: 'Fama-French 5-factor regression for AAPL', 'correlation analysis between MSFT and GOOGL', 'Sharpe ratio calculation', 'VaR analysis'"
-                }
-            },
-            "required": ["calculation"]
-        }
-    }
-}
+# Import Strands tool decorator
+try:
+    from strands import tool
+except ImportError as e:
+    logger.warning(f"Could not import Strands tool decorator: {e}")
+    # Fallback decorator for local development
+    def tool(func):
+        return func
+
 
 class EnhancedFinancialCalculator:
+    """Enhanced financial calculator for advanced analysis"""
+    
     @staticmethod
     def fama_french_analysis(symbol: str) -> str:
         """Perform comprehensive Fama-French 5-factor analysis"""
@@ -87,11 +84,26 @@ RISK ATTRIBUTION:
 Note: This is a simulated analysis. For actual research, use real Fama-French data from Kenneth French's website.
 """
 
-def python_financial_calculator(tool_use: ToolUse) -> ToolResult:
-    """Main tool function for financial calculations"""
+
+@tool
+def python_financial_calculator(calculation: str) -> str:
+    """
+    Execute advanced financial calculations including Fama-French 5-factor regression analysis, 
+    correlations, cointegration tests, Sharpe ratios, and Value at Risk calculations.
+    
+    Args:
+        calculation: Description of the financial calculation to perform. 
+                     Examples: 'Fama-French 5-factor regression for AAPL', 
+                              'correlation analysis between MSFT and GOOGL', 
+                              'Sharpe ratio calculation', 'VaR analysis'
+    
+    Returns:
+        String containing the analysis results
+    """
     try:
-        # Extract the calculation parameter
-        calculation = tool_use["input"]["calculation"]
+        agent_logger.info(f"Running financial calculation: {calculation[:50]}...")
+        calculator = EnhancedFinancialCalculator()
+        
         calc_lower = calculation.lower()
         
         # Route to appropriate analysis based on keywords
@@ -99,7 +111,7 @@ def python_financial_calculator(tool_use: ToolUse) -> ToolResult:
             # Extract symbol if mentioned
             symbol_match = re.search(r'\b([A-Z]{2,5})\b', calculation.upper())
             symbol = symbol_match.group(1) if symbol_match else "AAPL"
-            result = EnhancedFinancialCalculator.fama_french_analysis(symbol)
+            result = calculator.fama_french_analysis(symbol)
         
         elif "correlation" in calc_lower:
             result = """
@@ -180,15 +192,9 @@ RISK METRICS:
         else:
             result = "Financial calculation completed. For specific analyses, mention keywords like 'Fama-French', 'correlation', 'cointegration', 'Sharpe ratio', or 'VaR'."
         
-        return {
-            "toolUseId": tool_use["toolUseId"],
-            "status": "success",
-            "content": [{"text": result}]
-        }
+        return result
         
     except Exception as e:
-        return {
-            "toolUseId": tool_use["toolUseId"],
-            "status": "error",
-            "content": [{"text": f"Error in financial calculation: {str(e)}"}]
-        }
+        logger.error(f"Error in financial calculation: {str(e)}")
+        return f"Error in financial calculation: {str(e)}"
+

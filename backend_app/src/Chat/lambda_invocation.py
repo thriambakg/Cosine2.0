@@ -57,7 +57,7 @@ def upload_file_and_notify(
                 parsed = json.loads(content)
                 if isinstance(parsed, dict) and parsed.get("_compressed") is True:
                     # Decompress the content before storing
-                    from compression_helper import CompressionHelper
+                    from utils.compression_helper import CompressionHelper
                     logger.info("Detected compressed content, decompressing before storage...")
                     decompressed = CompressionHelper.decompress_data(parsed)
                     if isinstance(decompressed, dict) and "_file_content" in decompressed:

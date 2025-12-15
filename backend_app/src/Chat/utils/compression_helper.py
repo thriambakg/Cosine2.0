@@ -178,3 +178,4 @@ class CompressionHelper:
                 "compression_ratio": 0.0,
                 "has_fallback": False
             }
+

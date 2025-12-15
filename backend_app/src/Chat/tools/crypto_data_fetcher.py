@@ -13,7 +13,7 @@ import math
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from compression_helper import CompressionHelper
+from utils.compression_helper import CompressionHelper
 
 # Configure logging
 logger = logging.getLogger()

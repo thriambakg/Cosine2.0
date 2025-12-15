@@ -575,7 +575,7 @@ def fetch_web_content_tool(url: str) -> str:
         
         if original_size > COMPRESSION_THRESHOLD:
             try:
-                from compression_helper import CompressionHelper
+                from utils.compression_helper import CompressionHelper
                 
                 logger.info(f"📦 Output size ({original_size} chars) exceeds threshold ({COMPRESSION_THRESHOLD}), compressing...")
                 

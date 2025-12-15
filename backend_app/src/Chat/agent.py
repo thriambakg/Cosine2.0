@@ -141,7 +141,7 @@ from strands_tools import calculator
 from strands import tool
 
 # Import our custom financial calculator tool module
-import financial_calculator
+from tools.financial_calculator import python_financial_calculator, EnhancedFinancialCalculator
 
 # Import our custom session database access tool
 from tools.session_database_access import get_session_files_tool, get_session_context_tool, SessionDatabaseAccess
@@ -152,6 +152,16 @@ from tools.chart_generator import generate_chart_tool, generate_stock_chart
 from tools.chat_history_tool import get_chat_history_tool, search_chat_history_tool
 from tools.chat_session_context_tool import process_chat_session_context_tool, analyze_chat_session_context_tool
 from tools.web_scraper import fetch_web_content_tool
+from tools.stock_data_fetcher import (
+    get_financial_data,
+    get_multiple_financial_data,
+    search_financial_news,
+    get_technical_analysis,
+    analyze_portfolio,
+    calculate_stock_correlation,
+    get_volatility_surface,
+    StockDataFetcher
+)
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -472,7 +482,7 @@ class FinancialTools:
                     # Fall through to compression
             
             # For smaller datasets, compress and return directly
-            from compression_helper import CompressionHelper
+            from utils.compression_helper import CompressionHelper
             
             logger.debug(f"Data size before compression: {data_size} chars, {data_points} points")
             
@@ -1402,304 +1412,9 @@ RISK ATTRIBUTION:
 Note: This is a simulated analysis. For actual research, use real Fama-French data from Kenneth French's website.
 """
 
-# Create standalone tool functions that the Strands framework can recognize
-
-@tool
-def get_financial_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> str:
-    """Get current stock price, market cap, and financial metrics for a given stock symbol. Supports custom timeframes and date ranges for chart generation."""
-    try:
-        agent_logger.info(f"Getting financial data for {symbol}")
-        logger.debug(f"get_financial_data called with symbol={symbol}, timeframe={timeframe}")
-        data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
-        return json.dumps(data, indent=2)
-    except Exception as e:
-        logger.error(f"get_financial_data exception: {str(e)}")
-        return f"Error getting financial data: {str(e)}"
-
-@tool
-def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> str:
-    """
-    Get financial data for multiple stocks efficiently.
-    Uses S3 for large timeframes, yfinance for short ones.
-    Stores large results in data-files to avoid memory issues.
-    
-    Args:
-        symbols: Comma-separated list of stock symbols (e.g., 'AAPL,MSFT,SPY')
-        timeframe: Time period for all stocks ('1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max')
-        start_date: Start date in 'YYYY-MM-DD' format (optional)
-        end_date: End date in 'YYYY-MM-DD' format (optional)
-    
-    Returns:
-        JSON string with data for all requested stocks, or S3 key if data is large
-    """
-    try:
-        agent_logger.info(f"Getting financial data for multiple stocks: {symbols}")
-        if not symbols:
-            return "Error: symbols parameter is required"
-        
-        # Parse symbols
-        symbol_list = [s.strip().upper() for s in symbols.split(',')]
-        
-        if len(symbol_list) > 10:
-            return "Error: Maximum 10 stocks can be fetched at once"
-        
-        # Fetch data for each symbol
-        results = []
-        has_s3_keys = False
-        for symbol in symbol_list:
-            try:
-                data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
-                results.append(data)
-                
-                # Check if this result is stored in S3
-                if isinstance(data, dict) and 's3_key' in data:
-                    has_s3_keys = True
-            except Exception as e:
-                results.append({
-                    "symbol": symbol,
-                    "status": "error",
-                    "message": f"Failed to fetch data: {str(e)}"
-                })
-        
-        # Return consolidated results
-        consolidated_data = {
-            "timeframe": timeframe,
-            "start_date": start_date,
-            "end_date": end_date,
-            "total_symbols": len(symbol_list),
-            "successful_symbols": len([r for r in results if r.get("status") == "success"]),
-            "stocks": results
-        }
-        
-        # Check if consolidated result is large enough to store in S3
-        consolidated_json = json.dumps(consolidated_data)
-        consolidated_size = len(consolidated_json)
-        total_data_points = sum(len(r.get('historical_data', [])) for r in results if isinstance(r, dict))
-        
-        LARGE_DATA_THRESHOLD = 50000  # 50KB
-        LARGE_POINTS_THRESHOLD = 500  # 500 total data points
-        
-        should_store_in_s3 = consolidated_size > LARGE_DATA_THRESHOLD or total_data_points > LARGE_POINTS_THRESHOLD or has_s3_keys
-        
-        if should_store_in_s3:
-            # Store in data-files and return S3 key
-            try:
-                import boto3
-                import os
-                from datetime import datetime
-                
-                user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID', 'default')
-                session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
-                bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
-                
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                symbols_str = '_'.join(symbol_list)
-                filename = f"get_multiple_financial_data_{symbols_str}_{timeframe}_{timestamp}.json"
-                s3_key = f"users/{user_id}/sessions/{session_id}/data-files/{filename}"
-                
-                s3_client = boto3.client('s3')
-                s3_client.put_object(
-                    Bucket=bucket_name,
-                    Key=s3_key,
-                    Body=consolidated_json,
-                    ContentType='application/json'
-                )
-                
-                agent_logger.info(f"Stored consolidated stock data in S3: {s3_key} ({consolidated_size} bytes, {total_data_points} total points)")
-                
-                # Return reference with S3 key
-                return json.dumps({
-                    "status": "success",
-                    "timeframe": timeframe,
-                    "total_symbols": len(symbol_list),
-                    "successful_symbols": len([r for r in results if r.get("status") == "success"]),
-                    "s3_key": s3_key,
-                    "data_size_bytes": consolidated_size,
-                    "total_data_points": total_data_points,
-                    "message": f"Large dataset stored in S3. Use read_s3_file_tool to access: {s3_key}",
-                    "stocks_summary": [
-                        {
-                            "symbol": r.get("symbol", "UNKNOWN"),
-                            "status": r.get("status", "unknown"),
-                            "data_points": len(r.get("historical_data", [])),
-                            "s3_key": r.get("s3_key") if isinstance(r, dict) else None
-                        }
-                        for r in results
-                    ]
-                }, indent=2)
-            except Exception as store_error:
-                agent_logger.warning(f"Failed to store consolidated data in S3: {str(store_error)}, returning JSON directly")
-                # Fall through to return JSON
-        
-        # For smaller datasets, return JSON directly
-        return json.dumps(consolidated_data, indent=2)
-        
-    except Exception as e:
-        return f"Error getting multiple financial data: {str(e)}"
-
-@tool
-def search_financial_news(query: str) -> str:
-    """Search for recent financial news and developments about a stock or financial topic."""
-    try:
-        agent_logger.info(f"Searching financial news for: {query}")
-        news = FinancialTools.search_financial_news(query)
-        return json.dumps(news, indent=2)
-    except Exception as e:
-        return f"Error searching news: {str(e)}"
-
-@tool
-def get_technical_analysis(symbol: str) -> str:
-    """Get technical indicators like RSI, moving averages, MACD, and Bollinger Bands for a stock."""
-    try:
-        agent_logger.info(f"Getting technical analysis for {symbol}")
-        indicators = FinancialTools.calculate_technical_indicators(symbol)
-        return json.dumps(indicators, indent=2)
-    except Exception as e:
-        return f"Error getting technical analysis: {str(e)}"
-
-@tool
-def analyze_portfolio(portfolio_data: str, period: str = "1y") -> str:
-    """Analyze a portfolio of stocks with risk metrics, returns, and correlations. Portfolio format: [{"ticker": "AAPL", "shares": 100, "price": 150.0}, {"ticker": "MSFT", "shares": 50, "price": 300.0}]"""
-    try:
-        agent_logger.info("Analyzing portfolio")
-        metrics = FinancialTools.calculate_portfolio_metrics(portfolio_data, period)
-        return json.dumps(metrics, indent=2)
-    except Exception as e:
-        return f"Error analyzing portfolio: {str(e)}"
-
-@tool
-def calculate_stock_correlation(tickers: str, period: str = "1y") -> str:
-    """Calculate correlation matrix between multiple stocks. Tickers should be comma-separated like 'AAPL,MSFT,GOOGL'"""
-    try:
-        agent_logger.info(f"Calculating stock correlation for: {tickers}")
-        ticker_list = [t.strip().upper() for t in tickers.split(',')]
-        correlation = FinancialTools.calculate_correlation(ticker_list, period)
-        return json.dumps(correlation, indent=2)
-    except Exception as e:
-        return f"Error calculating correlation: {str(e)}"
-
-@tool
-def get_volatility_surface(symbol: str) -> str:
-    """Calculate implied volatility surface and historical volatility patterns for a stock using real market data."""
-    try:
-        agent_logger.info(f"Getting volatility surface for {symbol}")
-        volatility_data = FinancialTools.calculate_volatility_surface(symbol)
-        return json.dumps(volatility_data, indent=2)
-    except Exception as e:
-        return f"Error calculating volatility surface: {str(e)}"
-
-@tool
-def python_financial_calculator(calculation: str) -> str:
-    """Execute advanced financial calculations including Fama-French 5-factor regression analysis, correlations, cointegration tests, Sharpe ratios, and Value at Risk calculations."""
-    try:
-        agent_logger.info(f"Running financial calculation: {calculation[:50]}...")
-        # Use the enhanced financial calculator from our module
-        calculator = financial_calculator.EnhancedFinancialCalculator()
-        
-        calc_lower = calculation.lower()
-        
-        if any(term in calc_lower for term in ["fama", "french", "factor", "regression"]):
-            # Extract symbol if provided
-            symbol = "AAPL"  # Default
-            import re
-            symbol_match = re.search(r'\b[A-Z]{1,5}\b', calculation)
-            if symbol_match:
-                symbol = symbol_match.group()
-            
-            return calculator.fama_french_analysis(symbol)
-            
-        elif any(term in calc_lower for term in ["correlation", "corr"]):
-            return """
-CORRELATION ANALYSIS:
-====================
-Stock A vs Stock B Correlation: 0.74***
-• Confidence Interval (95%): [0.62, 0.83]
-• Statistical Significance: p < 0.001
-• Interpretation: Strong positive correlation
-
-ROLLING CORRELATION (12-month):
-• Current: 0.74
-• Average: 0.68
-• Range: [0.45, 0.89]
-"""
-            
-        elif any(term in calc_lower for term in ["cointegration", "coint"]):
-            return """
-COINTEGRATION ANALYSIS:
-======================
-Engle-Granger Test:
-• Test Statistic: -4.23***
-• P-value: 0.002
-• Critical Value (5%): -3.34
-• Result: COINTEGRATED
-
-Johansen Test:
-• Trace Statistic: 28.45***
-• Max Eigenvalue: 22.17***
-• Cointegrating Vectors: 1
-"""
-            
-        elif any(term in calc_lower for term in ["sharpe", "ratio"]):
-            return """
-SHARPE RATIO ANALYSIS:
-=====================
-• Sharpe Ratio: 1.42
-• Risk-Free Rate: 2.1%
-• Excess Return: 12.4%
-• Volatility: 8.7%
-• Interpretation: Strong risk-adjusted performance
-"""
-            
-        elif any(term in calc_lower for term in ["var", "value at risk", "risk"]):
-            return """
-VALUE AT RISK (VaR) ANALYSIS:
-=============================
-1-Day VaR (95% confidence): -2.1%
-1-Day VaR (99% confidence): -2.8%
-10-Day VaR (95% confidence): -6.6%
-
-Expected Shortfall (CVaR):
-• 95% level: -2.7%
-• 99% level: -3.5%
-
-RISK METRICS:
-• Maximum Drawdown: -12.4%
-• Volatility (annualized): 18.2%
-• Beta vs Market: 1.15
-"""
-        
-        elif any(term in calc_lower for term in ["volatility", "surface", "implied"]):
-            return """
-VOLATILITY SURFACE ANALYSIS:
-============================
-Current Implied Volatility Levels:
-• 30-day IV: 22.4%
-• 60-day IV: 24.1%
-• 90-day IV: 25.8%
-• 180-day IV: 27.2%
-
-Historical vs Implied Volatility:
-• Current HV (30-day): 19.8%
-• IV-HV Spread: +2.6% (IV premium)
-• Mean reversion likelihood: High
-
-Volatility Skew Analysis:
-• ATM IV: 24.1%
-• 10-delta Put IV: 28.7%
-• 10-delta Call IV: 21.3%
-• Skew: -7.4% (put skew present)
-
-Term Structure:
-• Contango present (increasing with time)
-• Front month elevated due to earnings
-• Backmonth relatively stable
-"""
-        
-        else:
-            return "Financial calculation completed. For specific analyses, mention keywords like 'Fama-French', 'correlation', 'cointegration', 'Sharpe ratio', 'VaR', or 'volatility surface'."
-            
-    except Exception as e:
-        return f"Error in financial calculation: {str(e)}"
+# Financial data tools have been moved to tools/stock_data_fetcher.py
+# Financial calculator tool has been moved to tools/financial_calculator.py
+# They are imported at the top of this file
 
 
 # S3 File Reader Tool - defined inline to match other tools
@@ -1850,7 +1565,7 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
         
         try:
             import json
-            from compression_helper import CompressionHelper
+            from utils.compression_helper import CompressionHelper
             
             # Try to parse as JSON to check if it's compressed
             try:

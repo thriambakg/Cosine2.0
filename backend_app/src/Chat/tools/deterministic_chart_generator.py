@@ -70,7 +70,7 @@ class ChartImageGenerator:
                 if isinstance(stock, dict) and stock.get("_compressed") is True:
                     logger.info(f"Decompressing stock: {stock.get('symbol', 'UNKNOWN')}")
                     try:
-                        from compression_helper import CompressionHelper
+                        from utils.compression_helper import CompressionHelper
                         decompressed_stock = CompressionHelper.decompress_data(stock)
                         # Remove original_data if present
                         if isinstance(decompressed_stock, dict) and 'original_data' in decompressed_stock:
@@ -272,7 +272,7 @@ class SummaryMetricsCalculator:
                 if isinstance(stock, dict) and stock.get("_compressed") is True:
                     logger.info(f"Decompressing stock: {stock.get('symbol', 'UNKNOWN')}")
                     try:
-                        from compression_helper import CompressionHelper
+                        from utils.compression_helper import CompressionHelper
                         decompressed_stock = CompressionHelper.decompress_data(stock)
                         # Remove original_data if present
                         if isinstance(decompressed_stock, dict) and 'original_data' in decompressed_stock:

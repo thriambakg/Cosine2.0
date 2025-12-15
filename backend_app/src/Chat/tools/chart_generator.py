@@ -261,7 +261,7 @@ class UnifiedChartGenerator:
             import sys
             import os
             sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-            from compression_helper import CompressionHelper
+            from utils.compression_helper import CompressionHelper
             
             # Check if the entire response is compressed (new approach)
             if isinstance(data_dict, dict) and data_dict.get("_compressed") is True:
