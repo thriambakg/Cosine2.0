@@ -259,6 +259,19 @@ class ContextAwareAgent:
 - get_session_context_tool(session_id, user_id) - Get full session context when needed
 - get_session_files_tool(session_id, user_id, file_type) - Get specific files when needed
 
+📊 HTML REPORT GENERATION RULES:
+- NEVER embed all raw data points in HTML files - this causes timeouts
+- NEVER call read_s3_file_tool to read full data files when generating HTML reports
+- For HTML reports with charts:
+  1. Use get_multiple_financial_data to get data (it returns summary metrics)
+  2. Call generate_chart_tool to create a chart image (saves to S3)
+  3. Create lightweight HTML that embeds the chart image URL and summary metrics only
+  4. DO NOT read the full data file - use the summary from step 1
+- Keep HTML files under 50KB - use external chart images, not inline data
+- Extract only key metrics (CAGR, volatility, max drawdown, Sharpe ratio) from initial tool responses
+- If data is stored in S3 (s3_key provided), DO NOT read it - reference it via link instead
+- For interactive charts, use Chart.js with <50 sample data points, not full datasets
+
 ⚡ WORKFLOW:
 1. Call relevant tools immediately
 2. Use on-demand tools to get full content when needed
