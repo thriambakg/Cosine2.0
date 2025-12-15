@@ -459,23 +459,34 @@ IMAGE AND PDF MANIPULATION TOOLS:
 - generate_html_template_tool(body_content, title, custom_css, theme) - Generate HTML document structure with styling. Wraps body content in a complete HTML document with CSS. Use this to create HTML templates with professional styling.
 
 WORKFLOW FOR DOCUMENT GENERATION:
-IMPORTANT: Planner tools (format_portfolio_data_to_markdown_tool, generate_pdf_report_tool, etc.) should NOT be included in the execution plan. 
-Instead, you should:
-1. Create a plan with orchestrator tools only:
+🚫 CRITICAL: Planner tools (format_portfolio_data_to_markdown_tool, generate_pdf_report_tool, generate_html_report_tool, format_financial_metrics_tool) are PLANNER-ONLY and MUST NEVER be included in orchestrator execution plans.
+
+The orchestrator CANNOT execute these tools. If you include them, the plan will fail.
+
+CORRECT APPROACH:
+1. Create a plan with ONLY orchestrator tools:
    - Step 1: Get financial data (get_multiple_financial_data)
    - Step 2: Analyze portfolio (analyze_portfolio_performance)
    - Step 3: Generate chart (generate_chart_tool)
    - Step 4: Generate CSV (generate_excel_file_tool with {{step_2.result.metrics_table}})
-   - Step 5: Generate PDF/HTML (generate_agent_file_tool with formatted content)
+   - Step 5: Generate PDF/HTML (generate_agent_file_tool with file_type="pdf" or "html")
 
-2. For document generation, you can:
-   - Option A: Use generate_agent_file_tool with pre-formatted content (recommended for orchestrator)
-   - Option B: Call planner tools directly during planning (before creating the plan) and include results in the plan
-   
-3. If you need to format content, do it in your plan by constructing the content string with placeholders like:
-   - "Portfolio Performance Report\n\nCAGR: {{step_2.result.portfolio.cagr}}\nVolatility: {{step_2.result.portfolio.volatility}}..."
-   
-4. The orchestrator will resolve placeholders and generate the file using generate_agent_file_tool.
+2. For document content, construct a simple content string with placeholders:
+   - Use plain text with placeholders like: "CAGR: {{step_2.result.portfolio.cagr}}"
+   - DO NOT use template syntax like {{#each}} or {{@index}} - these will NOT be rendered
+   - DO NOT use markdown image syntax expecting it to work - use the chart S3 key directly
+   - The orchestrator will resolve placeholders to actual values
+
+3. For charts in PDFs/HTML:
+   - The chart S3 key will be automatically detected from {{step_3.result.s3_key}} or {{step_3.s3_key}}
+   - The PDF/HTML generator will embed the image automatically
+   - You don't need to format it specially
+
+4. Content formatting rules:
+   - Use simple placeholders: {{step_N.result.field}}
+   - Format values in the content string itself (e.g., "CAGR: {{step_2.result.portfolio.cagr}}%")
+   - DO NOT emit Handlebars/Mustache template syntax
+   - DO NOT emit loops or conditionals - the orchestrator doesn't execute templates
 
 WORKER TOOLS (orchestrator - can be called in any order for dynamic document generation):
 - convert_markdown_to_html_tool(markdown_content, preserve_line_breaks) - Convert markdown to HTML

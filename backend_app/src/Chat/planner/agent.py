@@ -2228,9 +2228,12 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                     # Create Image from bytes
                     img_buffer = BytesIO(image_data)
                     img = Image(img_buffer, width=max_width, height=max_height, kind='proportional')
+                    logger.info(f"✅ Successfully embedded image from S3: {s3_key} ({len(image_data)} bytes)")
                     return img
                 except Exception as e:
-                    logger.error(f"Error embedding image from S3 {s3_key}: {str(e)}")
+                    logger.error(f"❌ Error embedding image from S3 {s3_key}: {str(e)}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     return None
             
             # Helper function to resolve S3 JSON references in content
@@ -2487,11 +2490,60 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                 
                 return '\n'.join(formatted_lines)
             
+            # Helper function to remove template syntax (Handlebars/Mustache)
+            def remove_template_syntax(content_text: str) -> str:
+                """
+                Remove all Handlebars/Mustache template syntax from content.
+                Agents should never emit templates - this is a safety net.
+                
+                Removes:
+                - {{#each ...}} ... {{/each}}
+                - {{#if ...}} ... {{/if}}
+                - {{@index}}, {{this}}, {{../field}}
+                - Any {{...}} that looks like template logic
+                """
+                import re
+                
+                # Remove block helpers: {{#each}}, {{#if}}, {{#unless}}, etc.
+                # Match: {{#each ...}} ... {{/each}}
+                content_text = re.sub(r'\{\{#each[^}]+\}\}.*?\{\{/each\}\}', '', content_text, flags=re.DOTALL)
+                content_text = re.sub(r'\{\{#if[^}]+\}\}.*?\{\{/if\}\}', '', content_text, flags=re.DOTALL)
+                content_text = re.sub(r'\{\{#unless[^}]+\}\}.*?\{\{/unless\}\}', '', content_text, flags=re.DOTALL)
+                content_text = re.sub(r'\{\{#with[^}]+\}\}.*?\{\{/with\}\}', '', content_text, flags=re.DOTALL)
+                
+                # Remove template variables that look like loops/conditionals
+                # {{@index}}, {{this}}, {{../field}}, {{@key}}, etc.
+                content_text = re.sub(r'\{\{@[^}]+\}\}', '', content_text)
+                content_text = re.sub(r'\{\{this\}\}', '', content_text)
+                content_text = re.sub(r'\{\{\.\.\/[^}]+\}\}', '', content_text)
+                
+                # Remove any remaining template syntax that contains step references with array notation
+                # e.g., {{step_2.result.portfolio.rolling_12m_returns.returns[@index]}}
+                content_text = re.sub(r'\{\{[^}]*\[@[^\]]+\][^}]*\}\}', '', content_text)
+                
+                # Remove lines that are entirely template syntax
+                lines = content_text.split('\n')
+                cleaned_lines = []
+                for line in lines:
+                    line_stripped = line.strip()
+                    # Skip lines that are only template syntax
+                    if re.match(r'^\{\{[#/]', line_stripped) or re.match(r'^\{\{.*\}\}$', line_stripped):
+                        continue
+                    # Remove template syntax from within lines but keep the line
+                    cleaned_line = re.sub(r'\{\{[^}]+\}\}', '', line)
+                    if cleaned_line.strip():  # Only add non-empty lines
+                        cleaned_lines.append(cleaned_line)
+                
+                return '\n'.join(cleaned_lines)
+            
             # Resolve JSON references in content before processing
             content = resolve_json_references(content)
             
             # Format raw decimal values that were extracted by orchestrator
             content = format_decimal_values(content)
+            
+            # Remove any template syntax (safety net - agents shouldn't emit templates)
+            content = remove_template_syntax(content)
             
             # First, try to parse entire content as JSON to extract chart references
             chart_s3_keys = []
@@ -2564,8 +2616,8 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                         story.append(Spacer(1, 0.2*inch))
                         story.append(img)
                         story.append(Spacer(1, 0.2*inch))
-                        # Remove the markdown image syntax from the line
-                        line = re.sub(r'!\[.*?\]\(users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>\)]+\.png\)', '[Chart embedded above]', line)
+                        # Remove the markdown image syntax from the line (handle spaces in S3 keys)
+                        line = re.sub(r'!\[.*?\]\(users/[^)]+\.png\)', '[Chart embedded above]', line)
                 
                 # S3 keys can contain spaces, so match from users/ to .png (allowing spaces)
                 # Pattern: users/.../sessions/.../agent-files/...png (where ... can contain spaces)
