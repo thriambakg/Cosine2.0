@@ -221,8 +221,21 @@ class UnifiedChartGenerator:
                 metadata=metadata
             )
             
-            logger.info(f"Generated chart: {filename}")
-            return result
+            # Extract S3 key from result or construct it
+            # upload_file_and_notify returns a success message, but we need the S3 key
+            # Construct the S3 key based on the known pattern
+            s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
+            
+            logger.info(f"Generated chart: {filename} at {s3_key}")
+            
+            # Return a dict with both the success message and S3 key for better compatibility
+            return json.dumps({
+                'success': True,
+                'message': result,
+                's3_key': s3_key,
+                'filename': filename,
+                'file_type': 'png'
+            })
             
         except ImportError:
             logger.warning("lambda_invocation module not available - falling back to manual upload")

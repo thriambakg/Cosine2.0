@@ -1690,9 +1690,12 @@ File Information:
 def _resolve_placeholders_in_content(content: str, user_id: str, session_id: str) -> str:
     """
     Resolve placeholders like {{step_N.result.s3_key}} in content.
-    Tries to extract S3 keys from session files, prioritizing chart/image files.
+    Tries to extract S3 keys from:
+    1. Stored orchestrator results (if available in data-files)
+    2. Session files (agent-files folder)
     """
     import re
+    import json
     
     # Find placeholders like {{step_N.result.s3_key}}, {{step_N.s3_key}}, {{step_N.result}}
     placeholder_patterns = [
@@ -1717,51 +1720,121 @@ def _resolve_placeholders_in_content(content: str, user_id: str, session_id: str
             step_num = int(step_num_str)
             s3_key = None
             
-            # Try to get S3 key from session files
-            # Look for files that match the pattern of step results
+            # First, try to get S3 key from stored orchestrator results
+            # The orchestrator stores results in data-files folder
             try:
                 bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
                 if bucket_name:
                     import boto3
                     s3_client = boto3.client('s3')
                     
-                    # List files in agent-files folder, prioritizing image files (charts)
-                    prefix = f"users/{user_id}/sessions/{session_id}/agent-files/"
+                    # Look for stored result files from the orchestrator
+                    # Pattern: generate_chart_tool_TIMESTAMP.json or tool_name_TIMESTAMP.json
+                    data_prefix = f"users/{user_id}/sessions/{session_id}/data-files/"
                     try:
-                        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=100)
+                        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=data_prefix, MaxKeys=100)
                         if 'Contents' in response:
+                            # Look for files that might contain the step result
                             # Sort by last modified (most recent first)
                             files = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)
                             
-                            # For image placeholders, prioritize PNG files (charts)
-                            if 's3_key' in placeholder_type or 'image' in content.lower() or 'chart' in content.lower():
-                                # Look for PNG files first (charts are typically PNG)
-                                png_files = [f for f in files if f['Key'].endswith('.png')]
-                                if png_files:
-                                    s3_key = png_files[0]['Key']
-                                    logger.info(f"Resolved placeholder {{step_{step_num}.s3_key}} to chart: {s3_key}")
+                            # Try to find a result file that might contain the S3 key
+                            for file_obj in files:
+                                if file_obj['Key'].endswith('.json'):
+                                    try:
+                                        # Read the stored result
+                                        obj_response = s3_client.get_object(Bucket=bucket_name, Key=file_obj['Key'])
+                                        result_content = obj_response['Body'].read().decode('utf-8')
+                                        result_data = json.loads(result_content)
+                                        
+                                        # Check if this result contains an s3_key
+                                        if isinstance(result_data, dict):
+                                            if 's3_key' in result_data:
+                                                s3_key = result_data['s3_key']
+                                                logger.info(f"Found S3 key in stored result: {s3_key}")
+                                                break
+                                            # Also check if it's a string that contains the S3 key pattern
+                                            elif 'message' in result_data and isinstance(result_data['message'], str):
+                                                # Try to extract S3 key from message
+                                                message = result_data['message']
+                                                if 'users/' in message and '/agent-files/' in message:
+                                                    # Extract S3 key from message
+                                                    import re as re_module
+                                                    s3_match = re_module.search(r'users/[^/]+/sessions/[^/]+/agent-files/[^\s]+', message)
+                                                    if s3_match:
+                                                        s3_key = s3_match.group(0)
+                                                        logger.info(f"Extracted S3 key from message: {s3_key}")
+                                                        break
+                                    except Exception as e:
+                                        logger.debug(f"Could not parse result file {file_obj['Key']}: {str(e)}")
+                                        continue
+                    except Exception as e:
+                        logger.debug(f"Could not list data-files to resolve placeholder: {str(e)}")
+            except Exception as e:
+                logger.debug(f"Error reading stored results: {str(e)}")
+            
+            # If we didn't find it in stored results, try agent-files folder
+            if not s3_key:
+                try:
+                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
+                    if bucket_name:
+                        import boto3
+                        s3_client = boto3.client('s3')
+                        
+                        # List files in agent-files folder, prioritizing image files (charts)
+                        prefix = f"users/{user_id}/sessions/{session_id}/agent-files/"
+                        try:
+                            response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=100)
+                            if 'Contents' in response:
+                                # Sort by last modified (most recent first)
+                                files = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)
+                                
+                                # For image placeholders, prioritize PNG files (charts)
+                                if 's3_key' in placeholder_type or 'image' in content.lower() or 'chart' in content.lower():
+                                    # Look for PNG files first (charts are typically PNG)
+                                    png_files = [f for f in files if f['Key'].endswith('.png')]
+                                    if png_files:
+                                        s3_key = png_files[0]['Key']
+                                        logger.info(f"Resolved placeholder {{step_{step_num}.s3_key}} to chart: {s3_key}")
                                 elif files:
                                     # Fallback to most recent file
                                     s3_key = files[0]['Key']
                                     logger.info(f"Resolved placeholder {{step_{step_num}.s3_key}} to: {s3_key}")
-                            else:
-                                # For other placeholders, use most recent file
-                                if files:
-                                    s3_key = files[0]['Key']
-                                    logger.info(f"Resolved placeholder {{step_{step_num}.result}} to: {s3_key}")
-                    except Exception as e:
-                        logger.warning(f"Could not list S3 files to resolve placeholder: {str(e)}")
-            except Exception as e:
-                logger.warning(f"Error resolving placeholder {{step_{step_num}.s3_key}}: {str(e)}")
+                        except Exception as e:
+                            logger.warning(f"Could not list S3 files to resolve placeholder: {str(e)}")
+                except Exception as e:
+                    logger.warning(f"Error resolving placeholder {{step_{step_num}.s3_key}}: {str(e)}")
             
             # Replace placeholders if we found an S3 key
             if s3_key:
+                # Also handle URLs - if the placeholder is in a URL, construct the full S3 URL
                 if placeholder_type == 's3_key':
                     placeholder = f"{{{{step_{step_num}.s3_key}}}}"
-                    resolved_content = resolved_content.replace(placeholder, s3_key)
+                    # Check if it's in a URL context
+                    if f"https://s3.amazonaws.com/{placeholder}" in resolved_content or f"s3.amazonaws.com/{placeholder}" in resolved_content:
+                        # Replace with full S3 URL
+                        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
+                        if bucket_name:
+                            s3_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
+                            resolved_content = resolved_content.replace(f"https://s3.amazonaws.com/{placeholder}", s3_url)
+                            resolved_content = resolved_content.replace(f"s3.amazonaws.com/{placeholder}", s3_url)
+                        else:
+                            resolved_content = resolved_content.replace(placeholder, s3_key)
+                    else:
+                        resolved_content = resolved_content.replace(placeholder, s3_key)
                 elif placeholder_type == 'result.s3_key':
                     placeholder = f"{{{{step_{step_num}.result.s3_key}}}}"
-                    resolved_content = resolved_content.replace(placeholder, s3_key)
+                    # Check if it's in a URL context
+                    if f"https://s3.amazonaws.com/{placeholder}" in resolved_content or f"s3.amazonaws.com/{placeholder}" in resolved_content:
+                        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
+                        if bucket_name:
+                            s3_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
+                            resolved_content = resolved_content.replace(f"https://s3.amazonaws.com/{placeholder}", s3_url)
+                            resolved_content = resolved_content.replace(f"s3.amazonaws.com/{placeholder}", s3_url)
+                        else:
+                            resolved_content = resolved_content.replace(placeholder, s3_key)
+                    else:
+                        resolved_content = resolved_content.replace(placeholder, s3_key)
                 elif placeholder_type == 'result':
                     placeholder = f"{{{{step_{step_num}.result}}}}"
                     resolved_content = resolved_content.replace(placeholder, s3_key)
