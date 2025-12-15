@@ -52,7 +52,29 @@ class Orchestrator:
         
         for i, step in enumerate(steps):
             step_num = i + 1
+            
+            # Validate step format
+            if not isinstance(step, dict):
+                logger.error(f"Step {step_num} is not a dictionary: {type(step)}")
+                results['results'].append({
+                    'step': step_num,
+                    'status': 'failed',
+                    'error': f'Invalid step format: expected dict, got {type(step).__name__}'
+                })
+                results['steps_failed'] += 1
+                continue
+            
             tool_name = step.get('tool')
+            if not tool_name:
+                logger.error(f"Step {step_num} missing 'tool' field")
+                results['results'].append({
+                    'step': step_num,
+                    'status': 'failed',
+                    'error': "Missing 'tool' field in step"
+                })
+                results['steps_failed'] += 1
+                continue
+            
             parameters = step.get('parameters', {})
             
             logger.info(f"Executing step {step_num}/{len(steps)}: {tool_name}")

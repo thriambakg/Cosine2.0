@@ -1737,6 +1737,130 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
         except Exception as decomp_error:
             logger.warning(f"Decompression check failed, using content as-is: {str(decomp_error)}")
         
+        # Convert content to PDF bytes if file_type is 'pdf'
+        if file_type == 'pdf':
+            try:
+                from reportlab.lib.pagesizes import letter
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib.units import inch
+                from reportlab.lib import colors
+                from io import BytesIO
+                import re
+                
+                # Create PDF in memory
+                buffer = BytesIO()
+                doc = SimpleDocTemplate(buffer, pagesize=letter, 
+                                       rightMargin=72, leftMargin=72,
+                                       topMargin=72, bottomMargin=18)
+                styles = getSampleStyleSheet()
+                story = []
+                
+                # Helper to escape XML/HTML special chars for ReportLab
+                def escape_xml(text):
+                    return (text.replace('&', '&amp;')
+                               .replace('<', '&lt;')
+                               .replace('>', '&gt;'))
+                
+                # Helper to convert markdown to ReportLab Paragraph
+                def markdown_to_paragraph(text, style=styles['Normal']):
+                    # Escape XML
+                    text = escape_xml(text)
+                    # Convert markdown bold **text** to <b>text</b>
+                    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+                    # Convert markdown italic *text* to <i>text</i>
+                    text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)
+                    # Convert markdown code `text` to <font name="Courier">text</font>
+                    text = re.sub(r'`(.+?)`', r'<font name="Courier">\1</font>', text)
+                    return Paragraph(text, style)
+                
+                # Convert content to paragraphs
+                if not content or not content.strip():
+                    content = "Empty document"
+                
+                lines = content.split('\n')
+                i = 0
+                while i < len(lines):
+                    line = lines[i].strip()
+                    
+                    if not line:
+                        story.append(Spacer(1, 0.1*inch))
+                        i += 1
+                        continue
+                    
+                    # Handle markdown headers
+                    if line.startswith('# '):
+                        story.append(markdown_to_paragraph(line[2:], styles['Heading1']))
+                        story.append(Spacer(1, 0.2*inch))
+                    elif line.startswith('## '):
+                        story.append(markdown_to_paragraph(line[3:], styles['Heading2']))
+                        story.append(Spacer(1, 0.15*inch))
+                    elif line.startswith('### '):
+                        story.append(markdown_to_paragraph(line[4:], styles['Heading3']))
+                        story.append(Spacer(1, 0.1*inch))
+                    # Handle tables (markdown table format)
+                    elif '|' in line and i < len(lines) - 1:
+                        # Try to parse as table
+                        table_rows = []
+                        header_line = line
+                        if '|' in header_line:
+                            headers = [h.strip() for h in header_line.split('|') if h.strip()]
+                            if headers and len(headers) > 1:
+                                table_rows.append(headers)
+                                i += 1
+                                # Skip separator line (|---|---|)
+                                if i < len(lines) and '---' in lines[i]:
+                                    i += 1
+                                # Read data rows
+                                while i < len(lines) and '|' in lines[i]:
+                                    row = [cell.strip() for cell in lines[i].split('|') if cell.strip()]
+                                    if row:
+                                        table_rows.append(row)
+                                    i += 1
+                                # Create table
+                                if len(table_rows) > 1:
+                                    table = Table(table_rows)
+                                    table.setStyle(TableStyle([
+                                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                                        ('FONTSIZE', (0, 0), (-1, 0), 14),
+                                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                                    ]))
+                                    story.append(table)
+                                    story.append(Spacer(1, 0.2*inch))
+                                    continue
+                        # Not a table, treat as normal paragraph
+                        story.append(markdown_to_paragraph(line))
+                    else:
+                        # Normal paragraph with markdown support
+                        story.append(markdown_to_paragraph(line))
+                    
+                    story.append(Spacer(1, 0.05*inch))
+                    i += 1
+                
+                # Build PDF
+                doc.build(story)
+                
+                # Get PDF bytes
+                pdf_bytes = buffer.getvalue()
+                buffer.close()
+                
+                logger.info(f"Generated PDF: {len(pdf_bytes)} bytes from {len(content)} chars of text")
+                content = pdf_bytes  # Use PDF bytes instead of text
+                
+            except ImportError as e:
+                logger.warning(f"ReportLab not available: {str(e)}, uploading as text file with PDF extension")
+                # Fall through to upload as text
+            except Exception as e:
+                logger.error(f"Error generating PDF: {str(e)}, uploading as text file")
+                import traceback
+                logger.error(f"PDF generation traceback: {traceback.format_exc()}")
+                # Fall through to upload as text
+        
         # Use unified file upload function
         try:
             from lambda_invocation import upload_file_and_notify

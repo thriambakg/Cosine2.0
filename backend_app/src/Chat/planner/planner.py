@@ -59,8 +59,33 @@ NON-DETERMINISTIC TASKS (no planning needed):
 - General conversation
 - Simple file creation
 
+AVAILABLE TOOLS:
+- get_multiple_financial_data(symbols, timeframe, start_date, end_date)
+- generate_chart_tool(symbol, data_json, chart_type, title)
+- analyze_portfolio(portfolio_data, period, risk_free_rate)
+- calculate_stock_correlation(tickers, period)
+
+PLAN FORMAT (if needs planning):
+{{
+  "needs_planning": true,
+  "steps": [
+    {{
+      "tool": "get_multiple_financial_data",
+      "parameters": {{"symbols": "AAPL,NVDA,^GSPC", "timeframe": "5y"}},
+      "store_result": true
+    }},
+    {{
+      "tool": "analyze_portfolio",
+      "parameters": {{"portfolio_data": "...", "period": "5y"}},
+      "store_result": true
+    }}
+  ]
+}}
+
+CRITICAL: Steps must be objects with "tool" and "parameters" keys, NOT strings or descriptions.
+
 QUICK DECISION:
-- If query needs deterministic batch processing → return {{"needs_planning": true, "steps": [...]}}
+- If query needs deterministic batch processing → return plan with structured steps
 - If query is simple or non-deterministic → return {{"needs_planning": false}}
 
 Return ONLY JSON, no explanation text."""
@@ -81,8 +106,26 @@ Return ONLY JSON, no explanation text."""
             plan = self._extract_plan_from_response(response_text)
             
             if plan and plan.get('needs_planning') and plan.get('steps'):
-                logger.info(f"Created plan with {len(plan.get('steps', []))} steps")
-                return plan
+                # Validate that steps are objects, not strings
+                steps = plan.get('steps', [])
+                validated_steps = []
+                for i, step in enumerate(steps):
+                    if isinstance(step, str):
+                        logger.warning(f"Step {i+1} is a string instead of object, skipping: {step[:50]}...")
+                        continue
+                    elif isinstance(step, dict) and 'tool' in step:
+                        validated_steps.append(step)
+                    else:
+                        logger.warning(f"Step {i+1} has invalid format, skipping: {type(step)}")
+                        continue
+                
+                if validated_steps:
+                    plan['steps'] = validated_steps
+                    logger.info(f"Created plan with {len(validated_steps)} validated steps")
+                    return plan
+                else:
+                    logger.warning("No valid steps found in plan, returning None")
+                    return None
             else:
                 # Return None to indicate agent should handle directly
                 # This prevents the agent from seeing {"needs_planning": false} in context

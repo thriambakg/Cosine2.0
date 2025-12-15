@@ -110,6 +110,8 @@ def upload_file_and_notify(
             content_type = 'image/png'
         elif file_type == 'json':
             content_type = 'application/json'
+        elif file_type == 'pdf':
+            content_type = 'application/pdf'
         
         # Create S3 key
         s3_key = f"users/{user_id}/sessions/{session_id}/{folder}/{filename}"
