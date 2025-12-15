@@ -40,45 +40,30 @@ class Planner:
         logger.info(f"Creating plan for query: {user_query[:100]}...")
         
         try:
-            # Create planning prompt
-            planning_prompt = f"""You are a planning system that creates execution plans for deterministic financial data tasks.
+            # Create planning prompt - quick decision maker, not a full response
+            planning_prompt = f"""You are a planning system that quickly determines if a query needs deterministic data processing.
 
 USER QUERY: {user_query}
 
-Your job is to create a JSON execution plan for deterministic tasks like:
-- Fetching stock data for multiple symbols
-- Generating charts
-- Calculating portfolio metrics
+DETERMINISTIC TASKS (needs planning):
+- Fetching stock data for multiple symbols (3+ symbols)
+- Generating charts from data
+- Calculating portfolio metrics with multiple stocks
 - Processing large datasets
+- Batch operations on multiple stocks
 
-DETERMINISTIC TASKS (use orchestrator):
-- get_multiple_financial_data: Fetch data for multiple stocks
-- generate_chart: Generate charts from data
-- analyze_portfolio_performance: Calculate portfolio metrics
-- calculate_correlations: Calculate stock correlations
-
-NON-DETERMINISTIC TASKS (agent handles directly):
+NON-DETERMINISTIC TASKS (no planning needed):
+- Single stock lookups
 - User questions and explanations
-- Report generation
-- Document creation
+- Report/document generation (HTML, PDF, etc.)
 - General conversation
+- Simple file creation
 
-If the query requires deterministic data processing, create a plan.
-If it's a simple question or report generation, return {{"needs_planning": false}}.
+QUICK DECISION:
+- If query needs deterministic batch processing → return {{"needs_planning": true, "steps": [...]}}
+- If query is simple or non-deterministic → return {{"needs_planning": false}}
 
-PLAN FORMAT:
-{{
-  "needs_planning": true,
-  "steps": [
-    {{
-      "tool": "tool_name",
-      "parameters": {{"param1": "value1"}},
-      "store_result": true/false
-    }}
-  ]
-}}
-
-Return ONLY JSON, no other text."""
+Return ONLY JSON, no explanation text."""
 
             # Get LLM response
             response = self.agent(planning_prompt)
@@ -95,12 +80,14 @@ Return ONLY JSON, no other text."""
             # Parse plan from response
             plan = self._extract_plan_from_response(response_text)
             
-            if plan:
+            if plan and plan.get('needs_planning') and plan.get('steps'):
                 logger.info(f"Created plan with {len(plan.get('steps', []))} steps")
                 return plan
             else:
+                # Return None to indicate agent should handle directly
+                # This prevents the agent from seeing {"needs_planning": false} in context
                 logger.info("Query does not need planning - agent will handle directly")
-                return {"needs_planning": False}
+                return None
                 
         except Exception as e:
             logger.error(f"Error creating plan: {str(e)}")
@@ -113,16 +100,28 @@ Return ONLY JSON, no other text."""
             json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
             if json_match:
                 plan_json = json_match.group(1)
-                return json.loads(plan_json)
+                parsed = json.loads(plan_json)
+                # If it's just {"needs_planning": false}, return None to let agent handle
+                if parsed.get('needs_planning') is False and not parsed.get('steps'):
+                    return None
+                return parsed
             
             # Try to find JSON object directly
-            json_match = re.search(r'\{.*"steps".*\}', response_text, re.DOTALL)
+            json_match = re.search(r'\{.*"(?:needs_planning|steps)".*\}', response_text, re.DOTALL)
             if json_match:
                 plan_json = json_match.group(0)
-                return json.loads(plan_json)
+                parsed = json.loads(plan_json)
+                # If it's just {"needs_planning": false}, return None to let agent handle
+                if parsed.get('needs_planning') is False and not parsed.get('steps'):
+                    return None
+                return parsed
             
             # Try parsing entire response as JSON
-            return json.loads(response_text)
+            parsed = json.loads(response_text)
+            # If it's just {"needs_planning": false}, return None to let agent handle
+            if parsed.get('needs_planning') is False and not parsed.get('steps'):
+                return None
+            return parsed
             
         except (json.JSONDecodeError, AttributeError):
             logger.warning("Could not parse plan from response")

@@ -1051,7 +1051,9 @@ Context Items Available: {len(context_items)} items
                 planner = Planner(agent)
                 plan = planner.create_plan(user_message, session_context)
                 
-                if plan.get('needs_planning', False) and plan.get('steps'):
+                # If plan is None, agent handles directly (no deterministic processing needed)
+                # If plan exists with steps, route through orchestrator
+                if plan and plan.get('needs_planning', False) and plan.get('steps'):
                     logger.info(f"Query requires deterministic processing - routing through planner/orchestrator")
                     
                     # Execute plan with orchestrator
