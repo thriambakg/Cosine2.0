@@ -89,6 +89,23 @@ class Orchestrator:
                 # Check if result needs storage
                 should_store = step.get('store_result', False) or self._is_large_result(tool_result)
                 
+                # For tools that return summary data (like generate_chart_image, calculate_summary_metrics),
+                # we want to include the summary data even if we store the full result in S3
+                summary_data = None
+                if isinstance(tool_result, dict):
+                    # Extract summary data if present
+                    if 'summary_metrics' in tool_result:
+                        summary_data = {
+                            'summary_metrics': tool_result.get('summary_metrics'),
+                            'summary_s3_key': tool_result.get('summary_s3_key')
+                        }
+                    elif 'chart_s3_key' in tool_result:
+                        summary_data = {
+                            'chart_s3_key': tool_result.get('chart_s3_key'),
+                            'chart_type': tool_result.get('chart_type'),
+                            'interactive': tool_result.get('interactive')
+                        }
+                
                 if should_store:
                     # Store in S3
                     file_reference = self.data_storage.store_result(
@@ -96,12 +113,17 @@ class Orchestrator:
                     )
                     results['file_references'].append(file_reference)
                     
-                    results['results'].append({
+                    # Include summary data if available, even when storing
+                    result_entry = {
                         'step': step_num,
                         'tool': tool_name,
                         'status': 'completed',
                         'file_reference': file_reference
-                    })
+                    }
+                    if summary_data:
+                        result_entry['result'] = summary_data
+                    
+                    results['results'].append(result_entry)
                 else:
                     # Return result directly
                     results['results'].append({

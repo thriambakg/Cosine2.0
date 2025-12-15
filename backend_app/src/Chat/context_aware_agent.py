@@ -269,6 +269,17 @@ When generating interactive HTML reports with charts:
 - Extract ALL historical_data points for each symbol and include them in the JavaScript arrays
 - Example: If there are 250 data points, include all 250, not just 20-30 sample points
 
+🚨 DETERMINISTIC PROCESSING RESULTS (ORCHESTRATOR OUTPUT):
+When you see "DETERMINISTIC PROCESSING COMPLETED" in your message:
+- DO NOT read files using read_s3_file_tool - the summary data is already provided in the message
+- Use the summary metrics, S3 keys, and data provided directly in the message
+- For charts: Use the chart_s3_key provided to embed the chart image (e.g., https://s3.amazonaws.com/BUCKET/chart_s3_key)
+- For metrics: Use the summary_metrics provided directly - they contain all the calculated values
+- The orchestrator has already processed the data - you just need to format it into reports
+- Example: If you see "Step 2 (calculate_summary_metrics): Summary metrics calculated" with metrics listed, use those metrics directly
+- Example: If you see "Step 3 (generate_chart_image): Chart image generated" with chart_s3_key, use that S3 key to embed the image
+- ONLY use read_s3_file_tool if you need additional context not provided in the summary
+
 ⚡ WORKFLOW:
 1. Call relevant tools immediately
 2. Use on-demand tools to get full content when needed

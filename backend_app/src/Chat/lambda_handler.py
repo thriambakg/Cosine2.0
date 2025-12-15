@@ -1088,44 +1088,73 @@ STEP RESULTS:
                             elif 'result' in result:
                                 result_value = result['result']
                                 
-                                # Check if this is a chart image (from generate_chart_image)
-                                try:
-                                    if isinstance(result_value, str):
+                                # Parse result value (could be dict or JSON string)
+                                parsed_result = None
+                                if isinstance(result_value, dict):
+                                    parsed_result = result_value
+                                elif isinstance(result_value, str):
+                                    try:
                                         import json
                                         parsed_result = json.loads(result_value)
-                                        if isinstance(parsed_result, dict) and parsed_result.get('success'):
-                                            if 'chart_s3_key' in parsed_result:
-                                                chart_s3_key = parsed_result.get('chart_s3_key', '')
-                                                results_summary += f"\nStep {step_num} ({tool_name}): Chart image generated\n"
-                                                results_summary += f"  - Chart image S3 key: {chart_s3_key}\n"
-                                                results_summary += f"  - Use {{step_{step_num}.result.chart_s3_key}} for chart image\n"
-                                                continue
-                                            elif 'summary_s3_key' in parsed_result:
-                                                summary_s3_key = parsed_result.get('summary_s3_key', '')
-                                                summary_metrics = parsed_result.get('summary_metrics', {})
-                                                results_summary += f"\nStep {step_num} ({tool_name}): Summary metrics calculated\n"
-                                                results_summary += f"  - Summary metrics S3 key: {summary_s3_key}\n"
-                                                results_summary += f"  - Use {{step_{step_num}.result.summary_s3_key}} for summary metrics\n"
-                                                
-                                                # Include key metrics in the message for agent
-                                                if summary_metrics and 'stocks' in summary_metrics:
-                                                    results_summary += f"\n  Summary Metrics:\n"
-                                                    for symbol, metrics in summary_metrics.get('stocks', {}).items():
-                                                        results_summary += f"    {symbol}: Current Price ${metrics.get('current_price', 'N/A')}, "
-                                                        results_summary += f"Return {metrics.get('total_return_pct', 'N/A')}%, "
-                                                        results_summary += f"Volatility {metrics.get('volatility_annual_pct', 'N/A')}%\n"
-                                                continue
-                                except:
-                                    pass  # Not a chart/summary result, continue with normal handling
+                                    except:
+                                        parsed_result = None
+                                
+                                # Check if this is a chart image (from generate_chart_image)
+                                if parsed_result and isinstance(parsed_result, dict) and parsed_result.get('success'):
+                                    if 'chart_s3_key' in parsed_result:
+                                        chart_s3_key = parsed_result.get('chart_s3_key', '')
+                                        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+                                        chart_url = f"https://s3.amazonaws.com/{bucket_name}/{chart_s3_key}"
+                                        results_summary += f"\nStep {step_num} ({tool_name}): Chart image generated\n"
+                                        results_summary += f"  - Chart image S3 key: {chart_s3_key}\n"
+                                        results_summary += f"  - Chart image URL: {chart_url}\n"
+                                        results_summary += f"  - Use this URL to embed the chart in HTML/PDF reports\n"
+                                        continue
+                                    elif 'summary_s3_key' in parsed_result:
+                                        summary_s3_key = parsed_result.get('summary_s3_key', '')
+                                        summary_metrics = parsed_result.get('summary_metrics', {})
+                                        results_summary += f"\nStep {step_num} ({tool_name}): Summary metrics calculated\n"
+                                        results_summary += f"  - Summary metrics S3 key: {summary_s3_key}\n"
+                                        
+                                        # Include comprehensive summary metrics in the message for agent
+                                        if summary_metrics:
+                                            results_summary += f"\n  📊 SUMMARY METRICS (USE THESE DIRECTLY - DO NOT READ FILES):\n"
+                                            
+                                            # Stock-level metrics
+                                            if 'stocks' in summary_metrics:
+                                                for symbol, metrics in summary_metrics.get('stocks', {}).items():
+                                                    results_summary += f"\n  {symbol}:\n"
+                                                    results_summary += f"    - Current Price: ${metrics.get('current_price', 'N/A')}\n"
+                                                    results_summary += f"    - Total Return: {metrics.get('total_return_pct', 'N/A')}%\n"
+                                                    results_summary += f"    - Annual Volatility: {metrics.get('volatility_annual_pct', 'N/A')}%\n"
+                                                    results_summary += f"    - Max Drawdown: {metrics.get('max_drawdown_pct', 'N/A')}%\n"
+                                                    results_summary += f"    - 52-Week High: ${metrics.get('52w_high', 'N/A')}\n"
+                                                    results_summary += f"    - 52-Week Low: ${metrics.get('52w_low', 'N/A')}\n"
+                                            
+                                            # Comparison metrics
+                                            if 'comparison' in summary_metrics:
+                                                comp = summary_metrics.get('comparison', {})
+                                                results_summary += f"\n  Comparison:\n"
+                                                if 'correlation' in comp:
+                                                    results_summary += f"    - Correlation: {comp.get('correlation', 'N/A')}\n"
+                                                if 'relative_performance' in comp:
+                                                    results_summary += f"    - Relative Performance: {comp.get('relative_performance', 'N/A')}\n"
+                                        
+                                        results_summary += f"\n  - Use these metrics directly in your report - DO NOT read files using read_s3_file_tool\n"
+                                        continue
                                 
                                 # If result is a string and looks like an S3 key or file path, include it
                                 if isinstance(result_value, str) and ('users/' in result_value or 's3_key' in result_value.lower()):
                                     results_summary += f"\nStep {step_num} ({tool_name}): {result_value}\n"
                                     results_summary += f"  - Use {{step_{step_num}.result}} to reference this result\n"
                     
-                    results_summary += "\nThe agent should now generate reports or provide explanations based on these results."
-                    results_summary += "\nWhen referencing files in HTML/PDF, use the S3 keys provided above."
-                    results_summary += "\nFor charts: Embed the chart image from the chart_s3_key. Use summary metrics for accurate report content."
+                    results_summary += "\n\n🚨 CRITICAL INSTRUCTIONS FOR REPORT GENERATION:"
+                    results_summary += "\n- DO NOT use read_s3_file_tool to read the files listed above - all necessary data is already provided in this summary"
+                    results_summary += "\n- Use the summary metrics provided above directly in your report"
+                    results_summary += "\n- For charts: Use the chart image URL provided above to embed in HTML/PDF"
+                    results_summary += "\n- For metrics: Use the summary metrics provided above - they contain all calculated values"
+                    results_summary += "\n- Generate the report (HTML/PDF) using generate_agent_file_tool with the data provided above"
+                    results_summary += "\n- Only use read_s3_file_tool if you need additional context not provided in this summary"
                     
                     enhanced_message += results_summary
                     
