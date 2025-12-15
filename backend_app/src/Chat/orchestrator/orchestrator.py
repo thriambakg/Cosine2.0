@@ -408,34 +408,87 @@ class Orchestrator:
                                     s3_key_to_read = step_result['actual_data_s3_key']
                                     needs_s3_read = True
                                 
-                                # SIMPLIFIED: Only handle s3_key or result fields
-                                # For nested fields, tools should receive the full result and parse it themselves
-                                # This keeps the orchestrator clean and focused on file movement only
-                                
-                                # If field is nested (contains '.'), warn and pass the S3 key instead
-                                if '.' in field and field != 's3_key':
-                                    logger.warning(f"Nested field extraction '{field}' not supported in orchestrator. Tool should parse result itself. Passing S3 key instead.")
-                                    # For nested fields, just pass the S3 key - tool will parse it
-                                    if needs_s3_read:
-                                        replacement = s3_key_to_read
+                                # For nested fields (like time_series, metrics_table), we need to read from S3 and extract
+                                # This is necessary because tools expect the actual data, not just the S3 key
+                                if field and field != 'result' and field != 's3_key':
+                                    # Need to extract a specific field from the result
+                                    if needs_s3_read and s3_key_to_read:
+                                        # Read the full data from S3
+                                        logger.info(f"Reading from S3 for step {step_num}, field '{field}', s3_key: {s3_key_to_read}")
+                                        try:
+                                            full_data = self.data_storage.retrieve_result({'s3_key': s3_key_to_read})
+                                            logger.info(f"Retrieved data from S3, type: {type(full_data)}, keys: {list(full_data.keys()) if isinstance(full_data, dict) else 'N/A'}")
+                                            
+                                            # Extract the nested field
+                                            if isinstance(full_data, dict):
+                                                if field in full_data:
+                                                    extracted_value = full_data[field]
+                                                    logger.info(f"Extracted direct field '{field}' from result")
+                                                elif '.' in field:
+                                                    # Handle nested field path like 'portfolio.cagr'
+                                                    parts = field.split('.')
+                                                    current = full_data
+                                                    for part in parts:
+                                                        if isinstance(current, dict):
+                                                            current = current.get(part)
+                                                            if current is None:
+                                                                break
+                                                        else:
+                                                            current = None
+                                                            break
+                                                    extracted_value = current
+                                                    logger.info(f"Extracted nested field '{field}' from result")
+                                                else:
+                                                    extracted_value = None
+                                                
+                                                if extracted_value is not None:
+                                                    # Convert to JSON string for the tool
+                                                    replacement = json.dumps(extracted_value)
+                                                    logger.info(f"Extracted replacement, type: {type(extracted_value)}, empty: {not extracted_value}")
+                                                    logger.info(f"Converted replacement to JSON string, length: {len(replacement)}")
+                                                else:
+                                                    logger.warning(f"Field '{field}' not found in retrieved data")
+                                                    replacement = ''
+                                            else:
+                                                logger.warning(f"Retrieved data is not a dict, cannot extract field '{field}'")
+                                                replacement = ''
+                                        except Exception as e:
+                                            logger.error(f"Error reading from S3 to extract field '{field}': {str(e)}")
+                                            replacement = ''
                                     else:
-                                        # Try to get s3_key from result
-                                        if 'file_reference' in step_result:
-                                            replacement = step_result['file_reference'].get('s3_key', '')
-                                        elif 'actual_data_s3_key' in step_result:
-                                            replacement = step_result['actual_data_s3_key']
+                                        # Data is not in S3, try to extract from step_result directly
+                                        if 'result' in step_result:
+                                            result_data = step_result['result']
+                                            if isinstance(result_data, dict):
+                                                replacement = json.dumps(result_data.get(field, ''))
+                                            elif isinstance(result_data, str):
+                                                try:
+                                                    parsed = json.loads(result_data)
+                                                    if isinstance(parsed, dict):
+                                                        replacement = json.dumps(parsed.get(field, ''))
+                                                    else:
+                                                        replacement = ''
+                                                except json.JSONDecodeError:
+                                                    replacement = ''
+                                            else:
+                                                replacement = ''
                                         else:
                                             replacement = ''
-                                    # Replace placeholder with S3 key
+                                    
+                                    # Replace placeholder with extracted value
                                     if replacement:
                                         placeholder_with_braces = f'{{{{{placeholder}}}}}'
                                         placeholder_single_brace = f'{{{placeholder}}}'
                                         if placeholder_with_braces in resolved_value:
                                             resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                                            logger.info(f"Replaced nested field placeholder {placeholder_with_braces} with S3 key (tool should parse)")
+                                            logger.info(f"Replaced placeholder {placeholder_with_braces} with data (length: {len(str(replacement))})")
                                         if placeholder_single_brace in resolved_value:
                                             resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                                            logger.info(f"Replaced nested field placeholder {placeholder_single_brace} with S3 key (tool should parse)")
+                                            logger.info(f"Replaced placeholder {placeholder_single_brace} with data (length: {len(str(replacement))})")
+                                        continue
+                                    else:
+                                        logger.warning(f"Could not resolve placeholder {{step_{step_num}.{field}}}")
+                                        replacement = ''
                                         continue
                                 
                                 # Handle simple field requests
