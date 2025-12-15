@@ -259,6 +259,16 @@ class ContextAwareAgent:
 - get_session_context_tool(session_id, user_id) - Get full session context when needed
 - get_session_files_tool(session_id, user_id, file_type) - Get specific files when needed
 
+📊 HTML REPORT GENERATION:
+When generating interactive HTML reports with charts:
+- CRITICAL: Extract ALL data points from the JSON data, not just samples
+- For get_multiple_financial_data results, iterate through ALL items in the "historical_data" array for each stock
+- Include EVERY data point in the JavaScript arrays (e.g., const aaplData = [...ALL points...])
+- Do NOT truncate or sample the data - use the complete dataset for accurate charts
+- The JSON structure is: {"stocks": [{"symbol": "AAPL", "historical_data": [{date, close, volume, ...}, ...]}, ...]}
+- Extract ALL historical_data points for each symbol and include them in the JavaScript arrays
+- Example: If there are 250 data points, include all 250, not just 20-30 sample points
+
 ⚡ WORKFLOW:
 1. Call relevant tools immediately
 2. Use on-demand tools to get full content when needed

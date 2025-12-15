@@ -46,24 +46,30 @@ class Planner:
 USER QUERY: {user_query}
 
 DETERMINISTIC TASKS (needs planning):
-- Fetching stock data for multiple symbols (3+ symbols)
+- Fetching stock data for multiple symbols (2+ symbols)
 - Generating charts from data
 - Calculating portfolio metrics with multiple stocks
 - Processing large datasets
 - Batch operations on multiple stocks
 
-NON-DETERMINISTIC TASKS (no planning needed):
+NON-DETERMINISTIC TASKS (no planning needed - agent handles these):
 - Single stock lookups
 - User questions and explanations
-- Report/document generation (HTML, PDF, etc.)
+- Report/document generation (HTML, PDF, etc.) - Agent generates these AFTER charts are created
 - General conversation
 - Simple file creation
 
+IMPORTANT: For reports with charts:
+- Plan should ONLY include: (1) get data, (2) generate chart
+- Do NOT include generate_agent_file_tool in the plan - the agent will handle HTML/PDF generation after the chart is created
+
 AVAILABLE TOOLS:
-- get_multiple_financial_data(symbols, timeframe, start_date, end_date)
-- generate_chart_tool(symbol, data_json, chart_type, title)
+- get_multiple_financial_data(symbols, timeframe, start_date, end_date) - Fetch stock data
+- generate_chart_with_summary(data_json, chart_type, title, interactive) - Generate chart + metrics (DETERMINISTIC, use this for reports)
+- generate_chart_tool(symbol, data_json, chart_type, title) - Legacy chart tool
 - analyze_portfolio(portfolio_data, period, risk_free_rate)
 - calculate_stock_correlation(tickers, period)
+- generate_agent_file_tool(filename, content, file_type) - For generating HTML/PDF reports (use AFTER charts are generated)
 
 PLAN FORMAT (if needs planning):
 {{
@@ -75,17 +81,22 @@ PLAN FORMAT (if needs planning):
       "store_result": true
     }},
     {{
-      "tool": "generate_chart_tool",
+      "tool": "generate_chart_with_summary",
       "parameters": {{
-        "symbol": "Portfolio vs S&P 500",
         "data_json": "{{{{step_1.result}}}}",
         "chart_type": "line",
-        "title": "Portfolio Performance"
+        "title": "Portfolio Performance",
+        "interactive": false
       }},
       "store_result": false
     }}
   ]
 }}
+
+IMPORTANT: For HTML/PDF reports with charts:
+1. First get the data (get_multiple_financial_data)
+2. Then generate the chart (generate_chart_tool) - this creates the chart image
+3. The agent will handle HTML/PDF generation with the chart embedded (do NOT include generate_agent_file_tool in the plan)
 
 PLACEHOLDER SYNTAX (CRITICAL):
 - Use {{step_N.result}} to reference the result from step N (1-indexed)

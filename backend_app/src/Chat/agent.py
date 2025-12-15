@@ -1687,6 +1687,54 @@ File Information:
         logger.error(f"Error in read_s3_file_tool: {str(e)}")
         return f"Error reading file: {str(e)}"
 
+def _format_json_data_for_html(data_json: str) -> str:
+    """
+    Format JSON financial data into JavaScript arrays for HTML embedding.
+    Extracts ALL data points from the JSON, not just samples.
+    
+    Args:
+        data_json: JSON string from get_multiple_financial_data
+        
+    Returns:
+        JavaScript code with data arrays (e.g., "const aaplData = [...]; const sp500Data = [...];")
+    """
+    import json
+    
+    try:
+        data = json.loads(data_json) if isinstance(data_json, str) else data_json
+        
+        js_code = []
+        
+        # Handle multiple stocks format
+        if 'stocks' in data:
+            for stock in data.get('stocks', []):
+                if stock.get('status') == 'success' and 'historical_data' in stock:
+                    symbol = stock.get('symbol', 'UNKNOWN')
+                    historical_data = stock.get('historical_data', [])
+                    
+                    # Format as JavaScript array with ALL data points
+                    js_array_name = symbol.lower().replace('^', '').replace('.', '_') + 'Data'
+                    js_array_items = []
+                    
+                    for point in historical_data:
+                        date = point.get('date', '')
+                        close = point.get('close', 0)
+                        volume = point.get('volume', 0)
+                        # Format as JavaScript object literal
+                        js_array_items.append(f"            {{date: '{date}', close: {close}, volume: {volume}}}")
+                    
+                    # Create the JavaScript array declaration
+                    js_code.append(f"        const {js_array_name} = [")
+                    js_code.append(",\n".join(js_array_items))
+                    js_code.append("        ];")
+                    js_code.append("")  # Empty line between arrays
+        
+        return "\n".join(js_code)
+        
+    except Exception as e:
+        logger.error(f"Error formatting JSON data for HTML: {str(e)}")
+        return f"// Error formatting data: {str(e)}"
+
 def _resolve_placeholders_in_content(content: str, user_id: str, session_id: str) -> str:
     """
     Resolve placeholders like {{step_N.result.s3_key}} in content.

@@ -1074,7 +1074,7 @@ The following deterministic tasks have been completed:
 
 STEP RESULTS:
 """
-                    # Add step-by-step results with S3 keys
+                    # Add step-by-step results with S3 keys and summary data
                     for result in execution_results.get('results', []):
                         step_num = result.get('step')
                         tool_name = result.get('tool')
@@ -1087,6 +1087,34 @@ STEP RESULTS:
                                 results_summary += f"  - Use {{step_{step_num}.s3_key}} or {{step_{step_num}.result.s3_key}} to reference this file\n"
                             elif 'result' in result:
                                 result_value = result['result']
+                                
+                                # Check if this is a chart with summary (from generate_chart_with_summary)
+                                try:
+                                    if isinstance(result_value, str):
+                                        import json
+                                        parsed_result = json.loads(result_value)
+                                        if isinstance(parsed_result, dict) and parsed_result.get('success') and 'chart_s3_key' in parsed_result:
+                                            chart_s3_key = parsed_result.get('chart_s3_key', '')
+                                            summary_s3_key = parsed_result.get('summary_s3_key', '')
+                                            summary_metrics = parsed_result.get('summary_metrics', {})
+                                            
+                                            results_summary += f"\nStep {step_num} ({tool_name}): Chart and summary generated\n"
+                                            results_summary += f"  - Chart image S3 key: {chart_s3_key}\n"
+                                            results_summary += f"  - Summary metrics S3 key: {summary_s3_key}\n"
+                                            results_summary += f"  - Use {{step_{step_num}.result.chart_s3_key}} for chart image\n"
+                                            results_summary += f"  - Use {{step_{step_num}.result.summary_s3_key}} for summary metrics\n"
+                                            
+                                            # Include key metrics in the message for agent
+                                            if summary_metrics and 'stocks' in summary_metrics:
+                                                results_summary += f"\n  Summary Metrics:\n"
+                                                for symbol, metrics in summary_metrics.get('stocks', {}).items():
+                                                    results_summary += f"    {symbol}: Current Price ${metrics.get('current_price', 'N/A')}, "
+                                                    results_summary += f"Return {metrics.get('total_return_pct', 'N/A')}%, "
+                                                    results_summary += f"Volatility {metrics.get('volatility_annual_pct', 'N/A')}%\n"
+                                            continue
+                                except:
+                                    pass  # Not a chart result, continue with normal handling
+                                
                                 # If result is a string and looks like an S3 key or file path, include it
                                 if isinstance(result_value, str) and ('users/' in result_value or 's3_key' in result_value.lower()):
                                     results_summary += f"\nStep {step_num} ({tool_name}): {result_value}\n"
@@ -1094,6 +1122,7 @@ STEP RESULTS:
                     
                     results_summary += "\nThe agent should now generate reports or provide explanations based on these results."
                     results_summary += "\nWhen referencing files in HTML/PDF, use the S3 keys provided above."
+                    results_summary += "\nFor charts: Embed the chart image from the chart_s3_key. Use summary metrics for accurate report content."
                     
                     enhanced_message += results_summary
                     

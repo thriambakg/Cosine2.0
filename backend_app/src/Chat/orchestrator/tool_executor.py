@@ -24,9 +24,11 @@ class ToolExecutor:
             get_multiple_financial_data,
             get_financial_data,
             analyze_portfolio,
-            calculate_stock_correlation
+            calculate_stock_correlation,
+            generate_agent_file_tool
         )
         from tools.chart_generator import generate_chart_tool
+        from tools.deterministic_chart_generator import generate_chart_with_summary_tool
         
         self.tool_registry = {
             'get_multiple_financial_data': get_multiple_financial_data,
@@ -35,6 +37,8 @@ class ToolExecutor:
             'calculate_stock_correlation': calculate_stock_correlation,
             'generate_chart': generate_chart_tool,
             'generate_chart_tool': generate_chart_tool,  # Alias for consistency
+            'generate_chart_with_summary': generate_chart_with_summary_tool,  # Deterministic chart + metrics
+            'generate_agent_file_tool': generate_agent_file_tool,  # For generating HTML/PDF reports
         }
     
     def execute_tool(self, tool_name: str, parameters: Dict[str, Any], session_id: str, user_id: str) -> Any:
