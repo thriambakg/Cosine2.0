@@ -75,12 +75,25 @@ PLAN FORMAT (if needs planning):
       "store_result": true
     }},
     {{
-      "tool": "analyze_portfolio",
-      "parameters": {{"portfolio_data": "...", "period": "5y"}},
-      "store_result": true
+      "tool": "generate_chart_tool",
+      "parameters": {{
+        "symbol": "Portfolio vs S&P 500",
+        "data_json": "{{{{step_1.result}}}}",
+        "chart_type": "line",
+        "title": "Portfolio Performance"
+      }},
+      "store_result": false
     }}
   ]
 }}
+
+PLACEHOLDER SYNTAX (CRITICAL):
+- Use {{step_N.result}} to reference the result from step N (1-indexed)
+- Use {{step_N.s3_key}} to reference the S3 key from step N
+- Use {{step_N.result.field}} to reference a nested field from step N
+- NEVER use ${{result0}} or similar - that syntax is WRONG
+- Example: To use data from step 1: "{{{{step_1.result}}}}"
+- Example: To use S3 key from step 2: "{{{{step_2.s3_key}}}}"
 
 CRITICAL: Steps must be objects with "tool" and "parameters" keys, NOT strings or descriptions.
 
@@ -114,6 +127,17 @@ Return ONLY JSON, no explanation text."""
                         logger.warning(f"Step {i+1} is a string instead of object, skipping: {step[:50]}...")
                         continue
                     elif isinstance(step, dict) and 'tool' in step:
+                        # Validate placeholder syntax in parameters
+                        parameters = step.get('parameters', {})
+                        for param_name, param_value in parameters.items():
+                            if isinstance(param_value, str):
+                                # Check for incorrect placeholder syntax
+                                if '${result' in param_value or '${{result' in param_value:
+                                    logger.warning(f"Step {i+1} parameter '{param_name}' uses incorrect placeholder syntax: {param_value[:50]}...")
+                                    logger.warning(f"  Should use {{step_N.result}} format instead of ${{result0}}")
+                                # Check for correct placeholder syntax
+                                elif '{{step_' in param_value:
+                                    logger.debug(f"Step {i+1} parameter '{param_name}' uses correct placeholder syntax")
                         validated_steps.append(step)
                     else:
                         logger.warning(f"Step {i+1} has invalid format, skipping: {type(step)}")

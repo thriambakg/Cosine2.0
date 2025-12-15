@@ -1699,9 +1699,40 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
         if not user_id or not session_id:
             return "Error: Missing required environment variables (user_id, session_id)"
         
-        # Ensure filename has proper extension
-        if not filename.endswith(f'.{file_type}'):
-            filename = f"{filename}.{file_type}"
+        # Detect file type from filename if not explicitly set or if it conflicts
+        filename_lower = filename.lower()
+        common_extensions = {
+            '.html': 'html', '.htm': 'html',
+            '.pdf': 'pdf',
+            '.csv': 'csv',
+            '.json': 'json',
+            '.txt': 'txt',
+            '.png': 'png', '.jpg': 'jpg', '.jpeg': 'jpeg',
+            '.xlsx': 'xlsx', '.xls': 'xls'
+        }
+        
+        # Check if filename already has a recognized extension
+        detected_type = None
+        for ext, ext_type in common_extensions.items():
+            if filename_lower.endswith(ext):
+                detected_type = ext_type
+                break
+        
+        # If filename has an extension, use that type (unless file_type was explicitly set to something else)
+        if detected_type:
+            # Only override if file_type is the default "txt" or if they match
+            if file_type == "txt" or file_type == detected_type:
+                file_type = detected_type
+            # If filename already has the correct extension, don't add it again
+            if filename_lower.endswith(f'.{file_type}'):
+                pass  # Already has correct extension
+            else:
+                # Filename has different extension, add the requested one
+                filename = f"{filename}.{file_type}"
+        else:
+            # No extension detected, add the file_type extension
+            if not filename.endswith(f'.{file_type}'):
+                filename = f"{filename}.{file_type}"
         
         # Decompress content if it's compressed (e.g., from web scraper tool)
         # This handles compressed data from tools like fetch_web_content_tool
