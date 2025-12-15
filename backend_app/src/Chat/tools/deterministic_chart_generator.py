@@ -180,10 +180,13 @@ class ChartImageGenerator:
             df = df.sort_values('date')
             
             logger.info(f"Chart for {symbol}: {len(df)} data points from {df['date'].min()} to {df['date'].max()}")
+            logger.info(f"Using ALL {len(df)} daily data points for chart - no downsampling")
             
-            # Plot
+            # Plot all data points - ensure no downsampling
+            # matplotlib.plot() will plot all points in a continuous line
             color = colors[idx % len(colors)]
-            ax.plot(df['date'], df['close'], label=symbol, linewidth=2, color=color)
+            ax.plot(df['date'], df['close'], label=symbol, linewidth=2, color=color, 
+                   marker='', markersize=0, linestyle='-', antialiased=True)
         
         # Formatting
         ax.set_xlabel('Date', fontsize=12)
@@ -192,9 +195,37 @@ class ChartImageGenerator:
         ax.legend(loc='best')
         ax.grid(True, alpha=0.3)
         
-        # Format x-axis dates
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+        # Format x-axis dates based on data range
+        # Calculate the date range to determine appropriate tick frequency
+        if stocks_data:
+            first_stock = next((s for s in stocks_data if s.get('status') == 'success' and s.get('historical_data')), None)
+            if first_stock and first_stock.get('historical_data'):
+                df_sample = pd.DataFrame(first_stock['historical_data'])
+                df_sample['date'] = pd.to_datetime(df_sample['date'])
+                date_range = (df_sample['date'].max() - df_sample['date'].min()).days
+                
+                # Use daily ticks for 1y data (252 trading days), weekly for longer periods
+                if date_range <= 400:  # ~1 year or less
+                    # For 1y data, show labels every ~10 trading days to avoid clutter
+                    # But all data points are still plotted
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                    ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=10))  # Every ~2 weeks
+                    ax.xaxis.set_minor_locator(mdates.WeekdayLocator(interval=1))  # Minor ticks for every weekday
+                elif date_range <= 800:  # ~2 years
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                    ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=5))  # Every week
+                else:  # Longer periods
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+                    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+            else:
+                # Fallback to default
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
+        else:
+            # Fallback to default
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+            ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
+        
         plt.xticks(rotation=45)
         
         # Add watermark

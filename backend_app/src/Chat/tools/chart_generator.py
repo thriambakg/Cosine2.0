@@ -472,9 +472,28 @@ class UnifiedChartGenerator:
             ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
             ax.set_axisbelow(True)
             
-            # Format x-axis with better date labels
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))  # Every 3 months
+            # Format x-axis with better date labels based on data range
+            if len(df) > 0:
+                date_range = (df.index.max() - df.index.min()).days
+                
+                # Use daily ticks for 1y data (252 trading days), weekly for longer periods
+                if date_range <= 400:  # ~1 year or less
+                    # For 1y data, show labels every ~10 trading days to avoid clutter
+                    # But all data points are still plotted
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                    ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=10))  # Every ~2 weeks
+                    ax.xaxis.set_minor_locator(mdates.WeekdayLocator(interval=1))  # Minor ticks for every weekday
+                elif date_range <= 800:  # ~2 years
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                    ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=5))  # Every week
+                else:  # Longer periods
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+                    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+            else:
+                # Fallback to default
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+            
             plt.xticks(rotation=45, fontsize=10)
             plt.yticks(fontsize=10)
             
