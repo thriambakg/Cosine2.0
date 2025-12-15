@@ -146,16 +146,16 @@ TOOL_SPECIFICATIONS = {
     },
     'generate_agent_file_tool': {
         'name': 'generate_agent_file_tool',
-        'description': 'Create files (txt, pdf, markdown, etc.) in the agent-files folder. Supports PDF generation with embedded charts. For HTML files, use generate_html_file_tool instead.',
+        'description': 'Create files (txt, markdown, etc.) in the agent-files folder. NOTE: For HTML and PDF generation, use planner tools (generate_html_report_tool, generate_pdf_report_tool) instead.',
         'inputs': {
             'filename': 'str - Name of file (without extension)',
-            'content': 'str - File content (can include chart references in JSON format or S3 keys)',
-            'file_type': 'str - File type ("txt", "pdf", "markdown", etc.). PDF files will automatically embed chart images referenced in content.'
+            'content': 'str - File content',
+            'file_type': 'str - File type ("txt", "markdown", etc.). NOTE: For PDF and HTML, use planner tools instead.'
         },
         'outputs': 'Success message with file URL',
         'size_estimate': 'small - File metadata',
         'store_result': False,
-        'notes': 'For PDF: Chart images are automatically embedded from S3 keys found in content. For HTML reports, use generate_html_file_tool instead.'
+        'notes': 'NOTE: For PDF and HTML generation, use planner tools (generate_html_report_tool, generate_pdf_report_tool) instead. These are available to the planner for intelligent document generation.'
     },
     'generate_excel_file_tool': {
         'name': 'generate_excel_file_tool',
@@ -170,32 +170,10 @@ TOOL_SPECIFICATIONS = {
         'size_estimate': 'small - File metadata',
         'store_result': False
     },
-    'generate_html_file_tool': {
-        'name': 'generate_html_file_tool',
-        'description': 'Generate interactive HTML reports with embedded charts and styling. Automatically embeds chart images from S3 as base64-encoded data URIs.',
-        'inputs': {
-            'filename': 'str - Name of the HTML file (without .html extension)',
-            'content': 'str - Content to convert to HTML (text, markdown, or JSON with chart references)',
-            'title': 'str (optional) - Title for the HTML document'
-        },
-        'outputs': 'Success message with file URL',
-        'size_estimate': 'small - File metadata',
-        'store_result': False,
-        'notes': 'Automatically detects and embeds chart images from S3 keys found in content. Charts are embedded as base64 images with interactive styling.'
-    },
-    'embed_images_tool': {
-        'name': 'embed_images_tool',
-        'description': 'Embed images from S3 into content for various file types (PDF, HTML, base64). Extracts image references and embeds them appropriately. Single-purpose worker tool.',
-        'inputs': {
-            'content': 'str - Content that may contain image references (S3 keys, JSON with s3_key, etc.)',
-            'target_format': 'str - Target file format: "pdf", "html", or "base64"',
-            'image_s3_keys': 'list[str] (optional) - Explicit list of S3 keys to embed. If not provided, will extract from content.'
-        },
-        'outputs': 'JSON with embedded content, embedded_images list, and failed_images list',
-        'size_estimate': 'small to medium - Depends on number of images',
-        'store_result': False,
-        'notes': 'Worker tool for image embedding. Use before PDF/HTML generation to prepare images.'
-    },
+    # NOTE: generate_html_file_tool has been moved to planner/agent_tools/
+    # Use generate_html_report_tool (available to planner) instead
+    # NOTE: embed_images_tool has been moved to planner/agent_tools/
+    # Use embed_images_tool (available to planner) instead
     'convert_markdown_to_html_tool': {
         'name': 'convert_markdown_to_html_tool',
         'description': 'Convert markdown text to HTML. Handles headings, lists, code blocks, paragraphs, and basic formatting. Single-purpose worker tool.',
@@ -208,54 +186,12 @@ TOOL_SPECIFICATIONS = {
         'store_result': False,
         'notes': 'Worker tool for markdown conversion. Use before HTML template generation.'
     },
-    'generate_html_template_tool': {
-        'name': 'generate_html_template_tool',
-        'description': 'Generate HTML document structure with styling. Wraps body content in a complete HTML document with CSS. Single-purpose worker tool.',
-        'inputs': {
-            'body_content': 'str - HTML body content to wrap in template',
-            'title': 'str - Document title',
-            'custom_css': 'str (optional) - Custom CSS to add to the document',
-            'theme': 'str - Theme preset: "default", "minimal", or "dark" (default: "default")'
-        },
-        'outputs': 'Complete HTML document as string',
-        'size_estimate': 'small - HTML text',
-        'store_result': False,
-        'notes': 'Worker tool for HTML template generation. Use after markdown conversion and image embedding.'
-    },
-    'generate_pdf_tool': {
-        'name': 'generate_pdf_tool',
-        'description': 'Generate PDF document from text/markdown content. Automatically detects and embeds chart images from S3. Uses ReportLab for creation. Single-purpose worker tool.',
-        'inputs': {
-            'content': 'str - Text/markdown content to convert to PDF (may contain S3 key references for charts)',
-            'filename': 'str - Filename for metadata (without .pdf extension)',
-            'pdf_images': 'list[dict] (optional) - List of PDF Image objects from embed_images_tool (target_format="pdf")',
-            'page_size': 'str - Page size: "letter" or "A4" (default: "letter")'
-        },
-        'outputs': 'JSON with pdf_base64 (base64-encoded PDF bytes), filename, and size_bytes',
-        'size_estimate': 'medium - PDF bytes (base64-encoded)',
-        'store_result': False,
-        'notes': 'Worker tool for PDF generation. Automatically extracts and embeds chart images from S3 when S3 keys are referenced in content.'
-    },
-    'manipulate_pdf_tool': {
-        'name': 'manipulate_pdf_tool',
-        'description': 'Advanced PDF manipulation: merge, split, extract, rotate, delete pages, add content, fill forms, encrypt/decrypt. Uses pypdf for manipulation operations.',
-        'inputs': {
-            'operation': 'str - Operation: "merge", "split", "extract", "rotate", "delete_pages", "add_content", "modify_content", "fill_form", "encrypt", "decrypt"',
-            'source_pdf_s3_key': 'str - S3 key of source PDF file (required for most operations)',
-            'source_pdf_s3_keys': 'list[str] (optional) - For merge: list of S3 keys of PDFs to merge',
-            'page_numbers': 'list[int] (optional) - For extract/delete/rotate: page numbers (1-indexed)',
-            'rotation_angle': 'int (optional) - For rotate: 90, 180, or 270 degrees',
-            'new_content': 'str (optional) - For add_content: text content to add',
-            'content_position': 'dict (optional) - For add_content: {x, y, page} coordinates',
-            'form_data': 'dict (optional) - For fill_form: {field_name: value} mapping',
-            'password': 'str (optional) - For encrypt/decrypt: password',
-            'output_filename': 'str (optional) - Output filename (without .pdf extension)'
-        },
-        'outputs': 'JSON with s3_key of output PDF, filename, size_bytes, and success message',
-        'size_estimate': 'medium to large - Depends on operation',
-        'store_result': False,
-        'notes': 'Advanced PDF manipulation tool using pypdf. Can merge multiple PDFs, extract/delete/rotate pages, add content at coordinates, fill form fields, and encrypt/decrypt PDFs.'
-    },
+    # NOTE: generate_html_template_tool has been moved to planner/agent_tools/
+    # Use generate_html_template_tool (available to planner) instead
+    # NOTE: generate_pdf_tool has been moved to planner/agent_tools/
+    # Use generate_pdf_report_tool (available to planner) instead
+    # NOTE: manipulate_pdf_tool has been moved to planner/agent_tools/
+    # Use manipulate_pdf_tool (available to planner) instead
     'upload_file_tool': {
         'name': 'upload_file_tool',
         'description': 'Upload file content to S3. Handles both text and binary content, sets metadata, and notifies the agent files processor. Single-purpose worker tool.',
@@ -273,19 +209,8 @@ TOOL_SPECIFICATIONS = {
         'store_result': False,
         'notes': 'Worker tool for file uploads. Use after generating any file content (PDF, HTML, images, etc.).'
     },
-    'read_image_tool': {
-        'name': 'read_image_tool',
-        'description': 'DEPRECATED: Use read_s3_file_tool instead. Read_s3_file_tool handles all file types including images. This tool is kept for backward compatibility.',
-        'inputs': {
-            's3_key': 'str - S3 key of the image file',
-            'include_base64': 'bool - Whether to include base64-encoded image data (default: true)',
-            'validate': 'bool - Whether to validate image is readable (default: true)'
-        },
-        'outputs': 'JSON with image metadata, validation results, and optionally base64 data',
-        'size_estimate': 'small to medium - Image metadata and optionally base64 data',
-        'store_result': False,
-        'notes': 'DEPRECATED: Use read_s3_file_tool for all file types including images.'
-    },
+    # NOTE: read_image_tool has been moved to planner/agent_tools/
+    # Use read_image_tool (available to planner) for image inspection and validation
     'get_session_context_tool': {
         'name': 'get_session_context_tool',
         'description': 'Get complete session context (files, context items, session variables)',
@@ -441,11 +366,15 @@ def get_tools_by_category() -> dict:
         'financial_data': ['get_financial_data', 'get_multiple_financial_data', 'get_crypto_data_tool'],
         'calculations': ['python_financial_calculator', 'analyze_portfolio', 'calculate_stock_correlation'],
         'visualization': ['generate_chart_tool', 'generate_stock_chart'],
-        'file_generation': ['generate_agent_file_tool', 'generate_excel_file_tool', 'generate_html_file_tool'],
-        'worker_tools': ['embed_images_tool', 'convert_markdown_to_html_tool', 'generate_html_template_tool', 'generate_pdf_tool', 'manipulate_pdf_tool', 'upload_file_tool'],
-        'validation_tools': ['read_s3_file_tool', 'read_image_tool', 'read_pdf_tool'],
+        'file_generation': ['generate_agent_file_tool', 'generate_excel_file_tool'],
+        # NOTE: generate_html_file_tool and generate_pdf_tool moved to planner/agent_tools/
+        # NOTE: embed_images_tool, generate_html_template_tool, manipulate_pdf_tool moved to planner/agent_tools/
+        'worker_tools': ['convert_markdown_to_html_tool', 'upload_file_tool'],
+        # NOTE: read_image_tool, read_pdf_tool moved to planner/agent_tools/
+        'validation_tools': ['read_s3_file_tool'],
         'session_context': ['get_session_context_tool', 'get_session_files_tool', 'get_chat_history_tool', 'search_chat_history_tool'],
-        'data_retrieval': ['read_s3_file_tool', 'fetch_web_content_tool', 'read_pdf_tool', 'analyze_pdf_content_tool'],
+        # NOTE: read_pdf_tool, analyze_pdf_content_tool moved to planner/agent_tools/
+        'data_retrieval': ['read_s3_file_tool', 'fetch_web_content_tool'],
         'sec_filings': ['get_company_cik', 'get_company_filings', 'get_filing_document', 'search_sec_filings']
     }
 

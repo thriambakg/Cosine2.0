@@ -1664,7 +1664,7 @@ class S3FileReader:
             # Handle PDF files
             if file_type == 'pdf' or s3_key.endswith('.pdf'):
                 try:
-                    from tools.pdf_reader import PDFReader
+                    from planner.agent_tools.pdf_reader import PDFReader
                     pdf_reader = PDFReader()
                     result = pdf_reader.read_pdf_from_s3(s3_key)
                     if result.get('success'):
@@ -1995,7 +1995,7 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
                 # Fallback to text file with .pdf extension (not ideal but better than failing)
                 logger.warning(f"Falling back to text content for PDF file")
                 is_binary = False
-        # Note: HTML generation is now handled by generate_html_file_tool in tools/html_generator.py
+        # Note: HTML generation is now handled by planner/agent_tools/ (generate_html_report_tool)
         # This tool only handles txt, pdf, and markdown files
         
         # Use unified file upload function
@@ -3116,11 +3116,42 @@ def get_excel_formatting(template_type: str) -> dict:
         "dates": {"number_format": "mm/dd/yyyy"}
     }
 
-# NOTE: PLANNER DOES NOT USE TOOL IMPLEMENTATIONS
-# The planner only creates plans, it does not execute tools
-# Tool implementations are in the tools/ directory and are executed by the orchestrator
-# This list is kept empty for the planner - tools are only used by the orchestrator
-enhanced_tools = []  # Empty - planner doesn't execute tools
+# NOTE: PLANNER TOOLS - Document Generation Only
+# The planner has access to document generation tools for creating nuanced reports.
+# These tools are available to the planner (LLM) for intelligent document generation.
+# The orchestrator handles deterministic tasks (data fetching, calculations, charts).
+# Other tools are in the tools/ directory and are executed by the orchestrator.
+
+# Import planner agent tools (document generation and non-deterministic tasks)
+try:
+    from planner.agent_tools.planner_tools import (
+        generate_html_report_tool,
+        generate_pdf_report_tool,
+        format_financial_metrics_tool,
+        format_portfolio_data_to_markdown_tool,
+        read_image_tool,
+        embed_images_tool,
+        read_pdf_tool,
+        analyze_pdf_content_tool,
+        manipulate_pdf_tool,
+        generate_html_template_tool
+    )
+    enhanced_tools = [
+        generate_html_report_tool,
+        generate_pdf_report_tool,
+        format_financial_metrics_tool,
+        format_portfolio_data_to_markdown_tool,
+        read_image_tool,
+        embed_images_tool,
+        read_pdf_tool,
+        analyze_pdf_content_tool,
+        manipulate_pdf_tool,
+        generate_html_template_tool
+    ]
+    logger.info(f"✅ Loaded {len(enhanced_tools)} planner tools (document generation and non-deterministic tasks)")
+except ImportError as e:
+    logger.warning(f"Could not import planner agent tools: {e}")
+    enhanced_tools = []  # Fallback to empty if import fails
 
 # Function to create agents with different models
 def create_financial_agent(model_name: str = 'claude-sonnet-4') -> Agent:

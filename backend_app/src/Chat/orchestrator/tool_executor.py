@@ -282,123 +282,22 @@ class ToolExecutor:
             self._tool_cache[tool_name] = generate_excel_file_tool
             return generate_excel_file_tool
         
-        elif tool_name == 'generate_html_file_tool':
-            from tools.html_generator import generate_html_file_tool
-            from strands.types.tools import ToolUse
-            def wrapped_html(filename: str, content: str, title: str = None):
-                logger.info(f"wrapped_html called with filename={filename}, content length={len(content) if isinstance(content, str) else 'not a string'}, title={title}")
-                try:
-                    import uuid
-                    tool_use_dict = {
-                        'toolUseId': str(uuid.uuid4()),
-                        'toolName': 'generate_html_file_tool',
-                        'input': {
-                            'filename': filename,
-                            'content': content,
-                            'title': title
-                        }
-                    }
-                    tool_use = ToolUse(tool_use_dict)
-                    logger.info(f"Created ToolUse object, calling generate_html_file_tool")
-                    result = generate_html_file_tool(tool_use)
-                    logger.info(f"generate_html_file_tool returned result type: {type(result)}")
-                    
-                    # Extract result from ToolResult format
-                    if hasattr(result, 'content'):
-                        # Extract text from content array
-                        if isinstance(result.content, list) and len(result.content) > 0:
-                            return result.content[0].get('text', result.content[0])
-                        return result.content
-                    elif isinstance(result, dict):
-                        content = result.get('content', result.get('output', result))
-                        if isinstance(content, list) and len(content) > 0:
-                            return content[0].get('text', content[0])
-                        return content
-                    return result
-                except Exception as e:
-                    logger.error(f"Error in wrapped_html: {e}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    raise
-            self._tool_cache[tool_name] = wrapped_html
-            return wrapped_html
+        # NOTE: generate_html_file_tool and generate_pdf_tool have been moved to planner/agent_tools/
+        # These are now handled by the planner directly for intelligent document generation
         
-        # Worker tools for document generation
-        elif tool_name == 'embed_images_tool':
-            from tools.image_embedder import embed_images_tool
-            self._tool_cache[tool_name] = embed_images_tool
-            return embed_images_tool
+        # NOTE: embed_images_tool, generate_html_template_tool have been moved to planner/agent_tools/
+        # These are now handled by the planner directly for intelligent document generation
         
         elif tool_name == 'convert_markdown_to_html_tool':
             from tools.markdown_converter import convert_markdown_to_html_tool
             self._tool_cache[tool_name] = convert_markdown_to_html_tool
             return convert_markdown_to_html_tool
         
-        elif tool_name == 'generate_html_template_tool':
-            from tools.html_template_generator import generate_html_template_tool
-            self._tool_cache[tool_name] = generate_html_template_tool
-            return generate_html_template_tool
+        # NOTE: generate_pdf_tool has been moved to planner/agent_tools/
+        # PDF generation is now handled by the planner directly
         
-        elif tool_name == 'generate_pdf_tool':
-            from tools.pdf_generator import generate_pdf_tool
-            from strands.types.tools import ToolUse
-            def wrapped_pdf_gen(content: str, filename: str = "report.pdf", pdf_images: list = None, page_size: str = "letter"):
-                import uuid
-                tool_use_dict = {
-                    'toolUseId': str(uuid.uuid4()),
-                    'toolName': 'generate_pdf_tool',
-                    'input': {
-                        'content': content,
-                        'filename': filename,
-                        'pdf_images': pdf_images,
-                        'page_size': page_size
-                    }
-                }
-                tool_use = ToolUse(tool_use_dict)
-                result = generate_pdf_tool(tool_use)
-                
-                if hasattr(result, 'content'):
-                    if isinstance(result.content, list) and len(result.content) > 0:
-                        return result.content[0].get('text', result.content[0])
-                    return result.content
-                elif isinstance(result, dict):
-                    content = result.get('content', result.get('output', result))
-                    if isinstance(content, list) and len(content) > 0:
-                        return content[0].get('text', content[0])
-                    return content
-                return result
-            self._tool_cache[tool_name] = wrapped_pdf_gen
-            return wrapped_pdf_gen
-        
-        elif tool_name == 'manipulate_pdf_tool':
-            from tools.pdf_manipulator import manipulate_pdf_tool
-            from strands.types.tools import ToolUse
-            def wrapped_pdf_manip(operation: str, source_pdf_s3_key: str = None, **kwargs):
-                import uuid
-                tool_use_dict = {
-                    'toolUseId': str(uuid.uuid4()),
-                    'toolName': 'manipulate_pdf_tool',
-                    'input': {
-                        'operation': operation,
-                        'source_pdf_s3_key': source_pdf_s3_key,
-                        **kwargs
-                    }
-                }
-                tool_use = ToolUse(tool_use_dict)
-                result = manipulate_pdf_tool(tool_use)
-                
-                if hasattr(result, 'content'):
-                    if isinstance(result.content, list) and len(result.content) > 0:
-                        return result.content[0].get('text', result.content[0])
-                    return result.content
-                elif isinstance(result, dict):
-                    content = result.get('content', result.get('output', result))
-                    if isinstance(content, list) and len(content) > 0:
-                        return content[0].get('text', content[0])
-                    return content
-                return result
-            self._tool_cache[tool_name] = wrapped_pdf_manip
-            return wrapped_pdf_manip
+        # NOTE: manipulate_pdf_tool has been moved to planner/agent_tools/
+        # PDF manipulation is now handled by the planner directly
         
         elif tool_name == 'upload_file_tool':
             from tools.file_uploader import upload_file_tool
@@ -406,10 +305,8 @@ class ToolExecutor:
             return upload_file_tool
         
         # Validation/reading tools for planner
-        elif tool_name == 'read_image_tool':
-            from tools.image_reader import read_image_tool
-            self._tool_cache[tool_name] = read_image_tool
-            return read_image_tool
+        # NOTE: read_image_tool has been moved to planner/agent_tools/
+        # Image reading is now handled by the planner directly for validation and inspection
         
         # Session tools
         elif tool_name == 'get_session_context_tool':
@@ -438,24 +335,8 @@ class ToolExecutor:
             self._tool_cache[tool_name] = search_chat_history_tool
             return search_chat_history_tool
         
-        # PDF tools
-        elif tool_name == 'read_pdf_tool':
-            from tools.pdf_reader import read_pdf_tool
-            from strands.types.tools import ToolUse
-            def wrapped_pdf(s3_key: str):
-                tool_use = {'input': {'s3_key': s3_key}}
-                return read_pdf_tool(ToolUse(tool_use))
-            self._tool_cache[tool_name] = wrapped_pdf
-            return wrapped_pdf
-        
-        elif tool_name == 'analyze_pdf_content_tool':
-            from tools.pdf_reader import analyze_pdf_content_tool
-            from strands.types.tools import ToolUse
-            def wrapped_analyze(s3_key: str):
-                tool_use = {'input': {'s3_key': s3_key}}
-                return analyze_pdf_content_tool(ToolUse(tool_use))
-            self._tool_cache[tool_name] = wrapped_analyze
-            return wrapped_analyze
+        # NOTE: read_pdf_tool and analyze_pdf_content_tool have been moved to planner/agent_tools/
+        # PDF reading is now handled by the planner directly for validation and inspection
         
         # SEC tools
         elif tool_name == 'get_company_cik':

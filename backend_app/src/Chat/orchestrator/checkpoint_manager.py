@@ -14,10 +14,10 @@ class CheckpointManager:
     """
     
     # Tools that trigger checkpoints (require validation)
+    # NOTE: generate_html_file_tool and generate_pdf_tool have been moved to planner/agent_tools/
+    # Document generation is now handled by the planner directly
     CHECKPOINT_TOOLS: Set[str] = {
         'generate_chart_tool',
-        'generate_html_file_tool',
-        'generate_pdf_tool',
         'upload_file_tool',
         'analyze_portfolio_performance'
     }
