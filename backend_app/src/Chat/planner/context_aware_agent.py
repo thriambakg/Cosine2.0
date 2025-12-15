@@ -380,6 +380,12 @@ The orchestrator can extract nested fields from JSON results using dot notation:
 - {{step_2.result.portfolio.max_drawdown}} - Gets max drawdown from portfolio object
 - {{step_2.result.portfolio.rolling_12m_returns}} - Gets rolling returns data
 
+CHART GENERATION AND PDF EMBEDDING:
+- generate_chart_tool returns JSON with s3_key field: {{"message": "...", "s3_key": "users/.../agent-files/chart.png", "filename": "...", "file_type": "png"}}
+- To embed chart in PDF: Use {{step_N.result.s3_key}} or {{step_N.s3_key}} in PDF content, NOT {{step_N.result}} (which contains full JSON)
+- Example PDF content: "## Report\n\n![Chart]({{step_3.result.s3_key}})" - This will embed the chart image
+- The PDF generator automatically detects S3 keys in content and embeds the images
+
 PORTFOLIO ANALYSIS SPECIFIC:
 When using analyze_portfolio_performance tool, the result structure is:
 {
@@ -422,10 +428,10 @@ Use placeholders like:
 - get_crypto_data_tool(symbol, timeframe, start_date, end_date) - Crypto data
 - python_financial_calculator(calculation) - Financial calculations (can process large datasets)
 - analyze_portfolio_performance(data_source, portfolio_holdings, benchmark_symbol, risk_free_rate) - Portfolio analysis with real calculations (CAGR, volatility, Sharpe, etc.) - Returns structured JSON with metrics_table and time_series
-- generate_chart_tool(symbol, data_json, chart_type, title) - Generate charts (use {{step_N.result.time_series}} for portfolio charts)
+- generate_chart_tool(symbol, data_json, chart_type, title) - Generate charts (use {{step_N.result.time_series}} for portfolio charts). Returns JSON with s3_key field. Use {{step_N.result.s3_key}} or {{step_N.s3_key}} to reference the chart image in PDF/HTML generation.
 - generate_stock_chart(symbol, timeframe, chart_type) - Simplified stock charts
-- generate_agent_file_tool(filename, content, file_type) - Create files (txt, pdf, markdown, etc.). PDF files automatically embed chart images from S3.
-- generate_html_file_tool(filename, content, title) - Generate interactive HTML reports with embedded charts and styling. Automatically embeds chart images from S3.
+- generate_agent_file_tool(filename, content, file_type) - Create files (txt, pdf, markdown, etc.). PDF files automatically embed chart images from S3 when content contains chart S3 keys. IMPORTANT: For PDFs with charts, use {{step_N.result.s3_key}} or {{step_N.s3_key}} in content, NOT {{step_N.result}} (which contains full JSON).
+- generate_html_file_tool(filename, content, title) - Generate interactive HTML reports with embedded charts and styling. Automatically embeds chart images from S3 when content contains chart S3 keys.
 - generate_excel_file_tool(filename, content, template_type, include_charts) - Create CSV/Excel files (use {{step_N.result.metrics_table}} for portfolio CSV)
 
 WORKER TOOLS (can be called in any order for dynamic document generation):
@@ -538,10 +544,22 @@ Plan:
       "store_result": false
     },
     {
+      "tool": "generate_chart_tool",
+      "parameters": {
+        "symbol": "Portfolio vs S&P500",
+        "data_json": "{{step_2.result.time_series}}",
+        "chart_type": "line",
+        "title": "Portfolio Performance vs S&P 500"
+      },
+      "critical": false,
+      "store_result": true,
+      "checkpoint": true
+    },
+    {
       "tool": "generate_agent_file_tool",
       "parameters": {
         "filename": "portfolio_report",
-        "content": "{{summary_with_charts}}",
+        "content": "## Portfolio Performance\n\n**CAGR:** {{step_2.result.portfolio.cagr}}\n**Volatility:** {{step_2.result.portfolio.volatility}}\n\n![Chart]({{step_3.result.s3_key}})",
         "file_type": "pdf"
       },
       "critical": false,

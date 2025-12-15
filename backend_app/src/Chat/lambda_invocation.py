@@ -114,17 +114,43 @@ def upload_file_and_notify(
         # Create S3 key
         s3_key = f"users/{user_id}/sessions/{session_id}/{folder}/{filename}"
         
+        # Helper function to sanitize metadata values for S3 (S3 metadata must be ASCII-only)
+        def sanitize_for_s3_metadata(value: str) -> str:
+            """Convert string to ASCII-only for S3 metadata"""
+            if not value:
+                return value
+            if not isinstance(value, str):
+                value = str(value)
+            # Replace common non-ASCII characters with ASCII equivalents
+            replacements = {
+                '–': '-',  # en-dash
+                '—': '-',  # em-dash
+                '…': '...',  # ellipsis
+                '"': '"',  # left double quote
+                '"': '"',  # right double quote
+                ''': "'",  # left single quote
+                ''': "'",  # right single quote
+            }
+            result = value
+            for non_ascii, ascii_char in replacements.items():
+                result = result.replace(non_ascii, ascii_char)
+            # Remove any remaining non-ASCII characters
+            result = result.encode('ascii', 'ignore').decode('ascii')
+            return result
+        
         # Prepare metadata
         upload_metadata = {
             'user_id': user_id,
             'session_id': session_id,
-            'filename': filename,
-            'file_type': file_type,
+            'filename': sanitize_for_s3_metadata(filename),
+            'file_type': sanitize_for_s3_metadata(file_type),
             'upload_timestamp': str(int(datetime.utcnow().timestamp()))
         }
         
         if metadata:
-            upload_metadata.update(metadata)
+            # Sanitize all metadata values
+            sanitized_metadata = {k: sanitize_for_s3_metadata(str(v)) if isinstance(v, str) else str(v) for k, v in metadata.items()}
+            upload_metadata.update(sanitized_metadata)
         
         # Upload to S3
         s3_client.put_object(

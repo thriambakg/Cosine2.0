@@ -348,6 +348,30 @@ def generate_html_file_tool(tool_use: ToolUse) -> ToolResult:
         try:
             from lambda_invocation import upload_file_and_notify
             
+            # Sanitize title to ASCII-only for S3 metadata (S3 metadata must be ASCII)
+            def sanitize_for_s3_metadata(value: str) -> str:
+                """Convert string to ASCII-only for S3 metadata"""
+                if not value:
+                    return value
+                # Replace common non-ASCII characters with ASCII equivalents
+                replacements = {
+                    '–': '-',  # en-dash
+                    '—': '-',  # em-dash
+                    '…': '...',  # ellipsis
+                    '"': '"',  # left double quote
+                    '"': '"',  # right double quote
+                    ''': "'",  # left single quote
+                    ''': "'",  # right single quote
+                }
+                result = value
+                for non_ascii, ascii_char in replacements.items():
+                    result = result.replace(non_ascii, ascii_char)
+                # Remove any remaining non-ASCII characters
+                result = result.encode('ascii', 'ignore').decode('ascii')
+                return result
+            
+            sanitized_title = sanitize_for_s3_metadata(title or filename)
+            
             result = upload_file_and_notify(
                 content=html_content,
                 filename=filename,
@@ -358,7 +382,7 @@ def generate_html_file_tool(tool_use: ToolUse) -> ToolResult:
                 folder="agent-files",
                 metadata={
                     'generated_by': 'html_generator_tool',
-                    'title': title or filename
+                    'title': sanitized_title
                 }
             )
             

@@ -408,25 +408,61 @@ class Orchestrator:
                                     s3_key_to_read = step_result['actual_data_s3_key']
                                     needs_s3_read = True
                                 
-                                # For nested fields (like time_series, metrics_table), we need to read from S3 and extract
+                                # For nested fields (like time_series, metrics_table, result.s3_key), we need to read from S3 and extract
                                 # This is necessary because tools expect the actual data, not just the S3 key
-                                if field and field != 'result' and field != 's3_key':
+                                # Handle "result.field" pattern - strip "result." prefix if present
+                                actual_field = field
+                                if field.startswith('result.'):
+                                    actual_field = field.replace('result.', '', 1)
+                                
+                                # Special handling for s3_key extraction from chart results
+                                if actual_field == 's3_key' and not needs_s3_read:
+                                    # Try to extract s3_key from result (chart generation returns JSON with s3_key)
+                                    if 'result' in step_result:
+                                        result_data = step_result['result']
+                                        if isinstance(result_data, str):
+                                            try:
+                                                parsed = json.loads(result_data)
+                                                if isinstance(parsed, dict) and 's3_key' in parsed:
+                                                    replacement = parsed['s3_key']
+                                                    logger.info(f"Extracted s3_key from chart result: {replacement}")
+                                                    placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                                                    placeholder_single_brace = f'{{{placeholder}}}'
+                                                    if placeholder_with_braces in resolved_value:
+                                                        resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                                                    if placeholder_single_brace in resolved_value:
+                                                        resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                                                    continue
+                                            except json.JSONDecodeError:
+                                                pass
+                                        elif isinstance(result_data, dict) and 's3_key' in result_data:
+                                            replacement = result_data['s3_key']
+                                            logger.info(f"Extracted s3_key from chart result dict: {replacement}")
+                                            placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                                            placeholder_single_brace = f'{{{placeholder}}}'
+                                            if placeholder_with_braces in resolved_value:
+                                                resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                                            if placeholder_single_brace in resolved_value:
+                                                resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                                            continue
+                                
+                                if field and field != 'result' and field != 's3_key' and actual_field != 's3_key':
                                     # Need to extract a specific field from the result
                                     if needs_s3_read and s3_key_to_read:
                                         # Read the full data from S3
-                                        logger.info(f"Reading from S3 for step {step_num}, field '{field}', s3_key: {s3_key_to_read}")
+                                        logger.info(f"Reading from S3 for step {step_num}, field '{actual_field}', s3_key: {s3_key_to_read}")
                                         try:
                                             full_data = self.data_storage.retrieve_result({'s3_key': s3_key_to_read})
                                             logger.info(f"Retrieved data from S3, type: {type(full_data)}, keys: {list(full_data.keys()) if isinstance(full_data, dict) else 'N/A'}")
                                             
-                                            # Extract the nested field
+                                            # Extract the nested field using actual_field (without "result." prefix)
                                             if isinstance(full_data, dict):
-                                                if field in full_data:
-                                                    extracted_value = full_data[field]
-                                                    logger.info(f"Extracted direct field '{field}' from result")
-                                                elif '.' in field:
+                                                if actual_field in full_data:
+                                                    extracted_value = full_data[actual_field]
+                                                    logger.info(f"Extracted direct field '{actual_field}' from result")
+                                                elif '.' in actual_field:
                                                     # Handle nested field path like 'portfolio.cagr'
-                                                    parts = field.split('.')
+                                                    parts = actual_field.split('.')
                                                     current = full_data
                                                     for part in parts:
                                                         if isinstance(current, dict):
@@ -437,7 +473,7 @@ class Orchestrator:
                                                             current = None
                                                             break
                                                     extracted_value = current
-                                                    logger.info(f"Extracted nested field '{field}' from result")
+                                                    logger.info(f"Extracted nested field '{actual_field}' from result")
                                                 else:
                                                     extracted_value = None
                                                 
@@ -460,12 +496,40 @@ class Orchestrator:
                                         if 'result' in step_result:
                                             result_data = step_result['result']
                                             if isinstance(result_data, dict):
-                                                replacement = json.dumps(result_data.get(field, ''))
+                                                # Handle nested field paths like 'result.s3_key' - use actual_field (already stripped)
+                                                if '.' in actual_field:
+                                                    parts = actual_field.split('.')
+                                                    current = result_data
+                                                    for part in parts:
+                                                        if isinstance(current, dict):
+                                                            current = current.get(part)
+                                                            if current is None:
+                                                                break
+                                                        else:
+                                                            current = None
+                                                            break
+                                                    replacement = str(current) if current is not None else ''
+                                                else:
+                                                    replacement = json.dumps(result_data.get(actual_field, '')) if isinstance(result_data.get(actual_field), (dict, list)) else str(result_data.get(actual_field, ''))
                                             elif isinstance(result_data, str):
                                                 try:
                                                     parsed = json.loads(result_data)
                                                     if isinstance(parsed, dict):
-                                                        replacement = json.dumps(parsed.get(field, ''))
+                                                        # Handle nested field paths - use actual_field (already stripped)
+                                                        if '.' in actual_field:
+                                                            parts = actual_field.split('.')
+                                                            current = parsed
+                                                            for part in parts:
+                                                                if isinstance(current, dict):
+                                                                    current = current.get(part)
+                                                                    if current is None:
+                                                                        break
+                                                                else:
+                                                                    current = None
+                                                                    break
+                                                            replacement = str(current) if current is not None else ''
+                                                        else:
+                                                            replacement = json.dumps(parsed.get(actual_field, '')) if isinstance(parsed.get(actual_field), (dict, list)) else str(parsed.get(actual_field, ''))
                                                     else:
                                                         replacement = ''
                                                 except json.JSONDecodeError:

@@ -2325,8 +2325,157 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                 
                 return '\n'.join(resolved_lines)
             
+            # Helper function to format raw decimal values in content
+            def format_decimal_values(content_text: str) -> str:
+                """
+                Format raw decimal values in content based on their context.
+                Handles cases where orchestrator has already extracted values but they're not formatted.
+                
+                Examples:
+                - CAGR: 0.2977067600527421 → 29.77%
+                - Volatility: 0.3058089933708457 → 30.58%
+                - Max Drawdown: -0.35553266553567237 → -35.55%
+                - Sharpe Ratio: 0.9420121008306779 → 0.94
+                - Rolling 12-month returns: {...} → Summary text
+                """
+                lines = content_text.split('\n')
+                formatted_lines = []
+                i = 0
+                
+                while i < len(lines):
+                    line = lines[i]
+                    line_lower = line.lower()
+                    
+                    # Pattern to match decimal numbers (including negative)
+                    decimal_pattern = r'(-?\d+\.\d+)'
+                    
+                    # Check if this line contains a metric label
+                    if 'cagr' in line_lower or 'compound annual growth rate' in line_lower:
+                        # Format as percentage
+                        line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2%}", line)
+                    elif 'volatility' in line_lower:
+                        # Format as percentage
+                        line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2%}", line)
+                    elif 'drawdown' in line_lower and 'max' in line_lower:
+                        # Format as percentage (already negative if needed)
+                        line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2%}", line)
+                    elif 'sharpe' in line_lower and 'ratio' in line_lower:
+                        # Format as decimal (2 decimal places)
+                        line = re.sub(decimal_pattern, lambda m: f"{float(m.group(1)):.2f}", line)
+                    elif 'rolling' in line_lower and ('12' in line_lower or 'month' in line_lower) and 'return' in line_lower:
+                        # Check if this line or subsequent lines contain a JSON object (rolling returns data)
+                        # First, check if line is very long (likely contains entire JSON)
+                        # If line is extremely long (> 10000 chars), just replace with summary to avoid parsing issues
+                        if len(line) > 10000 and '{' in line and '"dates"' in line:
+                            json_start = line.find('{')
+                            if json_start != -1:
+                                # Too long to parse efficiently, just replace with summary
+                                line = line[:json_start] + "(Rolling 12-month returns data - see CSV for detailed time series)"
+                        elif len(line) > 500 and '{' in line and '"dates"' in line:
+                            # Try to extract and parse JSON
+                            json_start = line.find('{')
+                            if json_start != -1:
+                                # Try to find the matching closing brace
+                                brace_count = 0
+                                json_end = -1
+                                for j in range(json_start, len(line)):
+                                    if line[j] == '{':
+                                        brace_count += 1
+                                    elif line[j] == '}':
+                                        brace_count -= 1
+                                        if brace_count == 0:
+                                            json_end = j + 1
+                                            break
+                                
+                                if json_end > json_start:
+                                    try:
+                                        json_str = line[json_start:json_end]
+                                        rolling_data = json.loads(json_str)
+                                        if isinstance(rolling_data, dict) and 'dates' in rolling_data:
+                                            # Replace with summary
+                                            num_points = len(rolling_data.get('dates', []))
+                                            if 'returns' in rolling_data:
+                                                returns = rolling_data['returns']
+                                                if isinstance(returns, list) and len(returns) > 0:
+                                                    avg_return = sum(returns) / len(returns)
+                                                    min_return = min(returns)
+                                                    max_return = max(returns)
+                                                    summary = f"Average: {avg_return:.2%}, Range: {min_return:.2%} to {max_return:.2%} ({num_points} data points)"
+                                                    line = line[:json_start] + summary
+                                                else:
+                                                    line = line[:json_start] + f"({num_points} data points available)"
+                                            else:
+                                                line = line[:json_start] + f"({num_points} data points available)"
+                                    except (json.JSONDecodeError, ValueError):
+                                        # If parsing fails, replace with simple note
+                                        line = line[:json_start] + "(Rolling 12-month returns data - see CSV for details)"
+                                else:
+                                    # JSON spans multiple lines - collect them
+                                    collected_lines = [line]
+                                    brace_count = line.count('{') - line.count('}')
+                                    j = i + 1
+                                    while j < len(lines) and brace_count > 0:
+                                        collected_lines.append(lines[j])
+                                        brace_count += lines[j].count('{') - lines[j].count('}')
+                                        j += 1
+                                    
+                                    # Try to parse the collected JSON
+                                    full_json = '\n'.join(collected_lines)
+                                    json_start = full_json.find('{')
+                                    if json_start != -1:
+                                        try:
+                                            # Find matching closing brace
+                                            brace_count = 0
+                                            json_end = -1
+                                            for k in range(json_start, len(full_json)):
+                                                if full_json[k] == '{':
+                                                    brace_count += 1
+                                                elif full_json[k] == '}':
+                                                    brace_count -= 1
+                                                    if brace_count == 0:
+                                                        json_end = k + 1
+                                                        break
+                                            
+                                            if json_end > json_start:
+                                                json_str = full_json[json_start:json_end]
+                                                rolling_data = json.loads(json_str)
+                                                if isinstance(rolling_data, dict) and 'dates' in rolling_data:
+                                                    num_points = len(rolling_data.get('dates', []))
+                                                    summary = f"(Rolling 12-month returns: {num_points} data points - see CSV for details)"
+                                                    # Replace the first line and skip the rest
+                                                    line = line[:line.find('{')] + summary
+                                                    i = j - 1  # Skip processed lines
+                                        except (json.JSONDecodeError, ValueError):
+                                            # If parsing fails, replace with simple note
+                                            line = line[:line.find('{')] + "(Rolling 12-month returns data - see CSV for details)"
+                                            # Skip lines that are part of the JSON
+                                            while i + 1 < len(lines) and ('"' in lines[i+1] or '}' in lines[i+1] or ']' in lines[i+1]):
+                                                i += 1
+                                                if lines[i].strip().endswith('}'):
+                                                    break
+                    else:
+                        # For other numeric values, try to detect if they should be percentages
+                        # If the value is between -1 and 1 and not already formatted, it might be a percentage
+                        matches = list(re.finditer(decimal_pattern, line))
+                        for match in matches:
+                            value = float(match.group(1))
+                            # If it's a small decimal (likely a percentage), format it
+                            if -1 <= value <= 1 and abs(value) < 0.5:
+                                # Check context - if it's near words like "return", "rate", "growth", format as percentage
+                                context = line[max(0, match.start()-20):min(len(line), match.end()+20)].lower()
+                                if any(word in context for word in ['return', 'rate', 'growth', 'yield', 'cagr']):
+                                    line = line.replace(match.group(1), f"{value:.2%}")
+                    
+                    formatted_lines.append(line)
+                    i += 1
+                
+                return '\n'.join(formatted_lines)
+            
             # Resolve JSON references in content before processing
             content = resolve_json_references(content)
+            
+            # Format raw decimal values that were extracted by orchestrator
+            content = format_decimal_values(content)
             
             # First, try to parse entire content as JSON to extract chart references
             chart_s3_keys = []
@@ -2418,20 +2567,27 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                         line = re.sub(r'users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>]+\.png', '[Chart embedded above]', line)
                 
                 # Check for JSON chart references (format: {"s3_key": "users/.../agent-files/...png"})
-                json_match = re.search(r'\{"s3_key":\s*"([^"]+)"', line)
+                # Also handle full chart result JSON: {"message": "...", "s3_key": "...", "filename": "...", "file_type": "png"}
+                json_match = re.search(r'\{"(?:message|s3_key)":\s*"[^"]*",\s*"s3_key":\s*"([^"]+)"', line)
+                if not json_match:
+                    # Try simpler pattern
+                    json_match = re.search(r'\{"s3_key":\s*"([^"]+)"', line)
                 if json_match:
                     s3_key = json_match.group(1)
-                    logger.info(f"Found JSON chart reference: {s3_key}")
-                    img = embed_image_from_s3(s3_key)
-                    if img:
-                        if current_section:
-                            story.extend(current_section)
-                            current_section = []
-                        story.append(Spacer(1, 0.2*inch))
-                        story.append(img)
-                        story.append(Spacer(1, 0.2*inch))
-                        # Remove the JSON reference from the line
-                        line = re.sub(r'\{"s3_key":\s*"[^"]+"[^}]*\}', '[Chart embedded above]', line)
+                    # Only process if it's an image file
+                    if s3_key.endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                        logger.info(f"Found JSON chart reference: {s3_key}")
+                        img = embed_image_from_s3(s3_key)
+                        if img:
+                            if current_section:
+                                story.extend(current_section)
+                                current_section = []
+                            story.append(Spacer(1, 0.2*inch))
+                            story.append(img)
+                            story.append(Spacer(1, 0.2*inch))
+                            # Remove the JSON reference from the line (handle both full and simple JSON)
+                            line = re.sub(r'\{"(?:message|s3_key)":\s*"[^"]*",\s*"s3_key":\s*"[^"]+"[^}]*\}', '[Chart embedded above]', line)
+                            line = re.sub(r'\{"s3_key":\s*"[^"]+"[^}]*\}', '[Chart embedded above]', line)
                 
                 # Detect headings (markdown style or plain text)
                 if line.startswith('# '):
