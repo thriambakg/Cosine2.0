@@ -64,6 +64,32 @@ class ChartImageGenerator:
             if not stocks_data:
                 raise ValueError("No stocks data found in JSON")
             
+            # Decompress individual stocks if they are compressed
+            decompressed_stocks = []
+            for stock in stocks_data:
+                if isinstance(stock, dict) and stock.get("_compressed") is True:
+                    logger.info(f"Decompressing stock: {stock.get('symbol', 'UNKNOWN')}")
+                    try:
+                        from compression_helper import CompressionHelper
+                        decompressed_stock = CompressionHelper.decompress_data(stock)
+                        # Remove original_data if present
+                        if isinstance(decompressed_stock, dict) and 'original_data' in decompressed_stock:
+                            decompressed_stock.pop('original_data', None)
+                        decompressed_stocks.append(decompressed_stock)
+                    except Exception as e:
+                        logger.warning(f"Failed to decompress stock, using original_data fallback: {str(e)}")
+                        if 'original_data' in stock:
+                            decompressed_stocks.append(stock['original_data'])
+                        else:
+                            decompressed_stocks.append(stock)
+                else:
+                    # Remove original_data if present in uncompressed stock
+                    if isinstance(stock, dict) and 'original_data' in stock:
+                        stock = stock.copy()
+                        stock.pop('original_data', None)
+                    decompressed_stocks.append(stock)
+            stocks_data = decompressed_stocks
+            
             # Generate chart
             chart_s3_key = self._generate_chart_image(
                 stocks_data, chart_type, title, user_id, session_id
@@ -143,12 +169,17 @@ class ChartImageGenerator:
             historical_data = stock.get('historical_data', [])
             
             if not historical_data:
+                logger.warning(f"No historical data for {symbol}")
                 continue
+            
+            logger.info(f"Processing {len(historical_data)} data points for {symbol}")
             
             # Convert to DataFrame
             df = pd.DataFrame(historical_data)
             df['date'] = pd.to_datetime(df['date'])
             df = df.sort_values('date')
+            
+            logger.info(f"Chart for {symbol}: {len(df)} data points from {df['date'].min()} to {df['date'].max()}")
             
             # Plot
             color = colors[idx % len(colors)]
@@ -234,6 +265,32 @@ class SummaryMetricsCalculator:
             stocks_data = data.get('stocks', [])
             if not stocks_data:
                 raise ValueError("No stocks data found in JSON")
+            
+            # Decompress individual stocks if they are compressed
+            decompressed_stocks = []
+            for stock in stocks_data:
+                if isinstance(stock, dict) and stock.get("_compressed") is True:
+                    logger.info(f"Decompressing stock: {stock.get('symbol', 'UNKNOWN')}")
+                    try:
+                        from compression_helper import CompressionHelper
+                        decompressed_stock = CompressionHelper.decompress_data(stock)
+                        # Remove original_data if present
+                        if isinstance(decompressed_stock, dict) and 'original_data' in decompressed_stock:
+                            decompressed_stock.pop('original_data', None)
+                        decompressed_stocks.append(decompressed_stock)
+                    except Exception as e:
+                        logger.warning(f"Failed to decompress stock, using original_data fallback: {str(e)}")
+                        if 'original_data' in stock:
+                            decompressed_stocks.append(stock['original_data'])
+                        else:
+                            decompressed_stocks.append(stock)
+                else:
+                    # Remove original_data if present in uncompressed stock
+                    if isinstance(stock, dict) and 'original_data' in stock:
+                        stock = stock.copy()
+                        stock.pop('original_data', None)
+                    decompressed_stocks.append(stock)
+            stocks_data = decompressed_stocks
             
             # Calculate summary metrics
             summary_metrics = self._calculate_summary_metrics(stocks_data)
