@@ -183,11 +183,18 @@ def _extract_chart_s3_keys(content: str) -> list:
     return list(set(chart_s3_keys))
 
 
-def _embed_image_from_s3(s3_key: str, max_width: float = 6*inch, max_height: float = 4*inch):
+def _embed_image_from_s3(s3_key: str, max_width: float = None, max_height: float = None):
     """Download image from S3 and return Image element for PDF"""
     try:
         from reportlab.platypus import Image
+        from reportlab.lib.units import inch
         from io import BytesIO
+        
+        # Set defaults using inch (now imported)
+        if max_width is None:
+            max_width = 6 * inch
+        if max_height is None:
+            max_height = 4 * inch
         
         s3_client = boto3.client('s3')
         bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')

@@ -2205,9 +2205,15 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
             )
             
             # Helper function to download image from S3 and embed in PDF
-            def embed_image_from_s3(s3_key: str, max_width: float = 6*inch, max_height: float = 4*inch):
+            def embed_image_from_s3(s3_key: str, max_width: float = None, max_height: float = None):
                 """Download image from S3 and return Image element for PDF"""
                 try:
+                    # Set defaults using inch (now available in scope)
+                    if max_width is None:
+                        max_width = 6 * inch
+                    if max_height is None:
+                        max_height = 4 * inch
+                    
                     s3_client = boto3.client('s3')
                     bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
                     
