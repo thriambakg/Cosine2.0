@@ -221,21 +221,8 @@ class UnifiedChartGenerator:
                 metadata=metadata
             )
             
-            # Extract S3 key from result or construct it
-            # upload_file_and_notify returns a success message, but we need the S3 key
-            # Construct the S3 key based on the known pattern
-            s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
-            
-            logger.info(f"Generated chart: {filename} at {s3_key}")
-            
-            # Return a dict with both the success message and S3 key for better compatibility
-            return json.dumps({
-                'success': True,
-                'message': result,
-                's3_key': s3_key,
-                'filename': filename,
-                'file_type': 'png'
-            })
+            logger.info(f"Generated chart: {filename}")
+            return result
             
         except ImportError:
             logger.warning("lambda_invocation module not available - falling back to manual upload")
@@ -284,6 +271,11 @@ class UnifiedChartGenerator:
                 logger.info(f"🔍 DEBUG: Compressed data size: {data_dict.get('_compressed_size', 'unknown')}")
                 logger.info(f"🔍 DEBUG: Original data size: {data_dict.get('_original_size', 'unknown')}")
                 
+                # Check the base64 data before decompression
+                compressed_data = data_dict.get('data', '')
+                logger.info(f"🔍 DEBUG: Base64 data length: {len(compressed_data)}")
+                logger.info(f"🔍 DEBUG: Base64 data preview: {compressed_data[:100]}...")
+                
                 try:
                     data_dict = CompressionHelper.decompress_data(data_dict)
                     logger.info(f"🔍 DEBUG: After decompression, keys: {list(data_dict.keys()) if isinstance(data_dict, dict) else 'Not a dict'}")
@@ -300,35 +292,6 @@ class UnifiedChartGenerator:
                     else:
                         logger.error("❌ No fallback data available, returning error")
                         return f"Error: Unable to decompress data. The compressed data appears to be corrupted. Please try again."
-            
-            # Decompress individual stocks if they are compressed (for multiple_stocks data)
-            if isinstance(data_dict, dict) and 'stocks' in data_dict:
-                stocks = data_dict.get('stocks', [])
-                decompressed_stocks = []
-                for stock in stocks:
-                    if isinstance(stock, dict) and stock.get("_compressed") is True:
-                        logger.info(f"🔍 DEBUG: Decompressing stock: {stock.get('symbol', 'UNKNOWN')}")
-                        try:
-                            decompressed_stock = CompressionHelper.decompress_data(stock)
-                            # Remove original_data if present
-                            if isinstance(decompressed_stock, dict) and 'original_data' in decompressed_stock:
-                                decompressed_stock.pop('original_data', None)
-                            decompressed_stocks.append(decompressed_stock)
-                        except Exception as e:
-                            logger.warning(f"Failed to decompress stock, using original_data fallback: {str(e)}")
-                            if 'original_data' in stock:
-                                decompressed_stocks.append(stock['original_data'])
-                            else:
-                                decompressed_stocks.append(stock)
-                    else:
-                        # Remove original_data if present in uncompressed stock
-                        if isinstance(stock, dict) and 'original_data' in stock:
-                            stock = stock.copy()
-                            stock.pop('original_data', None)
-                        decompressed_stocks.append(stock)
-                data_dict['stocks'] = decompressed_stocks
-                logger.info(f"🔍 DEBUG: Decompressed {len(decompressed_stocks)} stocks")
-            
             elif isinstance(data_dict, dict) and 'historical_data' in data_dict:
                 # Legacy: Only historical_data is compressed, decompress it
                 hist_data = data_dict['historical_data']
