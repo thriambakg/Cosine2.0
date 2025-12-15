@@ -150,26 +150,28 @@ class PortfolioAnalyzer:
         return holdings
     
     def _load_financial_data(self, data_source: Any) -> Dict[str, pd.DataFrame]:
-        """Load financial data from S3 or JSON string"""
-        # Handle if data_source is already a dict (from placeholder resolution)
-        if isinstance(data_source, dict):
-            data = data_source
-        else:
-            # Try to parse as JSON string first
-            try:
-                data = json.loads(str(data_source))
-            except:
-                # Assume it's an S3 key (string)
-                data = self._read_data_from_s3(str(data_source))
-        
-        # Check if this is a file reference JSON (from get_multiple_financial_data)
-        # If so, we need to read the actual data file
-        if isinstance(data, dict) and 'file_reference' in data and 'stocks' not in data:
-            file_ref = data.get('file_reference', {})
-            if isinstance(file_ref, dict) and 's3_key' in file_ref:
-                # Read the actual data file
-                logger.info(f"Detected file reference JSON, reading actual data from: {file_ref['s3_key']}")
-                data = self._read_data_from_s3(file_ref['s3_key'])
+        """Load financial data from S3 or JSON string - handles all JSON parsing internally"""
+        # Use JSON parser helper for consistent parsing
+        try:
+            from tools.json_parser_helper import JSONParserHelper
+            data = JSONParserHelper.parse_json_data(data_source)
+        except ImportError:
+            # Fallback to manual parsing if helper not available
+            logger.warning("JSONParserHelper not available, using manual parsing")
+            if isinstance(data_source, dict):
+                data = data_source
+            else:
+                try:
+                    data = json.loads(str(data_source))
+                except:
+                    data = self._read_data_from_s3(str(data_source))
+            
+            # Check if this is a file reference JSON
+            if isinstance(data, dict) and 'file_reference' in data and 'stocks' not in data:
+                file_ref = data.get('file_reference', {})
+                if isinstance(file_ref, dict) and 's3_key' in file_ref:
+                    logger.info(f"Detected file reference JSON, reading actual data from: {file_ref['s3_key']}")
+                    data = self._read_data_from_s3(file_ref['s3_key'])
         
         # Decompress data if it's compressed
         try:

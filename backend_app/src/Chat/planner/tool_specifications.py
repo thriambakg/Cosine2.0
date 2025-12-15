@@ -224,9 +224,9 @@ TOOL_SPECIFICATIONS = {
     },
     'generate_pdf_tool': {
         'name': 'generate_pdf_tool',
-        'description': 'Generate PDF document from text/markdown content. Supports embedded images (use embed_images_tool first to get PDF Image objects). Single-purpose worker tool.',
+        'description': 'Generate PDF document from text/markdown content. Automatically detects and embeds chart images from S3. Uses ReportLab for creation. Single-purpose worker tool.',
         'inputs': {
-            'content': 'str - Text/markdown content to convert to PDF',
+            'content': 'str - Text/markdown content to convert to PDF (may contain S3 key references for charts)',
             'filename': 'str - Filename for metadata (without .pdf extension)',
             'pdf_images': 'list[dict] (optional) - List of PDF Image objects from embed_images_tool (target_format="pdf")',
             'page_size': 'str - Page size: "letter" or "A4" (default: "letter")'
@@ -234,7 +234,27 @@ TOOL_SPECIFICATIONS = {
         'outputs': 'JSON with pdf_base64 (base64-encoded PDF bytes), filename, and size_bytes',
         'size_estimate': 'medium - PDF bytes (base64-encoded)',
         'store_result': False,
-        'notes': 'Worker tool for PDF generation. Use embed_images_tool first to prepare images, then this tool to generate PDF.'
+        'notes': 'Worker tool for PDF generation. Automatically extracts and embeds chart images from S3 when S3 keys are referenced in content.'
+    },
+    'manipulate_pdf_tool': {
+        'name': 'manipulate_pdf_tool',
+        'description': 'Advanced PDF manipulation: merge, split, extract, rotate, delete pages, add content, fill forms, encrypt/decrypt. Uses pypdf for manipulation operations.',
+        'inputs': {
+            'operation': 'str - Operation: "merge", "split", "extract", "rotate", "delete_pages", "add_content", "modify_content", "fill_form", "encrypt", "decrypt"',
+            'source_pdf_s3_key': 'str - S3 key of source PDF file (required for most operations)',
+            'source_pdf_s3_keys': 'list[str] (optional) - For merge: list of S3 keys of PDFs to merge',
+            'page_numbers': 'list[int] (optional) - For extract/delete/rotate: page numbers (1-indexed)',
+            'rotation_angle': 'int (optional) - For rotate: 90, 180, or 270 degrees',
+            'new_content': 'str (optional) - For add_content: text content to add',
+            'content_position': 'dict (optional) - For add_content: {x, y, page} coordinates',
+            'form_data': 'dict (optional) - For fill_form: {field_name: value} mapping',
+            'password': 'str (optional) - For encrypt/decrypt: password',
+            'output_filename': 'str (optional) - Output filename (without .pdf extension)'
+        },
+        'outputs': 'JSON with s3_key of output PDF, filename, size_bytes, and success message',
+        'size_estimate': 'medium to large - Depends on operation',
+        'store_result': False,
+        'notes': 'Advanced PDF manipulation tool using pypdf. Can merge multiple PDFs, extract/delete/rotate pages, add content at coordinates, fill form fields, and encrypt/decrypt PDFs.'
     },
     'upload_file_tool': {
         'name': 'upload_file_tool',
@@ -422,7 +442,7 @@ def get_tools_by_category() -> dict:
         'calculations': ['python_financial_calculator', 'analyze_portfolio', 'calculate_stock_correlation'],
         'visualization': ['generate_chart_tool', 'generate_stock_chart'],
         'file_generation': ['generate_agent_file_tool', 'generate_excel_file_tool', 'generate_html_file_tool'],
-        'worker_tools': ['embed_images_tool', 'convert_markdown_to_html_tool', 'generate_html_template_tool', 'generate_pdf_tool', 'upload_file_tool'],
+        'worker_tools': ['embed_images_tool', 'convert_markdown_to_html_tool', 'generate_html_template_tool', 'generate_pdf_tool', 'manipulate_pdf_tool', 'upload_file_tool'],
         'validation_tools': ['read_s3_file_tool', 'read_image_tool', 'read_pdf_tool'],
         'session_context': ['get_session_context_tool', 'get_session_files_tool', 'get_chat_history_tool', 'search_chat_history_tool'],
         'data_retrieval': ['read_s3_file_tool', 'fetch_web_content_tool', 'read_pdf_tool', 'analyze_pdf_content_tool'],

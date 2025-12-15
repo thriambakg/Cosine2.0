@@ -432,7 +432,8 @@ WORKER TOOLS (can be called in any order for dynamic document generation):
 - embed_images_tool(content, target_format, image_s3_keys) - Embed images from S3 into content (pdf/html/base64)
 - convert_markdown_to_html_tool(markdown_content, preserve_line_breaks) - Convert markdown to HTML
 - generate_html_template_tool(body_content, title, custom_css, theme) - Generate HTML document structure
-- generate_pdf_tool(content, filename, pdf_images, page_size) - Generate PDF from content
+- generate_pdf_tool(content, filename, pdf_images, page_size) - Generate PDF from content. Automatically detects and embeds chart images from S3.
+- manipulate_pdf_tool(operation, source_pdf_s3_key, ...) - Advanced PDF manipulation: merge, split, extract, rotate, delete pages, add content, fill forms, encrypt/decrypt. Uses pypdf library.
 - upload_file_tool(content, filename, file_type, folder, metadata, is_base64) - Upload files to S3
 
 VALIDATION TOOLS (for checkpoint validation):

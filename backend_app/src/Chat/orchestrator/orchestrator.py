@@ -338,10 +338,15 @@ class Orchestrator:
         """
         Resolve placeholders in parameters using results from previous steps.
         
+        SIMPLIFIED: Only handles S3 file movement, no JSON parsing.
+        Tools are responsible for their own JSON parsing.
+        
         Supports placeholders like:
-        - {{step_1.result}} - result from step 1
-        - {{step_2.s3_key}} - s3_key from file_reference in step 2
-        - {{portfolio_tickers_from_step_1}} - extract specific field from step 1 result
+        - {{step_1.result}} - raw result from step 1 (S3 key string or raw data)
+        - {{step_2.s3_key}} - S3 key from step 2 result
+        
+        NOTE: Nested field extraction (e.g., {{step_2.result.metrics_table}}) is NOT supported.
+        Tools should receive the full result and parse it themselves using json_parser_helper.
         
         Args:
             parameters: Parameters dictionary that may contain placeholders
@@ -349,7 +354,7 @@ class Orchestrator:
             current_step: Current step number (1-indexed)
             
         Returns:
-            Parameters with placeholders resolved
+            Parameters with placeholders resolved (S3 keys or raw results only)
         """
         import json
         import re
@@ -403,52 +408,35 @@ class Orchestrator:
                                     s3_key_to_read = step_result['actual_data_s3_key']
                                     needs_s3_read = True
                                 
-                                # If field is a nested path (e.g., "result.time_series" or "time_series"), 
-                                # we need to read from S3 and extract the nested field
-                                if needs_s3_read and ('.' in field or field not in ['result', 's3_key', 'file_reference']):
-                                    try:
-                                        logger.info(f"Reading from S3 for step {step_num}, field '{field}', s3_key: {s3_key_to_read}")
-                                        # Read the actual result from S3
-                                        result_data = self.data_storage.retrieve_result({'s3_key': s3_key_to_read})
-                                        logger.info(f"Retrieved data from S3, type: {type(result_data)}, keys: {list(result_data.keys()) if isinstance(result_data, dict) else 'Not a dict'}")
-                                        
-                                        # If field is "result.X", extract X from the result
-                                        if field.startswith('result.'):
-                                            nested_field = field.replace('result.', '', 1)
-                                            logger.info(f"Extracting nested field '{nested_field}' from result")
-                                            replacement = self._extract_nested_field(result_data, nested_field)
+                                # SIMPLIFIED: Only handle s3_key or result fields
+                                # For nested fields, tools should receive the full result and parse it themselves
+                                # This keeps the orchestrator clean and focused on file movement only
+                                
+                                # If field is nested (contains '.'), warn and pass the S3 key instead
+                                if '.' in field and field != 's3_key':
+                                    logger.warning(f"Nested field extraction '{field}' not supported in orchestrator. Tool should parse result itself. Passing S3 key instead.")
+                                    # For nested fields, just pass the S3 key - tool will parse it
+                                    if needs_s3_read:
+                                        replacement = s3_key_to_read
+                                    else:
+                                        # Try to get s3_key from result
+                                        if 'file_reference' in step_result:
+                                            replacement = step_result['file_reference'].get('s3_key', '')
+                                        elif 'actual_data_s3_key' in step_result:
+                                            replacement = step_result['actual_data_s3_key']
                                         else:
-                                            # Field is directly in the result (e.g., "time_series", "metrics_table")
-                                            logger.info(f"Extracting direct field '{field}' from result")
-                                            replacement = self._extract_nested_field(result_data, field)
-                                        
-                                        logger.info(f"Extracted replacement, type: {type(replacement)}, empty: {not replacement if replacement else True}")
-                                        
-                                        # Convert to JSON string if it's a dict/list
-                                        if isinstance(replacement, (dict, list)):
-                                            replacement = json.dumps(replacement)
-                                            logger.info(f"Converted replacement to JSON string, length: {len(replacement)}")
-                                        
-                                        if replacement:
-                                            # Replace placeholder
-                                            placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                                            placeholder_single_brace = f'{{{placeholder}}}'
-                                            if placeholder_with_braces in resolved_value:
-                                                resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                                                logger.info(f"Replaced placeholder {placeholder_with_braces} with data (length: {len(str(replacement))})")
-                                            if placeholder_single_brace in resolved_value:
-                                                resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                                                logger.info(f"Replaced placeholder {placeholder_single_brace} with data (length: {len(str(replacement))})")
-                                            logger.debug(f"Successfully resolved placeholder {placeholder} to field {field}")
-                                            continue
-                                        else:
-                                            logger.warning(f"Field {field} extracted from S3 but is empty or None")
-                                    except Exception as e:
-                                        logger.error(f"Could not read from S3 or extract field {field}: {e}")
-                                        logger.error(f"S3 key attempted: {s3_key_to_read}")
-                                        logger.error(f"Step result keys: {list(step_result.keys()) if isinstance(step_result, dict) else 'Not a dict'}")
-                                        import traceback
-                                        logger.error(f"Traceback: {traceback.format_exc()}")
+                                            replacement = ''
+                                    # Replace placeholder with S3 key
+                                    if replacement:
+                                        placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                                        placeholder_single_brace = f'{{{placeholder}}}'
+                                        if placeholder_with_braces in resolved_value:
+                                            resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                                            logger.info(f"Replaced nested field placeholder {placeholder_with_braces} with S3 key (tool should parse)")
+                                        if placeholder_single_brace in resolved_value:
+                                            resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                                            logger.info(f"Replaced nested field placeholder {placeholder_single_brace} with S3 key (tool should parse)")
+                                        continue
                                 
                                 # Handle simple field requests
                                 if field == 'result':
@@ -501,135 +489,28 @@ class Orchestrator:
                                     if 'result' in step_result:
                                         result_data = step_result['result']
                                         
-                                        # Handle string results (like file content or JSON strings)
+                                        # SIMPLIFIED: Only return raw result or S3 key
+                                        # Tools will parse JSON themselves
                                         if isinstance(result_data, str):
-                                            # Try to parse as JSON first
-                                            try:
-                                                parsed = json.loads(result_data)
-                                                if isinstance(parsed, dict):
-                                                    # Special handling: if this is a file reference JSON (from get_multiple_financial_data),
-                                                    # and we're looking for s3_key or result, extract the actual data file's S3 key
-                                                    if field in ['result', 's3_key'] and 'file_reference' in parsed:
-                                                        file_ref = parsed.get('file_reference', {})
-                                                        if isinstance(file_ref, dict) and 's3_key' in file_ref:
-                                                            # This is the actual data file's S3 key
-                                                            replacement = file_ref.get('s3_key', '')
-                                                            # If we got the s3_key, we're done
-                                                            if replacement:
-                                                                # Convert replacement to string if needed
-                                                                if not isinstance(replacement, str):
-                                                                    replacement = json.dumps(replacement) if replacement else ''
-                                                                # Replace placeholder
-                                                                placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                                                                placeholder_single_brace = f'{{{placeholder}}}'
-                                                                if placeholder_with_braces in resolved_value:
-                                                                    resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                                                                if placeholder_single_brace in resolved_value:
-                                                                    resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                                                                continue
-                                                    
-                                                    # Extract field from parsed JSON (support nested paths)
-                                                    # Handle nested paths like "portfolio.cagr" or "result.metrics_table"
-                                                    if '.' in field:
-                                                        # Split the field path and extract nested value
-                                                        field_parts = field.split('.')
-                                                        current = parsed
-                                                        for part in field_parts:
-                                                            if isinstance(current, dict) and part in current:
-                                                                current = current[part]
-                                                            else:
-                                                                current = None
-                                                                break
-                                                        replacement = current
-                                                    else:
-                                                        replacement = self._extract_nested_field(parsed, field)
-                                                    
-                                                    # Convert to JSON string if it's a dict/list
-                                                    if isinstance(replacement, (dict, list)):
-                                                        replacement = json.dumps(replacement)
-                                                    
-                                                    # Replace placeholder immediately if we got a replacement
-                                                    if replacement:
-                                                        placeholder_with_braces = f'{{{{{placeholder}}}}}'
-                                                        placeholder_single_brace = f'{{{placeholder}}}'
-                                                        if placeholder_with_braces in resolved_value:
-                                                            resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
-                                                            logger.info(f"Replaced placeholder {placeholder_with_braces} with data (length: {len(str(replacement))})")
-                                                        if placeholder_single_brace in resolved_value:
-                                                            resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
-                                                            logger.info(f"Replaced placeholder {placeholder_single_brace} with data (length: {len(str(replacement))})")
-                                                        continue
-                                                    
-                                                    # Try common field variations for file S3 keys
-                                                    if not replacement and field in ['file_s3_key', 's3_key', 'file_key']:
-                                                        # Look in files array
-                                                        files = parsed.get('files', [])
-                                                        if files and isinstance(files, list) and len(files) > 0:
-                                                            # Get first file's S3 key
-                                                            first_file = files[0] if isinstance(files[0], dict) else {}
-                                                            replacement = first_file.get('s3_key', first_file.get('file_key', ''))
-                                                        
-                                                        # Also check direct fields
-                                                        if not replacement:
-                                                            replacement = parsed.get('s3_key', parsed.get('file_key', ''))
-                                                    
-                                                    # Try portfolio tickers extraction
-                                                    if not replacement and ('portfolio' in field.lower() or 'ticker' in field.lower()):
-                                                        # Look in files for portfolio CSV
-                                                        files = parsed.get('files', [])
-                                                        for file_info in files:
-                                                            if isinstance(file_info, dict):
-                                                                filename = file_info.get('filename', '').lower()
-                                                                if 'portfolio' in filename:
-                                                                    # This is a portfolio file, return its S3 key for reading
-                                                                    replacement = file_info.get('s3_key', '')
-                                                                    break
-                                                else:
-                                                    replacement = ''
-                                            except json.JSONDecodeError:
-                                                # Not JSON, try to extract from plain text (like get_session_files_tool output)
-                                                if field in ['file_s3_key', 's3_key', 'file_key']:
-                                                    # Try to extract S3 key from formatted text output
-                                                    # Pattern: "S3 Key: files/user_id/session_id/filename"
-                                                    s3_key_match = re.search(r'S3 Key:\s*([^\n\r]+)', result_data, re.IGNORECASE)
-                                                    if s3_key_match:
-                                                        replacement = s3_key_match.group(1).strip()
-                                                    else:
-                                                        # Try s3:// URL pattern
-                                                        s3_key_match = re.search(r's3://[^/\s]+/([^\s]+)', result_data)
-                                                        if s3_key_match:
-                                                            replacement = s3_key_match.group(1)
-                                                        else:
-                                                            # Try to find files/ path pattern
-                                                            s3_key_match = re.search(r'(files/[^\s\n\r]+)', result_data)
-                                                            if s3_key_match:
-                                                                replacement = s3_key_match.group(1)
-                                                            else:
-                                                                replacement = ''
-                                                elif 'portfolio' in field.lower() or 'ticker' in field.lower():
-                                                    # Try to extract portfolio tickers from text
-                                                    # Look for patterns like "tickers: AAPL,MSFT,GOOGL" or similar
-                                                    ticker_match = re.search(r'(?:ticker|symbol)[s]?[:\s]+([A-Z,]+)', result_data, re.IGNORECASE)
-                                                    if ticker_match:
-                                                        replacement = ticker_match.group(1).strip()
-                                                    else:
-                                                        replacement = ''
-                                                else:
-                                                    replacement = ''
+                                            # If it's a string, return it as-is (tool will parse if needed)
+                                            replacement = result_data
                                         elif isinstance(result_data, dict):
-                                            # Use nested field extraction for dict results too
-                                            replacement = self._extract_nested_field(result_data, field)
-                                            
-                                            # Try common field variations if still not found
-                                            if not replacement:
-                                                # Try file_s3_key -> s3_key, file_key, etc.
-                                                if 'file' in field.lower() and 's3' in field.lower():
-                                                    replacement = result_data.get('s3_key', result_data.get('file_key', ''))
-                                                # Try portfolio_tickers -> tickers, symbols, etc.
-                                                elif 'portfolio' in field.lower() or 'ticker' in field.lower():
-                                                    replacement = result_data.get('tickers', result_data.get('symbols', result_data.get('portfolio_tickers', '')))
+                                            # If it's a dict, check for file_reference or s3_key
+                                            if field == 's3_key':
+                                                # Extract s3_key from dict
+                                                if 'file_reference' in result_data:
+                                                    replacement = result_data['file_reference'].get('s3_key', '')
+                                                elif 's3_key' in result_data:
+                                                    replacement = result_data['s3_key']
+                                                else:
+                                                    replacement = ''
+                                            else:
+                                                # For other fields, return the dict as JSON string
+                                                # Tool will parse it
+                                                replacement = json.dumps(result_data)
                                         else:
-                                            replacement = ''
+                                            # For other types, convert to string
+                                            replacement = str(result_data) if result_data else ''
                                     
                                     if not replacement:
                                         logger.warning(f"Could not resolve placeholder {{step_{step_num}.{field}}}")
@@ -711,7 +592,9 @@ class Orchestrator:
                                     try:
                                         parsed = json.loads(result_data)
                                         if isinstance(parsed, dict):
-                                            replacement = self._extract_nested_field(parsed, field_name)
+                                            # SIMPLIFIED: For nested fields, return the full parsed dict as JSON string
+                                            # Tool will parse it using json_parser_helper
+                                            replacement = json.dumps(parsed) if isinstance(parsed, dict) else str(parsed)
                                             if not isinstance(replacement, str):
                                                 replacement = json.dumps(replacement) if replacement else ''
                                     except:
@@ -755,48 +638,9 @@ class Orchestrator:
         
         return resolved_params
     
-    def _extract_nested_field(self, data: Dict[str, Any], field_path: str) -> Any:
-        """
-        Extract a field from nested dictionary, supporting dot notation and common variations.
-        Examples:
-        - 'portfolio_time_series' -> data.get('time_series', {}).get('portfolio_values')
-        - 'time_series.portfolio_values' -> data.get('time_series', {}).get('portfolio_values')
-        - 'portfolio.cagr' -> data.get('portfolio', {}).get('cagr')
-        - 'metrics_table' -> data.get('metrics_table')
-        """
-        if not isinstance(data, dict):
-            return ''
-        
-        # Handle dot notation for nested paths
-        if '.' in field_path:
-            parts = field_path.split('.')
-            current = data
-            for part in parts:
-                if isinstance(current, dict):
-                    current = current.get(part)
-                    if current is None:
-                        return ''
-                else:
-                    return ''
-            return current
-        
-        # Direct field access
-        replacement = data.get(field_path, '')
-        
-        # Try common variations for portfolio analysis fields
-        if not replacement:
-            # portfolio_time_series -> time_series.portfolio_values
-            if 'portfolio_time_series' in field_path or 'time_series' in field_path:
-                time_series = data.get('time_series', {})
-                if isinstance(time_series, dict):
-                    replacement = time_series.get('portfolio_values', time_series.get('dates', ''))
-            
-            # metrics_table -> metrics_table
-            elif 'metrics_table' in field_path:
-                replacement = data.get('metrics_table', '')
-            
-            # portfolio.cagr, portfolio.volatility, etc.
-            elif field_path in ['cagr', 'volatility', 'max_drawdown', 'sharpe_ratio', 'total_return']:
+    # REMOVED: _extract_nested_field method
+    # Tools should use json_parser_helper.JSONParserHelper.extract_nested_field() instead
+    # This keeps the orchestrator clean and focused on file movement only
                 portfolio = data.get('portfolio', {})
                 if isinstance(portfolio, dict):
                     replacement = portfolio.get(field_path, '')

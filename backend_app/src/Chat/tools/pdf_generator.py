@@ -4,6 +4,8 @@ Single-purpose tool for PDF generation
 """
 
 import logging
+import os
+import boto3
 from typing import Dict, Any, List, Optional
 from io import BytesIO
 
@@ -67,7 +69,33 @@ TOOL_SPEC = {
 }
 
 class PDFGenerator:
-    """Generates PDF documents from content"""
+    """Generates PDF documents from content with advanced manipulation capabilities"""
+    
+    def __init__(self):
+        self.s3_client = boto3.client('s3')
+        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
+    
+    def _read_pdf_from_s3(self, s3_key: str) -> bytes:
+        """Read PDF file from S3"""
+        try:
+            if not self.bucket_name:
+                raise ValueError("S3 bucket name not configured")
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
+            return response['Body'].read()
+        except Exception as e:
+            logger.error(f"Error reading PDF from S3 {s3_key}: {str(e)}")
+            raise
+    
+    def _download_image_from_s3(self, s3_key: str) -> bytes:
+        """Download image from S3"""
+        try:
+            if not self.bucket_name:
+                raise ValueError("S3 bucket name not configured")
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
+            return response['Body'].read()
+        except Exception as e:
+            logger.error(f"Error downloading image from S3 {s3_key}: {str(e)}")
+            return None
     
     def _create_pdf_image_from_base64(self, image_data_base64: str, max_width: float = 6.0, max_height: float = 4.0):
         """Create ReportLab Image from base64 data"""
@@ -83,6 +111,47 @@ class PDFGenerator:
         except Exception as e:
             logger.error(f"Error creating PDF image from base64: {str(e)}")
             return None
+    
+    def _extract_chart_s3_keys(self, content: str) -> List[str]:
+        """Extract chart S3 keys from content - handles JSON parsing internally"""
+        import json
+        import re
+        
+        chart_s3_keys = []
+        
+        # Try to parse entire content as JSON
+        try:
+            content_json = json.loads(content)
+            if isinstance(content_json, dict) and 's3_key' in content_json:
+                chart_s3_keys.append(content_json['s3_key'])
+            elif isinstance(content_json, list):
+                for item in content_json:
+                    if isinstance(item, dict) and 's3_key' in item:
+                        chart_s3_keys.append(item['s3_key'])
+        except (json.JSONDecodeError, ValueError):
+            # Not JSON, look for embedded JSON patterns
+            json_pattern = r'\{"message":\s*"[^"]*",\s*"s3_key":\s*"([^"]+)"'
+            matches = re.findall(json_pattern, content)
+            chart_s3_keys.extend([m for m in matches if m.endswith(('.png', '.jpg', '.jpeg', '.gif'))])
+            
+            simple_json_pattern = r'\{"s3_key":\s*"([^"]+)"'
+            simple_matches = re.findall(simple_json_pattern, content)
+            chart_s3_keys.extend([m for m in simple_matches if m.endswith(('.png', '.jpg', '.jpeg', '.gif')) and m not in chart_s3_keys])
+        
+        # Also look for direct S3 key references in content
+        s3_key_pattern = r'users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>]+\.(png|jpg|jpeg|gif)'
+        direct_matches = re.findall(s3_key_pattern, content)
+        chart_s3_keys.extend([m[0] if isinstance(m, tuple) else m for m in direct_matches if m not in chart_s3_keys])
+        
+        # Look for markdown image syntax: ![Chart](s3_key)
+        markdown_pattern = r'!\[.*?\]\((users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>\)]+\.(png|jpg|jpeg|gif))\)'
+        markdown_matches = re.findall(markdown_pattern, content)
+        for match in markdown_matches:
+            s3_key = match[0] if isinstance(match, tuple) else match
+            if s3_key not in chart_s3_keys:
+                chart_s3_keys.append(s3_key)
+        
+        return chart_s3_keys
     
     def generate(self, content: str, filename: str = "report.pdf", pdf_images: Optional[List[Dict[str, Any]]] = None, page_size: str = "letter") -> bytes:
         """
@@ -147,7 +216,28 @@ class PDFGenerator:
                 leading=12
             )
             
-            # Add PDF images if provided
+            # Extract chart S3 keys from content and download/embed them
+            chart_s3_keys = self._extract_chart_s3_keys(content)
+            if chart_s3_keys:
+                try:
+                    from reportlab.platypus import Image
+                    for s3_key in chart_s3_keys:
+                        # Download image from S3
+                        image_bytes = self._download_image_from_s3(s3_key)
+                        if image_bytes:
+                            img_buffer = BytesIO(image_bytes)
+                            pdf_img = Image(img_buffer, width=6*inch, height=4*inch, kind='proportional')
+                            if pdf_img:
+                                story.append(Spacer(1, 0.2*inch))
+                                story.append(pdf_img)
+                                story.append(Spacer(1, 0.2*inch))
+                                logger.info(f"Embedded chart image from S3: {s3_key}")
+                except ImportError:
+                    logger.warning("ReportLab Image not available for embedding")
+                except Exception as e:
+                    logger.error(f"Error embedding chart from S3: {str(e)}")
+            
+            # Add PDF images if provided (from embed_images_tool)
             if pdf_images:
                 try:
                     from reportlab.platypus import Image
@@ -158,10 +248,13 @@ class PDFGenerator:
                                 # Base64 encoded image data
                                 pdf_img = self._create_pdf_image_from_base64(img_info['image_data'])
                             elif 's3_key' in img_info:
-                                # Need to download from S3 - this should have been done by embed_images_tool
-                                # For now, skip if not already embedded
-                                logger.warning(f"PDF image from s3_key {img_info['s3_key']} not pre-processed")
-                                continue
+                                # Download from S3
+                                image_bytes = self._download_image_from_s3(img_info['s3_key'])
+                                if image_bytes:
+                                    img_buffer = BytesIO(image_bytes)
+                                    pdf_img = Image(img_buffer, width=6*inch, height=4*inch, kind='proportional')
+                                else:
+                                    continue
                             else:
                                 continue
                             
@@ -185,10 +278,14 @@ class PDFGenerator:
                     story.append(Spacer(1, 0.1*inch))
                     continue
                 
-                # Remove S3 key references (images should already be embedded)
-                line = re.sub(r'users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>]+\.(png|jpg|jpeg|gif)', '', line)
-                line = re.sub(r'\{"s3_key":\s*"[^"]+"[^}]*\}', '', line)
-                line = re.sub(r'\{"message":\s*"[^"]*",\s*"s3_key":\s*"[^"]+"[^}]*\}', '', line)
+                # Remove S3 key references and markdown image syntax (images already embedded above)
+                # Remove markdown image syntax: ![Chart](s3_key)
+                line = re.sub(r'!\[.*?\]\(users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>\)]+\.(png|jpg|jpeg|gif)\)', '[Chart embedded above]', line)
+                # Remove direct S3 key references
+                line = re.sub(r'users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>]+\.(png|jpg|jpeg|gif)', '[Chart embedded above]', line)
+                # Remove JSON object references
+                line = re.sub(r'\{"s3_key":\s*"[^"]+"[^}]*\}', '[Chart embedded above]', line)
+                line = re.sub(r'\{"message":\s*"[^"]*",\s*"s3_key":\s*"[^"]+"[^}]*\}', '[Chart embedded above]', line)
                 
                 # Detect headings (markdown style or plain text)
                 if line.startswith('# '):

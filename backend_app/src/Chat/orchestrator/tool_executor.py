@@ -341,8 +341,64 @@ class ToolExecutor:
         
         elif tool_name == 'generate_pdf_tool':
             from tools.pdf_generator import generate_pdf_tool
-            self._tool_cache[tool_name] = generate_pdf_tool
-            return generate_pdf_tool
+            from strands.types.tools import ToolUse
+            def wrapped_pdf_gen(content: str, filename: str = "report.pdf", pdf_images: list = None, page_size: str = "letter"):
+                import uuid
+                tool_use_dict = {
+                    'toolUseId': str(uuid.uuid4()),
+                    'toolName': 'generate_pdf_tool',
+                    'input': {
+                        'content': content,
+                        'filename': filename,
+                        'pdf_images': pdf_images,
+                        'page_size': page_size
+                    }
+                }
+                tool_use = ToolUse(tool_use_dict)
+                result = generate_pdf_tool(tool_use)
+                
+                if hasattr(result, 'content'):
+                    if isinstance(result.content, list) and len(result.content) > 0:
+                        return result.content[0].get('text', result.content[0])
+                    return result.content
+                elif isinstance(result, dict):
+                    content = result.get('content', result.get('output', result))
+                    if isinstance(content, list) and len(content) > 0:
+                        return content[0].get('text', content[0])
+                    return content
+                return result
+            self._tool_cache[tool_name] = wrapped_pdf_gen
+            return wrapped_pdf_gen
+        
+        elif tool_name == 'manipulate_pdf_tool':
+            from tools.pdf_manipulator import manipulate_pdf_tool
+            from strands.types.tools import ToolUse
+            def wrapped_pdf_manip(operation: str, source_pdf_s3_key: str = None, **kwargs):
+                import uuid
+                tool_use_dict = {
+                    'toolUseId': str(uuid.uuid4()),
+                    'toolName': 'manipulate_pdf_tool',
+                    'input': {
+                        'operation': operation,
+                        'source_pdf_s3_key': source_pdf_s3_key,
+                        **kwargs
+                    }
+                }
+                tool_use = ToolUse(tool_use_dict)
+                result = manipulate_pdf_tool(tool_use)
+                
+                if hasattr(result, 'content'):
+                    if isinstance(result.content, list) and len(result.content) > 0:
+                        return result.content[0].get('text', result.content[0])
+                    return result.content
+                elif isinstance(result, dict):
+                    content = result.get('content', result.get('output', result))
+                    if isinstance(content, list) and len(content) > 0:
+                        return content[0].get('text', content[0])
+                    return content
+                return result
+            self._tool_cache[tool_name] = wrapped_pdf_manip
+            return wrapped_pdf_manip
         
         elif tool_name == 'upload_file_tool':
             from tools.file_uploader import upload_file_tool
