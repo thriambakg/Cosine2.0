@@ -529,7 +529,36 @@ class Orchestrator:
                                                                 continue
                                                     
                                                     # Extract field from parsed JSON (support nested paths)
-                                                    replacement = self._extract_nested_field(parsed, field)
+                                                    # Handle nested paths like "portfolio.cagr" or "result.metrics_table"
+                                                    if '.' in field:
+                                                        # Split the field path and extract nested value
+                                                        field_parts = field.split('.')
+                                                        current = parsed
+                                                        for part in field_parts:
+                                                            if isinstance(current, dict) and part in current:
+                                                                current = current[part]
+                                                            else:
+                                                                current = None
+                                                                break
+                                                        replacement = current
+                                                    else:
+                                                        replacement = self._extract_nested_field(parsed, field)
+                                                    
+                                                    # Convert to JSON string if it's a dict/list
+                                                    if isinstance(replacement, (dict, list)):
+                                                        replacement = json.dumps(replacement)
+                                                    
+                                                    # Replace placeholder immediately if we got a replacement
+                                                    if replacement:
+                                                        placeholder_with_braces = f'{{{{{placeholder}}}}}'
+                                                        placeholder_single_brace = f'{{{placeholder}}}'
+                                                        if placeholder_with_braces in resolved_value:
+                                                            resolved_value = resolved_value.replace(placeholder_with_braces, str(replacement))
+                                                            logger.info(f"Replaced placeholder {placeholder_with_braces} with data (length: {len(str(replacement))})")
+                                                        if placeholder_single_brace in resolved_value:
+                                                            resolved_value = resolved_value.replace(placeholder_single_brace, str(replacement))
+                                                            logger.info(f"Replaced placeholder {placeholder_single_brace} with data (length: {len(str(replacement))})")
+                                                        continue
                                                     
                                                     # Try common field variations for file S3 keys
                                                     if not replacement and field in ['file_s3_key', 's3_key', 'file_key']:

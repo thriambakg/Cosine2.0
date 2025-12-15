@@ -2284,6 +2284,22 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                     continue
                 
                 # Check for S3 key references (format: users/.../agent-files/...png)
+                # Also check for markdown image syntax: ![Chart](s3_key)
+                markdown_img_match = re.search(r'!\[.*?\]\((users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>\)]+\.png)\)', line)
+                if markdown_img_match:
+                    s3_key = markdown_img_match.group(1)
+                    logger.info(f"Found markdown chart image reference: {s3_key}")
+                    img = embed_image_from_s3(s3_key)
+                    if img:
+                        if current_section:
+                            story.extend(current_section)
+                            current_section = []
+                        story.append(Spacer(1, 0.2*inch))
+                        story.append(img)
+                        story.append(Spacer(1, 0.2*inch))
+                        # Remove the markdown image syntax from the line
+                        line = re.sub(r'!\[.*?\]\(users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>\)]+\.png\)', '[Chart embedded above]', line)
+                
                 s3_key_match = re.search(r'users/[^/]+/sessions/[^/]+/agent-files/[^\s"\'<>]+\.png', line)
                 if s3_key_match:
                     s3_key = s3_key_match.group(0)

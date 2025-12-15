@@ -284,8 +284,44 @@ class ToolExecutor:
         
         elif tool_name == 'generate_html_file_tool':
             from tools.html_generator import generate_html_file_tool
-            self._tool_cache[tool_name] = generate_html_file_tool
-            return generate_html_file_tool
+            from strands.types.tools import ToolUse
+            def wrapped_html(filename: str, content: str, title: str = None):
+                logger.info(f"wrapped_html called with filename={filename}, content length={len(content) if isinstance(content, str) else 'not a string'}, title={title}")
+                try:
+                    import uuid
+                    tool_use_dict = {
+                        'toolUseId': str(uuid.uuid4()),
+                        'toolName': 'generate_html_file_tool',
+                        'input': {
+                            'filename': filename,
+                            'content': content,
+                            'title': title
+                        }
+                    }
+                    tool_use = ToolUse(tool_use_dict)
+                    logger.info(f"Created ToolUse object, calling generate_html_file_tool")
+                    result = generate_html_file_tool(tool_use)
+                    logger.info(f"generate_html_file_tool returned result type: {type(result)}")
+                    
+                    # Extract result from ToolResult format
+                    if hasattr(result, 'content'):
+                        # Extract text from content array
+                        if isinstance(result.content, list) and len(result.content) > 0:
+                            return result.content[0].get('text', result.content[0])
+                        return result.content
+                    elif isinstance(result, dict):
+                        content = result.get('content', result.get('output', result))
+                        if isinstance(content, list) and len(content) > 0:
+                            return content[0].get('text', content[0])
+                        return content
+                    return result
+                except Exception as e:
+                    logger.error(f"Error in wrapped_html: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    raise
+            self._tool_cache[tool_name] = wrapped_html
+            return wrapped_html
         
         # Worker tools for document generation
         elif tool_name == 'embed_images_tool':
