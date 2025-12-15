@@ -1088,32 +1088,35 @@ STEP RESULTS:
                             elif 'result' in result:
                                 result_value = result['result']
                                 
-                                # Check if this is a chart with summary (from generate_chart_with_summary)
+                                # Check if this is a chart image (from generate_chart_image)
                                 try:
                                     if isinstance(result_value, str):
                                         import json
                                         parsed_result = json.loads(result_value)
-                                        if isinstance(parsed_result, dict) and parsed_result.get('success') and 'chart_s3_key' in parsed_result:
-                                            chart_s3_key = parsed_result.get('chart_s3_key', '')
-                                            summary_s3_key = parsed_result.get('summary_s3_key', '')
-                                            summary_metrics = parsed_result.get('summary_metrics', {})
-                                            
-                                            results_summary += f"\nStep {step_num} ({tool_name}): Chart and summary generated\n"
-                                            results_summary += f"  - Chart image S3 key: {chart_s3_key}\n"
-                                            results_summary += f"  - Summary metrics S3 key: {summary_s3_key}\n"
-                                            results_summary += f"  - Use {{step_{step_num}.result.chart_s3_key}} for chart image\n"
-                                            results_summary += f"  - Use {{step_{step_num}.result.summary_s3_key}} for summary metrics\n"
-                                            
-                                            # Include key metrics in the message for agent
-                                            if summary_metrics and 'stocks' in summary_metrics:
-                                                results_summary += f"\n  Summary Metrics:\n"
-                                                for symbol, metrics in summary_metrics.get('stocks', {}).items():
-                                                    results_summary += f"    {symbol}: Current Price ${metrics.get('current_price', 'N/A')}, "
-                                                    results_summary += f"Return {metrics.get('total_return_pct', 'N/A')}%, "
-                                                    results_summary += f"Volatility {metrics.get('volatility_annual_pct', 'N/A')}%\n"
-                                            continue
+                                        if isinstance(parsed_result, dict) and parsed_result.get('success'):
+                                            if 'chart_s3_key' in parsed_result:
+                                                chart_s3_key = parsed_result.get('chart_s3_key', '')
+                                                results_summary += f"\nStep {step_num} ({tool_name}): Chart image generated\n"
+                                                results_summary += f"  - Chart image S3 key: {chart_s3_key}\n"
+                                                results_summary += f"  - Use {{step_{step_num}.result.chart_s3_key}} for chart image\n"
+                                                continue
+                                            elif 'summary_s3_key' in parsed_result:
+                                                summary_s3_key = parsed_result.get('summary_s3_key', '')
+                                                summary_metrics = parsed_result.get('summary_metrics', {})
+                                                results_summary += f"\nStep {step_num} ({tool_name}): Summary metrics calculated\n"
+                                                results_summary += f"  - Summary metrics S3 key: {summary_s3_key}\n"
+                                                results_summary += f"  - Use {{step_{step_num}.result.summary_s3_key}} for summary metrics\n"
+                                                
+                                                # Include key metrics in the message for agent
+                                                if summary_metrics and 'stocks' in summary_metrics:
+                                                    results_summary += f"\n  Summary Metrics:\n"
+                                                    for symbol, metrics in summary_metrics.get('stocks', {}).items():
+                                                        results_summary += f"    {symbol}: Current Price ${metrics.get('current_price', 'N/A')}, "
+                                                        results_summary += f"Return {metrics.get('total_return_pct', 'N/A')}%, "
+                                                        results_summary += f"Volatility {metrics.get('volatility_annual_pct', 'N/A')}%\n"
+                                                continue
                                 except:
-                                    pass  # Not a chart result, continue with normal handling
+                                    pass  # Not a chart/summary result, continue with normal handling
                                 
                                 # If result is a string and looks like an S3 key or file path, include it
                                 if isinstance(result_value, str) and ('users/' in result_value or 's3_key' in result_value.lower()):

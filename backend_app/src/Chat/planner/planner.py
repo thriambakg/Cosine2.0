@@ -65,7 +65,8 @@ IMPORTANT: For reports with charts:
 
 AVAILABLE TOOLS:
 - get_multiple_financial_data(symbols, timeframe, start_date, end_date) - Fetch stock data
-- generate_chart_with_summary(data_json, chart_type, title, interactive) - Generate chart + metrics (DETERMINISTIC, use this for reports)
+- generate_chart_image(data_json, chart_type, title, interactive) - Generate chart image only (DETERMINISTIC)
+- calculate_summary_metrics(data_json) - Calculate summary metrics only (DETERMINISTIC)
 - generate_chart_tool(symbol, data_json, chart_type, title) - Legacy chart tool
 - analyze_portfolio(portfolio_data, period, risk_free_rate)
 - calculate_stock_correlation(tickers, period)
@@ -81,12 +82,19 @@ PLAN FORMAT (if needs planning):
       "store_result": true
     }},
     {{
-      "tool": "generate_chart_with_summary",
+      "tool": "generate_chart_image",
       "parameters": {{
         "data_json": "{{{{step_1.result}}}}",
         "chart_type": "line",
         "title": "Portfolio Performance",
         "interactive": false
+      }},
+      "store_result": false
+    }},
+    {{
+      "tool": "calculate_summary_metrics",
+      "parameters": {{
+        "data_json": "{{{{step_1.result}}}}"
       }},
       "store_result": false
     }}

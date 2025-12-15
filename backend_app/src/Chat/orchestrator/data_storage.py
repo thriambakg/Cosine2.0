@@ -42,14 +42,25 @@ class DataStorage:
             raise ValueError("S3 bucket not configured")
         
         # Convert result to JSON string
+        # Remove original_data fallback from compressed data before storing
         if isinstance(result, str):
             try:
-                # Try to parse as JSON to validate
-                json.loads(result)
-                result_str = result
+                # Try to parse as JSON to validate and clean
+                parsed = json.loads(result)
+                if isinstance(parsed, dict):
+                    # Remove original_data if present (compression fallback)
+                    if 'original_data' in parsed:
+                        parsed.pop('original_data', None)
+                    result_str = json.dumps(parsed)
+                else:
+                    result_str = result
             except:
                 result_str = json.dumps(result)
         else:
+            # Remove original_data if present
+            if isinstance(result, dict) and 'original_data' in result:
+                result = result.copy()
+                result.pop('original_data', None)
             result_str = json.dumps(result)
         
         # Generate S3 key
