@@ -235,7 +235,7 @@ class UnifiedChartGenerator:
                 ha='right', va='bottom', 
                 transform=fig.transFigure)
 
-    def generate_chart(self, symbol: str, data_json: str, chart_type: str = "line", title: str = None) -> str:
+    def generate_chart(self, symbol: str, data_json: str, chart_type: str = "line", title: str = None, normalize: bool = False) -> str:
         """
         Generate a unified chart that works with both stock and crypto data.
         
@@ -244,6 +244,7 @@ class UnifiedChartGenerator:
             data_json: JSON string containing data from get_financial_data or get_crypto_data_tool
             chart_type: Type of chart ('line', 'candlestick', 'volume', 'ohlc')
             title: Custom title for the chart (optional)
+            normalize: If True and multiple stocks, normalize prices to start at same baseline (default: False)
             
         Returns:
             Success message with file details
@@ -416,6 +417,25 @@ class UnifiedChartGenerator:
                 # Handle multiple stocks comparison
                 colors = ['#F06292', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD']
                 
+                # If normalization is requested, calculate baseline prices
+                baseline_prices = {}
+                if normalize:
+                    for stock_symbol, stock_data in normalized_data.items():
+                        if stock_data and len(stock_data) > 0:
+                            # Convert to DataFrame to handle date sorting properly
+                            temp_df = pd.DataFrame(stock_data)
+                            # Convert time to datetime for proper sorting
+                            if temp_df['time'].dtype == 'int64':
+                                temp_df['time'] = pd.to_datetime(temp_df['time'], unit='s')
+                            else:
+                                temp_df['time'] = pd.to_datetime(temp_df['time'])
+                            # Sort by time and get the first (earliest) price
+                            temp_df = temp_df.sort_values('time')
+                            first_price = temp_df.iloc[0]['close']
+                            if first_price > 0:
+                                baseline_prices[stock_symbol] = first_price
+                    logger.info(f"🔍 DEBUG: Normalization enabled. Baseline prices: {baseline_prices}")
+                
                 for i, (stock_symbol, stock_data) in enumerate(normalized_data.items()):
                     if not stock_data:
                         continue
@@ -431,7 +451,17 @@ class UnifiedChartGenerator:
                     else:
                         df['time'] = pd.to_datetime(df['time'])
                     
+                    # Sort by time to ensure proper ordering
+                    df = df.sort_values('time')
                     df.set_index('time', inplace=True)
+                    
+                    # Apply normalization if requested
+                    if normalize and stock_symbol in baseline_prices:
+                        baseline = baseline_prices[stock_symbol]
+                        if baseline > 0:
+                            # Normalize: multiply all prices by (100 / baseline) so they start at 100
+                            df['close'] = df['close'] * (100.0 / baseline)
+                            logger.info(f"🔍 DEBUG: Normalized {stock_symbol} prices (baseline: ${baseline:.2f})")
                     
                     # Plot line for this stock with professional styling
                     color = colors[i % len(colors)]
@@ -440,8 +470,16 @@ class UnifiedChartGenerator:
                 # Set title for multiple stocks
                 if not title:
                     stock_symbols = list(normalized_data.keys())
-                    title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
+                    if normalize:
+                        title = f"Normalized Stock Comparison ({timeframe}) - {', '.join(stock_symbols)}"
+                    else:
+                        title = f"Stock Comparison Chart ({timeframe}) - {', '.join(stock_symbols)}"
                 ax.set_title(title, fontsize=18, fontweight='bold', pad=20)
+                
+                # Update y-axis label for normalized charts
+                if normalize:
+                    ax.set_ylabel('Normalized Price (Index: 100)', fontsize=12, fontweight='bold')
+                
                 ax.legend()
             else:
                 # Handle single stock/crypto
@@ -595,28 +633,34 @@ class UnifiedChartGenerator:
 chart_generator = UnifiedChartGenerator()
 
 @tool
-def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", title: str = None) -> str:
+def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", title: str = None, normalize: bool = False) -> str:
     """
     Generate a unified chart that works with both stock and cryptocurrency data.
     Automatically detects data type and generates appropriate charts.
     
     Args:
-        symbol: Stock ticker or cryptocurrency symbol
-        data_json: JSON string containing data from get_financial_data or get_crypto_data_tool
+        symbol: Stock ticker or cryptocurrency symbol (or comparison name like "SNAP vs SPY")
+        data_json: JSON string containing data from get_financial_data or get_multiple_financial_data
         chart_type: Type of chart ('line', 'candlestick', 'volume', 'ohlc') - defaults to 'line'
         title: Custom title for the chart (optional)
+        normalize: If True and multiple stocks are provided, normalize prices to start at same baseline (100) for comparison - defaults to False
     
     Returns:
         Success message with file details
+    
+    Note:
+        - For comparison charts with multiple stocks, pass the COMPLETE result from get_multiple_financial_data
+        - Set normalize=True to show relative performance starting from the same baseline
+        - The tool automatically detects multiple stocks and creates a single comparison chart
     """
     try:
-        agent_logger.info(f"Generating {chart_type} chart for {symbol}")
+        agent_logger.info(f"Generating {chart_type} chart for {symbol} (normalize={normalize})")
         # Debug logging to see what data is being passed
-        logger.info(f"🔍 DEBUG: generate_chart_tool called with symbol={symbol}, chart_type={chart_type}")
+        logger.info(f"🔍 DEBUG: generate_chart_tool called with symbol={symbol}, chart_type={chart_type}, normalize={normalize}")
         logger.info(f"🔍 DEBUG: data_json length: {len(data_json)} characters")
         logger.info(f"🔍 DEBUG: data_json preview: {data_json[:200]}...")
         
-        return chart_generator.generate_chart(symbol, data_json, chart_type, title)
+        return chart_generator.generate_chart(symbol, data_json, chart_type, title, normalize)
     except Exception as e:
         logger.error(f"Error generating chart for {symbol}: {str(e)}")
         return f"❌ Error generating chart: {str(e)}"

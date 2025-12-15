@@ -260,12 +260,15 @@ class ContextAwareAgent:
 - get_session_files_tool(session_id, user_id, file_type) - Get specific files when needed
 
 📊 CHART GENERATION RULES:
-- When calling generate_chart_tool, pass the COMPLETE result from get_multiple_financial_data directly
+- When comparing multiple stocks, ALWAYS call generate_chart_tool ONCE with the COMPLETE result from get_multiple_financial_data
+- DO NOT call generate_chart_tool multiple times for each stock - it creates a single comparison chart automatically
 - DO NOT call read_s3_file_tool before generate_chart_tool - the tool handles S3 keys automatically
 - If get_multiple_financial_data returns data with an s3_key, pass that result directly to generate_chart_tool
 - generate_chart_tool will automatically read from S3 if needed - you don't need to read it first
-- Example: data = get_multiple_financial_data("AAPL,SPY", "1y") → generate_chart_tool("Comparison", data, "line")
+- For comparison charts: data = get_multiple_financial_data("SNAP,SPY", "1y") → generate_chart_tool("SNAP vs SPY", data, "line", normalize=True)
+- For normalized comparison charts (showing relative performance), set normalize=True in generate_chart_tool
 - NEVER read large S3 files yourself - let generate_chart_tool handle it
+- NEVER generate HTML reports when user explicitly asks for a "chart" - use generate_chart_tool instead
 
 📊 HTML REPORT GENERATION RULES:
 - NEVER embed all raw data points in HTML files - this causes timeouts
