@@ -282,6 +282,43 @@ class ToolExecutor:
             self._tool_cache[tool_name] = generate_excel_file_tool
             return generate_excel_file_tool
         
+        elif tool_name == 'generate_html_file_tool':
+            from tools.html_generator import generate_html_file_tool
+            self._tool_cache[tool_name] = generate_html_file_tool
+            return generate_html_file_tool
+        
+        # Worker tools for document generation
+        elif tool_name == 'embed_images_tool':
+            from tools.image_embedder import embed_images_tool
+            self._tool_cache[tool_name] = embed_images_tool
+            return embed_images_tool
+        
+        elif tool_name == 'convert_markdown_to_html_tool':
+            from tools.markdown_converter import convert_markdown_to_html_tool
+            self._tool_cache[tool_name] = convert_markdown_to_html_tool
+            return convert_markdown_to_html_tool
+        
+        elif tool_name == 'generate_html_template_tool':
+            from tools.html_template_generator import generate_html_template_tool
+            self._tool_cache[tool_name] = generate_html_template_tool
+            return generate_html_template_tool
+        
+        elif tool_name == 'generate_pdf_tool':
+            from tools.pdf_generator import generate_pdf_tool
+            self._tool_cache[tool_name] = generate_pdf_tool
+            return generate_pdf_tool
+        
+        elif tool_name == 'upload_file_tool':
+            from tools.file_uploader import upload_file_tool
+            self._tool_cache[tool_name] = upload_file_tool
+            return upload_file_tool
+        
+        # Validation/reading tools for planner
+        elif tool_name == 'read_image_tool':
+            from tools.image_reader import read_image_tool
+            self._tool_cache[tool_name] = read_image_tool
+            return read_image_tool
+        
         # Session tools
         elif tool_name == 'get_session_context_tool':
             from tools.session_database_access import get_session_context_tool

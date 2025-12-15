@@ -16,7 +16,7 @@ class Orchestrator:
     No LLM calls - purely deterministic execution.
     """
     
-    def __init__(self, tool_executor, data_storage, status_reporter):
+    def __init__(self, tool_executor, data_storage, status_reporter, planner=None, checkpoint_manager=None):
         """
         Initialize the orchestrator.
         
@@ -24,10 +24,14 @@ class Orchestrator:
             tool_executor: ToolExecutor instance for executing tools
             data_storage: DataStorage instance for storing large data
             status_reporter: StatusReporter instance for WebSocket status updates
+            planner: Optional Planner instance for checkpoint validation
+            checkpoint_manager: Optional CheckpointManager instance
         """
         self.tool_executor = tool_executor
         self.data_storage = data_storage
         self.status_reporter = status_reporter
+        self.planner = planner
+        self.checkpoint_manager = checkpoint_manager
         logger.info("Orchestrator initialized")
     
     def execute_plan(self, plan: Dict[str, Any], session_id: str, user_id: str, message_id: str) -> Dict[str, Any]:
@@ -216,6 +220,53 @@ class Orchestrator:
                         'status': 'completed',
                         'result': tool_result
                     })
+                
+                # Check if we should checkpoint after this step
+                if self.checkpoint_manager and self.planner:
+                    if self.checkpoint_manager.should_checkpoint(tool_name, step_num, len(steps)):
+                        logger.info(f"🛑 Checkpoint triggered after step {step_num}: {tool_name}")
+                        
+                        # Create checkpoint data
+                        checkpoint_data = self.checkpoint_manager.create_checkpoint_data(
+                            step_num, tool_name, tool_result, results, plan
+                        )
+                        
+                        # Get session context for planner (simplified - would need full context in real implementation)
+                        session_context = {
+                            'session_id': session_id,
+                            'user_id': user_id
+                        }
+                        
+                        # Validate checkpoint with planner
+                        validation_decision = self.planner.validate_checkpoint(
+                            checkpoint_data, session_context
+                        )
+                        
+                        action = validation_decision.get('action', 'continue')
+                        
+                        if action == 'rework':
+                            # Planner wants to rework the plan
+                            updated_plan = validation_decision.get('updated_plan', {})
+                            if 'steps' in updated_plan:
+                                logger.info(f"📝 Planner reworking plan: {len(updated_plan['steps'])} steps remaining")
+                                # Update plan with remaining steps
+                                plan['steps'] = updated_plan['steps']
+                                steps = plan['steps']
+                                # Continue with updated plan
+                            else:
+                                logger.warning("Planner requested rework but no updated_plan provided, continuing")
+                        elif action == 'update_user':
+                            # Planner wants to provide update to user
+                            message = validation_decision.get('message', '')
+                            if message:
+                                logger.info(f"💬 Planner update: {message}")
+                                # Could send update via status_reporter here
+                                self.status_reporter.report_tool_completed(
+                                    tool_name, f"Checkpoint: {message}",
+                                    session_id, user_id, message_id, step_num, len(steps)
+                                )
+                        # If action is 'continue', just proceed
+                        logger.info(f"✅ Checkpoint validation complete: {action}")
                 
                 results['steps_completed'] += 1
                 

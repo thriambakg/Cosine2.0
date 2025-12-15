@@ -146,15 +146,16 @@ TOOL_SPECIFICATIONS = {
     },
     'generate_agent_file_tool': {
         'name': 'generate_agent_file_tool',
-        'description': 'Create files (txt, pdf, markdown, etc.) in the agent-files folder',
+        'description': 'Create files (txt, pdf, markdown, etc.) in the agent-files folder. Supports PDF generation with embedded charts. For HTML files, use generate_html_file_tool instead.',
         'inputs': {
             'filename': 'str - Name of file (without extension)',
-            'content': 'str - File content',
-            'file_type': 'str - File type ("txt", "pdf", "markdown", etc.)'
+            'content': 'str - File content (can include chart references in JSON format or S3 keys)',
+            'file_type': 'str - File type ("txt", "pdf", "markdown", etc.). PDF files will automatically embed chart images referenced in content.'
         },
         'outputs': 'Success message with file URL',
         'size_estimate': 'small - File metadata',
-        'store_result': False
+        'store_result': False,
+        'notes': 'For PDF: Chart images are automatically embedded from S3 keys found in content. For HTML reports, use generate_html_file_tool instead.'
     },
     'generate_excel_file_tool': {
         'name': 'generate_excel_file_tool',
@@ -168,6 +169,102 @@ TOOL_SPECIFICATIONS = {
         'outputs': 'Success message with file URL',
         'size_estimate': 'small - File metadata',
         'store_result': False
+    },
+    'generate_html_file_tool': {
+        'name': 'generate_html_file_tool',
+        'description': 'Generate interactive HTML reports with embedded charts and styling. Automatically embeds chart images from S3 as base64-encoded data URIs.',
+        'inputs': {
+            'filename': 'str - Name of the HTML file (without .html extension)',
+            'content': 'str - Content to convert to HTML (text, markdown, or JSON with chart references)',
+            'title': 'str (optional) - Title for the HTML document'
+        },
+        'outputs': 'Success message with file URL',
+        'size_estimate': 'small - File metadata',
+        'store_result': False,
+        'notes': 'Automatically detects and embeds chart images from S3 keys found in content. Charts are embedded as base64 images with interactive styling.'
+    },
+    'embed_images_tool': {
+        'name': 'embed_images_tool',
+        'description': 'Embed images from S3 into content for various file types (PDF, HTML, base64). Extracts image references and embeds them appropriately. Single-purpose worker tool.',
+        'inputs': {
+            'content': 'str - Content that may contain image references (S3 keys, JSON with s3_key, etc.)',
+            'target_format': 'str - Target file format: "pdf", "html", or "base64"',
+            'image_s3_keys': 'list[str] (optional) - Explicit list of S3 keys to embed. If not provided, will extract from content.'
+        },
+        'outputs': 'JSON with embedded content, embedded_images list, and failed_images list',
+        'size_estimate': 'small to medium - Depends on number of images',
+        'store_result': False,
+        'notes': 'Worker tool for image embedding. Use before PDF/HTML generation to prepare images.'
+    },
+    'convert_markdown_to_html_tool': {
+        'name': 'convert_markdown_to_html_tool',
+        'description': 'Convert markdown text to HTML. Handles headings, lists, code blocks, paragraphs, and basic formatting. Single-purpose worker tool.',
+        'inputs': {
+            'markdown_content': 'str - Markdown text to convert to HTML',
+            'preserve_line_breaks': 'bool - Whether to preserve line breaks as <br> tags (default: true)'
+        },
+        'outputs': 'HTML string',
+        'size_estimate': 'small - HTML text',
+        'store_result': False,
+        'notes': 'Worker tool for markdown conversion. Use before HTML template generation.'
+    },
+    'generate_html_template_tool': {
+        'name': 'generate_html_template_tool',
+        'description': 'Generate HTML document structure with styling. Wraps body content in a complete HTML document with CSS. Single-purpose worker tool.',
+        'inputs': {
+            'body_content': 'str - HTML body content to wrap in template',
+            'title': 'str - Document title',
+            'custom_css': 'str (optional) - Custom CSS to add to the document',
+            'theme': 'str - Theme preset: "default", "minimal", or "dark" (default: "default")'
+        },
+        'outputs': 'Complete HTML document as string',
+        'size_estimate': 'small - HTML text',
+        'store_result': False,
+        'notes': 'Worker tool for HTML template generation. Use after markdown conversion and image embedding.'
+    },
+    'generate_pdf_tool': {
+        'name': 'generate_pdf_tool',
+        'description': 'Generate PDF document from text/markdown content. Supports embedded images (use embed_images_tool first to get PDF Image objects). Single-purpose worker tool.',
+        'inputs': {
+            'content': 'str - Text/markdown content to convert to PDF',
+            'filename': 'str - Filename for metadata (without .pdf extension)',
+            'pdf_images': 'list[dict] (optional) - List of PDF Image objects from embed_images_tool (target_format="pdf")',
+            'page_size': 'str - Page size: "letter" or "A4" (default: "letter")'
+        },
+        'outputs': 'JSON with pdf_base64 (base64-encoded PDF bytes), filename, and size_bytes',
+        'size_estimate': 'medium - PDF bytes (base64-encoded)',
+        'store_result': False,
+        'notes': 'Worker tool for PDF generation. Use embed_images_tool first to prepare images, then this tool to generate PDF.'
+    },
+    'upload_file_tool': {
+        'name': 'upload_file_tool',
+        'description': 'Upload file content to S3. Handles both text and binary content, sets metadata, and notifies the agent files processor. Single-purpose worker tool.',
+        'inputs': {
+            'content': 'str - File content (string or base64-encoded bytes for binary files)',
+            'filename': 'str - Name of the file (with extension)',
+            'file_type': 'str - File type (txt, pdf, html, png, csv, etc.)',
+            'content_type': 'str (optional) - MIME content type (auto-detected if not provided)',
+            'folder': 'str - S3 folder: "agent-files" (final files) or "data-files" (intermediate data)',
+            'metadata': 'dict (optional) - Additional metadata to attach to the file',
+            'is_base64': 'bool - Whether content is base64-encoded (for binary files, default: false)'
+        },
+        'outputs': 'JSON with message, s3_key, filename, file_type, and folder',
+        'size_estimate': 'small - File metadata',
+        'store_result': False,
+        'notes': 'Worker tool for file uploads. Use after generating any file content (PDF, HTML, images, etc.).'
+    },
+    'read_image_tool': {
+        'name': 'read_image_tool',
+        'description': 'DEPRECATED: Use read_s3_file_tool instead. Read_s3_file_tool handles all file types including images. This tool is kept for backward compatibility.',
+        'inputs': {
+            's3_key': 'str - S3 key of the image file',
+            'include_base64': 'bool - Whether to include base64-encoded image data (default: true)',
+            'validate': 'bool - Whether to validate image is readable (default: true)'
+        },
+        'outputs': 'JSON with image metadata, validation results, and optionally base64 data',
+        'size_estimate': 'small to medium - Image metadata and optionally base64 data',
+        'store_result': False,
+        'notes': 'DEPRECATED: Use read_s3_file_tool for all file types including images.'
     },
     'get_session_context_tool': {
         'name': 'get_session_context_tool',
@@ -194,13 +291,15 @@ TOOL_SPECIFICATIONS = {
     },
         'read_s3_file_tool': {
             'name': 'read_s3_file_tool',
-            'description': 'Read files from S3 (use after large data is stored). Can read from both data-files/ (intermediate tool results) and agent-files/ (completed agent files)',
+            'description': 'Read and analyze files from S3. Handles all common file types: PDF (extracts text), images (PNG/JPG/GIF/WebP - provides metadata), JSON (parses), CSV, HTML (extracts text), text files, and binary files (base64). Use during checkpoint validation to inspect intermediate results. Can read from both data-files/ (intermediate tool results) and agent-files/ (completed agent files).',
             'inputs': {
-                's3_key': 'str - S3 key/path to file (from file_reference.s3_key). Paths may be in data-files/ or agent-files/ folders'
+                's3_key': 'str - S3 key/path to file (from file_reference.s3_key). Paths may be in data-files/ or agent-files/ folders',
+                'file_type': 'str (optional) - File type hint: "auto" (default, auto-detect), "pdf", "image", "json", "csv", "html", "text"'
             },
-            'outputs': 'File contents',
+            'outputs': 'File contents with analysis (formatted based on file type)',
             'size_estimate': 'variable - Depends on file size',
-            'store_result': False
+            'store_result': False,
+            'notes': 'Automatically detects file type from extension. For PDFs, extracts text and provides analysis. For images, provides dimensions and base64 data. For text files, returns content. For binary files, returns base64-encoded data.'
         },
     'get_chat_history_tool': {
         'name': 'get_chat_history_tool',
@@ -322,7 +421,9 @@ def get_tools_by_category() -> dict:
         'financial_data': ['get_financial_data', 'get_multiple_financial_data', 'get_crypto_data_tool'],
         'calculations': ['python_financial_calculator', 'analyze_portfolio', 'calculate_stock_correlation'],
         'visualization': ['generate_chart_tool', 'generate_stock_chart'],
-        'file_generation': ['generate_agent_file_tool', 'generate_excel_file_tool'],
+        'file_generation': ['generate_agent_file_tool', 'generate_excel_file_tool', 'generate_html_file_tool'],
+        'worker_tools': ['embed_images_tool', 'convert_markdown_to_html_tool', 'generate_html_template_tool', 'generate_pdf_tool', 'upload_file_tool'],
+        'validation_tools': ['read_s3_file_tool', 'read_image_tool', 'read_pdf_tool'],
         'session_context': ['get_session_context_tool', 'get_session_files_tool', 'get_chat_history_tool', 'search_chat_history_tool'],
         'data_retrieval': ['read_s3_file_tool', 'fetch_web_content_tool', 'read_pdf_tool', 'analyze_pdf_content_tool'],
         'sec_filings': ['get_company_cik', 'get_company_filings', 'get_filing_document', 'search_sec_filings']

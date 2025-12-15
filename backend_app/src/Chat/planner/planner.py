@@ -197,4 +197,86 @@ Remember: You cannot execute tools. You only create plans. If you need informati
         except (json.JSONDecodeError, AttributeError):
             # Not a JSON plan - likely a direct answer
             return None
+    
+    def validate_checkpoint(self, checkpoint_data: Dict[str, Any], session_context: Dict[str, Any], 
+                           model: str = 'claude-sonnet-4') -> Dict[str, Any]:
+        """
+        Validate a checkpoint and decide whether to continue, rework plan, or provide updates.
+        
+        Args:
+            checkpoint_data: Checkpoint data from orchestrator
+            session_context: Session context
+            model: Model to use for validation
+            
+        Returns:
+            Validation decision: {
+                "action": "continue" | "rework" | "update_user",
+                "updated_plan": {...} (if rework),
+                "message": "..." (if update_user)
+            }
+        """
+        logger.info(f"Validating checkpoint at step {checkpoint_data.get('step_number')}")
+        
+        try:
+            agent = self.context_aware_agent.get_session_agent(session_context, model)
+            
+            validation_prompt = f"""You are validating an intermediate execution checkpoint.
+
+CHECKPOINT DATA:
+{json.dumps(checkpoint_data, indent=2)}
+
+AVAILABLE TOOLS FOR VALIDATION:
+- read_s3_file_tool(s3_key) - Read files from S3
+- read_image_tool(s3_key) - Read and validate images
+- read_pdf_tool(s3_key) - Read and analyze PDFs
+
+You can use these tools to inspect the intermediate results before deciding.
+
+DECISION FORMAT (return JSON only):
+{{
+  "action": "continue" | "rework" | "update_user",
+  "reason": "Brief explanation of decision",
+  "updated_plan": {{...}} (only if action is "rework"),
+  "message": "..." (only if action is "update_user")
+}}
+
+ACTIONS:
+- "continue": Results look good, proceed with remaining steps
+- "rework": Need to modify the plan based on results (provide updated_plan with remaining steps)
+- "update_user": Provide progress update to user (provide message)
+
+Return ONLY JSON, no other text."""
+            
+            response = agent(validation_prompt)
+            
+            # Extract response content
+            if hasattr(response, 'message') and hasattr(response.message, 'content'):
+                if isinstance(response.message.content, list):
+                    response_text = "".join(str(block) for block in response.message.content)
+                else:
+                    response_text = str(response.message.content)
+            else:
+                response_text = str(response)
+            
+            # Parse validation decision
+            decision = self._extract_plan_from_response(response_text)
+            
+            if decision and 'action' in decision:
+                logger.info(f"Checkpoint validation decision: {decision['action']}")
+                return decision
+            else:
+                # Default to continue if can't parse
+                logger.warning("Could not parse validation decision, defaulting to continue")
+                return {
+                    "action": "continue",
+                    "reason": "Could not parse validation response"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error validating checkpoint: {str(e)}")
+            # Default to continue on error
+            return {
+                "action": "continue",
+                "reason": f"Validation error: {str(e)}"
+            }
 

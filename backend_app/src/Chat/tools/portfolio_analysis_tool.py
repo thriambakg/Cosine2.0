@@ -547,20 +547,34 @@ class PortfolioAnalyzer:
             }
             
             if benchmark_values is not None:
-                # Align benchmark with portfolio dates
+                # Normalize benchmark to portfolio's initial dollar value
+                # This ensures the chart shows both series starting at the same dollar amount
+                portfolio_initial_value = float(portfolio_values.iloc[0])
+                benchmark_initial_value = float(benchmark_values.iloc[0])
+                
+                # Calculate normalization factor
+                normalization_factor = portfolio_initial_value / benchmark_initial_value if benchmark_initial_value > 0 else 1.0
+                
+                logger.info(f"Normalizing benchmark: portfolio initial=${portfolio_initial_value:.2f}, benchmark initial=${benchmark_initial_value:.2f}, factor={normalization_factor:.6f}")
+                
+                # Align benchmark with portfolio dates and normalize
                 aligned_benchmark = []
                 for date in portfolio_values.index:
                     if date in benchmark_values.index:
-                        aligned_benchmark.append(float(benchmark_values.loc[date]))
+                        # Normalize benchmark value to match portfolio's initial dollar amount
+                        normalized_value = float(benchmark_values.loc[date]) * normalization_factor
+                        aligned_benchmark.append(normalized_value)
                     else:
-                        # Use last available value
+                        # Use last available value and normalize
                         available = benchmark_values[benchmark_values.index <= date]
                         if len(available) > 0:
-                            aligned_benchmark.append(float(available.iloc[-1]))
+                            normalized_value = float(available.iloc[-1]) * normalization_factor
+                            aligned_benchmark.append(normalized_value)
                         else:
                             aligned_benchmark.append(None)
                 
                 metrics['time_series']['benchmark_values'] = aligned_benchmark
+                logger.info(f"Normalized benchmark values: first={aligned_benchmark[0] if aligned_benchmark else 'N/A'}, last={aligned_benchmark[-1] if aligned_benchmark else 'N/A'}")
             
             # Create metrics table for CSV
             metrics_table = []

@@ -49,7 +49,8 @@ class PDFReader:
     def __init__(self):
         self.s3_client = boto3.client('s3')
         self.textract_client = boto3.client('textract')
-        self.bucket_name = os.environ.get('S3_BUCKET_NAME', 'cosine-uploads')
+        # Use chat files bucket (where agent files are stored)
+        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME') or os.environ.get('S3_BUCKET_NAME', 'cosine-uploads')
     
     def read_pdf_from_s3(self, s3_key: str) -> Dict[str, Any]:
         """
@@ -62,6 +63,12 @@ class PDFReader:
             Dictionary with extracted text and metadata
         """
         try:
+            # Ensure bucket name is set
+            if not self.bucket_name:
+                self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME') or os.environ.get('AGENT_FILES_BUCKET_NAME')
+                if not self.bucket_name:
+                    raise ValueError("S3 bucket name not configured")
+            
             # Download PDF from S3
             response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
             pdf_content = response['Body'].read()

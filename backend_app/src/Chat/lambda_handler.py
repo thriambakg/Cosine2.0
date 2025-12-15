@@ -1041,15 +1041,41 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
                 
                 # Save to DynamoDB
                 try:
-                    session_manager.save_message(
-                        session_id=session_id,
-                        user_id=user_id,
-                        message_id=ai_message_id,
-                        sender='ai',
-                        content=response_content,
-                        timestamp=int(time.time() * 1000)
+                    import boto3
+                    dynamodb = boto3.resource('dynamodb')
+                    chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
+                    
+                    # Get current session to append message
+                    session_response = chat_sessions_table.get_item(
+                        Key={'user_id': user_id, 'session_id': session_id}
                     )
-                    logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (length: {len(response_content)})")
+                    
+                    if 'Item' in session_response:
+                        messages = session_response['Item'].get('messages', [])
+                        timestamp = int(time.time() * 1000)
+                        
+                        ai_message = {
+                            'id': ai_message_id,
+                            'text': response_content,
+                            'sender': 'bot',
+                            'timestamp': timestamp,
+                            'message_type': 'text'
+                        }
+                        
+                        messages.append(ai_message)
+                        
+                        chat_sessions_table.update_item(
+                            Key={'user_id': user_id, 'session_id': session_id},
+                            UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                            ExpressionAttributeValues={
+                                ':messages': messages,
+                                ':count': len(messages),
+                                ':timestamp': timestamp
+                            }
+                        )
+                        logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (length: {len(response_content)})")
+                    else:
+                        logger.warning(f"Session not found for user {user_id}, session {session_id}")
                 except Exception as db_error:
                     logger.error(f"Error saving AI response to DynamoDB: {str(db_error)}")
                 
@@ -1083,7 +1109,11 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
             tool_executor = ToolExecutor()
             data_storage = DataStorage()
             status_reporter = StatusReporter(ws_handler)
-            orchestrator = Orchestrator(tool_executor, data_storage, status_reporter)
+            
+            # Initialize checkpoint manager and pass planner for validation
+            from orchestrator.checkpoint_manager import CheckpointManager
+            checkpoint_manager = CheckpointManager()
+            orchestrator = Orchestrator(tool_executor, data_storage, status_reporter, planner, checkpoint_manager)
             
             execution_results = orchestrator.execute_plan(plan, session_id, user_id, ai_message_id)
             

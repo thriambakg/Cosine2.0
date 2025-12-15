@@ -424,8 +424,20 @@ Use placeholders like:
 - analyze_portfolio_performance(data_source, portfolio_holdings, benchmark_symbol, risk_free_rate) - Portfolio analysis with real calculations (CAGR, volatility, Sharpe, etc.) - Returns structured JSON with metrics_table and time_series
 - generate_chart_tool(symbol, data_json, chart_type, title) - Generate charts (use {{step_N.result.time_series}} for portfolio charts)
 - generate_stock_chart(symbol, timeframe, chart_type) - Simplified stock charts
-- generate_agent_file_tool(filename, content, file_type) - Create files (txt, pdf, etc.)
+- generate_agent_file_tool(filename, content, file_type) - Create files (txt, pdf, markdown, etc.). PDF files automatically embed chart images from S3.
+- generate_html_file_tool(filename, content, title) - Generate interactive HTML reports with embedded charts and styling. Automatically embeds chart images from S3.
 - generate_excel_file_tool(filename, content, template_type, include_charts) - Create CSV/Excel files (use {{step_N.result.metrics_table}} for portfolio CSV)
+
+WORKER TOOLS (can be called in any order for dynamic document generation):
+- embed_images_tool(content, target_format, image_s3_keys) - Embed images from S3 into content (pdf/html/base64)
+- convert_markdown_to_html_tool(markdown_content, preserve_line_breaks) - Convert markdown to HTML
+- generate_html_template_tool(body_content, title, custom_css, theme) - Generate HTML document structure
+- generate_pdf_tool(content, filename, pdf_images, page_size) - Generate PDF from content
+- upload_file_tool(content, filename, file_type, folder, metadata, is_base64) - Upload files to S3
+
+VALIDATION TOOLS (for checkpoint validation):
+- read_s3_file_tool(s3_key, file_type) - Read and analyze ALL file types from S3 (PDF, images, JSON, CSV, HTML, text, binary). Auto-detects file type. Use this for checkpoint validation to inspect intermediate results.
+- read_pdf_tool(s3_key) - DEPRECATED: Use read_s3_file_tool instead. Specialized PDF reader (kept for backward compatibility).
 - get_session_context_tool(session_id, user_id) - Get session context
 - get_session_files_tool(session_id, user_id, file_type) - Get session files
 - read_s3_file_tool(s3_key) - Read files from S3

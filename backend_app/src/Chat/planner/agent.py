@@ -1617,42 +1617,180 @@ class S3FileReader:
     
     def read_file(self, s3_key: str, file_type: str = "auto") -> str:
         """
-        Read file content from S3
+        Read file content from S3. Handles all common file types: PDF, images, JSON, CSV, HTML, text, etc.
         
         Args:
             s3_key: The S3 key/path of the file to read
             file_type: The type of file (auto-detect if not specified)
             
         Returns:
-            String with file content
+            String with file content and analysis
         """
         try:
             bucket_name = self.get_bucket_name()
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
             content = response['Body'].read()
-            
-            # Determine content type
             content_type = response.get('ContentType', '')
-            if 'json' in content_type or file_type == 'json' or s3_key.endswith('.json'):
-                # JSON file
+            
+            # Auto-detect file type from extension if not provided
+            if file_type == "auto":
+                if s3_key.endswith('.pdf'):
+                    file_type = 'pdf'
+                elif s3_key.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                    file_type = 'image'
+                elif s3_key.endswith('.json'):
+                    file_type = 'json'
+                elif s3_key.endswith('.csv'):
+                    file_type = 'csv'
+                elif s3_key.endswith(('.html', '.htm')):
+                    file_type = 'html'
+                elif s3_key.endswith(('.txt', '.md', '.markdown')):
+                    file_type = 'text'
+                elif 'pdf' in content_type:
+                    file_type = 'pdf'
+                elif 'image' in content_type:
+                    file_type = 'image'
+                elif 'json' in content_type:
+                    file_type = 'json'
+                elif 'csv' in content_type:
+                    file_type = 'csv'
+                elif 'html' in content_type:
+                    file_type = 'html'
+                elif 'text' in content_type:
+                    file_type = 'text'
+                else:
+                    file_type = 'auto'
+            
+            # Handle PDF files
+            if file_type == 'pdf' or s3_key.endswith('.pdf'):
+                try:
+                    from tools.pdf_reader import PDFReader
+                    pdf_reader = PDFReader()
+                    result = pdf_reader.read_pdf_from_s3(s3_key)
+                    if result.get('success'):
+                        return f"""PDF File Analysis:
+File: {s3_key}
+Size: {result.get('file_size', 0):,} bytes
+Text Length: {result.get('text_length', 0):,} characters
+
+Extracted Text:
+{result.get('text_content', '')[:5000]}{'...' if len(result.get('text_content', '')) > 5000 else ''}
+
+Analysis:
+{json.dumps(result.get('analysis', {}), indent=2)}"""
+                    else:
+                        return f"Error reading PDF: {result.get('error', 'Unknown error')}"
+                except Exception as e:
+                    logger.warning(f"PDF reader not available, falling back to basic read: {str(e)}")
+                    import base64
+                    return f"PDF file (binary, {len(content):,} bytes). Base64: {base64.b64encode(content[:1000]).decode('utf-8')}... (truncated)"
+            
+            # Handle image files
+            elif file_type == 'image' or s3_key.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                try:
+                    import base64
+                    from io import BytesIO
+                    from PIL import Image as PILImage
+                    
+                    # Try to get image metadata
+                    img = PILImage.open(BytesIO(content))
+                    image_format = img.format or 'unknown'
+                    width, height = img.size
+                    mode = img.mode
+                    
+                    # Encode as base64 for reference
+                    image_base64 = base64.b64encode(content).decode('utf-8')
+                    
+                    # Determine MIME type
+                    mime_type = 'image/png'
+                    if s3_key.endswith('.jpg') or s3_key.endswith('.jpeg'):
+                        mime_type = 'image/jpeg'
+                    elif s3_key.endswith('.gif'):
+                        mime_type = 'image/gif'
+                    elif s3_key.endswith('.webp'):
+                        mime_type = 'image/webp'
+                    
+                    return f"""Image File Analysis:
+File: {s3_key}
+Size: {len(content):,} bytes
+Format: {image_format}
+Dimensions: {width} x {height} pixels
+Color Mode: {mode}
+Content Type: {mime_type}
+
+Base64 Data URI (first 200 chars): data:{mime_type};base64,{image_base64[:200]}...
+(Full base64 data available in result)"""
+                except ImportError:
+                    # PIL not available, return basic info
+                    import base64
+                    return f"Image file (binary, {len(content):,} bytes). Base64: {base64.b64encode(content[:500]).decode('utf-8')}... (truncated)"
+                except Exception as e:
+                    logger.warning(f"Error analyzing image: {str(e)}")
+                    import base64
+                    return f"Image file (binary, {len(content):,} bytes). Base64: {base64.b64encode(content[:500]).decode('utf-8')}... (truncated)"
+            
+            # Handle JSON files
+            elif file_type == 'json' or s3_key.endswith('.json') or 'json' in content_type:
                 try:
                     json_data = json.loads(content.decode('utf-8'))
                     return json.dumps(json_data, indent=2)
                 except json.JSONDecodeError as e:
-                    return f"Error parsing JSON: {str(e)}\nRaw content: {content.decode('utf-8')}"
-            elif 'csv' in content_type or file_type == 'csv' or s3_key.endswith('.csv'):
-                # CSV file
-                return content.decode('utf-8')
-            elif 'text' in content_type or file_type == 'txt' or s3_key.endswith('.txt'):
-                # Text file
-                return content.decode('utf-8')
+                    return f"Error parsing JSON: {str(e)}\nRaw content (first 1000 chars): {content.decode('utf-8', errors='ignore')[:1000]}"
+            
+            # Handle CSV files
+            elif file_type == 'csv' or s3_key.endswith('.csv') or 'csv' in content_type:
+                csv_content = content.decode('utf-8')
+                # Show first 100 lines for large CSVs
+                lines = csv_content.split('\n')
+                if len(lines) > 100:
+                    preview = '\n'.join(lines[:100])
+                    return f"{preview}\n\n... ({len(lines) - 100} more lines)"
+                return csv_content
+            
+            # Handle HTML files
+            elif file_type == 'html' or s3_key.endswith(('.html', '.htm')) or 'html' in content_type:
+                html_content = content.decode('utf-8')
+                # Extract text content (remove tags for readability)
+                import re
+                text_content = re.sub(r'<[^>]+>', ' ', html_content)
+                text_content = ' '.join(text_content.split())
+                return f"""HTML File Content:
+File: {s3_key}
+Size: {len(content):,} bytes
+
+Extracted Text Content:
+{text_content[:2000]}{'...' if len(text_content) > 2000 else ''}
+
+Full HTML (first 5000 chars):
+{html_content[:5000]}{'...' if len(html_content) > 5000 else ''}"""
+            
+            # Handle text files
+            elif file_type == 'text' or s3_key.endswith(('.txt', '.md', '.markdown')) or 'text' in content_type:
+                text_content = content.decode('utf-8')
+                # Show first 5000 chars for large text files
+                if len(text_content) > 5000:
+                    return f"{text_content[:5000]}\n\n... ({len(text_content) - 5000} more characters)"
+                return text_content
+            
+            # Handle other text-based files
             else:
-                # Try to decode as UTF-8, fallback to base64 if it fails
+                # Try to decode as UTF-8
                 try:
-                    return content.decode('utf-8')
+                    text_content = content.decode('utf-8')
+                    # If it's valid UTF-8 and looks like text, return it
+                    if len(text_content) > 0 and not any(ord(c) < 32 and c not in '\n\r\t' for c in text_content[:100]):
+                        if len(text_content) > 5000:
+                            return f"{text_content[:5000]}\n\n... ({len(text_content) - 5000} more characters)"
+                        return text_content
                 except UnicodeDecodeError:
-                    import base64
-                    return f"Binary file content (base64): {base64.b64encode(content).decode('utf-8')}"
+                    pass
+                
+                # Binary file - return base64
+                import base64
+                base64_content = base64.b64encode(content).decode('utf-8')
+                if len(base64_content) > 1000:
+                    return f"Binary file (size: {len(content):,} bytes)\nBase64 (first 1000 chars): {base64_content[:1000]}...\n(Full base64 available in result)"
+                return f"Binary file (size: {len(content):,} bytes)\nBase64: {base64_content}"
                     
         except ClientError as e:
             error_code = e.response['Error']['Code']
@@ -1663,6 +1801,9 @@ class S3FileReader:
             else:
                 return f"S3 error: {str(e)}"
         except Exception as e:
+            logger.error(f"Error reading file: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return f"Error reading file: {str(e)}"
     
     def get_file_info(self, s3_key: str) -> Dict[str, Any]:
@@ -1692,7 +1833,25 @@ class S3FileReader:
 
 @tool
 def read_s3_file_tool(s3_key: str, file_type: str = "auto") -> str:
-    """Read uploaded files from S3 storage. When you see an uploaded file context with an S3 key, use this tool to read the file content. Pass the S3 key exactly as provided in the context."""
+    """
+    Read and analyze files from S3 storage. Handles all common file types:
+    - PDF files: Extracts text and provides analysis
+    - Image files (PNG, JPG, GIF, WebP): Provides metadata and base64 data
+    - JSON files: Parses and formats JSON
+    - CSV files: Returns CSV content
+    - HTML files: Extracts text and shows HTML structure
+    - Text files (TXT, MD): Returns text content
+    - Other files: Returns base64-encoded binary content
+    
+    Use this tool during checkpoint validation to inspect intermediate results.
+    When you see an uploaded file context with an S3 key, use this tool to read the file content.
+    Pass the S3 key exactly as provided in the context.
+    
+    Args:
+        s3_key: The S3 key/path of the file to read
+        file_type: File type hint ("auto", "pdf", "image", "json", "csv", "html", "text")
+                   Auto-detection works for most files based on extension
+    """
     try:
         agent_logger.info(f"Reading S3 file: {s3_key}")
         if not s3_key:
@@ -1777,7 +1936,7 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
         except Exception as decomp_error:
             logger.warning(f"Decompression check failed, using content as-is: {str(decomp_error)}")
         
-        # Generate PDF if file_type is pdf (after decompression)
+        # Generate PDF or HTML if file_type matches (after decompression)
         is_binary = False
         if file_type.lower() == 'pdf':
             try:
@@ -1794,6 +1953,8 @@ def generate_agent_file_tool(filename: str, content: str = "", file_type: str = 
                 # Fallback to text file with .pdf extension (not ideal but better than failing)
                 logger.warning(f"Falling back to text content for PDF file")
                 is_binary = False
+        # Note: HTML generation is now handled by generate_html_file_tool in tools/html_generator.py
+        # This tool only handles txt, pdf, and markdown files
         
         # Use unified file upload function
         try:
@@ -2039,8 +2200,22 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                             chart_s3_keys.append(item['s3_key'])
                             logger.info(f"Found chart S3 key in JSON list: {item['s3_key']}")
             except (json.JSONDecodeError, ValueError):
-                # Not JSON, continue with line-by-line parsing
-                pass
+                # Not JSON, try to find JSON objects embedded in the content string
+                # Look for chart result JSON (e.g., from generate_chart_tool)
+                json_pattern = r'\{"message":\s*"[^"]*",\s*"s3_key":\s*"([^"]+)"'
+                matches = re.findall(json_pattern, content)
+                for match in matches:
+                    if match.endswith('.png'):
+                        chart_s3_keys.append(match)
+                        logger.info(f"Found chart S3 key in embedded JSON: {match}")
+                
+                # Also look for simple JSON objects with s3_key
+                simple_json_pattern = r'\{"s3_key":\s*"([^"]+)"'
+                simple_matches = re.findall(simple_json_pattern, content)
+                for match in simple_matches:
+                    if match.endswith('.png') and match not in chart_s3_keys:
+                        chart_s3_keys.append(match)
+                        logger.info(f"Found chart S3 key in simple JSON: {match}")
             
             # Parse content and convert to PDF elements
             lines = content.split('\n')
