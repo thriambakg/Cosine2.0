@@ -118,14 +118,32 @@ class UnifiedChartGenerator:
             stocks_data = data_dict.get('stocks', [])
             normalized_data = {}
             
+            logger.info(f"🔍 DEBUG: Processing {len(stocks_data)} stocks for normalization")
+            
             for stock in stocks_data:
-                if stock.get('status') == 'success' and 'historical_data' in stock:
+                # Check if stock has historical_data (more lenient - don't require status='success')
+                # Some stocks might not have status field, or might be compressed
+                if not isinstance(stock, dict):
+                    logger.warning(f"⚠️ Skipping non-dict stock: {type(stock)}")
+                    continue
+                
+                # Check for historical_data - this is the key requirement
+                if 'historical_data' in stock:
                     symbol = stock.get('symbol', 'UNKNOWN')
                     historical_data = stock['historical_data']
+                    
+                    # Ensure historical_data is a list
+                    if not isinstance(historical_data, list) or len(historical_data) == 0:
+                        logger.warning(f"⚠️ Stock {symbol} has no valid historical_data (type: {type(historical_data)}, length: {len(historical_data) if isinstance(historical_data, list) else 'N/A'})")
+                        continue
+                    
+                    logger.info(f"✅ Processing {len(historical_data)} data points for {symbol}")
                     
                     # Normalize each stock's data
                     stock_normalized = []
                     for point in historical_data:
+                        if not isinstance(point, dict):
+                            continue
                         stock_normalized.append({
                             'time': point.get('timestamp', point.get('date', 0)),
                             'close': point.get('close', 0),
@@ -135,7 +153,19 @@ class UnifiedChartGenerator:
                             'volume': point.get('volume', 0)
                         })
                     
-                    normalized_data[symbol] = stock_normalized
+                    if stock_normalized:
+                        normalized_data[symbol] = stock_normalized
+                        logger.info(f"✅ Successfully normalized {len(stock_normalized)} points for {symbol}")
+                    else:
+                        logger.warning(f"⚠️ No valid data points extracted for {symbol}")
+                else:
+                    # Log why stock was skipped
+                    symbol = stock.get('symbol', 'UNKNOWN')
+                    status = stock.get('status', 'N/A')
+                    has_error = 'error' in stock or 'message' in stock
+                    logger.warning(f"⚠️ Skipping stock {symbol}: status={status}, has_historical_data={False}, has_error={has_error}")
+            
+            logger.info(f"🔍 DEBUG: Successfully normalized {len(normalized_data)} stocks: {list(normalized_data.keys())}")
             
             return normalized_data, data_dict.get('timeframe', 'Custom Range')
             
@@ -316,6 +346,35 @@ class UnifiedChartGenerator:
             sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
             from utils.compression_helper import CompressionHelper
             
+            # Decompress individual stocks if they are compressed
+            if isinstance(data_dict, dict) and 'stocks' in data_dict:
+                stocks = data_dict.get('stocks', [])
+                decompressed_stocks = []
+                for stock in stocks:
+                    if isinstance(stock, dict) and stock.get("_compressed") is True:
+                        logger.info(f"🔍 DEBUG: Decompressing stock: {stock.get('symbol', 'UNKNOWN')}")
+                        try:
+                            decompressed_stock = CompressionHelper.decompress_data(stock)
+                            # Remove original_data if present
+                            if isinstance(decompressed_stock, dict) and 'original_data' in decompressed_stock:
+                                decompressed_stock.pop('original_data', None)
+                            decompressed_stocks.append(decompressed_stock)
+                            logger.info(f"✅ Successfully decompressed stock: {stock.get('symbol', 'UNKNOWN')}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to decompress stock, using original_data fallback: {str(e)}")
+                            # Try to use original_data if available
+                            if isinstance(stock, dict) and 'original_data' in stock:
+                                decompressed_stocks.append(stock['original_data'])
+                            else:
+                                # If decompression fails and no original_data, keep the stock as-is
+                                decompressed_stocks.append(stock)
+                    else:
+                        # Stock is not compressed, add it as-is
+                        decompressed_stocks.append(stock)
+                # Update the stocks array with decompressed stocks
+                data_dict['stocks'] = decompressed_stocks
+                logger.info(f"🔍 DEBUG: Decompressed {len(decompressed_stocks)} stocks in the array")
+            
             # Check if the entire response is compressed (new approach)
             if isinstance(data_dict, dict) and data_dict.get("_compressed") is True:
                 # Entire response is compressed - decompress it
@@ -417,6 +476,8 @@ class UnifiedChartGenerator:
                 # Handle multiple stocks comparison
                 colors = ['#F06292', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD']
                 
+                logger.info(f"🔍 DEBUG: Plotting {len(normalized_data)} stocks: {list(normalized_data.keys())}")
+                
                 # If normalization is requested, calculate baseline prices
                 baseline_prices = {}
                 if normalize:
@@ -436,6 +497,7 @@ class UnifiedChartGenerator:
                                 baseline_prices[stock_symbol] = first_price
                     logger.info(f"🔍 DEBUG: Normalization enabled. Baseline prices: {baseline_prices}")
                 
+                plotted_count = 0
                 for i, (stock_symbol, stock_data) in enumerate(normalized_data.items()):
                     if not stock_data:
                         continue
@@ -466,6 +528,10 @@ class UnifiedChartGenerator:
                     # Plot line for this stock with professional styling
                     color = colors[i % len(colors)]
                     ax.plot(df.index, df['close'], linewidth=3, color=color, alpha=0.9, label=stock_symbol)
+                    plotted_count += 1
+                    logger.info(f"✅ Plotted line {plotted_count} for {stock_symbol} with {len(df)} data points")
+                
+                logger.info(f"🔍 DEBUG: Successfully plotted {plotted_count} stocks out of {len(normalized_data)} total stocks")
                 
                 # Set title for multiple stocks
                 if not title:

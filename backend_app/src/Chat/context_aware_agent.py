@@ -258,6 +258,9 @@ class ContextAwareAgent:
 - generate_excel_file_tool(filename, content, template_type, include_charts) - Create CSV files
 - get_session_context_tool(session_id, user_id) - Get full session context when needed
 - get_session_files_tool(session_id, user_id, file_type) - Get specific files when needed
+- search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills in DynamoDB
+- search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards in DynamoDB
+- search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
 
 📊 CHART GENERATION RULES:
 - When comparing multiple stocks, ALWAYS call generate_chart_tool ONCE with the COMPLETE result from get_multiple_financial_data
@@ -324,6 +327,32 @@ When get_chat_history_tool returns data:
 - session_id and user_id are provided in the Session Context section of your input message
 - Look for "Session ID: {session_id}" and "User ID: {user_id}" in the message you receive
 - Use these exact values when calling the tools
+
+🔍 SEARCH TOOLS (Government & Political Data):
+- search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills
+  * Filters: sponsor_name, bill_title, bill_type, sponsor_party, sponsor_state, policy_area, bipartisan, 
+    bill_number, congress, introduced_date_from/to, latest_action_date_from/to
+  * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
+  * Large results stored in S3 - use read_s3_file_tool to access via s3_key
+  
+- search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards
+  * Filters: awarding_agency_name/code, funding_agency_name/code, recipient_name, recipient_location_state/country,
+    award_type, naics_code, psc_code, cfda_number, fiscal_year, date_from/to, min/max_obligation
+  * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
+  * Large results stored in S3 - use read_s3_file_tool to access via s3_key
+  
+- search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades
+  * Filters: politicianName, position, party, security/securitySymbol/securityName, transactionType,
+    amountRange, stateDistrict, dateFrom/to, filingDateFrom/to, requiresManualReview, isUnparsed, matchConfidence
+  * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
+  * Large results stored in S3 - use read_s3_file_tool to access via s3_key
+  * Supports pagination with page/page_size (max page_size: 100)
+
+📦 S3 PASSTHROUGH FOR LARGE RESULTS:
+- All search tools automatically store large results (>50KB or >50 items) in S3
+- When a search returns an s3_key instead of results array, use read_s3_file_tool to access the data
+- Example: If search_congress_bills returns {"status": "success", "s3_key": "users/.../data-files/..."},
+  call read_s3_file_tool(s3_key) to get the full results
 
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete

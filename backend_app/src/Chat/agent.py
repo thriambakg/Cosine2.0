@@ -162,6 +162,9 @@ from tools.stock_data_fetcher import (
     get_volatility_surface,
     StockDataFetcher
 )
+from tools.congress_bills_search import search_congress_bills
+from tools.govt_contracts_search import search_govt_contracts
+from tools.politician_trades_search import search_politician_trades
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -1997,6 +2000,9 @@ enhanced_tools = [
     process_chat_session_context_tool,  # Process chat session context from history sidebar
     analyze_chat_session_context_tool,  # Analyze chat session context for insights
     fetch_web_content_tool,  # Fetch and extract content from web URLs (for article context items)
+    search_congress_bills,  # Search congressional bills in DynamoDB
+    search_govt_contracts,  # Search government contracts/awards in DynamoDB
+    search_politician_trades,  # Search politician stock trades in DynamoDB
 ]
 
 # Function to create agents with different models
