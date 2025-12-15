@@ -308,11 +308,76 @@ class FinancialTools:
                 
         except Exception as e:
             return {"symbol": symbol, "status": "error", "message": str(e)}
+    
+    @staticmethod
+    def _convert_s3_to_standard_format(s3_data: Dict[str, Any], symbol: str, timeframe: str) -> Dict[str, Any]:
+        """
+        Convert S3 historical data format to standard format expected by tools.
+        
+        Args:
+            s3_data: Data from S3 in historical format
+            symbol: Stock symbol
+            timeframe: Timeframe requested
+            
+        Returns:
+            Standard format data dict
+        """
+        try:
+            history = s3_data.get('history', [])
+            
+            # Convert history to historical_data format
+            historical_data = []
+            for point in history:
+                historical_data.append({
+                    "date": point.get('date', ''),
+                    "timestamp": point.get('timestamp', 0),
+                    "open": point.get('open', 0),
+                    "high": point.get('high', 0),
+                    "low": point.get('low', 0),
+                    "close": point.get('close', 0),
+                    "volume": point.get('volume', 0)
+                })
+            
+            # Extract current price from latest data point
+            current_price = history[-1].get('close', 0) if history else 0
+            previous_close = history[-2].get('close', current_price) if len(history) > 1 else current_price
+            
+            # Calculate metrics
+            closes = [p.get('close', 0) for p in history if p.get('close')]
+            if closes:
+                high_52w = max(closes)
+                low_52w = min(closes)
+            else:
+                high_52w = current_price
+                low_52w = current_price
+            
+            return {
+                "symbol": symbol,
+                "current_price": round(current_price, 2),
+                "previous_close": round(previous_close, 2),
+                "price_change": round(current_price - previous_close, 2),
+                "price_change_percent": round(((current_price - previous_close) / previous_close) * 100, 2) if previous_close > 0 else 0,
+                "52_week_high": round(high_52w, 2),
+                "52_week_low": round(low_52w, 2),
+                "status": "success",
+                "source": "s3",
+                "timeframe": timeframe,
+                "data_points": len(history),
+                "date_range": {
+                    "start": history[0].get('date', '') if history else '',
+                    "end": history[-1].get('date', '') if history else ''
+                },
+                "historical_data": historical_data
+            }
+        except Exception as e:
+            logger.error(f"Error converting S3 data format: {str(e)}")
+            return {"symbol": symbol, "status": "error", "message": f"Failed to convert S3 data: {str(e)}"}
 
     @staticmethod
     def get_stock_data(symbol: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """
-        Get stock data using yfinance
+        Get stock data - uses S3 for large timeframes, yfinance for short ones.
+        Stores large results in data-files to avoid memory issues.
         
         Args:
             symbol: Stock ticker symbol
@@ -323,23 +388,97 @@ class FinancialTools:
         try:
             logger.debug(f"get_stock_data called with symbol={symbol}, timeframe={timeframe}")
             
-            # Use yfinance for all data
-            result = FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
+            # Large timeframes: check S3 first, then fallback to yfinance
+            # Small timeframes: use yfinance directly
+            large_timeframes = ['1y', '2y', '5y', '10y', 'ytd', 'max']
+            is_large_timeframe = timeframe in large_timeframes
+            
+            result = None
+            
+            # For large timeframes, try S3 first
+            if is_large_timeframe:
+                try:
+                    from tools.s3_historical_data_helper import S3HistoricalDataHelper
+                    s3_helper = S3HistoricalDataHelper()
+                    s3_data = s3_helper.get_stock_data_from_s3(symbol, timeframe, priority='high')
+                    
+                    if s3_data:
+                        logger.info(f"✅ Loaded {symbol} from S3 historical data (priority: high)")
+                        result = FinancialTools._convert_s3_to_standard_format(s3_data, symbol, timeframe)
+                    else:
+                        # Try medium priority
+                        s3_data = s3_helper.get_stock_data_from_s3(symbol, timeframe, priority='medium')
+                        if s3_data:
+                            logger.info(f"✅ Loaded {symbol} from S3 historical data (priority: medium)")
+                            result = FinancialTools._convert_s3_to_standard_format(s3_data, symbol, timeframe)
+                except Exception as s3_error:
+                    logger.debug(f"S3 lookup failed for {symbol}: {str(s3_error)}, falling back to yfinance")
+            
+            # If S3 didn't work or it's a small timeframe, use yfinance
+            if result is None:
+                logger.debug(f"Fetching {symbol} from yfinance (timeframe: {timeframe})")
+                result = FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
             
             # Check for errors
             if isinstance(result, dict) and result.get('status') == 'error':
                 return result
             
-            # Import compression utility
+            # Determine if data is large enough to store in S3
+            data_points = len(result.get('historical_data', []))
+            data_size = len(json.dumps(result))
+            LARGE_DATA_THRESHOLD = 50000  # 50KB
+            LARGE_POINTS_THRESHOLD = 500  # 500 data points
+            
+            should_store_in_s3 = data_size > LARGE_DATA_THRESHOLD or data_points > LARGE_POINTS_THRESHOLD
+            
+            if should_store_in_s3:
+                # Store in data-files and return S3 key
+                try:
+                    import boto3
+                    import os
+                    from datetime import datetime
+                    
+                    user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID', 'default')
+                    session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
+                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+                    
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"stock_data_{symbol}_{timeframe}_{timestamp}.json"
+                    s3_key = f"users/{user_id}/sessions/{session_id}/data-files/{filename}"
+                    
+                    s3_client = boto3.client('s3')
+                    s3_client.put_object(
+                        Bucket=bucket_name,
+                        Key=s3_key,
+                        Body=json.dumps(result),
+                        ContentType='application/json'
+                    )
+                    
+                    logger.info(f"Stored large stock data in S3: {s3_key} ({data_size} bytes, {data_points} points)")
+                    
+                    # Return reference with S3 key
+                    return {
+                        "symbol": symbol,
+                        "status": "success",
+                        "source": "s3_stored" if is_large_timeframe else "yfinance_stored",
+                        "timeframe": timeframe,
+                        "data_points": data_points,
+                        "s3_key": s3_key,
+                        "data_size_bytes": data_size,
+                        "message": f"Large dataset stored in S3. Use read_s3_file_tool to access: {s3_key}"
+                    }
+                except Exception as store_error:
+                    logger.warning(f"Failed to store data in S3: {str(store_error)}, returning compressed data")
+                    # Fall through to compression
+            
+            # For smaller datasets, compress and return directly
             from compression_helper import CompressionHelper
             
-            # Debug logging for compression
-            logger.debug(f"Data size before compression: {len(str(result))} chars, {len(result.get('historical_data', []))} points")
+            logger.debug(f"Data size before compression: {data_size} chars, {data_points} points")
             
             # Compress the entire data object if it's large
             compressed_result = CompressionHelper.compress_data(result, compression_threshold=2000)
             
-            # Debug logging for compression result
             logger.debug(f"Compressed result type: {type(compressed_result)}, compressed: {compressed_result.get('_compressed', False) if isinstance(compressed_result, dict) else 'N/A'}")
             
             return compressed_result
@@ -1280,7 +1419,9 @@ def get_financial_data(symbol: str, timeframe: str = "1y", start_date: str = Non
 @tool
 def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date: str = None, end_date: str = None) -> str:
     """
-    Get financial data for multiple stocks efficiently. 
+    Get financial data for multiple stocks efficiently.
+    Uses S3 for large timeframes, yfinance for short ones.
+    Stores large results in data-files to avoid memory issues.
     
     Args:
         symbols: Comma-separated list of stock symbols (e.g., 'AAPL,MSFT,SPY')
@@ -1289,7 +1430,7 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
         end_date: End date in 'YYYY-MM-DD' format (optional)
     
     Returns:
-        JSON string with data for all requested stocks
+        JSON string with data for all requested stocks, or S3 key if data is large
     """
     try:
         agent_logger.info(f"Getting financial data for multiple stocks: {symbols}")
@@ -1304,10 +1445,15 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
         
         # Fetch data for each symbol
         results = []
+        has_s3_keys = False
         for symbol in symbol_list:
             try:
                 data = FinancialTools.get_stock_data(symbol, timeframe, start_date, end_date)
                 results.append(data)
+                
+                # Check if this result is stored in S3
+                if isinstance(data, dict) and 's3_key' in data:
+                    has_s3_keys = True
             except Exception as e:
                 results.append({
                     "symbol": symbol,
@@ -1325,6 +1471,67 @@ def get_multiple_financial_data(symbols: str, timeframe: str = "1y", start_date:
             "stocks": results
         }
         
+        # Check if consolidated result is large enough to store in S3
+        consolidated_json = json.dumps(consolidated_data)
+        consolidated_size = len(consolidated_json)
+        total_data_points = sum(len(r.get('historical_data', [])) for r in results if isinstance(r, dict))
+        
+        LARGE_DATA_THRESHOLD = 50000  # 50KB
+        LARGE_POINTS_THRESHOLD = 500  # 500 total data points
+        
+        should_store_in_s3 = consolidated_size > LARGE_DATA_THRESHOLD or total_data_points > LARGE_POINTS_THRESHOLD or has_s3_keys
+        
+        if should_store_in_s3:
+            # Store in data-files and return S3 key
+            try:
+                import boto3
+                import os
+                from datetime import datetime
+                
+                user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID', 'default')
+                session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
+                bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+                
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                symbols_str = '_'.join(symbol_list)
+                filename = f"get_multiple_financial_data_{symbols_str}_{timeframe}_{timestamp}.json"
+                s3_key = f"users/{user_id}/sessions/{session_id}/data-files/{filename}"
+                
+                s3_client = boto3.client('s3')
+                s3_client.put_object(
+                    Bucket=bucket_name,
+                    Key=s3_key,
+                    Body=consolidated_json,
+                    ContentType='application/json'
+                )
+                
+                agent_logger.info(f"Stored consolidated stock data in S3: {s3_key} ({consolidated_size} bytes, {total_data_points} total points)")
+                
+                # Return reference with S3 key
+                return json.dumps({
+                    "status": "success",
+                    "timeframe": timeframe,
+                    "total_symbols": len(symbol_list),
+                    "successful_symbols": len([r for r in results if r.get("status") == "success"]),
+                    "s3_key": s3_key,
+                    "data_size_bytes": consolidated_size,
+                    "total_data_points": total_data_points,
+                    "message": f"Large dataset stored in S3. Use read_s3_file_tool to access: {s3_key}",
+                    "stocks_summary": [
+                        {
+                            "symbol": r.get("symbol", "UNKNOWN"),
+                            "status": r.get("status", "unknown"),
+                            "data_points": len(r.get("historical_data", [])),
+                            "s3_key": r.get("s3_key") if isinstance(r, dict) else None
+                        }
+                        for r in results
+                    ]
+                }, indent=2)
+            except Exception as store_error:
+                agent_logger.warning(f"Failed to store consolidated data in S3: {str(store_error)}, returning JSON directly")
+                # Fall through to return JSON
+        
+        # For smaller datasets, return JSON directly
         return json.dumps(consolidated_data, indent=2)
         
     except Exception as e:
