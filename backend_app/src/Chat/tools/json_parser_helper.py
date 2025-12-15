@@ -5,6 +5,7 @@ Tools should use this instead of relying on orchestrator for JSON parsing
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger()

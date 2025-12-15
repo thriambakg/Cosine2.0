@@ -2227,6 +2227,107 @@ def generate_pdf_content(content: str, filename: str = "report.pdf") -> bytes:
                     logger.error(f"Error embedding image from S3 {s3_key}: {str(e)}")
                     return None
             
+            # Helper function to resolve S3 JSON references in content
+            def resolve_json_references(content_text: str) -> str:
+                """
+                Detect S3 keys pointing to JSON files in content and replace with actual values.
+                Handles patterns like:
+                - CAGR: users/.../data-files/...json
+                - Volatility: users/.../data-files/...json
+                """
+                from tools.json_parser_helper import JSONParserHelper
+                
+                # Pattern to match S3 keys ending in .json (more flexible to handle line breaks)
+                s3_json_pattern = r'users/[^/]+/sessions/[^/]+/data-files/[^\s"\'<>\)\n]+\.json'
+                
+                # Map metric names to their field paths in the JSON (case-insensitive matching)
+                metric_field_map = {
+                    'cagr': 'portfolio.cagr',
+                    'volatility': 'portfolio.volatility',
+                    'max drawdown': 'portfolio.max_drawdown',
+                    'max_drawdown': 'portfolio.max_drawdown',
+                    'sharpe ratio': 'portfolio.sharpe_ratio',
+                    'sharpe_ratio': 'portfolio.sharpe_ratio',
+                    'rolling 12-month returns': 'portfolio.rolling_12m_returns',
+                    'rolling_12m_returns': 'portfolio.rolling_12m_returns',
+                    'total return': 'portfolio.total_return',
+                    'total_return': 'portfolio.total_return',
+                }
+                
+                # Split content into lines for better context detection
+                lines = content_text.split('\n')
+                resolved_lines = []
+                
+                for line in lines:
+                    # Find all S3 JSON references in this line
+                    matches = list(re.finditer(s3_json_pattern, line))
+                    if not matches:
+                        resolved_lines.append(line)
+                        continue
+                    
+                    # Process each match in reverse order to preserve positions
+                    resolved_line = line
+                    for match in reversed(matches):
+                        s3_key = match.group(0)
+                        try:
+                            # Read JSON from S3
+                            data = JSONParserHelper.parse_json_data(s3_key)
+                            
+                            # Use the entire line as context (case-insensitive)
+                            line_context_lower = line.lower()
+                            
+                            # Find which metric this line refers to
+                            extracted_value = None
+                            for metric_name, field_path in metric_field_map.items():
+                                if metric_name in line_context_lower:
+                                    extracted_value = JSONParserHelper.extract_nested_field(data, field_path)
+                                    if extracted_value is not None:
+                                        break
+                            
+                            # If no specific metric found, try common fields
+                            if extracted_value is None:
+                                # Try direct portfolio fields
+                                if 'portfolio' in data:
+                                    portfolio = data.get('portfolio', {})
+                                    if isinstance(portfolio, dict):
+                                        # Try common fields in order
+                                        for field in ['cagr', 'volatility', 'max_drawdown', 'sharpe_ratio', 'total_return']:
+                                            if field in portfolio:
+                                                extracted_value = portfolio[field]
+                                                break
+                            
+                            # Format the value
+                            if extracted_value is not None:
+                                if isinstance(extracted_value, (int, float)):
+                                    if 'ratio' in line_context_lower or 'sharpe' in line_context_lower:
+                                        replacement = f"{extracted_value:.2f}"
+                                    elif 'drawdown' in line_context_lower:
+                                        # Drawdown is typically negative, show as percentage
+                                        replacement = f"{extracted_value:.2%}"
+                                    elif 'return' in line_context_lower or 'cagr' in line_context_lower:
+                                        replacement = f"{extracted_value:.2%}"
+                                    else:
+                                        replacement = f"{extracted_value:.2f}"
+                                else:
+                                    replacement = str(extracted_value)
+                                
+                                # Replace the S3 key with the actual value
+                                resolved_line = resolved_line.replace(s3_key, replacement)
+                                logger.info(f"Resolved {s3_key} to {replacement} based on context: {line[:50]}")
+                            else:
+                                logger.warning(f"Could not extract metric value from {s3_key} in line: {line[:100]}")
+                                resolved_line = resolved_line.replace(s3_key, "[Value not available]")
+                        except Exception as e:
+                            logger.error(f"Error resolving JSON reference {s3_key}: {str(e)}")
+                            resolved_line = resolved_line.replace(s3_key, "[Error reading data]")
+                    
+                    resolved_lines.append(resolved_line)
+                
+                return '\n'.join(resolved_lines)
+            
+            # Resolve JSON references in content before processing
+            content = resolve_json_references(content)
+            
             # First, try to parse entire content as JSON to extract chart references
             chart_s3_keys = []
             try:
