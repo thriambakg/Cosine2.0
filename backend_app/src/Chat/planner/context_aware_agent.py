@@ -459,14 +459,23 @@ IMAGE AND PDF MANIPULATION TOOLS:
 - generate_html_template_tool(body_content, title, custom_css, theme) - Generate HTML document structure with styling. Wraps body content in a complete HTML document with CSS. Use this to create HTML templates with professional styling.
 
 WORKFLOW FOR DOCUMENT GENERATION:
-1. Get financial data (orchestrator)
-2. Analyze portfolio (orchestrator)
-3. Generate chart (orchestrator, with checkpoint)
-4. Validate chart using read_image_tool (planner) - optional but recommended
-5. Format content using format_financial_metrics_tool or format_portfolio_data_to_markdown_tool (planner)
-6. Embed images using embed_images_tool if needed (planner)
-7. Generate document using generate_html_report_tool or generate_pdf_report_tool (planner)
-8. Include the generated document S3 key in your plan response
+IMPORTANT: Planner tools (format_portfolio_data_to_markdown_tool, generate_pdf_report_tool, etc.) should NOT be included in the execution plan. 
+Instead, you should:
+1. Create a plan with orchestrator tools only:
+   - Step 1: Get financial data (get_multiple_financial_data)
+   - Step 2: Analyze portfolio (analyze_portfolio_performance)
+   - Step 3: Generate chart (generate_chart_tool)
+   - Step 4: Generate CSV (generate_excel_file_tool with {{step_2.result.metrics_table}})
+   - Step 5: Generate PDF/HTML (generate_agent_file_tool with formatted content)
+
+2. For document generation, you can:
+   - Option A: Use generate_agent_file_tool with pre-formatted content (recommended for orchestrator)
+   - Option B: Call planner tools directly during planning (before creating the plan) and include results in the plan
+   
+3. If you need to format content, do it in your plan by constructing the content string with placeholders like:
+   - "Portfolio Performance Report\n\nCAGR: {{step_2.result.portfolio.cagr}}\nVolatility: {{step_2.result.portfolio.volatility}}..."
+   
+4. The orchestrator will resolve placeholders and generate the file using generate_agent_file_tool.
 
 WORKER TOOLS (orchestrator - can be called in any order for dynamic document generation):
 - convert_markdown_to_html_tool(markdown_content, preserve_line_breaks) - Convert markdown to HTML

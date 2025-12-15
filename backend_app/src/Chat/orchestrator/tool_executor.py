@@ -365,6 +365,25 @@ class ToolExecutor:
             self._tool_cache[tool_name] = fetch_web_content_tool
             return fetch_web_content_tool
         
+        # Planner-only tools (should not be in orchestrator plans)
+        elif tool_name in [
+            'format_portfolio_data_to_markdown_tool',
+            'generate_pdf_report_tool',
+            'generate_html_report_tool',
+            'format_financial_metrics_tool',
+            'read_image_tool',
+            'embed_images_tool',
+            'read_pdf_tool',
+            'analyze_pdf_content_tool',
+            'manipulate_pdf_tool',
+            'generate_html_template_tool'
+        ]:
+            raise ValueError(
+                f"Tool '{tool_name}' is a PLANNER-ONLY tool and cannot be executed by the orchestrator. "
+                f"The planner should call these tools directly during planning, not include them in the execution plan. "
+                f"Please update the plan to use orchestrator tools instead (e.g., generate_agent_file_tool for file generation)."
+            )
+        
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
 
