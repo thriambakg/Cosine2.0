@@ -641,19 +641,6 @@ class Orchestrator:
     # REMOVED: _extract_nested_field method
     # Tools should use json_parser_helper.JSONParserHelper.extract_nested_field() instead
     # This keeps the orchestrator clean and focused on file movement only
-                portfolio = data.get('portfolio', {})
-                if isinstance(portfolio, dict):
-                    replacement = portfolio.get(field_path, '')
-            
-            # rolling_12m_returns
-            elif 'rolling' in field_path.lower() or ('returns' in field_path.lower() and '12' in field_path.lower()):
-                portfolio = data.get('portfolio', {})
-                if isinstance(portfolio, dict):
-                    rolling = portfolio.get('rolling_12m_returns', {})
-                    if isinstance(rolling, dict):
-                        replacement = rolling.get('returns', rolling.get('dates', ''))
-        
-        return replacement
     
     def _create_execution_summary(self, plan: Dict[str, Any], results: Dict[str, Any]) -> Dict[str, Any]:
         """
