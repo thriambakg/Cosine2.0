@@ -582,13 +582,14 @@ const GlobalChatSidebar: React.FC = () => {
     
     // First add persistence messages (for initial load)
     // Note: persistence messages use 'bot' for AI, but we convert to 'ai' for consistency
-    persistenceMessages.forEach(msg => {
+    persistenceMessages.forEach((msg: any) => {
       const sender = (msg.sender === 'bot' || msg.sender === 'ai') ? 'ai' : 'user';
       let timestamp: number;
-      if (msg.timestamp && typeof msg.timestamp === 'object' && msg.timestamp instanceof Date) {
-        timestamp = msg.timestamp.getTime();
-      } else if (typeof msg.timestamp === 'number') {
-        timestamp = msg.timestamp;
+      const msgTimestamp = msg.timestamp;
+      if (msgTimestamp && typeof msgTimestamp === 'object' && msgTimestamp instanceof Date) {
+        timestamp = msgTimestamp.getTime();
+      } else if (typeof msgTimestamp === 'number') {
+        timestamp = msgTimestamp;
       } else {
         timestamp = Date.now();
       }

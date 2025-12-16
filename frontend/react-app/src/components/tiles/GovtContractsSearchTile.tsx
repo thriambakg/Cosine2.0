@@ -52,8 +52,6 @@ import {
 } from '../../services/api';
 import { useTilePinning, TileHeaderActions, addAwardToContext, addMultipleAwardsToContext, confirmDialog } from './common';
 import MultiSelectField from '../MultiSelectField';
-import { useAuth } from '@/contexts/AuthContext';
-import { useGlobalChat } from '@/contexts/GlobalChatContext';
 
 // Award type options
 const AWARD_TYPES = [
@@ -794,14 +792,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     handleContextMenuClose();
   };
 
-  const handleDisplayOptionsChange = (option: keyof typeof displayOptions) => {
-    const newOptions = {
-      ...localDisplayOptions,
-      [option]: !localDisplayOptions[option],
-    };
-    onSettingsChange(id, { displayOptions: newOptions });
-  };
-
+  
   const handleRefresh = () => {
     performSearch();
   };

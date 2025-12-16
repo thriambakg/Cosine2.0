@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
   Box,
   Typography,
@@ -142,7 +142,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   isPinned = false,
 }) => {
   const [criteriaDialogOpen, setCriteriaDialogOpen] = useState(false);
-  const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  // const [filterDialogOpen, setFilterDialogOpen] = useState(false);
 
   // Pinning functionality
   const { isPinned: pinnedState, togglePin } = useTilePinning({

@@ -49,8 +49,6 @@ import {
 } from '../../services/api';
 import { useTilePinning, TileHeaderActions, confirmDialog, addBillToContext, addMultipleBillsToContext } from './common';
 import MultiSelectField from '../MultiSelectField';
-import { useAuth } from '@/contexts/AuthContext';
-import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { politicianSuggestionsService } from '../../services/politicianSuggestions';
 import { policyAreaSuggestionsService } from '../../services/policyAreaSuggestions';
 
@@ -309,7 +307,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   // Autocomplete state
   const [isPoliticianDataLoaded, setIsPoliticianDataLoaded] = useState<boolean>(false);
   const [isPolicyAreaDataLoaded, setIsPolicyAreaDataLoaded] = useState<boolean>(false);
-  const [sponsorNameSuggestions] = useState<string[]>([]);
+  const [sponsorNameSuggestions, setSponsorNameSuggestions] = useState<string[]>([]);
   const [policyAreaSuggestions] = useState<string[]>([]);
   const [sponsorNameLoading, setSponsorNameLoading] = useState<boolean>(false);
   // const [policyAreaLoading, setPolicyAreaLoading] = useState<boolean>(false);
@@ -654,13 +652,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
     handleContextMenuClose();
   };
   
-  const handleDisplayOptionsChange = (option: keyof typeof displayOptions) => {
-    const newOptions = {
-      ...localDisplayOptions,
-      [option]: !localDisplayOptions[option],
-    };
-    onSettingsChange(id, { displayOptions: newOptions });
-  };
   
   const handleRefresh = () => {
     performSearch();
@@ -1421,15 +1412,11 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
                 setCurrentSearchParams((prev) => ({ ...prev, bill_title: titles }));
               }}
               suggestions={[]}
-              onSearch={async (query: string) => {
-                if (!query || query.length < 2) return [];
-                try {
-                  const response = await congressBillsAutocompleteAPI.autocomplete({ autocomplete_type: 'bill_title', search_text: query, limit: 10 });
-                  return (response.results || []).map((r: any) => r.text || r.name || r.value || '');
-                } catch (error) {
-                  console.error('Bill title autocomplete error:', error);
-                  return [];
-                }
+              onSearch={(query: string) => {
+                // Note: MultiSelectField expects synchronous function, but autocomplete API is async
+                // For now, return empty array - autocomplete functionality can be added later
+                // TODO: Implement state-based autocomplete suggestions or update MultiSelectField to support async
+                return [];
               }}
               renderItem={(title) => title}
               placeholder="Search bill titles..."
