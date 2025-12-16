@@ -49,7 +49,7 @@ import {
   ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { secSearchAPI, SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../../services/api';
-import { useTilePinning, PinButton, TileHeaderActions, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
+import { useTilePinning, TileHeaderActions, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';

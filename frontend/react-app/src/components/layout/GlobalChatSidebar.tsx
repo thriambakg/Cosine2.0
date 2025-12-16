@@ -583,9 +583,10 @@ const GlobalChatSidebar: React.FC = () => {
     // First add persistence messages (for initial load)
     // Note: persistence messages use 'bot' for AI, but we convert to 'ai' for consistency
     persistenceMessages.forEach(msg => {
-      const sender = msg.sender === 'bot' ? 'ai' : (msg.sender === 'ai' ? 'ai' : 'user');
-      const timestamp = msg.timestamp instanceof Date 
-        ? msg.timestamp.getTime() 
+      const sender = (msg.sender === 'bot' || msg.sender === 'ai') ? 'ai' : 'user';
+      const timestamp = (msg.timestamp && typeof msg.timestamp === 'object' && msg.timestamp instanceof Date)
+        ? msg.timestamp.getTime()
+        : (typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()) 
         : (typeof msg.timestamp === 'number' ? msg.timestamp : Date.now());
       
       messageMap.set(msg.id, {
@@ -2221,8 +2222,10 @@ const GlobalChatSidebar: React.FC = () => {
                   // Force a refresh of messages to ensure immediate display
                   if (activeSessionId || result.sessionId) {
                     const sessionIdToUse = result.sessionId || activeSessionId;
-                    const currentMessages = unifiedMessageHandler.getMessagesForSession(sessionIdToUse);
-                    // The subscription should handle this, but we can force a refresh if needed
+                    if (sessionIdToUse) {
+                      // const currentMessages = unifiedMessageHandler.getMessagesForSession(sessionIdToUse);
+                      // The subscription should handle this, but we can force a refresh if needed
+                    }
                   }
                   
                   // Update session ID if a new session was created (matching ChatPage pattern)

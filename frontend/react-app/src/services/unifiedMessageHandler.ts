@@ -1446,7 +1446,7 @@ class UnifiedMessageHandlerService {
     
     // Get existing messages from cache (may contain unsaved messages)
     const existingCacheMessages = this.localCache.get(sessionId) || [];
-    const existingMessageIds = new Set(existingCacheMessages.map(m => m.id));
+    // const existingMessageIds = new Set(existingCacheMessages.map(m => m.id));
     
     // Convert database messages to SharedMessage format
     const databaseMessages: SharedMessage[] = messages.map((msg: any) => ({

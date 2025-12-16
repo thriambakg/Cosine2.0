@@ -49,7 +49,7 @@ import {
   ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../../services/api';
-import { useTilePinning, PinButton, TileHeaderActions, addTradeToContext, addMultipleTradesToContext, confirmDialog } from './common';
+import { useTilePinning, TileHeaderActions, addTradeToContext, addMultipleTradesToContext, confirmDialog } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';

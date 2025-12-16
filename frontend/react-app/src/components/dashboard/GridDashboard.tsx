@@ -867,7 +867,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
-      results: tile.results,
+      results: tile.results as any,
       displayOptions: {
         showRecipient: true,
         showAwardingAgency: true,
@@ -891,7 +891,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
-      results: tile.results,
+      results: tile.results as any,
       displayOptions: {
         showBillTitle: true,
         showBillType: true,

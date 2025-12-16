@@ -110,8 +110,8 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
             onUpdate={onUpdateTile}
             onSettingsChange={onSettingsChange}
             searchParams={tile.searchParams}
-            results={tile.results}
-            displayOptions={tile.displayOptions}
+            results={tile.results as any}
+            displayOptions={tile.displayOptions as any}
             autoRefresh={tile.autoRefresh}
             isPinned={tile.isPinned}
           />
@@ -126,8 +126,8 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
             onUpdate={onUpdateTile}
             onSettingsChange={onSettingsChange}
             searchParams={tile.searchParams}
-            results={tile.results}
-            displayOptions={tile.displayOptions}
+            results={tile.results as any}
+            displayOptions={tile.displayOptions as any}
             autoRefresh={tile.autoRefresh}
             isPinned={tile.isPinned}
           />

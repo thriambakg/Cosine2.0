@@ -16,7 +16,6 @@ import {
   DialogContent,
   DialogActions,
   Checkbox,
-  FormControlLabel,
   Slider,
   Autocomplete,
   Table,
@@ -28,14 +27,9 @@ import {
   Pagination,
   Alert,
   CircularProgress,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  ExpandMore as ExpandMoreIcon,
 } from '@mui/material';
 import {
   Close as CloseIcon,
-  PushPin as PinIcon,
   Refresh as RefreshIcon,
   Search as SearchIcon,
   FilterList as FilterIcon,
@@ -49,7 +43,7 @@ import {
   ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
-import { useTilePinning, PinButton, TileHeaderActions, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
+import { useTilePinning, TileHeaderActions, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
 
 interface StockScreenerTileProps {
   id: string;
@@ -179,7 +173,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   
   // Client-side filter state - restore from props if available
-  const [selectedFilters, setSelectedFilters] = useState<{
+  const [selectedFilters] = useState<{
     industries: Set<string>;
     marketCapRanges: Set<string>;
     volatilityRanges: Set<string>;
@@ -713,54 +707,55 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   }, [applyFilters]);
 
   // Generate available filters from all results
-  const availableFilters = useMemo(() => {
-    const industryMap = new Map<string, number>();
-    const marketCapCounts = { micro: 0, small: 0, mid: 0, large: 0, mega: 0 };
-    const volatilityCounts = { low: 0, medium: 0, high: 0 };
-    const priceChangeCounts = { gain: 0, loss: 0, 'big-gain': 0, 'big-loss': 0 };
-    
-    allResults.forEach(stock => {
-      // Industries
-      const industry = stock.industry || 'Unknown';
-      industryMap.set(industry, (industryMap.get(industry) || 0) + 1);
-      
-      // Market cap ranges
-      const marketCap = stock.marketCap || 0;
-      if (marketCap < 300_000_000) marketCapCounts.micro++;
-      else if (marketCap < 2_000_000_000) marketCapCounts.small++;
-      else if (marketCap < 10_000_000_000) marketCapCounts.mid++;
-      else if (marketCap < 200_000_000_000) marketCapCounts.large++;
-      else marketCapCounts.mega++;
-      
-      // Volatility ranges
-      const volatility = stock.volatility || 0;
-      if (volatility < 20) volatilityCounts.low++;
-      else if (volatility < 40) volatilityCounts.medium++;
-      else volatilityCounts.high++;
-      
-      // Price change ranges
-      const priceChange = stock.priceChangePercent || 0;
-      if (priceChange > 5) priceChangeCounts['big-gain']++;
-      else if (priceChange > 0) priceChangeCounts.gain++;
-      else if (priceChange < -5) priceChangeCounts['big-loss']++;
-      else if (priceChange < 0) priceChangeCounts.loss++;
-    });
-    
-    return {
-      industries: Array.from(industryMap.entries())
-        .map(([industry, count]) => ({ industry, count }))
-        .sort((a, b) => b.count - a.count),
-      marketCapRanges: Object.entries(marketCapCounts)
-        .map(([range, count]) => ({ range, count }))
-        .filter(item => item.count > 0),
-      volatilityRanges: Object.entries(volatilityCounts)
-        .map(([range, count]) => ({ range, count }))
-        .filter(item => item.count > 0),
-      priceChangeRanges: Object.entries(priceChangeCounts)
-        .map(([range, count]) => ({ range, count }))
-        .filter(item => item.count > 0),
-    };
-  }, [allResults]);
+  // TODO: Implement filter dialog that uses availableFilters
+  // const availableFilters = useMemo(() => {
+  //   const industryMap = new Map<string, number>();
+  //   const marketCapCounts = { micro: 0, small: 0, mid: 0, large: 0, mega: 0 };
+  //   const volatilityCounts = { low: 0, medium: 0, high: 0 };
+  //   const priceChangeCounts = { gain: 0, loss: 0, 'big-gain': 0, 'big-loss': 0 };
+  //   
+  //   allResults.forEach(stock => {
+  //     // Industries
+  //     const industry = stock.industry || 'Unknown';
+  //     industryMap.set(industry, (industryMap.get(industry) || 0) + 1);
+  //     
+  //     // Market cap ranges
+  //     const marketCap = stock.marketCap || 0;
+  //     if (marketCap < 300_000_000) marketCapCounts.micro++;
+  //     else if (marketCap < 2_000_000_000) marketCapCounts.small++;
+  //     else if (marketCap < 10_000_000_000) marketCapCounts.mid++;
+  //     else if (marketCap < 200_000_000_000) marketCapCounts.large++;
+  //     else marketCapCounts.mega++;
+  //     
+  //     // Volatility ranges
+  //     const volatility = stock.volatility || 0;
+  //     if (volatility < 20) volatilityCounts.low++;
+  //     else if (volatility < 40) volatilityCounts.medium++;
+  //     else volatilityCounts.high++;
+  //     
+  //     // Price change ranges
+  //     const priceChange = stock.priceChangePercent || 0;
+  //     if (priceChange > 5) priceChangeCounts['big-gain']++;
+  //     else if (priceChange > 0) priceChangeCounts.gain++;
+  //     else if (priceChange < -5) priceChangeCounts['big-loss']++;
+  //     else if (priceChange < 0) priceChangeCounts.loss++;
+  //   });
+  //   
+  //   return {
+  //     industries: Array.from(industryMap.entries())
+  //       .map(([industry, count]) => ({ industry, count }))
+  //       .sort((a, b) => b.count - a.count),
+  //     marketCapRanges: Object.entries(marketCapCounts)
+  //       .map(([range, count]) => ({ range, count }))
+  //       .filter(item => item.count > 0),
+  //     volatilityRanges: Object.entries(volatilityCounts)
+  //       .map(([range, count]) => ({ range, count }))
+  //       .filter(item => item.count > 0),
+  //     priceChangeRanges: Object.entries(priceChangeCounts)
+  //       .map(([range, count]) => ({ range, count }))
+  //       .filter(item => item.count > 0),
+  //   };
+  // }, [allResults]);
 
   const totalPages = Math.ceil(filteredResults.length / resultsPerPage);
   const startIndex = (currentPage - 1) * resultsPerPage;

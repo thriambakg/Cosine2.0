@@ -50,7 +50,7 @@ import {
   ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../../services/api';
-import { useTilePinning, PinButton, TileHeaderActions, addArticleToContext, addMultipleArticlesToContext, confirmDialog } from './common';
+import { useTilePinning, TileHeaderActions, addArticleToContext, addMultipleArticlesToContext, confirmDialog } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';

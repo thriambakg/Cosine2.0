@@ -79,10 +79,10 @@ try:
     if not ALL_AVAILABLE_STOCKS:
         logger.warning("⚠️ CSV loading returned empty list, falling back to predefined list")
         ALL_AVAILABLE_STOCKS = None
-        else:
+    else:
         logger.info(f"✅ Successfully loaded {len(ALL_AVAILABLE_STOCKS)} stock symbols from CSV")
         logger.info(f"✅ Sample symbols: {ALL_AVAILABLE_STOCKS[:20]}")
-    except Exception as e:
+except Exception as e:
     logger.error(f"❌ Failed to load stock symbols from CSV: {str(e)}")
     import traceback
     logger.error(f"Traceback: {traceback.format_exc()}")

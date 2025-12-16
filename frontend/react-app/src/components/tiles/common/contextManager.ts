@@ -34,6 +34,7 @@ export interface TileContextData {
   searchParams?: any;
   filterSettings?: any;
   filers?: any; // Full filer objects for SEC tile (includes CIK and ticker)
+  results?: any; // Results data for session persistence
   
   // Portfolio-specific data
   portfolioData?: {

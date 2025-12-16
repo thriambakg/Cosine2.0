@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  TextField,
   Typography,
   Box,
   Card,
@@ -14,7 +13,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  CircularProgress,
   Checkbox,
   FormControl,
   InputLabel,
@@ -25,27 +23,16 @@ import {
   Collapse,
   Chip,
   Pagination,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   Tooltip,
   Slider,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
 } from '@mui/material';
 import {
-  Search as SearchIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
   ViewColumn as ViewColumnIcon,
   Dashboard as AddToContextIcon,
-  Refresh as RefreshIcon,
-  ExpandMore as ExpandMoreIcon,
-  FilterList as FilterIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../hooks/useAPI';
 import { useAuth } from '@/contexts/AuthContext';
@@ -184,7 +171,7 @@ const StockScreenerSearchPage: React.FC = () => {
   const [isFiltered, setIsFiltered] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
   const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 25);
-  const [criteriaDialogOpen, setCriteriaDialogOpen] = useState<boolean>(false);
+  // const [criteriaDialogOpen, setCriteriaDialogOpen] = useState<boolean>(false);
   const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== false);
   const [expandedFilters, setExpandedFilters] = useState<{
     industries: boolean;
@@ -215,7 +202,7 @@ const StockScreenerSearchPage: React.FC = () => {
 
   // Use the stock screener API hook
   const stockScreenerHook = useStockScreener();
-  const { loading: apiLoading, error: apiError, execute: executeScreener } = stockScreenerHook;
+  const { execute: executeScreener } = stockScreenerHook;
 
   // Run stock screener (initial search)
   const runScreener = useCallback(async () => {

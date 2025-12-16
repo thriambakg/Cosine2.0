@@ -5,7 +5,6 @@ import {
   IconButton,
   Menu,
   MenuItem,
-  FormControl,
   TextField,
   Button,
   Chip,
@@ -23,21 +22,16 @@ import {
   TableRow,
   Alert,
   CircularProgress,
-  ListItemIcon,
-  ListItemText,
   Pagination,
-  FormControlLabel,
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Link,
 } from '@mui/material';
 import {
   Close as CloseIcon,
   AutoAwesome as AutoRefreshIcon,
   Search as SearchIcon,
   AccountBalance as GovernmentIcon,
-  Launch as LaunchIcon,
   Dashboard as AddToContextIcon,
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
@@ -56,7 +50,7 @@ import {
   GovtContractsSearchFilters,
   GovtContractAward 
 } from '../../services/api';
-import { useTilePinning, PinButton, TileHeaderActions, addAwardToContext, addMultipleAwardsToContext, confirmDialog } from './common';
+import { useTilePinning, TileHeaderActions, addAwardToContext, addMultipleAwardsToContext, confirmDialog } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
@@ -165,8 +159,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   autoRefresh = false,
   isPinned = false,
 }) => {
-  const { user } = useAuth();
-  const { activeSessionId } = useGlobalChat();
+  // const { user } = useAuth();
+  // const { activeSessionId } = useGlobalChat();
   
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
@@ -322,13 +316,13 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     });
   }, [localDisplayOptions.showRecipient, localDisplayOptions.showAwardingAgency, localDisplayOptions.showFundingAgency, localDisplayOptions.showAmount, localDisplayOptions.showPeriodStartDate, localDisplayOptions.showPeriodEndDate, localDisplayOptions.showNaicsCode, localDisplayOptions.showPscCode, localDisplayOptions.showLastUpdated]); // Depend on individual properties to avoid object reference issues
 
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  // const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [resultsPerPage, setResultsPerPage] = useState(() => {
     const saved = localStorage.getItem(`govtContracts_pageSize_${id}`);
     return saved ? parseInt(saved) : 5;
   });
-  const [isPageSizeManuallySet, setIsPageSizeManuallySet] = useState(() => {
+  const [isPageSizeManuallySet] = useState(() => {
     return localStorage.getItem(`govtContracts_pageSize_${id}`) !== null;
   });
   const tileRef = useRef<HTMLDivElement>(null);
@@ -601,8 +595,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         // Persist search params to backend
         onSettingsChange(id, { searchParams: currentSearchParams });
       } else {
-        console.error('🏛️ GovtContractsSearchTile: Search failed:', response.error);
-        setError(response.error || 'Search failed');
+        console.error('🏛️ GovtContractsSearchTile: Search failed');
+        setError('Search failed');
         setCurrentResults([]);
         setHasMore(false);
         setHasPerformedInitialSearch(true);
@@ -659,8 +653,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
           lastUpdated: Date.now(),
         });
       } else {
-        console.error('🏛️ GovtContractsSearchTile: Load more failed:', response.error);
-        setError(response.error || 'Load more failed');
+        console.error('🏛️ GovtContractsSearchTile: Load more failed');
+        setError('Load more failed');
         setHasMore(false);
       }
     } catch (err: any) {
@@ -805,7 +799,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       ...localDisplayOptions,
       [option]: !localDisplayOptions[option],
     };
-    setLocalDisplayOptions(newOptions);
     onSettingsChange(id, { displayOptions: newOptions });
   };
 
@@ -884,7 +877,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
           }, 3000);
         }
       } else {
-        setEnrichmentError(response.error || 'Failed to enrich award data');
+        setEnrichmentError('Failed to enrich award data');
       }
     } catch (error: any) {
       console.error('Error enriching award:', error);

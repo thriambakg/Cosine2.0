@@ -66,9 +66,9 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
             }}
           >
             {collapsed ? (
-              <ChevronRightIcon sx={{ fontSize: 18 }} />
-            ) : (
               <ChevronLeftIcon sx={{ fontSize: 18 }} />
+            ) : (
+              <ChevronRightIcon sx={{ fontSize: 18 }} />
             )}
           </IconButton>
         </Tooltip>

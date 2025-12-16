@@ -23,19 +23,14 @@ import {
   TableRow,
   Alert,
   CircularProgress,
-  ListItemIcon,
-  ListItemText,
   Pagination,
-  FormControlLabel,
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Select,
 } from '@mui/material';
 import {
   Close as CloseIcon,
   Search as SearchIcon,
-  Description as DocumentIcon,
   Refresh as RefreshIcon,
   FilterList as FilterIcon,
   ExpandMore as ExpandMoreIcon,
@@ -52,7 +47,7 @@ import {
   CongressBillsSearchFilters,
   CongressBill 
 } from '../../services/api';
-import { useTilePinning, PinButton, TileHeaderActions, confirmDialog, addBillToContext, addMultipleBillsToContext } from './common';
+import { useTilePinning, TileHeaderActions, confirmDialog, addBillToContext, addMultipleBillsToContext } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
@@ -172,8 +167,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   autoRefresh = false,
   isPinned = false,
 }) => {
-  const { user } = useAuth();
-  const { activeSessionId } = useGlobalChat();
+  // const { user } = useAuth();
+  // const { activeSessionId } = useGlobalChat();
   
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
@@ -300,13 +295,13 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
     });
   }, [localDisplayOptions, id, onSettingsChange]);
   
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  // const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [resultsPerPage, setResultsPerPage] = useState(() => {
     const saved = localStorage.getItem(`congressBills_pageSize_${id}`);
     return saved ? parseInt(saved) : 5;
   });
-  const [isPageSizeManuallySet, setIsPageSizeManuallySet] = useState(() => {
+  const [isPageSizeManuallySet] = useState(() => {
     return localStorage.getItem(`congressBills_pageSize_${id}`) !== null;
   });
   const tileRef = useRef<HTMLDivElement>(null);
@@ -314,10 +309,10 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   // Autocomplete state
   const [isPoliticianDataLoaded, setIsPoliticianDataLoaded] = useState<boolean>(false);
   const [isPolicyAreaDataLoaded, setIsPolicyAreaDataLoaded] = useState<boolean>(false);
-  const [sponsorNameSuggestions, setSponsorNameSuggestions] = useState<string[]>([]);
-  const [policyAreaSuggestions, setPolicyAreaSuggestions] = useState<string[]>([]);
+  const [sponsorNameSuggestions] = useState<string[]>([]);
+  const [policyAreaSuggestions] = useState<string[]>([]);
   const [sponsorNameLoading, setSponsorNameLoading] = useState<boolean>(false);
-  const [policyAreaLoading, setPolicyAreaLoading] = useState<boolean>(false);
+  // const [policyAreaLoading, setPolicyAreaLoading] = useState<boolean>(false);
   
   // Pinning functionality
   const { isPinned: pinnedState, togglePin } = useTilePinning({
@@ -664,7 +659,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
       ...localDisplayOptions,
       [option]: !localDisplayOptions[option],
     };
-    setLocalDisplayOptions(newOptions);
     onSettingsChange(id, { displayOptions: newOptions });
   };
   
@@ -1430,8 +1424,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
               onSearch={async (query: string) => {
                 if (!query || query.length < 2) return [];
                 try {
-                  const response = await congressBillsAutocompleteAPI.autocomplete({ field: 'bill_title', query, limit: 10 });
-                  return response.suggestions || [];
+                  const response = await congressBillsAutocompleteAPI.autocomplete({ autocomplete_type: 'bill_title', search_text: query, limit: 10 });
+                  return (response.results || []).map((r: any) => r.text || r.name || r.value || '');
                 } catch (error) {
                   console.error('Bill title autocomplete error:', error);
                   return [];
