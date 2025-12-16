@@ -1430,10 +1430,35 @@ class S3FileReader:
     
     def __init__(self):
         self.s3_client = boto3.client('s3')
+        self.bucket_name = None
     
-    def get_bucket_name(self) -> str:
-        """Get the chat files bucket name from environment"""
-        return os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+    def get_bucket_name(self, s3_key: str = None) -> str:
+        """
+        Get the appropriate bucket name based on the S3 key pattern.
+        
+        Args:
+            s3_key: The S3 key/path to determine which bucket to use
+            
+        Returns:
+            Bucket name string
+        """
+        # If s3_key starts with billtext/, use congress bills data bucket
+        if s3_key and s3_key.startswith('billtext/'):
+            bucket_name = os.environ.get('CONGRESS_BILLS_DATA_S3_BUCKET_NAME')
+            if bucket_name:
+                logger.info(f"Using congress bills data bucket for billtext file: {bucket_name}")
+                return bucket_name
+            # Fallback: try to construct bucket name if env var not set
+            project_name = os.environ.get('PROJECT_NAME', 'cosine')
+            environment = os.environ.get('ENVIRONMENT', 'production')
+            bucket_name = f"{project_name}-congress-bills-data-{environment}"
+            logger.info(f"Using constructed congress bills data bucket name: {bucket_name}")
+            return bucket_name
+        
+        # Default to chat files bucket
+        if self.bucket_name is None:
+            self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+        return self.bucket_name
     
     def read_file(self, s3_key: str, file_type: str = "auto") -> str:
         """
@@ -1447,7 +1472,8 @@ class S3FileReader:
             String with file content
         """
         try:
-            bucket_name = self.get_bucket_name()
+            bucket_name = self.get_bucket_name(s3_key)
+            logger.info(f"Reading file from S3: {bucket_name}/{s3_key}")
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
             content = response['Body'].read()
             
@@ -1466,6 +1492,9 @@ class S3FileReader:
             elif 'text' in content_type or file_type == 'txt' or s3_key.endswith('.txt'):
                 # Text file
                 return content.decode('utf-8')
+            elif 'html' in content_type or s3_key.endswith('.html'):
+                # HTML file (for bill text)
+                return content.decode('utf-8')
             else:
                 # Try to decode as UTF-8, fallback to base64 if it fails
                 try:
@@ -1477,11 +1506,28 @@ class S3FileReader:
         except ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == 'NoSuchKey':
-                return f"File not found: {s3_key}"
+                # If file not found in first bucket, try congress bills bucket if it's a billtext file
+                if s3_key.startswith('billtext/') and bucket_name != self.get_bucket_name(s3_key):
+                    logger.info(f"File not found in {bucket_name}, trying congress bills bucket")
+                    try:
+                        congress_bucket = self.get_bucket_name(s3_key)
+                        response = self.s3_client.get_object(Bucket=congress_bucket, Key=s3_key)
+                        content = response['Body'].read()
+                        # Decode and return (same logic as above)
+                        content_type = response.get('ContentType', '')
+                        if 'html' in content_type or s3_key.endswith('.html'):
+                            return content.decode('utf-8')
+                        else:
+                            return content.decode('utf-8')
+                    except ClientError as e2:
+                        return f"File not found in either bucket: {s3_key}"
+                return f"File not found: {s3_key} in bucket {bucket_name}"
             elif error_code == 'NoSuchBucket':
                 return f"Bucket not found: {bucket_name}"
+            elif error_code == 'AccessDenied':
+                return f"Access denied to bucket {bucket_name} for key {s3_key}. Check IAM permissions."
             else:
-                return f"S3 error: {str(e)}"
+                return f"S3 error ({error_code}): {str(e)}"
         except Exception as e:
             return f"Error reading file: {str(e)}"
     
@@ -1496,7 +1542,7 @@ class S3FileReader:
             Dictionary with file metadata
         """
         try:
-            bucket_name = self.get_bucket_name()
+            bucket_name = self.get_bucket_name(s3_key)
             response = self.s3_client.head_object(Bucket=bucket_name, Key=s3_key)
             
             return {
