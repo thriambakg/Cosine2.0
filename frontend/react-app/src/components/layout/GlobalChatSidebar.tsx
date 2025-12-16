@@ -586,7 +586,6 @@ const GlobalChatSidebar: React.FC = () => {
       const sender = (msg.sender === 'bot' || msg.sender === 'ai') ? 'ai' : 'user';
       const timestamp = (msg.timestamp && typeof msg.timestamp === 'object' && msg.timestamp instanceof Date)
         ? msg.timestamp.getTime()
-        : (typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()) 
         : (typeof msg.timestamp === 'number' ? msg.timestamp : Date.now());
       
       messageMap.set(msg.id, {
