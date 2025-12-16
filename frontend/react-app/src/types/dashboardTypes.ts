@@ -57,7 +57,7 @@ export interface TileSizeConstraints {
 
 export interface UnifiedTile {
   id: string;
-  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search';
+  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills';
   title: string;
   symbol?: string; // For crypto/stock tiles
   timeframe?: string; // For crypto/stock tiles

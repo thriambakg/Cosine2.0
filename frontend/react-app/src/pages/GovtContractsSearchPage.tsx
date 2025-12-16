@@ -164,6 +164,7 @@ const GovtContractsSearchPage: React.FC = () => {
   const [enrichmentSuccess, setEnrichmentSuccess] = useState<string | null>(null);
   
   // Column visibility state
+  // Note: 'actions' is always visible and not selectable (like SEC tile)
   const AVAILABLE_COLUMNS = [
     'recipient',
     'awarding_agency',
@@ -1512,6 +1513,7 @@ const GovtContractsSearchPage: React.FC = () => {
                         naics_code: 'NAICS Code',
                         psc_code: 'PSC Code',
                         last_updated: 'Last Updated',
+                        // Note: 'actions' removed - always visible, not selectable
                       };
                       return (
                         <MenuItem
@@ -1674,6 +1676,7 @@ const GovtContractsSearchPage: React.FC = () => {
                                   fontSize: '0.875rem',
                                 }}>Last Updated</TableCell>
                               )}
+                              {/* Actions column is always visible (not selectable) */}
                               <TableCell sx={{ 
                                 color: '#9ca3af', 
                                 fontWeight: 600, 
@@ -1800,6 +1803,7 @@ const GovtContractsSearchPage: React.FC = () => {
                                     {formatLastUpdated(award.last_updated)}
                                   </TableCell>
                                 )}
+                                {/* Actions column is always visible (not selectable) */}
                                 <TableCell sx={{ 
                                   fontSize: '0.875rem',
                                   padding: '12px',

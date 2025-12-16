@@ -46,9 +46,10 @@ import {
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
   ExpandMore as ExpandMoreIcon,
+  ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../../services/api';
-import { useTilePinning, PinButton, addTradeToContext, addMultipleTradesToContext, confirmDialog } from './common';
+import { useTilePinning, PinButton, TileHeaderActions, addTradeToContext, addMultipleTradesToContext, confirmDialog } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
@@ -150,6 +151,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   
   // Filter state for client-side filtering - restore from props if available
   const [allResults, setAllResults] = useState<PoliticianTrade[]>([]);
@@ -198,30 +200,64 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     ...displayOptions
   });
 
-  // Column visibility state
-  const [visibleColumns, setVisibleColumns] = useState<{
-    politician: boolean;
-    party: boolean;
-    position: boolean;
-    stateDistrict: boolean;
-    security: boolean;
-    transactionType: boolean;
-    amount: boolean;
-    transactionDate: boolean;
-    date: boolean;
-    file: boolean;
-  }>({
-    politician: localDisplayOptions.showPolitician,
-    party: localDisplayOptions.showParty,
-    position: localDisplayOptions.showPosition,
-    stateDistrict: localDisplayOptions.showStateDistrict ?? true,
-    security: localDisplayOptions.showSecurity,
-    transactionType: localDisplayOptions.showTransactionType,
-    amount: localDisplayOptions.showAmount,
-    transactionDate: localDisplayOptions.showTransactionDate,
-    date: localDisplayOptions.showDate,
-    file: localDisplayOptions.showFile,
+  // Column visibility state - using array of strings like parent page
+  const AVAILABLE_COLUMNS = [
+    'Politician',
+    'Position',
+    'Party',
+    'Jurisdiction',
+    'Security',
+    'Transaction',
+    'Transaction Date',
+    'Filing Date',
+    'Amount',
+    'File',
+  ] as const;
+  
+  const DEFAULT_VISIBLE_COLUMNS = ['Politician', 'Position', 'Party', 'Security', 'Transaction', 'Transaction Date', 'Amount', 'File'];
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
+    // Convert display options to column array
+    const cols: string[] = [];
+    if (localDisplayOptions.showPolitician) cols.push('Politician');
+    if (localDisplayOptions.showPosition) cols.push('Position');
+    if (localDisplayOptions.showParty) cols.push('Party');
+    if (localDisplayOptions.showStateDistrict) cols.push('Jurisdiction');
+    if (localDisplayOptions.showSecurity) cols.push('Security');
+    if (localDisplayOptions.showTransactionType) cols.push('Transaction');
+    if (localDisplayOptions.showTransactionDate) cols.push('Transaction Date');
+    if (localDisplayOptions.showDate) cols.push('Filing Date');
+    if (localDisplayOptions.showAmount) cols.push('Amount');
+    if (localDisplayOptions.showFile) cols.push('File');
+    return cols.length > 0 ? cols : DEFAULT_VISIBLE_COLUMNS;
   });
+  
+  // Handle column toggle
+  const handleColumnToggle = useCallback((column: string) => {
+    setVisibleColumns((prev) => {
+      const newColumns = prev.includes(column)
+        ? prev.filter((c) => c !== column)
+        : [...prev, column];
+      
+      // Update display options
+      const newDisplayOptions = {
+        ...localDisplayOptions,
+        showPolitician: newColumns.includes('Politician'),
+        showPosition: newColumns.includes('Position'),
+        showParty: newColumns.includes('Party'),
+        showStateDistrict: newColumns.includes('Jurisdiction'),
+        showSecurity: newColumns.includes('Security'),
+        showTransactionType: newColumns.includes('Transaction'),
+        showTransactionDate: newColumns.includes('Transaction Date'),
+        showDate: newColumns.includes('Filing Date'),
+        showAmount: newColumns.includes('Amount'),
+        showFile: newColumns.includes('File'),
+      };
+      setLocalDisplayOptions(newDisplayOptions);
+      onSettingsChange(id, { displayOptions: newDisplayOptions });
+      
+      return newColumns;
+    });
+  }, [localDisplayOptions, id, onSettingsChange]);
 
   // Column width state for dynamic sizing
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
@@ -658,18 +694,20 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
 
   // Sync visible columns with display options when display options change
   useEffect(() => {
-    setVisibleColumns({
-      politician: localDisplayOptions.showPolitician,
-      party: localDisplayOptions.showParty,
-      position: localDisplayOptions.showPosition,
-      stateDistrict: localDisplayOptions.showStateDistrict ?? true,
-      security: localDisplayOptions.showSecurity,
-      transactionType: localDisplayOptions.showTransactionType,
-      amount: localDisplayOptions.showAmount,
-      transactionDate: localDisplayOptions.showTransactionDate,
-      date: localDisplayOptions.showDate,
-      file: localDisplayOptions.showFile,
-    });
+    const cols: string[] = [];
+    if (localDisplayOptions.showPolitician) cols.push('Politician');
+    if (localDisplayOptions.showPosition) cols.push('Position');
+    if (localDisplayOptions.showParty) cols.push('Party');
+    if (localDisplayOptions.showStateDistrict) cols.push('Jurisdiction');
+    if (localDisplayOptions.showSecurity) cols.push('Security');
+    if (localDisplayOptions.showTransactionType) cols.push('Transaction');
+    if (localDisplayOptions.showTransactionDate) cols.push('Transaction Date');
+    if (localDisplayOptions.showDate) cols.push('Filing Date');
+    if (localDisplayOptions.showAmount) cols.push('Amount');
+    if (localDisplayOptions.showFile) cols.push('File');
+    if (cols.length > 0) {
+      setVisibleColumns(cols);
+    }
   }, [localDisplayOptions]);
 
   // Generate available filters from all results
@@ -813,50 +851,50 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     // Calculate content-based widths
     widths.checkbox = minWidths.checkbox;
     
-    if (visibleColumns.politician) {
+    if (visibleColumns.includes('Politician')) {
       const maxLength = Math.max(...sampleResults.map(t => (t.politicianName || '').length));
       widths.politician = Math.max(minWidths.politician, Math.min(maxLength * 8 + 32, 200));
     }
     
-    if (visibleColumns.position) {
+    if (visibleColumns.includes('Position')) {
       widths.position = minWidths.position; // Fixed size for chips
     }
     
-    if (visibleColumns.party) {
+    if (visibleColumns.includes('Party')) {
       widths.party = minWidths.party; // Fixed size for chips
     }
     
-    if (visibleColumns.stateDistrict) {
+    if (visibleColumns.includes('Jurisdiction')) {
       const maxLength = Math.max(...sampleResults.map(t => (t.stateDistrict || '').length));
       widths.stateDistrict = Math.max(minWidths.stateDistrict, Math.min(maxLength * 8 + 32, 120));
     }
     
-    if (visibleColumns.security) {
+    if (visibleColumns.includes('Security')) {
       const maxSymbolLength = Math.max(...sampleResults.map(t => (t.securitySymbol || '').length));
       const maxNameLength = Math.max(...sampleResults.map(t => (t.securityName || '').length));
       const estimatedWidth = Math.max(maxSymbolLength * 9, maxNameLength * 6) + 32;
       widths.security = Math.max(minWidths.security, Math.min(estimatedWidth, 250));
     }
     
-    if (visibleColumns.transactionType) {
+    if (visibleColumns.includes('Transaction')) {
       const maxLength = Math.max(...sampleResults.map(t => (t.transactionType || '').length));
       widths.transactionType = Math.max(minWidths.transactionType, Math.min(maxLength * 7 + 32, 120));
     }
     
-    if (visibleColumns.amount) {
+    if (visibleColumns.includes('Amount')) {
       // Amount column is typically formatted currency, estimate based on max values
       widths.amount = minWidths.amount;
     }
     
-    if (visibleColumns.transactionDate) {
+    if (visibleColumns.includes('Transaction Date')) {
       widths.transactionDate = minWidths.transactionDate; // Fixed for date format
     }
     
-    if (visibleColumns.date) {
+    if (visibleColumns.includes('Filing Date')) {
       widths.date = minWidths.date; // Fixed for date format
     }
     
-    if (visibleColumns.file) {
+    if (visibleColumns.includes('File')) {
       widths.file = minWidths.file; // Fixed for "View File" or "N/A"
     }
     
@@ -1297,122 +1335,120 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           )}
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 0.5 }}>
-          <PinButton
-            isPinned={pinnedState}
-            onTogglePin={togglePin}
-          />
-
-          <Tooltip title="Run Search">
-            <IconButton
-              size="small"
-              onClick={handleRefresh}
-              disabled={isLoading}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ 
-                color: isLoading ? '#6b7280' : '#9ca3af',
-                '&:hover': { color: '#3b82f6' },
-                '&.Mui-disabled': { color: '#6b7280' }
-              }}
-            >
-              {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title={`Add ${selectedTrades.size > 0 ? `${selectedTrades.size} trade(s)` : 'selected trades'} to context`}>
-            <span>
-              <IconButton
-                size="small"
-                onClick={handleContextMenuClick}
-                disabled={selectedTrades.size === 0}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{ 
-                  color: selectedTrades.size > 0 ? '#10b981' : '#6b7280',
-                  '&:hover': { color: selectedTrades.size > 0 ? '#059669' : '#6b7280' },
-                  '&.Mui-disabled': { color: '#6b7280' }
-                }}
-              >
-                <AddToContextIcon fontSize="small" />
-              </IconButton>
-            </span>
-          </Tooltip>
-
-          <Tooltip title={
-            (selectedFilters.politicians.length > 0 || 
-             selectedFilters.parties.length > 0 || 
-             selectedFilters.positions.length > 0 || 
-             selectedFilters.securities.length > 0 || 
-             selectedFilters.transactionTypes.length > 0) 
-              ? `Filter Results (${Object.values(selectedFilters).flat().length} active)`
-              : "Filter Results"
-          }>
-            <Box sx={{ position: 'relative' }}>
-              <IconButton
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setFilterDialogOpen(true);
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{ 
-                  color: (selectedFilters.politicians.length > 0 || 
-                          selectedFilters.parties.length > 0 || 
-                          selectedFilters.positions.length > 0 || 
-                          selectedFilters.securities.length > 0 || 
-                          selectedFilters.transactionTypes.length > 0) 
-                    ? '#3b82f6' 
-                    : '#9ca3af', 
-                  '&:hover': { color: '#3b82f6' } 
-                }}
-              >
-                <FilterIcon fontSize="small" />
-              </IconButton>
-              {(selectedFilters.politicians.length > 0 || 
-                selectedFilters.parties.length > 0 || 
-                selectedFilters.positions.length > 0 || 
-                selectedFilters.securities.length > 0 || 
-                selectedFilters.transactionTypes.length > 0) && (
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    top: -2,
-                    right: -2,
-                    width: 8,
-                    height: 8,
-                    backgroundColor: '#3b82f6',
-                    borderRadius: '50%',
-                    border: '1px solid #1e293b',
+        <TileHeaderActions
+          pinButton={{
+            isPinned: pinnedState,
+            onTogglePin: togglePin,
+          }}
+          contextButton={{
+            onClick: handleContextMenuClick,
+            disabled: selectedTrades.size === 0,
+            tooltip: `Add ${selectedTrades.size > 0 ? `${selectedTrades.size} trade(s)` : 'selected trades'} to context`,
+            icon: <AddToContextIcon fontSize="small" />,
+          }}
+          deleteButton={{
+            onClick: handleRemove,
+            icon: <CloseIcon sx={{ fontSize: 18 }} />,
+          }}
+          collapsibleActions={
+            <>
+              <Tooltip title="Run Search">
+                <IconButton
+                  size="small"
+                  onClick={handleRefresh}
+                  disabled={isLoading}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ 
+                    color: isLoading ? '#6b7280' : '#9ca3af',
+                    '&:hover': { color: '#3b82f6' },
+                    '&.Mui-disabled': { color: '#6b7280' }
                   }}
-                />
-              )}
-            </Box>
-          </Tooltip>
+                >
+                  {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
 
-          <Tooltip title="Edit Search Criteria">
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSearchDialogOpen(true);
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-            >
-              <SearchIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+              <Tooltip title="Select columns to display">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setColumnMenuAnchor(e.currentTarget);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <ViewColumnIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
 
-          <Tooltip title="Remove tile">
-            <IconButton
-              size="small"
-              onClick={handleRemove}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#dc2626' } }}
-            >
-              <CloseIcon sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
-        </Box>
+              <Tooltip title={
+                (selectedFilters.politicians.length > 0 || 
+                 selectedFilters.parties.length > 0 || 
+                 selectedFilters.positions.length > 0 || 
+                 selectedFilters.securities.length > 0 || 
+                 selectedFilters.transactionTypes.length > 0) 
+                  ? `Filter Results (${Object.values(selectedFilters).flat().length} active)`
+                  : "Filter Results"
+              }>
+                <Box sx={{ position: 'relative' }}>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFilterDialogOpen(true);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    sx={{ 
+                      color: (selectedFilters.politicians.length > 0 || 
+                              selectedFilters.parties.length > 0 || 
+                              selectedFilters.positions.length > 0 || 
+                              selectedFilters.securities.length > 0 || 
+                              selectedFilters.transactionTypes.length > 0) 
+                        ? '#3b82f6' 
+                        : '#9ca3af', 
+                      '&:hover': { color: '#3b82f6' } 
+                    }}
+                  >
+                    <FilterIcon fontSize="small" />
+                  </IconButton>
+                  {(selectedFilters.politicians.length > 0 || 
+                    selectedFilters.parties.length > 0 || 
+                    selectedFilters.positions.length > 0 || 
+                    selectedFilters.securities.length > 0 || 
+                    selectedFilters.transactionTypes.length > 0) && (
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        top: -2,
+                        right: -2,
+                        width: 8,
+                        height: 8,
+                        backgroundColor: '#3b82f6',
+                        borderRadius: '50%',
+                        border: '1px solid #1e293b',
+                      }}
+                    />
+                  )}
+                </Box>
+              </Tooltip>
+
+              <Tooltip title="Edit Search Criteria">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSearchDialogOpen(true);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <SearchIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          }
+        />
       </Box>
 
       {/* Loading state */}
@@ -1518,7 +1554,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       }}
                     />
                   </TableCell>
-                  {visibleColumns.politician && (
+                  {visibleColumns.includes('Politician') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1527,7 +1563,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.politician,
                     }}>Politician</TableCell>
                   )}
-                  {visibleColumns.position && (
+                  {visibleColumns.includes('Position') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1536,7 +1572,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.position,
                     }}>Position</TableCell>
                   )}
-                  {visibleColumns.party && (
+                  {visibleColumns.includes('Party') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1545,7 +1581,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.party,
                     }}>Party</TableCell>
                   )}
-                  {visibleColumns.stateDistrict && (
+                  {visibleColumns.includes('Jurisdiction') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1554,7 +1590,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.stateDistrict,
                     }}>Jurisdiction</TableCell>
                   )}
-                  {visibleColumns.security && (
+                  {visibleColumns.includes('Security') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1563,7 +1599,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.security,
                     }}>Security</TableCell>
                   )}
-                  {visibleColumns.transactionType && (
+                  {visibleColumns.includes('Transaction') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1572,7 +1608,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.transactionType,
                     }}>Type</TableCell>
                   )}
-                  {visibleColumns.amount && (
+                  {visibleColumns.includes('Amount') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1581,7 +1617,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.amount,
                     }}>Amount</TableCell>
                   )}
-                  {visibleColumns.transactionDate && (
+                  {visibleColumns.includes('Transaction Date') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1590,7 +1626,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.transactionDate,
                     }}>Transaction Date</TableCell>
                   )}
-                  {visibleColumns.date && (
+                  {visibleColumns.includes('Filing Date') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1599,7 +1635,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.date,
                     }}>Filing Date</TableCell>
                   )}
-                  {visibleColumns.file && (
+                  {visibleColumns.includes('File') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
                       fontWeight: 600, 
@@ -1607,6 +1643,13 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       width: columnWidths.file,
                       minWidth: columnWidths.file,
                     }}>File</TableCell>
+                  )}
+                  {visibleColumns.includes('Details') && (
+                    <TableCell sx={{ 
+                      color: '#9ca3af', 
+                      fontWeight: 600, 
+                      fontSize: '0.875rem',
+                    }}>Details</TableCell>
                   )}
                 </TableRow>
               </TableHead>
@@ -1639,7 +1682,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
                       />
                     </TableCell>
-                    {visibleColumns.politician && (
+                    {visibleColumns.includes('Politician') && (
                       <TableCell sx={{ 
                         color: '#ffffff', 
                         fontSize: '0.875rem',
@@ -1682,7 +1725,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         )}
                       </TableCell>
                     )}
-                    {visibleColumns.position && (
+                    {visibleColumns.includes('Position') && (
                       <TableCell sx={{ 
                         fontSize: '0.875rem',
                         width: columnWidths.position,
@@ -1700,7 +1743,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         />
                       </TableCell>
                     )}
-                    {visibleColumns.party && (
+                    {visibleColumns.includes('Party') && (
                       <TableCell sx={{ 
                         fontSize: '0.875rem',
                         width: columnWidths.party,
@@ -1718,7 +1761,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         />
                       </TableCell>
                     )}
-                    {visibleColumns.stateDistrict && (
+                    {visibleColumns.includes('Jurisdiction') && (
                       <TableCell sx={{ 
                         color: '#ffffff', 
                         fontSize: '0.875rem',
@@ -1731,7 +1774,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         </Typography>
                       </TableCell>
                     )}
-                    {visibleColumns.security && (
+                    {visibleColumns.includes('Security') && (
                       <TableCell sx={{ 
                         color: '#ffffff', 
                         fontSize: '0.875rem',
@@ -1771,7 +1814,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         </Box>
                       </TableCell>
                     )}
-                    {visibleColumns.transactionType && (
+                    {visibleColumns.includes('Transaction') && (
                       <TableCell sx={{ 
                         fontSize: '0.875rem',
                         width: columnWidths.transactionType,
@@ -1790,7 +1833,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         />
                       </TableCell>
                     )}
-                    {visibleColumns.amount && (
+                    {visibleColumns.includes('Amount') && (
                       <TableCell sx={{ 
                         color: '#ffffff', 
                         fontSize: '0.875rem',
@@ -1801,7 +1844,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         {getAmountRangeDisplay(trade)}
                       </TableCell>
                     )}
-                    {visibleColumns.transactionDate && (
+                    {visibleColumns.includes('Transaction Date') && (
                       <TableCell sx={{ 
                         color: '#9ca3af', 
                         fontSize: '0.875rem',
@@ -1812,7 +1855,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         {formatTransactionDate(trade.transactionDate)}
                       </TableCell>
                     )}
-                    {visibleColumns.date && (
+                    {visibleColumns.includes('Filing Date') && (
                       <TableCell sx={{ 
                         color: '#9ca3af', 
                         fontSize: '0.875rem',
@@ -1823,7 +1866,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         {formatDate(trade.filingDate)}
                       </TableCell>
                     )}
-                    {visibleColumns.file && (
+                    {visibleColumns.includes('File') && (
                       <TableCell sx={{ 
                         color: '#9ca3af', 
                         fontSize: '0.875rem',
@@ -1907,6 +1950,38 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         </Box>
       )}
 
+
+      {/* Column Selection Menu */}
+      <Menu
+        anchorEl={columnMenuAnchor}
+        open={Boolean(columnMenuAnchor)}
+        onClose={() => setColumnMenuAnchor(null)}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.98)',
+            border: '2px solid #374151',
+            color: '#ffffff',
+          },
+        }}
+      >
+        {AVAILABLE_COLUMNS.map((column) => {
+          return (
+            <MenuItem
+              key={column}
+              onClick={() => handleColumnToggle(column)}
+              sx={{
+                color: visibleColumns.includes(column) ? '#3b82f6' : '#94a3b8',
+              }}
+            >
+              <Checkbox
+                checked={visibleColumns.includes(column)}
+                sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
+              />
+              {column}
+            </MenuItem>
+          );
+        })}
+      </Menu>
 
       {/* Context Menu */}
       <Menu
@@ -2081,63 +2156,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               </Box>
             </Box>
           )}
-
-          {/* Column Visibility Filter */}
-          <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
-            <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 2, fontWeight: 600 }}>
-              Visible Columns:
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {[
-                { key: 'politician', label: 'Politician', value: visibleColumns.politician },
-                { key: 'party', label: 'Party', value: visibleColumns.party },
-                { key: 'position', label: 'Position', value: visibleColumns.position },
-                { key: 'stateDistrict', label: 'Jurisdiction', value: visibleColumns.stateDistrict },
-                { key: 'security', label: 'Security', value: visibleColumns.security },
-                { key: 'transactionType', label: 'Transaction', value: visibleColumns.transactionType },
-                { key: 'amount', label: 'Amount', value: visibleColumns.amount },
-                { key: 'transactionDate', label: 'Transaction Date', value: visibleColumns.transactionDate },
-                { key: 'date', label: 'Filing Date', value: visibleColumns.date },
-                { key: 'file', label: 'File', value: visibleColumns.file },
-              ].map((column) => (
-                <FormControlLabel
-                  key={column.key}
-                  control={
-                    <Checkbox
-                      checked={column.value}
-                      onChange={(e) => {
-                        setVisibleColumns(prev => ({
-                          ...prev,
-                          [column.key]: e.target.checked
-                        }));
-                        // Update local display options
-                        setLocalDisplayOptions(prev => ({
-                          ...prev,
-                          [`show${column.key.charAt(0).toUpperCase() + column.key.slice(1)}`]: e.target.checked
-                        }));
-                      }}
-                      sx={{ 
-                        color: '#64748b', 
-                        '&.Mui-checked': { color: '#3b82f6' },
-                        '& .MuiSvgIcon-root': { fontSize: 20 },
-                      }}
-                    />
-                  }
-                  label={
-                    <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                      {column.label}
-                    </Typography>
-                  }
-                  sx={{ 
-                    margin: 0,
-                    '& .MuiFormControlLabel-label': {
-                      ml: 0.5,
-                    },
-                  }}
-                />
-              ))}
-            </Box>
-          </Box>
 
           {/* Page Size Selection */}
           <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>

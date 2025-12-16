@@ -64,10 +64,12 @@ def normalize_sector_name(sector: str) -> str:
 def query_stocks_by_criteria(
     criteria: Dict[str, Any], 
     max_results: int = 100,
-    timeframe: str = '1d'
-) -> List[Dict[str, Any]]:
+    timeframe: str = '1d',
+    last_evaluated_key: Optional[Dict] = None
+) -> tuple[List[Dict[str, Any]], Optional[Dict], bool]:
     """
     Query pre-cached stock data from DynamoDB using GSIs with efficient numeric range queries.
+    Supports pagination via last_evaluated_key.
     
     Args:
         criteria: Screening criteria with optional filters:
@@ -77,15 +79,17 @@ def query_stocks_by_criteria(
             - priceRange: [min, max] - Price range (e.g., [50, 200])
             - priceChangeRange: [min, max] - Price change % range (e.g., [-5, 5])
             - marketCapRange: [min, max] - Market cap range (e.g., [1e9, 1e12])
-        max_results: Maximum number of results to return
+        max_results: Maximum number of results to return per page
         timeframe: Time period ('1d', '7d', '30d', '1y')
+        last_evaluated_key: Pagination token from previous request
     
     Returns:
-        List of stock data dictionaries
+        Tuple of (results list, last_evaluated_key, has_more)
     """
     try:
         table = get_stock_data_table()
         results = []
+        last_evaluated_key_result = last_evaluated_key  # Track pagination key
         
         # Normalize sector names to handle legacy values
         if criteria.get('sectors'):
@@ -106,24 +110,18 @@ def query_stocks_by_criteria(
             logger.info("📊 Using Price Change Range GSI (GSI3)")
             change_min, change_max = criteria['priceChangeRange']
             
-            # Paginate through results to get all matching stocks
-            last_key = None
-            while True:
-                query_params = {
-                    'IndexName': 'PriceChangeRangeIndex',
-                    'KeyConditionExpression': Key('GSI3PK').eq(f'PRICE_CHANGE#{timeframe}') & 
-                                             Key('GSI3SK').between(Decimal(str(change_min)), Decimal(str(change_max))),
-                    'Limit': 1000  # DynamoDB max per request
-                }
-                if last_key:
-                    query_params['ExclusiveStartKey'] = last_key
-                
-                response = table.query(**query_params)
-                results.extend(response.get('Items', []))
-                
-                last_key = response.get('LastEvaluatedKey')
-                if not last_key or len(results) >= max_results * 10:
-                    break
+            query_params = {
+                'IndexName': 'PriceChangeRangeIndex',
+                'KeyConditionExpression': Key('GSI3PK').eq(f'PRICE_CHANGE#{timeframe}') & 
+                                         Key('GSI3SK').between(Decimal(str(change_min)), Decimal(str(change_max))),
+                'Limit': max_results * 2  # Get more to filter down
+            }
+            if last_evaluated_key:
+                query_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = table.query(**query_params)
+            results = response.get('Items', [])
+            last_evaluated_key_result = response.get('LastEvaluatedKey')
             
             logger.info(f"  Found {len(results)} stocks with price change {change_min}%-{change_max}%")
         
@@ -132,28 +130,42 @@ def query_stocks_by_criteria(
             logger.info("📊 Using Sector+Volatility GSI (GSI1)")
             vol_min, vol_max = criteria['volatilityRange']
             
-            for sector in criteria['sectors']:
-                response = table.query(
-                    IndexName='SectorVolatilityIndex',
-                    KeyConditionExpression=Key('GSI1PK').eq(f'SECTOR#{sector}#{timeframe}') & 
+            # Use first sector for pagination (can be enhanced to handle multiple sectors)
+            sector = criteria['sectors'][0]
+            query_params = {
+                'IndexName': 'SectorVolatilityIndex',
+                'KeyConditionExpression': Key('GSI1PK').eq(f'SECTOR#{sector}#{timeframe}') & 
                                          Key('GSI1SK').between(Decimal(str(vol_min)), Decimal(str(vol_max))),
-                    Limit=max_results
-                )
-                results.extend(response.get('Items', []))
-                logger.info(f"  Found {len(response.get('Items', []))} stocks in {sector} with vol {vol_min}-{vol_max}")
+                'Limit': max_results * 2
+            }
+            if last_evaluated_key:
+                query_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = table.query(**query_params)
+            results = response.get('Items', [])
+            last_evaluated_key_result = response.get('LastEvaluatedKey')
+            
+            logger.info(f"  Found {len(results)} stocks in {sector} with vol {vol_min}-{vol_max}")
         
         # STRATEGY 3: Sector-only query (all volatilities)
         elif criteria.get('sectors'):
             logger.info("📊 Using Sector GSI (GSI1) - all volatilities")
             
-            for sector in criteria['sectors']:
-                response = table.query(
-                    IndexName='SectorVolatilityIndex',
-                    KeyConditionExpression=Key('GSI1PK').eq(f'SECTOR#{sector}#{timeframe}'),
-                    Limit=max_results * 2  # Get more to filter down
-                )
-                results.extend(response.get('Items', []))
-                logger.info(f"  Found {len(response.get('Items', []))} stocks in {sector}")
+            # Use first sector for pagination (can be enhanced to handle multiple sectors)
+            sector = criteria['sectors'][0]
+            query_params = {
+                'IndexName': 'SectorVolatilityIndex',
+                'KeyConditionExpression': Key('GSI1PK').eq(f'SECTOR#{sector}#{timeframe}'),
+                'Limit': max_results * 2  # Get more to filter down
+            }
+            if last_evaluated_key:
+                query_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = table.query(**query_params)
+            results = response.get('Items', [])
+            last_evaluated_key_result = response.get('LastEvaluatedKey')
+            
+            logger.info(f"  Found {len(results)} stocks in {sector}")
         
         # STRATEGY 4: Volatility range query
         elif criteria.get('volatilityRange'):
@@ -164,13 +176,19 @@ def query_stocks_by_criteria(
             vol_min_decimal = Decimal(str(vol_min / 100))
             vol_max_decimal = Decimal(str(vol_max / 100))
             
-            response = table.query(
-                IndexName='VolatilityRangeIndex',
-                KeyConditionExpression=Key('GSI2PK').eq(f'VOLATILITY#{timeframe}') & 
-                                     Key('GSI2SK').between(vol_min_decimal, vol_max_decimal),
-                Limit=max_results * 2  # Get more to filter down
-            )
+            query_params = {
+                'IndexName': 'VolatilityRangeIndex',
+                'KeyConditionExpression': Key('GSI2PK').eq(f'VOLATILITY#{timeframe}') & 
+                                         Key('GSI2SK').between(vol_min_decimal, vol_max_decimal),
+                'Limit': max_results * 2  # Get more to filter down
+            }
+            if last_evaluated_key:
+                query_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = table.query(**query_params)
             results = response.get('Items', [])
+            last_evaluated_key_result = response.get('LastEvaluatedKey')
+            
             logger.info(f"  Found {len(results)} stocks with volatility {vol_min}%-{vol_max}%")
         
         # STRATEGY 5: Market cap range query
@@ -178,13 +196,19 @@ def query_stocks_by_criteria(
             logger.info("📊 Using Market Cap Range GSI (GSI4)")
             cap_min, cap_max = criteria['marketCapRange']
             
-            response = table.query(
-                IndexName='MarketCapRangeIndex',
-                KeyConditionExpression=Key('GSI4PK').eq(f'MARKET_CAP#{timeframe}') & 
-                                     Key('GSI4SK').between(Decimal(str(cap_min)), Decimal(str(cap_max))),
-                Limit=max_results * 2
-            )
+            query_params = {
+                'IndexName': 'MarketCapRangeIndex',
+                'KeyConditionExpression': Key('GSI4PK').eq(f'MARKET_CAP#{timeframe}') & 
+                                         Key('GSI4SK').between(Decimal(str(cap_min)), Decimal(str(cap_max))),
+                'Limit': max_results * 2
+            }
+            if last_evaluated_key:
+                query_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = table.query(**query_params)
             results = response.get('Items', [])
+            last_evaluated_key_result = response.get('LastEvaluatedKey')
+            
             logger.info(f"  Found {len(results)} stocks with market cap ${cap_min:,.0f}-${cap_max:,.0f}")
         
         # STRATEGY 6: Price range query
@@ -192,23 +216,35 @@ def query_stocks_by_criteria(
             logger.info("📊 Using Price Range GSI (GSI5)")
             price_min, price_max = criteria['priceRange']
             
-            response = table.query(
-                IndexName='PriceRangeIndex',
-                KeyConditionExpression=Key('GSI5PK').eq(f'PRICE#{timeframe}') & 
-                                     Key('GSI5SK').between(Decimal(str(price_min)), Decimal(str(price_max))),
-                Limit=max_results * 2
-            )
+            query_params = {
+                'IndexName': 'PriceRangeIndex',
+                'KeyConditionExpression': Key('GSI5PK').eq(f'PRICE#{timeframe}') & 
+                                         Key('GSI5SK').between(Decimal(str(price_min)), Decimal(str(price_max))),
+                'Limit': max_results * 2
+            }
+            if last_evaluated_key:
+                query_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = table.query(**query_params)
             results = response.get('Items', [])
+            last_evaluated_key_result = response.get('LastEvaluatedKey')
+            
             logger.info(f"  Found {len(results)} stocks with price ${price_min}-${price_max}")
         
         # STRATEGY 7: No specific criteria - get all stocks for timeframe (limited)
         else:
             logger.info(f"📊 Scanning all stocks for timeframe {timeframe}")
-            response = table.scan(
-                FilterExpression=Attr('SK').eq(f'{timeframe}#CURRENT'),
-                Limit=max_results
-            )
+            scan_params = {
+                'FilterExpression': Attr('SK').eq(f'{timeframe}#CURRENT'),
+                'Limit': max_results
+            }
+            if last_evaluated_key:
+                scan_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = table.scan(**scan_params)
             results = response.get('Items', [])
+            last_evaluated_key_result = response.get('LastEvaluatedKey')
+            
             logger.info(f"  Found {len(results)} stocks")
         
         # Apply additional filters in-memory for multi-criteria queries
@@ -273,15 +309,25 @@ def query_stocks_by_criteria(
         
         # Limit results
         final_results = filtered_results[:max_results]
+        has_more = last_evaluated_key_result is not None or len(filtered_results) > max_results
         
-        logger.info(f"✅ Returning {len(final_results)} stocks")
-        return final_results
+        logger.info(f"✅ Returning {len(final_results)} stocks (has_more={has_more})")
+        
+        # Convert last_evaluated_key to serializable format
+        serializable_last_key = None
+        if last_evaluated_key_result:
+            try:
+                serializable_last_key = decimal_to_float(last_evaluated_key_result)
+            except Exception as e:
+                logger.warning(f"Error converting last_evaluated_key: {e}")
+        
+        return final_results, serializable_last_key, has_more
         
     except Exception as e:
         logger.error(f"❌ Error querying DynamoDB: {str(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        return []
+        return [], None, False
 
 def passes_all_filters(stock: Dict[str, Any], criteria: Dict[str, Any]) -> bool:
     """

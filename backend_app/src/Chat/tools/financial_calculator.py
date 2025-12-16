@@ -198,3 +198,4 @@ RISK METRICS:
         logger.error(f"Error in financial calculation: {str(e)}")
         return f"Error in financial calculation: {str(e)}"
 
+

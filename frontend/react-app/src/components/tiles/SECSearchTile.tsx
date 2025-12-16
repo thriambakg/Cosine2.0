@@ -46,9 +46,10 @@ import {
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   OpenInNew as OpenInNewIcon,
+  ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { secSearchAPI, SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../../services/api';
-import { useTilePinning, PinButton, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
+import { useTilePinning, PinButton, TileHeaderActions, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
@@ -207,6 +208,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [formTypesModalOpen, setFormTypesModalOpen] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   
   // Search state - matching SEC search page structure
@@ -362,7 +364,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     ...initialDisplayOptions
   }), [initialDisplayOptions]);
 
-  // Column visibility state - separate state that can be toggled in filter dialog
+  // Column visibility state - separate state that can be toggled via column menu
   const [visibleColumns, setVisibleColumns] = useState({
     entity: localDisplayOptions.showEntity,
     form: localDisplayOptions.showForm,
@@ -371,6 +373,27 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     incorporation: localDisplayOptions.showIncorporation,
     cik: localDisplayOptions.showCIK,
   });
+
+  // Handle column toggle
+  const handleColumnToggle = useCallback((columnKey: keyof typeof visibleColumns) => {
+    setVisibleColumns((prev) => {
+      const newColumns = {
+        ...prev,
+        [columnKey]: !prev[columnKey],
+      };
+      
+      // Update display options via onSettingsChange to persist
+      const displayOptionKey = `show${columnKey.charAt(0).toUpperCase() + columnKey.slice(1)}` as keyof typeof localDisplayOptions;
+      onSettingsChange(id, {
+        displayOptions: {
+          ...localDisplayOptions,
+          [displayOptionKey]: newColumns[columnKey],
+        },
+      });
+      
+      return newColumns;
+    });
+  }, [localDisplayOptions, id, onSettingsChange]);
 
   // Column width state for dynamic sizing
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
@@ -1245,61 +1268,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           Refine search results by: Click headings to show top filters. Document counts shown in <span style={{ color: '#3b82f6' }}>#</span>
         </Typography>
 
-        {/* Column Visibility Filter */}
-        <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
-          <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 2, fontWeight: 600 }}>
-            Visible Columns:
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {[
-              { key: 'entity', label: 'Entity', value: visibleColumns.entity },
-              { key: 'form', label: 'Form', value: visibleColumns.form },
-              { key: 'filingDate', label: 'Filing Date', value: visibleColumns.filingDate },
-              { key: 'location', label: 'Location', value: visibleColumns.location },
-              { key: 'incorporation', label: 'Incorporation', value: visibleColumns.incorporation },
-              { key: 'cik', label: 'CIK', value: visibleColumns.cik },
-            ].map((column) => (
-              <FormControlLabel
-                key={column.key}
-                control={
-                  <Checkbox
-                    checked={column.value}
-                    onChange={(e) => {
-                      setVisibleColumns((prev: typeof visibleColumns) => ({
-                        ...prev,
-                        [column.key]: e.target.checked
-                      }));
-                      // Update display options via onSettingsChange to persist
-                      const displayOptionKey = `show${column.key.charAt(0).toUpperCase() + column.key.slice(1)}` as keyof typeof localDisplayOptions;
-                      onSettingsChange(id, {
-                        displayOptions: {
-                          ...localDisplayOptions,
-                          [displayOptionKey]: e.target.checked
-                        }
-                      });
-                    }}
-                    sx={{ 
-                      color: '#64748b', 
-                      '&.Mui-checked': { color: '#3b82f6' },
-                      '& .MuiSvgIcon-root': { fontSize: 20 },
-                    }}
-                  />
-                }
-                label={
-                  <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                    {column.label}
-                  </Typography>
-                }
-                sx={{ 
-                  margin: 0,
-                  '& .MuiFormControlLabel-label': {
-                    ml: 0.5,
-                  },
-                }}
-              />
-            ))}
-          </Box>
-        </Box>
 
         {/* Page Size Selection */}
         <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
@@ -2245,87 +2213,85 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           )}
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          {/* Control buttons */}
-          <Tooltip title={`Add ${selectedResults.size > 0 ? `${selectedResults.size} filing(s)` : 'selected filings'} to context`}>
-            <span>
-              <IconButton
-                size="small"
-                onClick={handleContextMenuClick}
-                disabled={selectedResults.size === 0}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{ 
-                  color: selectedResults.size > 0 ? '#10b981' : '#6b7280',
-                  '&:hover': { color: selectedResults.size > 0 ? '#059669' : '#6b7280' },
-                  '&.Mui-disabled': { color: '#6b7280' }
-                }}
-              >
-                <AddToContextIcon fontSize="small" />
-              </IconButton>
-            </span>
-          </Tooltip>
+        <TileHeaderActions
+          pinButton={{
+            isPinned: pinnedState,
+            onTogglePin: togglePin,
+          }}
+          contextButton={{
+            onClick: handleContextMenuClick,
+            disabled: selectedResults.size === 0,
+            tooltip: `Add ${selectedResults.size > 0 ? `${selectedResults.size} filing(s)` : 'selected filings'} to context`,
+            icon: <AddToContextIcon fontSize="small" />,
+          }}
+          deleteButton={{
+            onClick: handleRemove,
+            icon: <CloseIcon sx={{ fontSize: 18 }} />,
+          }}
+          collapsibleActions={
+            <>
+              <Tooltip title="Refresh" arrow>
+                <IconButton
+                  onClick={performSearch}
+                  disabled={isLoading}
+                  sx={{
+                    color: '#9ca3b8',
+                    '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                    padding: '6px',
+                  }}
+                  size="small"
+                >
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
 
-          <Tooltip title="Filter Results" arrow>
-            <IconButton
-              onClick={() => setFilterDialogOpen(true)}
-              sx={{
-                color: '#9ca3b8',
-                '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
-                padding: '6px',
-              }}
-              size="small"
-            >
-              <FilterIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+              <Tooltip title="Select columns to display">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setColumnMenuAnchor(e.currentTarget);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <ViewColumnIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
 
+              <Tooltip title="Filter Results" arrow>
+                <IconButton
+                  onClick={() => setFilterDialogOpen(true)}
+                  sx={{
+                    color: '#9ca3b8',
+                    '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                    padding: '6px',
+                  }}
+                  size="small"
+                >
+                  <FilterIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
 
-
-          <Tooltip title="Refresh" arrow>
-            <IconButton
-              onClick={performSearch}
-              disabled={isLoading}
-              sx={{
-                color: '#9ca3b8',
-                '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
-                padding: '6px',
-              }}
-              size="small"
-            >
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-
-          <PinButton isPinned={pinnedState} onTogglePin={togglePin} />
-
-          <Tooltip title="Edit Search Criteria" arrow>
-            <IconButton
-              onClick={(e) => {
-                e.stopPropagation();
-                setSearchDialogOpen(true);
-              }}
-              sx={{
-                color: '#9ca3b8',
-                '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
-                padding: '6px',
-              }}
-              size="small"
-            >
-              <SearchIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title="Remove tile">
-            <IconButton
-              size="small"
-              onClick={handleRemove}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#dc2626' } }}
-            >
-              <CloseIcon sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
-        </Box>
+              <Tooltip title="Edit Search Criteria" arrow>
+                <IconButton
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSearchDialogOpen(true);
+                  }}
+                  sx={{
+                    color: '#9ca3b8',
+                    '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                    padding: '6px',
+                  }}
+                  size="small"
+                >
+                  <SearchIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          }
+        />
       </Box>
 
       {/* Results Table */}
@@ -2683,6 +2649,43 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           <ListItemIcon><SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} /></ListItemIcon>
           <ListItemText primary="Add to Current Sidebar Chat" />
         </MenuItem>
+      </Menu>
+
+      {/* Column Selection Menu */}
+      <Menu
+        anchorEl={columnMenuAnchor}
+        open={Boolean(columnMenuAnchor)}
+        onClose={() => setColumnMenuAnchor(null)}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.98)',
+            border: '2px solid #374151',
+            color: '#ffffff',
+          },
+        }}
+      >
+        {[
+          { key: 'entity', label: 'Entity' },
+          { key: 'form', label: 'Form' },
+          { key: 'filingDate', label: 'Filing Date' },
+          { key: 'location', label: 'Location' },
+          { key: 'incorporation', label: 'Incorporation' },
+          { key: 'cik', label: 'CIK' },
+        ].map((column) => (
+          <MenuItem
+            key={column.key}
+            onClick={() => handleColumnToggle(column.key as keyof typeof visibleColumns)}
+            sx={{
+              color: visibleColumns[column.key as keyof typeof visibleColumns] ? '#3b82f6' : '#94a3b8',
+            }}
+          >
+            <Checkbox
+              checked={visibleColumns[column.key as keyof typeof visibleColumns]}
+              sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
+            />
+            {column.label}
+          </MenuItem>
+        ))}
       </Menu>
 
       {/* Dialogs */}

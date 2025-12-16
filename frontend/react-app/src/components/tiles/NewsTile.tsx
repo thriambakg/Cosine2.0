@@ -47,9 +47,10 @@ import {
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
   ExpandMore as ExpandMoreIcon,
+  ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../../services/api';
-import { useTilePinning, PinButton, addArticleToContext, addMultipleArticlesToContext, confirmDialog } from './common';
+import { useTilePinning, PinButton, TileHeaderActions, addArticleToContext, addMultipleArticlesToContext, confirmDialog } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
@@ -146,6 +147,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   
   // Filter state for client-side filtering - restore from props if available
@@ -269,6 +271,27 @@ const NewsTile: React.FC<NewsTileProps> = ({
     category: localDisplayOptions.showCategory,
     date: localDisplayOptions.showDate,
   });
+
+  // Handle column toggle
+  const handleColumnToggle = useCallback((columnKey: keyof typeof visibleColumns) => {
+    setVisibleColumns((prev) => {
+      const newColumns = {
+        ...prev,
+        [columnKey]: !prev[columnKey],
+      };
+      
+      // Update display options via onSettingsChange to persist
+      const displayOptionKey = `show${columnKey.charAt(0).toUpperCase() + columnKey.slice(1)}` as keyof typeof localDisplayOptions;
+      onSettingsChange(id, {
+        displayOptions: {
+          ...localDisplayOptions,
+          [displayOptionKey]: newColumns[columnKey],
+        },
+      });
+      
+      return newColumns;
+    });
+  }, [localDisplayOptions, id, onSettingsChange]);
 
   // Column width state for dynamic sizing
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
@@ -1196,116 +1219,114 @@ const NewsTile: React.FC<NewsTileProps> = ({
           )}
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 0.5 }}>
-          <PinButton
-            isPinned={pinnedState}
-            onTogglePin={togglePin}
-          />
-
-          <Tooltip title="Run Search">
-            <IconButton
-              size="small"
-              onClick={handleRefresh}
-              disabled={isLoading}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ 
-                color: isLoading ? '#6b7280' : '#9ca3af',
-                '&:hover': { color: '#3b82f6' },
-                '&.Mui-disabled': { color: '#6b7280' }
-              }}
-            >
-              {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title={`Add ${selectedArticles.size > 0 ? `${selectedArticles.size} article(s)` : 'selected articles'} to context`}>
-            <span>
-              <IconButton
-                size="small"
-                onClick={handleContextMenuClick}
-                disabled={selectedArticles.size === 0}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{ 
-                  color: selectedArticles.size > 0 ? '#10b981' : '#6b7280',
-                  '&:hover': { color: selectedArticles.size > 0 ? '#059669' : '#6b7280' },
-                  '&.Mui-disabled': { color: '#6b7280' }
-                }}
-              >
-                <AddToContextIcon fontSize="small" />
-              </IconButton>
-            </span>
-          </Tooltip>
-
-          <Tooltip title={
-            (selectedFilters.sources.length > 0 || 
-             selectedFilters.categories.length > 0 || 
-             selectedFilters.countries.length > 0) 
-              ? `Filter Results (${Object.values(selectedFilters).flat().length} active)`
-              : "Filter Results"
-          }>
-            <Box sx={{ position: 'relative' }}>
-              <IconButton
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setFilterDialogOpen(true);
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{ 
-                  color: (selectedFilters.sources.length > 0 || 
-                          selectedFilters.categories.length > 0 || 
-                          selectedFilters.countries.length > 0) 
-                    ? '#3b82f6' 
-                    : '#9ca3af', 
-                  '&:hover': { color: '#3b82f6' } 
-                }}
-              >
-                <FilterIcon fontSize="small" />
-              </IconButton>
-              {(selectedFilters.sources.length > 0 || 
-                selectedFilters.categories.length > 0 || 
-                selectedFilters.countries.length > 0) && (
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    top: -2,
-                    right: -2,
-                    width: 8,
-                    height: 8,
-                    backgroundColor: '#3b82f6',
-                    borderRadius: '50%',
-                    border: '1px solid #1e293b',
+        <TileHeaderActions
+          pinButton={{
+            isPinned: pinnedState,
+            onTogglePin: togglePin,
+          }}
+          contextButton={{
+            onClick: handleContextMenuClick,
+            disabled: selectedArticles.size === 0,
+            tooltip: `Add ${selectedArticles.size > 0 ? `${selectedArticles.size} article(s)` : 'selected articles'} to context`,
+            icon: <AddToContextIcon fontSize="small" />,
+          }}
+          deleteButton={{
+            onClick: handleRemove,
+            icon: <CloseIcon sx={{ fontSize: 18 }} />,
+          }}
+          collapsibleActions={
+            <>
+              <Tooltip title="Run Search">
+                <IconButton
+                  size="small"
+                  onClick={handleRefresh}
+                  disabled={isLoading}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ 
+                    color: isLoading ? '#6b7280' : '#9ca3af',
+                    '&:hover': { color: '#3b82f6' },
+                    '&.Mui-disabled': { color: '#6b7280' }
                   }}
-                />
-              )}
-            </Box>
-          </Tooltip>
+                >
+                  {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
 
-          <Tooltip title="Edit Search Criteria">
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSearchDialogOpen(true);
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-            >
-              <SearchIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+              <Tooltip title="Select columns to display">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setColumnMenuAnchor(e.currentTarget);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <ViewColumnIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
 
-          <Tooltip title="Remove tile">
-            <IconButton
-              size="small"
-              onClick={handleRemove}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#dc2626' } }}
-            >
-              <CloseIcon sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
-        </Box>
+              <Tooltip title={
+                (selectedFilters.sources.length > 0 || 
+                 selectedFilters.categories.length > 0 || 
+                 selectedFilters.countries.length > 0) 
+                  ? `Filter Results (${Object.values(selectedFilters).flat().length} active)`
+                  : "Filter Results"
+              }>
+                <Box sx={{ position: 'relative' }}>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFilterDialogOpen(true);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    sx={{ 
+                      color: (selectedFilters.sources.length > 0 || 
+                              selectedFilters.categories.length > 0 || 
+                              selectedFilters.countries.length > 0) 
+                        ? '#3b82f6' 
+                        : '#9ca3af', 
+                      '&:hover': { color: '#3b82f6' } 
+                    }}
+                  >
+                    <FilterIcon fontSize="small" />
+                  </IconButton>
+                  {(selectedFilters.sources.length > 0 || 
+                    selectedFilters.categories.length > 0 || 
+                    selectedFilters.countries.length > 0) && (
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        top: -2,
+                        right: -2,
+                        width: 8,
+                        height: 8,
+                        backgroundColor: '#3b82f6',
+                        borderRadius: '50%',
+                        border: '1px solid #1e293b',
+                      }}
+                    />
+                  )}
+                </Box>
+              </Tooltip>
+
+              <Tooltip title="Edit Search Criteria">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSearchDialogOpen(true);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <SearchIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          }
+        />
       </Box>
 
       {/* Loading state */}
@@ -1743,6 +1764,41 @@ const NewsTile: React.FC<NewsTileProps> = ({
         </MenuItem>
       </Menu>
 
+      {/* Column Selection Menu */}
+      <Menu
+        anchorEl={columnMenuAnchor}
+        open={Boolean(columnMenuAnchor)}
+        onClose={() => setColumnMenuAnchor(null)}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.98)',
+            border: '2px solid #374151',
+            color: '#ffffff',
+          },
+        }}
+      >
+        {[
+          { key: 'title', label: 'Title' },
+          { key: 'source', label: 'Source' },
+          { key: 'category', label: 'Category' },
+          { key: 'date', label: 'Date' },
+        ].map((column) => (
+          <MenuItem
+            key={column.key}
+            onClick={() => handleColumnToggle(column.key as keyof typeof visibleColumns)}
+            sx={{
+              color: visibleColumns[column.key as keyof typeof visibleColumns] ? '#3b82f6' : '#94a3b8',
+            }}
+          >
+            <Checkbox
+              checked={visibleColumns[column.key as keyof typeof visibleColumns]}
+              sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
+            />
+            {column.label}
+          </MenuItem>
+        ))}
+      </Menu>
+
       {/* Search Dialog */}
       {renderSearchDialog()}
 
@@ -1851,55 +1907,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
             </Box>
           )}
 
-          {/* Column Visibility Filter */}
-          <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
-            <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 2, fontWeight: 600 }}>
-              Visible Columns:
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {[
-                { key: 'title', label: 'Title', value: visibleColumns.title },
-                { key: 'source', label: 'Source', value: visibleColumns.source },
-                { key: 'category', label: 'Category', value: visibleColumns.category },
-                { key: 'date', label: 'Date', value: visibleColumns.date },
-              ].map((column) => (
-                <FormControlLabel
-                  key={column.key}
-                  control={
-                    <Checkbox
-                      checked={column.value}
-                      onChange={(e) => {
-                        setVisibleColumns(prev => ({
-                          ...prev,
-                          [column.key]: e.target.checked
-                        }));
-                        setLocalDisplayOptions(prev => ({
-                          ...prev,
-                          [`show${column.key.charAt(0).toUpperCase() + column.key.slice(1)}`]: e.target.checked
-                        }));
-                      }}
-                      sx={{ 
-                        color: '#64748b', 
-                        '&.Mui-checked': { color: '#3b82f6' },
-                        '& .MuiSvgIcon-root': { fontSize: 20 },
-                      }}
-                    />
-                  }
-                  label={
-                    <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                      {column.label}
-                    </Typography>
-                  }
-                  sx={{ 
-                    margin: 0,
-                    '& .MuiFormControlLabel-label': {
-                      ml: 0.5,
-                    },
-                  }}
-                />
-              ))}
-            </Box>
-          </Box>
 
           {/* Page Size Selection */}
           <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>

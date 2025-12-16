@@ -29,7 +29,8 @@ import {
   Settings as SettingsIcon,
   Article as ArticleIcon,
   Assessment as AssessmentIcon,
-  Description as DescriptionIcon
+  Description as DescriptionIcon,
+  Gavel as GavelIcon
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
@@ -318,6 +319,28 @@ const tileCategories: TileCategory[] = [
             subcategory: 'trades',
             icon: <DescriptionIcon />,
             color: '#2563eb',
+            isAvailable: true,
+            placeholder: false
+          },
+          {
+            id: 'govt_contracts',
+            name: 'Government Contracts',
+            description: 'Search and analyze government contract awards with agency and recipient filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <AccountBalanceIcon />,
+            color: '#059669',
+            isAvailable: true,
+            placeholder: false
+          },
+          {
+            id: 'congress_bills',
+            name: 'Congress Bills',
+            description: 'Search and analyze congressional bills with sponsor and policy area filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <GavelIcon />,
+            color: '#7c3aed',
             isAvailable: true,
             placeholder: false
           }
@@ -791,6 +814,12 @@ const UnifiedDashboardPage: React.FC = () => {
     } else if (tileType.id === 'sec_search') {
       // Handle SEC search tile creation
       handleCreateSECSearchTile();
+    } else if (tileType.id === 'govt_contracts') {
+      // Handle government contracts tile creation
+      handleCreateGovtContractsTile();
+    } else if (tileType.id === 'congress_bills') {
+      // Handle congress bills tile creation
+      handleCreateCongressBillsTile();
     } else if (tileType.placeholder) {
       // For placeholder tiles, show a message
       alert(`${tileType.name} tiles are coming soon!`);
@@ -1010,6 +1039,108 @@ const UnifiedDashboardPage: React.FC = () => {
         dateTo: '',
         cik: '',
       },
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
+  };
+
+  // Government contracts tile creation handler
+  const handleCreateGovtContractsTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `govt_contracts_${Date.now()}`,
+      type: 'govt_contracts',
+      title: 'Government Contracts',
+      displayOptions: {
+        showRecipient: true,
+        showAwardingAgency: true,
+        showFundingAgency: true,
+        showAmount: true,
+        showPeriodStartDate: false,
+        showPeriodEndDate: false,
+        showNaicsCode: false,
+        showPscCode: false,
+        showLastUpdated: true,
+        showResultsTable: true,
+        maxResults: 50,
+        compactView: false,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 600, height: 600 },
+      gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
+      gridSize: { width: 6, height: 6 },
+      dashboard_id: currentDashboardId,
+      searchParams: {
+        keywords: [],
+        award_type: [],
+        awarding_agency_name: [],
+        funding_agency_name: [],
+        recipient_name: [],
+        recipient_location_state: [],
+        naics_code: [],
+        psc_code: [],
+        cfda_number: [],
+        date_from: '',
+        date_to: '',
+      },
+      results: [],
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
+  };
+
+  // Congress bills tile creation handler
+  const handleCreateCongressBillsTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `congress_bills_${Date.now()}`,
+      type: 'congress_bills',
+      title: 'Congress Bills',
+      displayOptions: {
+        showBillTitle: true,
+        showBillType: true,
+        showBillNumber: false,
+        showSponsorName: true,
+        showSponsorParty: false,
+        showSponsorState: false,
+        showIntroducedDate: true,
+        showLatestActionDate: false,
+        showCongress: true,
+        showBipartisan: false,
+        showPolicyArea: false,
+        showResultsTable: true,
+        maxResults: 50,
+        compactView: false,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 600, height: 600 },
+      gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
+      gridSize: { width: 6, height: 6 },
+      dashboard_id: currentDashboardId,
+      searchParams: {
+        bill_title: [],
+        bill_type: [],
+        sponsor_name: [],
+        introduced_date_from: '',
+        introduced_date_to: '',
+        congress: [],
+        policy_area: [],
+        sponsor_party: [],
+        sponsor_state: [],
+        latest_action_date_from: '',
+        latest_action_date_to: '',
+        bipartisan: undefined,
+        bill_number: undefined,
+      },
+      results: [],
     };
 
     const updatedTiles = [...(activeTab.tiles || []), newTile];

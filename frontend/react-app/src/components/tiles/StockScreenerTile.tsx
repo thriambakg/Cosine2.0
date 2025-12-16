@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
   Box,
   Typography,
@@ -28,12 +28,15 @@ import {
   Pagination,
   Alert,
   CircularProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  ExpandMore as ExpandMoreIcon,
 } from '@mui/material';
 import {
-  Settings as SettingsIcon,
   Close as CloseIcon,
   PushPin as PinIcon,
-  AutoAwesome as AutoRefreshIcon,
+  Refresh as RefreshIcon,
   Search as SearchIcon,
   FilterList as FilterIcon,
   TrendingUp as TrendingUpIcon,
@@ -43,9 +46,10 @@ import {
   Dashboard as AddToContextIcon,
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
+  ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
-import { useTilePinning, PinButton, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
+import { useTilePinning, PinButton, TileHeaderActions, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
 
 interface StockScreenerTileProps {
   id: string;
@@ -75,7 +79,12 @@ interface StockScreenerTileProps {
     showCriteriaSummary: boolean;
     maxResults: number;
   };
-  autoRefresh?: boolean;
+  filterSettings?: {
+    industries?: string[];
+    marketCapRanges?: string[];
+    volatilityRanges?: string[];
+    priceChangeRanges?: string[];
+  };
   isPinned?: boolean;
 }
 
@@ -135,11 +144,11 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     showCriteriaSummary: true,
     maxResults: 100000, // Get all matching stocks (effectively unlimited)
   },
-  autoRefresh = false,
+  filterSettings: initialFilterSettings,
   isPinned = false,
 }) => {
-  const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
   const [criteriaDialogOpen, setCriteriaDialogOpen] = useState(false);
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false);
 
   // Pinning functionality
   const { isPinned: pinnedState, togglePin } = useTilePinning({
@@ -148,7 +157,6 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       onSettingsChange(id, { isPinned: pinned });
     },
   });
-  const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   // Ensure new criteria fields have defaults for old tiles
   const [localCriteria, setLocalCriteria] = useState<StockScreenerCriteria>({
     ...criteria,
@@ -163,9 +171,70 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     showDividendYield: displayOptions.showDividendYield ?? true,
   });
   const [currentPage, setCurrentPage] = useState(1);
-  const [stockResults, setStockResults] = useState<StockResult[]>(results);
+  // Store all results for client-side filtering
+  const [allResults, setAllResults] = useState<StockResult[]>(results || []);
+  const [filteredResults, setFilteredResults] = useState<StockResult[]>(results || []);
   const [selectedStocks, setSelectedStocks] = useState<string[]>([]);
+  const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  
+  // Client-side filter state - restore from props if available
+  const [selectedFilters, setSelectedFilters] = useState<{
+    industries: Set<string>;
+    marketCapRanges: Set<string>;
+    volatilityRanges: Set<string>;
+    priceChangeRanges: Set<string>;
+  }>({
+    industries: new Set(initialFilterSettings?.industries || []),
+    marketCapRanges: new Set(initialFilterSettings?.marketCapRanges || []),
+    volatilityRanges: new Set(initialFilterSettings?.volatilityRanges || []),
+    priceChangeRanges: new Set(initialFilterSettings?.priceChangeRanges || []),
+  });
+  
+  // Column visibility state
+  const [visibleColumns, setVisibleColumns] = useState({
+    industry: localDisplayOptions.showIndustry,
+    marketCap: localDisplayOptions.showMarketCap,
+    volatility: localDisplayOptions.showVolatility,
+    priceChange: localDisplayOptions.showPriceChange,
+    peRatio: localDisplayOptions.showPERatio,
+    dividendYield: localDisplayOptions.showDividendYield,
+  });
+
+  // Sync visibleColumns with localDisplayOptions when it changes
+  useEffect(() => {
+    setVisibleColumns({
+      industry: localDisplayOptions.showIndustry,
+      marketCap: localDisplayOptions.showMarketCap,
+      volatility: localDisplayOptions.showVolatility,
+      priceChange: localDisplayOptions.showPriceChange,
+      peRatio: localDisplayOptions.showPERatio,
+      dividendYield: localDisplayOptions.showDividendYield,
+    });
+  }, [localDisplayOptions.showIndustry, localDisplayOptions.showMarketCap, localDisplayOptions.showVolatility, localDisplayOptions.showPriceChange, localDisplayOptions.showPERatio, localDisplayOptions.showDividendYield]);
+
+  // Handle column toggle
+  const handleColumnToggle = useCallback((columnKey: keyof typeof visibleColumns) => {
+    setVisibleColumns((prev) => {
+      const newColumns = {
+        ...prev,
+        [columnKey]: !prev[columnKey],
+      };
+      
+      // Update display options via onSettingsChange to persist
+      const displayOptionKey = columnKey === 'peRatio' ? 'showPERatio' : 
+                               columnKey === 'priceChange' ? 'showPriceChange' :
+                               `show${columnKey.charAt(0).toUpperCase() + columnKey.slice(1)}` as keyof typeof localDisplayOptions;
+      const newDisplayOptions = {
+        ...localDisplayOptions,
+        [displayOptionKey]: newColumns[columnKey],
+      };
+      setLocalDisplayOptions(newDisplayOptions);
+      onSettingsChange(id, { displayOptions: newDisplayOptions });
+      
+      return newColumns;
+    });
+  }, [localDisplayOptions, id, onSettingsChange]);
   const tileRef = useRef<HTMLDivElement>(null);
   const lastClickTimeRef = useRef<number>(0);
 
@@ -332,10 +401,11 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const stockScreenerHook = useStockScreener();
   const { loading: apiLoading, error: apiError, execute: executeScreener } = stockScreenerHook;
 
-  // Handle API loading state
+  // Handle API loading state - only update if we're not already in a manual loading state
+  // This prevents the API hook from clearing loading state prematurely
   useEffect(() => {
-    if (apiLoading !== undefined) {
-      setIsLoading(apiLoading);
+    if (apiLoading !== undefined && apiLoading) {
+      setIsLoading(true);
     }
   }, [apiLoading]);
 
@@ -370,7 +440,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       const response = await executeScreener(requestPayload);
       
       if (response?.results) {
-        setStockResults(response.results);
+        setAllResults(response.results);
+        // Don't set filteredResults here - let applyFilters handle it after state update
         
         // Update tile with results
         onUpdate(id, {
@@ -383,68 +454,35 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         setError(null);
       } else if (response?.message) {
         // Show message from backend (e.g., "No stocks match criteria")
-        setStockResults([]);
+        setAllResults([]);
+        setFilteredResults([]);
         setError(null);  // Not an error, just no results
       } else {
         // Unknown response format
-        setStockResults([]);
+        setAllResults([]);
+        setFilteredResults([]);
         setError('Unexpected response format');
       }
     } catch (err) {
       setError('Failed to fetch stock data. Please try again.');
-      setStockResults([]);
+      setAllResults([]);
+      setFilteredResults([]);
       console.error('Stock screener error:', err);
     } finally {
       setIsLoading(false);
     }
   }, [executeScreener, localCriteria, localDisplayOptions.maxResults, id, onUpdate]);
 
-  // Auto-refresh functionality
-  useEffect(() => {
-    if (!autoRefresh) return;
-
-    const interval = setInterval(() => {
-      runScreener();
-    }, 10 * 60 * 1000); // 10 minutes
-
-    return () => clearInterval(interval);
-  }, [autoRefresh, runScreener]);
-
   // Initial load
   useEffect(() => {
-    if (stockResults.length === 0) {
+    if (allResults.length === 0) {
       runScreener();
     }
-  }, [runScreener, stockResults.length]);
-
-  const handleSettingsOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setSettingsAnchor(event.currentTarget);
-  };
-
-  const handleSettingsClose = () => {
-    setSettingsAnchor(null);
-  };
+  }, [runScreener, allResults.length]);
 
   const handleCriteriaChange = (newCriteria: StockScreenerCriteria) => {
     setLocalCriteria(newCriteria);
     onSettingsChange(id, { criteria: newCriteria });
-  };
-
-  const handleDisplayOptionsChange = (option: keyof typeof displayOptions) => {
-    const newOptions = {
-      ...localDisplayOptions,
-      [option]: !localDisplayOptions[option],
-    };
-    setLocalDisplayOptions(newOptions);
-    onSettingsChange(id, { displayOptions: newOptions });
-  };
-
-  const handleAutoRefreshToggle = () => {
-    onSettingsChange(id, { autoRefresh: !autoRefresh });
-  };
-
-  const handlePinToggle = () => {
-    togglePin();
   };
 
   const handleRemove = async () => {
@@ -483,8 +521,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const handleAddToContext = (target: 'new' | 'sidebar') => {
     if (selectedStocks.length === 0) return;
     
-    // Get the selected stock objects from stockResults state
-    const selectedStockObjects = stockResults.filter(stock => 
+    // Get the selected stock objects from filteredResults state
+    const selectedStockObjects = filteredResults.filter(stock => 
       selectedStocks.includes(stock.symbol)
     );
     
@@ -602,10 +640,132 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     };
   }, [calculateResultsPerPage]);
 
-  const totalPages = Math.ceil(stockResults.length / resultsPerPage);
+  // Client-side filtering function
+  const applyFilters = useCallback(() => {
+    // If no filters are selected, show all results
+    const hasFilters = selectedFilters.industries.size > 0 || 
+                       selectedFilters.marketCapRanges.size > 0 || 
+                       selectedFilters.volatilityRanges.size > 0 ||
+                       selectedFilters.priceChangeRanges.size > 0;
+    
+    if (!hasFilters) {
+      setFilteredResults([...allResults]);
+      return;
+    }
+    
+    let filtered = [...allResults];
+    
+    // Industry filter
+    if (selectedFilters.industries.size > 0) {
+      filtered = filtered.filter(stock => 
+        selectedFilters.industries.has(stock.industry || 'Unknown')
+      );
+    }
+    
+    // Market cap range filter
+    if (selectedFilters.marketCapRanges.size > 0) {
+      filtered = filtered.filter(stock => {
+        const marketCap = stock.marketCap || 0;
+        return Array.from(selectedFilters.marketCapRanges).some(range => {
+          if (range === 'micro') return marketCap < 300_000_000; // < $300M
+          if (range === 'small') return marketCap >= 300_000_000 && marketCap < 2_000_000_000; // $300M - $2B
+          if (range === 'mid') return marketCap >= 2_000_000_000 && marketCap < 10_000_000_000; // $2B - $10B
+          if (range === 'large') return marketCap >= 10_000_000_000 && marketCap < 200_000_000_000; // $10B - $200B
+          if (range === 'mega') return marketCap >= 200_000_000_000; // >= $200B
+          return false;
+        });
+      });
+    }
+    
+    // Volatility range filter
+    if (selectedFilters.volatilityRanges.size > 0) {
+      filtered = filtered.filter(stock => {
+        const volatility = stock.volatility || 0;
+        return Array.from(selectedFilters.volatilityRanges).some(range => {
+          if (range === 'low') return volatility < 20;
+          if (range === 'medium') return volatility >= 20 && volatility < 40;
+          if (range === 'high') return volatility >= 40;
+          return false;
+        });
+      });
+    }
+    
+    // Price change range filter
+    if (selectedFilters.priceChangeRanges.size > 0) {
+      filtered = filtered.filter(stock => {
+        const priceChange = stock.priceChangePercent || 0;
+        return Array.from(selectedFilters.priceChangeRanges).some(range => {
+          if (range === 'gain') return priceChange > 0;
+          if (range === 'loss') return priceChange < 0;
+          if (range === 'big-gain') return priceChange > 5;
+          if (range === 'big-loss') return priceChange < -5;
+          return false;
+        });
+      });
+    }
+    
+    setFilteredResults(filtered);
+  }, [allResults, selectedFilters]);
+
+  // Apply filters when selectedFilters or allResults change
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
+
+  // Generate available filters from all results
+  const availableFilters = useMemo(() => {
+    const industryMap = new Map<string, number>();
+    const marketCapCounts = { micro: 0, small: 0, mid: 0, large: 0, mega: 0 };
+    const volatilityCounts = { low: 0, medium: 0, high: 0 };
+    const priceChangeCounts = { gain: 0, loss: 0, 'big-gain': 0, 'big-loss': 0 };
+    
+    allResults.forEach(stock => {
+      // Industries
+      const industry = stock.industry || 'Unknown';
+      industryMap.set(industry, (industryMap.get(industry) || 0) + 1);
+      
+      // Market cap ranges
+      const marketCap = stock.marketCap || 0;
+      if (marketCap < 300_000_000) marketCapCounts.micro++;
+      else if (marketCap < 2_000_000_000) marketCapCounts.small++;
+      else if (marketCap < 10_000_000_000) marketCapCounts.mid++;
+      else if (marketCap < 200_000_000_000) marketCapCounts.large++;
+      else marketCapCounts.mega++;
+      
+      // Volatility ranges
+      const volatility = stock.volatility || 0;
+      if (volatility < 20) volatilityCounts.low++;
+      else if (volatility < 40) volatilityCounts.medium++;
+      else volatilityCounts.high++;
+      
+      // Price change ranges
+      const priceChange = stock.priceChangePercent || 0;
+      if (priceChange > 5) priceChangeCounts['big-gain']++;
+      else if (priceChange > 0) priceChangeCounts.gain++;
+      else if (priceChange < -5) priceChangeCounts['big-loss']++;
+      else if (priceChange < 0) priceChangeCounts.loss++;
+    });
+    
+    return {
+      industries: Array.from(industryMap.entries())
+        .map(([industry, count]) => ({ industry, count }))
+        .sort((a, b) => b.count - a.count),
+      marketCapRanges: Object.entries(marketCapCounts)
+        .map(([range, count]) => ({ range, count }))
+        .filter(item => item.count > 0),
+      volatilityRanges: Object.entries(volatilityCounts)
+        .map(([range, count]) => ({ range, count }))
+        .filter(item => item.count > 0),
+      priceChangeRanges: Object.entries(priceChangeCounts)
+        .map(([range, count]) => ({ range, count }))
+        .filter(item => item.count > 0),
+    };
+  }, [allResults]);
+
+  const totalPages = Math.ceil(filteredResults.length / resultsPerPage);
   const startIndex = (currentPage - 1) * resultsPerPage;
   const endIndex = startIndex + resultsPerPage;
-  const currentResults = stockResults.slice(startIndex, endIndex);
+  const currentResults = filteredResults.slice(startIndex, endIndex);
 
   return (
     <Box
@@ -635,7 +795,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           left: 0,
           right: 0,
           height: '3px',
-          background: stockResults.length > 0 ? '#3b82f6' : '#dc2626',
+          background: filteredResults.length > 0 ? '#3b82f6' : '#dc2626',
         },
       }}
       ref={tileRef}
@@ -676,7 +836,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           </Typography>
           
           <Chip
-            label={`${stockResults.length} results`}
+            label={`${filteredResults.length}${filteredResults.length !== allResults.length ? ` of ${allResults.length}` : ''} results`}
             size="small"
             sx={{
               backgroundColor: 'rgba(59, 130, 246, 0.2)',
@@ -687,67 +847,122 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
             }}
           />
           
-          {autoRefresh && (
-            <Tooltip title="Auto-refresh enabled">
-              <AutoRefreshIcon sx={{ color: '#22c55e', fontSize: 16 }} />
-            </Tooltip>
-          )}
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 0.5 }}>
-          <PinButton
-            isPinned={pinnedState}
-            onTogglePin={handlePinToggle}
-          />
+        <TileHeaderActions
+          pinButton={{
+            isPinned: pinnedState,
+            onTogglePin: togglePin,
+          }}
+          contextButton={{
+            onClick: handleAddToContextClick,
+            disabled: selectedStocks.length === 0,
+            tooltip: `Add ${selectedStocks.length > 0 ? `${selectedStocks.length} stock(s)` : 'selected stocks'} to context`,
+            icon: <AddToContextIcon sx={{ fontSize: 18 }} />,
+          }}
+          deleteButton={{
+            onClick: handleRemove,
+            icon: <CloseIcon sx={{ fontSize: 18 }} />,
+          }}
+          collapsibleActions={
+            <>
+              <Tooltip title="Refresh">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runScreener();
+                  }}
+                  disabled={isLoading}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  {isLoading ? (
+                    <CircularProgress size={18} sx={{ color: '#3b82f6' }} />
+                  ) : (
+                    <RefreshIcon sx={{ fontSize: 18 }} />
+                  )}
+                </IconButton>
+              </Tooltip>
 
-          <Tooltip title="Run Screener">
-            <IconButton
-              size="small"
-              onClick={runScreener}
-              disabled={isLoading}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-            >
-              <SearchIcon sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
+              <Tooltip title="Select columns to display">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setColumnMenuAnchor(e.currentTarget);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <ViewColumnIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
 
-          <Tooltip title={`Add ${selectedStocks.length > 0 ? `${selectedStocks.length} stock(s)` : 'selected stocks'} to context`}>
-            <span>
-              <IconButton
-                size="small"
-                onClick={handleAddToContextClick}
-                disabled={selectedStocks.length === 0}
-                sx={{ 
-                  color: selectedStocks.length > 0 ? '#10b981' : '#9ca3af', 
-                  '&:hover': { color: '#10b981' },
-                  '&:disabled': { color: '#4b5563' }
-                }}
-              >
-                <AddToContextIcon sx={{ fontSize: 18 }} />
-              </IconButton>
-            </span>
-          </Tooltip>
+              <Tooltip title={
+                (selectedFilters.industries.size > 0 || 
+                 selectedFilters.marketCapRanges.size > 0 || 
+                 selectedFilters.volatilityRanges.size > 0 ||
+                 selectedFilters.priceChangeRanges.size > 0) 
+                  ? `Filter Results (${selectedFilters.industries.size + selectedFilters.marketCapRanges.size + selectedFilters.volatilityRanges.size + selectedFilters.priceChangeRanges.size} active)`
+                  : "Filter Results"
+              }>
+                <Box sx={{ position: 'relative' }}>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFilterDialogOpen(true);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    sx={{ 
+                      color: (selectedFilters.industries.size > 0 || 
+                              selectedFilters.marketCapRanges.size > 0 || 
+                              selectedFilters.volatilityRanges.size > 0 ||
+                              selectedFilters.priceChangeRanges.size > 0) 
+                        ? '#3b82f6' 
+                        : '#9ca3af', 
+                      '&:hover': { color: '#3b82f6' } 
+                    }}
+                  >
+                    <FilterIcon fontSize="small" />
+                  </IconButton>
+                  {(selectedFilters.industries.size > 0 || 
+                    selectedFilters.marketCapRanges.size > 0 || 
+                    selectedFilters.volatilityRanges.size > 0 ||
+                    selectedFilters.priceChangeRanges.size > 0) && (
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        top: -2,
+                        right: -2,
+                        width: 8,
+                        height: 8,
+                        backgroundColor: '#3b82f6',
+                        borderRadius: '50%',
+                        border: '1px solid #1e293b',
+                      }}
+                    />
+                  )}
+                </Box>
+              </Tooltip>
 
-          <Tooltip title="Settings">
-            <IconButton
-              size="small"
-              onClick={handleSettingsOpen}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-            >
-              <SettingsIcon sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title="Remove tile">
-            <IconButton
-              size="small"
-              onClick={handleRemove}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#dc2626' } }}
-            >
-              <CloseIcon sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
-        </Box>
+              <Tooltip title="Edit Criteria">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCriteriaDialogOpen(true);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <SearchIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          }
+        />
       </Box>
 
       {/* Loading state */}
@@ -805,7 +1020,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       )}
 
       {/* Results Table */}
-      {localDisplayOptions.showResultsTable && stockResults.length > 0 && !isLoading && (
+      {localDisplayOptions.showResultsTable && filteredResults.length > 0 && !isLoading && (
         <Box sx={{ 
           flex: 1, 
           display: 'flex', 
@@ -868,23 +1083,23 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                     />
                   </TableCell>
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Symbol</TableCell>
-                  {localDisplayOptions.showIndustry && (
+                  {visibleColumns.industry && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Industry</TableCell>
                   )}
                   <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Price</TableCell>
-                  {localDisplayOptions.showPriceChange && (
+                  {visibleColumns.priceChange && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Change</TableCell>
                   )}
-                  {localDisplayOptions.showMarketCap && (
+                  {visibleColumns.marketCap && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Market Cap</TableCell>
                   )}
-                  {localDisplayOptions.showVolatility && (
+                  {visibleColumns.volatility && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Volatility</TableCell>
                   )}
-                  {localDisplayOptions.showPERatio && (
+                  {visibleColumns.peRatio && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>P/E</TableCell>
                   )}
-                  {localDisplayOptions.showDividendYield && (
+                  {visibleColumns.dividendYield && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Div Yield</TableCell>
                   )}
                 </TableRow>
@@ -927,13 +1142,13 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                         />
                       </TableCell>
                       <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>{stock.symbol}</TableCell>
-                      {localDisplayOptions.showIndustry && (
+                      {visibleColumns.industry && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{industry}</TableCell>
                       )}
                       <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>
                         ${price.toFixed(2)}
                       </TableCell>
-                      {localDisplayOptions.showPriceChange && (
+                      {visibleColumns.priceChange && (
                         <TableCell
                           sx={{
                             color: priceChangePercent >= 0 ? '#22c55e' : '#dc2626',
@@ -944,18 +1159,18 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                           {priceChangePercent >= 0 ? '+' : ''}{priceChangePercent.toFixed(2)}%
                         </TableCell>
                       )}
-                      {localDisplayOptions.showMarketCap && (
+                      {visibleColumns.marketCap && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{formatMarketCap(marketCap)}</TableCell>
                       )}
-                      {localDisplayOptions.showVolatility && (
+                      {visibleColumns.volatility && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{volatility.toFixed(1)}%</TableCell>
                       )}
-                      {localDisplayOptions.showPERatio && (
+                      {visibleColumns.peRatio && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
                           {peRatio > 0 ? peRatio.toFixed(1) : 'N/A'}
                         </TableCell>
                       )}
-                      {localDisplayOptions.showDividendYield && (
+                      {visibleColumns.dividendYield && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
                           {dividendYield > 0 ? `${dividendYield.toFixed(2)}%` : 'N/A'}
                         </TableCell>
@@ -978,7 +1193,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
               borderTop: '1px solid rgba(55, 65, 81, 0.3)' 
             }}>
               <Typography variant="caption" color="#6b7280" sx={{ fontSize: '0.75rem' }}>
-                Showing {startIndex + 1}-{Math.min(endIndex, stockResults.length)} of {stockResults.length} results
+                Showing {startIndex + 1}-{Math.min(endIndex, filteredResults.length)} of {filteredResults.length} results
               </Typography>
               <Pagination
                 count={totalPages}
@@ -1006,7 +1221,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       )}
 
       {/* No Results */}
-      {!isLoading && stockResults.length === 0 && !error && (
+      {!isLoading && filteredResults.length === 0 && !error && (
         <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
           <Typography variant="body2" color="#9ca3af">
             No stocks match your criteria. Try adjusting your filters.
@@ -1014,36 +1229,6 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         </Box>
       )}
 
-      {/* Settings Menu */}
-      <Menu
-        anchorEl={settingsAnchor}
-        open={Boolean(settingsAnchor)}
-        onClose={handleSettingsClose}
-        PaperProps={{
-          sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid #374151',
-            color: 'white',
-          },
-        }}
-      >
-        <MenuItem onClick={() => { setCriteriaDialogOpen(true); handleSettingsClose(); }}>
-          <FilterIcon sx={{ mr: 1, fontSize: 18 }} />
-          Edit Criteria
-        </MenuItem>
-        <MenuItem onClick={() => { setDisplayDialogOpen(true); handleSettingsClose(); }}>
-          <SettingsIcon sx={{ mr: 1, fontSize: 18 }} />
-          Display Options
-        </MenuItem>
-        <MenuItem onClick={handleAutoRefreshToggle}>
-          <AutoRefreshIcon sx={{ mr: 1, fontSize: 18 }} />
-          {autoRefresh ? 'Disable' : 'Enable'} Auto-refresh
-        </MenuItem>
-        <MenuItem onClick={handlePinToggle}>
-          <PinIcon sx={{ mr: 1, fontSize: 18 }} />
-          {pinnedState ? 'Unpin' : 'Pin'} Tile
-        </MenuItem>
-      </Menu>
 
       {/* Context Target Menu */}
       <Menu
@@ -1066,6 +1251,43 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
           Add to Current Sidebar Chat
         </MenuItem>
+      </Menu>
+
+      {/* Column Selection Menu */}
+      <Menu
+        anchorEl={columnMenuAnchor}
+        open={Boolean(columnMenuAnchor)}
+        onClose={() => setColumnMenuAnchor(null)}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.98)',
+            border: '2px solid #374151',
+            color: '#ffffff',
+          },
+        }}
+      >
+        {[
+          { key: 'industry', label: 'Industry' },
+          { key: 'marketCap', label: 'Market Cap' },
+          { key: 'volatility', label: 'Volatility' },
+          { key: 'priceChange', label: 'Price Change' },
+          { key: 'peRatio', label: 'P/E Ratio' },
+          { key: 'dividendYield', label: 'Dividend Yield' },
+        ].map((column) => (
+          <MenuItem
+            key={column.key}
+            onClick={() => handleColumnToggle(column.key as keyof typeof visibleColumns)}
+            sx={{
+              color: visibleColumns[column.key as keyof typeof visibleColumns] ? '#3b82f6' : '#94a3b8',
+            }}
+          >
+            <Checkbox
+              checked={visibleColumns[column.key as keyof typeof visibleColumns]}
+              sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
+            />
+            {column.label}
+          </MenuItem>
+        ))}
       </Menu>
 
       {/* Criteria Dialog */}
@@ -1239,106 +1461,39 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCriteriaDialogOpen(false)}>Cancel</Button>
-          <Button onClick={() => { setCriteriaDialogOpen(false); runScreener(); }} variant="contained">
-            Apply & Run
+          <Button 
+            onClick={() => setCriteriaDialogOpen(false)}
+            sx={{ color: '#94a3b8' }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={async () => {
+              // Persist criteria settings
+              onSettingsChange(id, { criteria: localCriteria });
+              // Close dialog
+              setCriteriaDialogOpen(false);
+              // Run screener with new criteria
+              await runScreener();
+            }}
+            variant="contained"
+            disabled={isLoading}
+            sx={{
+              background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+              '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+              color: '#ffffff',
+              fontWeight: 600,
+              '&.Mui-disabled': {
+                background: 'rgba(59, 130, 246, 0.3)',
+                color: 'rgba(255, 255, 255, 0.5)',
+              },
+            }}
+          >
+            {isLoading ? 'Running...' : 'Apply & Run'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Display Options Dialog */}
-      <Dialog
-        open={displayDialogOpen}
-        onClose={() => setDisplayDialogOpen(false)}
-        PaperProps={{
-          sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid #374151',
-            color: 'white',
-          },
-        }}
-      >
-        <DialogTitle>Display Options</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 1 }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.showIndustry}
-                  onChange={() => handleDisplayOptionsChange('showIndustry')}
-                />
-              }
-              label="Show Industry"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.showMarketCap}
-                  onChange={() => handleDisplayOptionsChange('showMarketCap')}
-                />
-              }
-              label="Show Market Cap"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.showVolatility}
-                  onChange={() => handleDisplayOptionsChange('showVolatility')}
-                />
-              }
-              label="Show Volatility"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.showPriceChange}
-                  onChange={() => handleDisplayOptionsChange('showPriceChange')}
-                />
-              }
-              label="Show Price Change"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.showPERatio}
-                  onChange={() => handleDisplayOptionsChange('showPERatio')}
-                />
-              }
-              label="Show P/E Ratio"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.showDividendYield}
-                  onChange={() => handleDisplayOptionsChange('showDividendYield')}
-                />
-              }
-              label="Show Dividend Yield"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.showResultsTable}
-                  onChange={() => handleDisplayOptionsChange('showResultsTable')}
-                />
-              }
-              label="Show Results Table"
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={localDisplayOptions.showCriteriaSummary}
-                  onChange={() => handleDisplayOptionsChange('showCriteriaSummary')}
-                />
-              }
-              label="Show Criteria Summary"
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDisplayDialogOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 };
@@ -1366,8 +1521,7 @@ const StockScreenerTileMemo = memo(StockScreenerTile, (prevProps, nextProps) => 
   }
   
   // Check if other important props changed
-  if (prevProps.autoRefresh !== nextProps.autoRefresh ||
-      prevProps.isPinned !== nextProps.isPinned ||
+  if (prevProps.isPinned !== nextProps.isPinned ||
       prevProps.isDragging !== nextProps.isDragging ||
       prevProps.isResizing !== nextProps.isResizing ||
       prevProps.isSelected !== nextProps.isSelected) {

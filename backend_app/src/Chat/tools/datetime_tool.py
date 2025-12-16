@@ -158,3 +158,4 @@ def calculate_date_range(
         logger.error(f"Error calculating date range: {str(e)}")
         return json.dumps({"error": str(e)})
 
+

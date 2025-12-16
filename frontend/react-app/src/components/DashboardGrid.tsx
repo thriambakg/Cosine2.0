@@ -3,6 +3,8 @@ import { Box, Typography } from '@mui/material';
 import CryptoTile from './tiles/CryptoTile';
 import StockTile from './tiles/StockTile';
 import SECSearchTile from './tiles/SECSearchTile';
+import GovtContractsSearchTile from './tiles/GovtContractsSearchTile';
+import CongressBillsSearchTile from './tiles/CongressBillsSearchTile';
 import PlaceholderTile from './tiles/PlaceholderTile';
 import { UnifiedTile } from '../types/dashboardTypes';
 
@@ -93,6 +95,38 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
             onUpdate={onUpdateTile}
             onSettingsChange={onSettingsChange}
             searchParams={tile.searchParams}
+            displayOptions={tile.displayOptions}
+            autoRefresh={tile.autoRefresh}
+            isPinned={tile.isPinned}
+          />
+        );
+      case 'govt_contracts':
+        return (
+          <GovtContractsSearchTile
+            key={tile.id}
+            id={tile.id}
+            size={tile.size}
+            onRemove={onRemoveTile}
+            onUpdate={onUpdateTile}
+            onSettingsChange={onSettingsChange}
+            searchParams={tile.searchParams}
+            results={tile.results}
+            displayOptions={tile.displayOptions}
+            autoRefresh={tile.autoRefresh}
+            isPinned={tile.isPinned}
+          />
+        );
+      case 'congress_bills':
+        return (
+          <CongressBillsSearchTile
+            key={tile.id}
+            id={tile.id}
+            size={tile.size}
+            onRemove={onRemoveTile}
+            onUpdate={onUpdateTile}
+            onSettingsChange={onSettingsChange}
+            searchParams={tile.searchParams}
+            results={tile.results}
             displayOptions={tile.displayOptions}
             autoRefresh={tile.autoRefresh}
             isPinned={tile.isPinned}

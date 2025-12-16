@@ -330,6 +330,7 @@ export interface StockScreenerRequest {
     timeframe?: string;
   };
   maxResults?: number;
+  lastEvaluatedKey?: any;  // Pagination token
 }
 
 export interface StockScreenerResponse {
@@ -368,6 +369,8 @@ export interface StockScreenerResponse {
     last_updated?: string;
   }>;
   totalResults: number;
+  has_more?: boolean;  // Pagination flag
+  last_evaluated_key?: any;  // Pagination token
   criteria: StockScreenerRequest['criteria'];
   timestamp: string;
   message?: string;  // Added for "no results" message

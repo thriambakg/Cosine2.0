@@ -20,6 +20,7 @@ import PoliticianTradesSearchPage from './pages/PoliticianTradesSearchPage';
 import NewsSearchPage from './pages/NewsSearchPage';
 import GovtContractsSearchPage from './pages/GovtContractsSearchPage';
 import CongressBillsSearchPage from './pages/CongressBillsSearchPage';
+import StockScreenerSearchPage from './pages/StockScreenerSearchPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import { ConfirmDialog } from './components/tiles/common';
 
@@ -116,6 +117,11 @@ function AppContent() {
               <Route path="/congress-bills-search" element={
                 <ProtectedRoute>
                   <CongressBillsSearchPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/stock-screener-search" element={
+                <ProtectedRoute>
+                  <StockScreenerSearchPage />
                 </ProtectedRoute>
               } />
               <Route path="*" element={<Navigate to="/" replace />} />

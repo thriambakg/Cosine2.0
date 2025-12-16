@@ -966,6 +966,121 @@ export const addMultipleAwardsToContext = (
 };
 
 /**
+ * Add a congress bill to the context window
+ * Used for adding individual bills from the congress bills search page
+ */
+export const addBillToContext = (
+  bill: any,
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  const billId = bill.bill_id || bill.id || `bill_${Date.now()}`;
+  
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return '';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
+  const subtitle = bill.introduced_date 
+    ? `${formatDate(bill.introduced_date)}${bill.sponsor_full_name ? ` • ${bill.sponsor_full_name}` : ''}${bill.congress ? ` • ${bill.congress}th Congress` : ''}`
+    : bill.sponsor_full_name ? bill.sponsor_full_name : 'Congress Bill';
+  
+  const contextItem: ContextItem = {
+    id: `congress_bill_${billId}_${Date.now()}`,
+    type: 'congress_bill',
+    title,
+    subtitle,
+    data: bill,
+    timestamp: Date.now(),
+  };
+  
+  if (target === 'sidebar') {
+    const event = new CustomEvent('add-to-sidebar-context', {
+      detail: contextItem
+    });
+    window.dispatchEvent(event);
+    
+    const handleSidebarError = () => {
+      addToContext(contextItem);
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+  } else {
+    addToContext(contextItem);
+  }
+};
+
+/**
+ * Add multiple congress bills to the context window
+ * Used for adding multiple selected bills from the congress bills search page
+ */
+export const addMultipleBillsToContext = (
+  bills: any[],
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return '';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  const contextItems: ContextItem[] = bills.map(bill => {
+    const billId = bill.bill_id || bill.id || `bill_${Date.now()}`;
+    const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
+    const subtitle = bill.introduced_date 
+      ? `${formatDate(bill.introduced_date)}${bill.sponsor_full_name ? ` • ${bill.sponsor_full_name}` : ''}${bill.congress ? ` • ${bill.congress}th Congress` : ''}`
+      : bill.sponsor_full_name ? bill.sponsor_full_name : 'Congress Bill';
+    
+    return {
+      id: `congress_bill_${billId}_${Date.now()}_${Math.random()}`,
+      type: 'congress_bill' as const,
+      title,
+      subtitle,
+      data: bill,
+      timestamp: Date.now(),
+    };
+  });
+  
+  if (target === 'sidebar') {
+    const event = new CustomEvent('add-multiple-to-sidebar-context', {
+      detail: contextItems
+    });
+    window.dispatchEvent(event);
+    
+    const handleSidebarError = () => {
+      contextItems.forEach(item => addToContext(item));
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+  } else {
+    contextItems.forEach(item => addToContext(item));
+  }
+};
+
+/**
  * Add a custom item to the context window
  */
 export const addCustomToContext = (
@@ -1017,13 +1132,14 @@ export const extractTileData = (tile: any): TileContextData => {
     };
   }
 
-  // Add search params and filter settings for politician trades and SEC tiles
-  if (tile.type === 'politician_trades' || tile.type === 'sec_search') {
+  // Add search params and filter settings for politician trades, SEC, government contracts, and congress bills tiles
+  if (tile.type === 'politician_trades' || tile.type === 'sec_search' || tile.type === 'govt_contracts' || tile.type === 'congress_bills') {
     return {
       ...baseData,
       searchParams: tile.searchParams, // Search parameters (politicians, securities, dates, etc.)
       filterSettings: tile.filterSettings, // Client-side filter settings (entities, forms, etc.)
       filers: tile.filers, // Full filer objects for SEC tile (includes CIK and ticker)
+      results: tile.results || tile.trades, // Results data for session persistence
     };
   }
 

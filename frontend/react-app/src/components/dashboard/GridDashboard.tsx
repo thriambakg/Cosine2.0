@@ -8,6 +8,8 @@ import NewsTile from '../tiles/NewsTile';
 import PortfolioTile from '../tiles/PortfolioTile';
 import PoliticianTradesSearchTile from '../tiles/PoliticianTradesSearchTile';
 import SECSearchTile from '../tiles/SECSearchTile';
+import GovtContractsSearchTile from '../tiles/GovtContractsSearchTile';
+import CongressBillsSearchTile from '../tiles/CongressBillsSearchTile';
 import PlaceholderTile from '../tiles/PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../tiles/tileConfig';
@@ -861,6 +863,56 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       isPinned: tile.isPinned,
     };
 
+    const govtContractsProps = {
+      ...commonProps,
+      onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
+      searchParams: tile.searchParams,
+      results: tile.results,
+      displayOptions: {
+        showRecipient: true,
+        showAwardingAgency: true,
+        showFundingAgency: true,
+        showAmount: true,
+        showPeriodStartDate: false,
+        showPeriodEndDate: false,
+        showNaicsCode: false,
+        showPscCode: false,
+        showLastUpdated: true,
+        showResultsTable: true,
+        maxResults: 50,
+        compactView: false,
+        ...((tile.displayOptions as any) || {}),
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+    };
+
+    const congressBillsProps = {
+      ...commonProps,
+      onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
+      searchParams: tile.searchParams,
+      results: tile.results,
+      displayOptions: {
+        showBillTitle: true,
+        showBillType: true,
+        showBillNumber: false,
+        showSponsorName: true,
+        showSponsorParty: false,
+        showSponsorState: false,
+        showIntroducedDate: true,
+        showLatestActionDate: false,
+        showCongress: true,
+        showBipartisan: false,
+        showPolicyArea: false,
+        showResultsTable: true,
+        maxResults: 50,
+        compactView: false,
+        ...((tile.displayOptions as any) || {}),
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+    };
+
 
     return (
       <Box
@@ -888,6 +940,10 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           <PoliticianTradesSearchTile key={tile.id} {...politicianTradesProps} />
         ) : tile.type === 'sec_search' ? (
           <SECSearchTile key={tile.id} {...secSearchProps} />
+        ) : tile.type === 'govt_contracts' ? (
+          <GovtContractsSearchTile key={tile.id} {...govtContractsProps} />
+        ) : tile.type === 'congress_bills' ? (
+          <CongressBillsSearchTile key={tile.id} {...congressBillsProps} />
         ) : (
           <PlaceholderTile
             key={tile.id}

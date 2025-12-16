@@ -48,6 +48,13 @@ const defaultNavigationItems: NavigationItem[] = [
     category: 'portfolio'
   },
   {
+    id: 'stock-screener-search',
+    label: 'Stock Screener',
+    path: '/stock-screener-search',
+    icon: 'TrendingUpIcon',
+    category: 'portfolio'
+  },
+  {
     id: 'stock-volatility',
     label: 'Stock Volatility',
     path: '/stock-volatility',

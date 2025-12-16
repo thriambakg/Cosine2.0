@@ -996,18 +996,20 @@ def filter_stocks(stocks: List[Dict[str, Any]], criteria: Dict[str, Any]) -> Lis
     
     return filtered_stocks
 
-def screen_stocks_from_dynamodb(criteria: Dict[str, Any], max_results: int = 100) -> List[Dict[str, Any]]:
+def screen_stocks_from_dynamodb(criteria: Dict[str, Any], max_results: int = 100, last_evaluated_key: Optional[Dict] = None) -> tuple[List[Dict[str, Any]], Optional[Dict], bool]:
     """
     Screen stocks by querying pre-cached data from DynamoDB.
     This is MUCH faster than fetching from Yahoo Finance (<1 second vs 15+ seconds).
     Uses new numeric GSI sort keys for efficient BETWEEN queries.
+    Supports pagination via last_evaluated_key.
     
     Args:
         criteria: Screening criteria with optional timeframe
-        max_results: Maximum number of results to return
+        max_results: Maximum number of results to return per page
+        last_evaluated_key: Pagination token from previous request
     
     Returns:
-        List of stock dictionaries matching criteria
+        Tuple of (results list, last_evaluated_key, has_more)
     """
     try:
         logger.info(f"=== Starting DynamoDB stock screening ===")
@@ -1021,9 +1023,9 @@ def screen_stocks_from_dynamodb(criteria: Dict[str, Any], max_results: int = 100
         from dynamodb_query import query_stocks_by_criteria
         
         # Query DynamoDB with timeframe (sub-second response!)
-        stocks = query_stocks_by_criteria(criteria, max_results * 2, timeframe)
+        stocks, last_eval_key, has_more = query_stocks_by_criteria(criteria, max_results, timeframe, last_evaluated_key)
         
-        logger.info(f"✅ Retrieved {len(stocks)} stocks from DynamoDB cache")
+        logger.info(f"✅ Retrieved {len(stocks)} stocks from DynamoDB cache (has_more={has_more})")
         
         # Format for frontend
         results = []
@@ -1069,7 +1071,7 @@ def screen_stocks_from_dynamodb(criteria: Dict[str, Any], max_results: int = 100
             })
         
         logger.info(f"✅ Returning {len(results)} stocks")
-        return results[:max_results]
+        return results, last_eval_key, has_more
         
     except Exception as e:
         logger.error(f"❌ DynamoDB screening failed: {str(e)}")
@@ -1077,7 +1079,9 @@ def screen_stocks_from_dynamodb(criteria: Dict[str, Any], max_results: int = 100
         logger.error(f"Traceback: {traceback.format_exc()}")
         # Fall back to direct HTTP if DynamoDB fails
         logger.warning("⚠️ Falling back to direct HTTP screening")
-        return screen_stocks_with_bulk_download(criteria, max_results)
+        # Note: bulk download doesn't support pagination yet
+        bulk_results = screen_stocks_with_bulk_download(criteria, max_results)
+        return bulk_results, None, False
 
 def screen_stocks_with_bulk_download(criteria: Dict[str, Any], max_results: int = 100) -> List[Dict[str, Any]]:
     """
@@ -1493,24 +1497,29 @@ def lambda_handler(event, context):
         
         # Extract parameters
         criteria = {}
-        max_results = 5000  # Default to allow unlimited results with frontend pagination
+        max_results = 100  # Default page size
+        last_evaluated_key = None
         
         if event.get('queryStringParameters'):
             # API Gateway GET request
             params = event['queryStringParameters']
             criteria = json.loads(params.get('criteria', '{}'))
-            max_results = int(params.get('maxResults', 5000))
+            max_results = int(params.get('maxResults', 100))
+            if params.get('lastEvaluatedKey'):
+                last_evaluated_key = json.loads(params.get('lastEvaluatedKey'))
         elif event.get('body'):
             # API Gateway POST request
             body = event['body']
             if isinstance(body, str):
                 body = json.loads(body)
             criteria = body.get('criteria', {})
-            max_results = body.get('maxResults', 5000)
+            max_results = body.get('maxResults', 100)
+            last_evaluated_key = body.get('lastEvaluatedKey')
         else:
             # Direct Lambda invocation
             criteria = event.get('criteria', {})
-            max_results = event.get('maxResults', 5000)
+            max_results = event.get('maxResults', 100)
+            last_evaluated_key = event.get('lastEvaluatedKey')
         
         logger.info(f"Screening criteria: {criteria}")
         logger.info(f"Max results: {max_results}")
@@ -1538,8 +1547,9 @@ def lambda_handler(event, context):
             logger.info("=== Using DynamoDB cache screening (with HTTP fallback) ===")
             logger.info(f"Criteria: {criteria}")
             logger.info(f"Max results: {max_results}")
-            results = screen_stocks_from_dynamodb(criteria, max_results)
-            logger.info(f"Screening completed, got {len(results)} results")
+            logger.info(f"Last evaluated key: {last_evaluated_key}")
+            results, last_eval_key, has_more = screen_stocks_from_dynamodb(criteria, max_results, last_evaluated_key)
+            logger.info(f"Screening completed, got {len(results)} results (has_more={has_more})")
             
             # Return empty results with message instead of mock data
             if not results:
@@ -1548,19 +1558,23 @@ def lambda_handler(event, context):
                     'success': True,
                     'results': [],
                     'totalResults': 0,
+                    'has_more': False,
+                    'last_evaluated_key': None,
                     'criteria': criteria,
                     'timestamp': datetime.now().isoformat(),
                     'message': 'No stocks match the selected criteria. Try adjusting your filters.'
                 }
             else:
-            logger.info(f"Stock screening completed: {len(results)} results found")
-            response = {
-                'success': True,
-                'results': results,
-                'totalResults': len(results),
-                'criteria': criteria,
-                'timestamp': datetime.now().isoformat()
-            }
+                logger.info(f"Stock screening completed: {len(results)} results found")
+                response = {
+                    'success': True,
+                    'results': results,
+                    'totalResults': len(results),
+                    'has_more': has_more,
+                    'last_evaluated_key': last_eval_key,
+                    'criteria': criteria,
+                    'timestamp': datetime.now().isoformat()
+                }
             
             return {
                 'statusCode': 200,

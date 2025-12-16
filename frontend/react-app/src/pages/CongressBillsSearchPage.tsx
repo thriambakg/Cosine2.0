@@ -340,6 +340,7 @@ const CongressBillsSearchPage: React.FC = () => {
   }, [allSearchResults, selectedFilters]);
   
   // Column visibility state
+  // Note: 'details' is always visible and not selectable (like SEC tile actions)
   const AVAILABLE_COLUMNS = [
     'bill_title',
     'bill_type',
@@ -352,7 +353,6 @@ const CongressBillsSearchPage: React.FC = () => {
     'congress',
     'bipartisan',
     'policy_area',
-    'details',
   ] as const;
   
   const DEFAULT_VISIBLE_COLUMNS = ['bill_title', 'bill_type', 'sponsor_name', 'introduced_date', 'congress'];
@@ -1368,6 +1368,8 @@ const CongressBillsSearchPage: React.FC = () => {
                     {visibleColumns.includes('policy_area') && (
                       <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Policy Area</TableCell>
                     )}
+                    {/* Details column is always visible (not selectable) */}
+                    <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Details</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1443,27 +1445,26 @@ const CongressBillsSearchPage: React.FC = () => {
                           {bill.policy_area || 'N/A'}
                         </TableCell>
                       )}
-                      {visibleColumns.includes('details') && (
-                        <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                          <Tooltip title="View full bill details">
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setSelectedBillForDetails(bill);
-                                setDetailsDialogOpen(true);
-                              }}
-                              sx={{
-                                color: '#3b82f6',
-                                '&:hover': {
-                                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                },
-                              }}
-                            >
-                              <VisibilityIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      )}
+                      {/* Details column is always visible (not selectable) */}
+                      <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                        <Tooltip title="View full bill details">
+                          <IconButton
+                            size="small"
+                            onClick={() => {
+                              setSelectedBillForDetails(bill);
+                              setDetailsDialogOpen(true);
+                            }}
+                            sx={{
+                              color: '#3b82f6',
+                              '&:hover': {
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <VisibilityIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
