@@ -228,6 +228,31 @@ class ChartImageGenerator:
         
         plt.xticks(rotation=45)
         
+        # Scale y-axis based on data: start at minimum value, end at 10% above max
+        # Collect all close prices from all plotted stocks
+        all_prices = []
+        for stock in stocks_data:
+            if stock.get('status') == 'success' and stock.get('historical_data'):
+                historical_data = stock.get('historical_data', [])
+                for data_point in historical_data:
+                    if 'close' in data_point:
+                        all_prices.append(data_point['close'])
+        
+        if all_prices and len(all_prices) > 0:
+            min_price = min(all_prices)
+            max_price = max(all_prices)
+            # Set y-axis: start at minimum value, end at 10% above max
+            # Handle edge case where min and max are the same
+            if min_price == max_price:
+                # If all prices are the same, add some padding
+                y_min = min_price * 0.99
+                y_max = max_price * 1.01
+            else:
+                y_min = min_price
+                y_max = max_price * 1.1
+            ax.set_ylim(y_min, y_max)
+            logger.info(f"📊 Y-axis scaled: {y_min:.2f} to {y_max:.2f} (data range: {min_price:.2f} to {max_price:.2f})")
+        
         # Add watermark
         fig.text(0.99, 0.01, 'investcosine.com', fontsize=8, color='gray',
                 ha='right', va='bottom', alpha=0.7, transform=fig.transFigure)

@@ -632,16 +632,19 @@ class UnifiedMessageHandlerService {
     }
     
     // Check if message already exists - if so, update it instead of adding duplicate
-    const messages = this.localCache.get(sessionId)!;
+    let messages = this.localCache.get(sessionId)!;
     const existingIndex = messages.findIndex(m => m.id === messageData.messageId && m.sender === 'user');
     
     if (existingIndex !== -1) {
-      // Update existing message instead of adding duplicate
+      // Update existing message - create new array to ensure reference changes for React
+      messages = [...messages];
       messages[existingIndex] = userMessage;
+      this.localCache.set(sessionId, messages);
       console.log('🔄 UnifiedMessageHandler: Updated existing user message in cache:', messageData.messageId);
     } else {
-      // Add new message
-      messages.push(userMessage);
+      // Add new message - create new array to ensure reference changes for React
+      messages = [...messages, userMessage];
+      this.localCache.set(sessionId, messages);
       console.log('📨 UnifiedMessageHandler: Added user message to local cache:', messageData.messageId);
     }
 
@@ -1456,15 +1459,24 @@ class UnifiedMessageHandlerService {
       files: this.convertDynamoDBFormat(msg.files)
     }));
     
-    // Merge: Keep cache messages that aren't in database (unsaved/new messages)
-    // Add database messages that aren't in cache
-    const mergedMessages: SharedMessage[] = [
-      ...existingCacheMessages.filter(m => !databaseMessages.some(db => db.id === m.id)),
-      ...databaseMessages.filter(db => !existingMessageIds.has(db.id))
-    ];
+    // Merge: Keep cache messages (they're more up-to-date), add database messages that aren't in cache
+    // Use a Map to deduplicate by ID, with cache messages taking precedence
+    const mergedMap = new Map<string, SharedMessage>();
     
-    // Sort by timestamp to maintain chronological order
-    mergedMessages.sort((a, b) => a.timestamp - b.timestamp);
+    // First add all cache messages (these are the most up-to-date)
+    existingCacheMessages.forEach(msg => {
+      mergedMap.set(msg.id, msg);
+    });
+    
+    // Then add database messages that aren't already in cache
+    databaseMessages.forEach(dbMsg => {
+      if (!mergedMap.has(dbMsg.id)) {
+        mergedMap.set(dbMsg.id, dbMsg);
+      }
+    });
+    
+    // Convert map to array and sort by timestamp
+    const mergedMessages: SharedMessage[] = Array.from(mergedMap.values()).sort((a, b) => a.timestamp - b.timestamp);
     
     // Update cache with merged messages
     this.localCache.set(sessionId, mergedMessages);
@@ -1504,8 +1516,10 @@ class UnifiedMessageHandlerService {
 
   /**
    * Notify all listeners of message updates
+   * Public method to allow components to manually trigger message updates
+   * (useful for fixing race conditions when sessionId changes)
    */
-  private notifyMessageUpdate(sessionId: string, messages: SharedMessage[]): void {
+  public notifyMessageUpdate(sessionId: string, messages: SharedMessage[]): void {
     this.messageListeners.forEach(callback => {
       try {
         callback(sessionId, messages);

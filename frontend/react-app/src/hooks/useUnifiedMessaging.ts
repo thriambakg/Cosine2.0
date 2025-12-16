@@ -27,14 +27,23 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
       return;
     }
 
-    // Clear messages when session changes to prevent cross-session contamination
-    setMessages([]);
-
-    // Get initial messages from local cache for this specific session
+    // Get initial messages from local cache BEFORE clearing to preserve them
+    // This prevents race conditions where messages are added to cache but then cleared
     const initialMessages = unifiedMessageHandler.getMessagesForSession(sessionId);
+    
+    // Set messages immediately from cache (don't clear first to avoid flicker)
+    // This ensures messages appear immediately when session changes
     setMessages(initialMessages);
 
     console.log(`📨 ${source}: Loaded messages for session ${sessionId}:`, initialMessages.length);
+    
+    // If we have messages, also trigger a notification to ensure UI updates
+    if (initialMessages.length > 0) {
+      // Use setTimeout to ensure this happens after the subscription is set up
+      setTimeout(() => {
+        unifiedMessageHandler.notifyMessageUpdate(sessionId, initialMessages);
+      }, 0);
+    }
 
     // Subscribe to message updates for this session
     const unsubscribe = unifiedMessageHandler.subscribeToMessages((updatedSessionId, updatedMessages) => {
@@ -84,10 +93,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
         sessionId: messageData.sessionId || sessionId || undefined
       };
 
-      console.log(`📤 ${source}: Sending message via unified handler:`, fullMessageData.messageId);
-      console.log('🔍 DEBUG: sendMessage - fullMessageData being passed to processMessage:', fullMessageData);
-      console.log('🔍 DEBUG: sendMessage - contextItems in fullMessageData:', fullMessageData.contextItems);
-      console.log('🔍 DEBUG: sendMessage - contextItems length:', fullMessageData.contextItems?.length || 0);
+      // Sending message via unified handler
       
       const result = await unifiedMessageHandler.processMessage(fullMessageData);
       

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, memo } from 'react';
+import { useEffect, useState, useRef, useCallback, memo, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatPersistence } from '@/hooks/useChatPersistence';
@@ -358,8 +358,7 @@ export default function ChatPage() {
     const currentContext = sessionContext;
     const previousContext = previousContextRef.current;
     
-    console.log('🔍 DEBUG: ChatPage hasContextChanged - currentContext:', currentContext);
-    console.log('🔍 DEBUG: ChatPage hasContextChanged - previousContext:', previousContext);
+    // Context change detection
     
     // Compare lengths first (quick check)
     if (currentContext.length !== previousContext.length) {
@@ -380,7 +379,7 @@ export default function ChatPage() {
       }
     }
     
-    console.log('🔍 DEBUG: ChatPage hasContextChanged - no changes detected, returning false');
+      // No context changes detected
     return false;
   }, [sessionContext]);
   
@@ -390,7 +389,7 @@ export default function ChatPage() {
       // Only update if this is a new session, not a context change
       if (previousContextRef.current.length === 0) {
         previousContextRef.current = [...sessionContext];
-        console.log('🔍 DEBUG: ChatPage: Initial previousContextRef.current set for new session:', previousContextRef.current);
+        // Initial context set for new session
       }
     }
   }, [currentSession?.session_id]);
@@ -417,33 +416,49 @@ export default function ChatPage() {
   // Use messages from unified messaging system (real-time) as primary source
   // Fall back to persistence system for initial load or when unified messages aren't available
   // Merge both sources to ensure we show all messages
-  const persistenceMessages = currentSession?.messages || [];
+  // Memoize persistenceMessages to prevent unnecessary recalculations
+  const persistenceMessages = useMemo(() => {
+    return currentSession?.messages || [];
+  }, [currentSession?.messages, currentSession?.session_id]);
+  
   const unifiedMessageList = unifiedMessages || [];
   
   // Create a merged list, prioritizing unified messages (real-time) but including persistence messages
   // Use a Map to deduplicate by message ID, with unified messages taking precedence
-  const messageMap = new Map<string, any>();
-  
-  // First add persistence messages (for initial load)
-  persistenceMessages.forEach(msg => {
-    messageMap.set(msg.id, {
-      id: msg.id,
-      sender: msg.sender === 'bot' ? 'ai' : msg.sender,
-      text: msg.text,
-      timestamp: msg.timestamp instanceof Date ? msg.timestamp.getTime() : (typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()),
-      sessionId: currentSession?.session_id || '',
-      source: 'database' as const,
-      files: msg.files
+  // Memoize to prevent unnecessary recalculations
+  const messages = useMemo(() => {
+    const messageMap = new Map<string, any>();
+    const currentSessionId = currentSession?.session_id;
+    
+    // First add persistence messages (for initial load)
+    persistenceMessages.forEach(msg => {
+      messageMap.set(msg.id, {
+        id: msg.id,
+        sender: msg.sender === 'bot' ? 'ai' : msg.sender,
+        text: msg.text,
+        timestamp: msg.timestamp instanceof Date ? msg.timestamp.getTime() : (typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()),
+        sessionId: currentSessionId || '',
+        source: 'database' as const,
+        files: msg.files
+      });
     });
-  });
-  
-  // Then add/override with unified messages (real-time updates)
-  unifiedMessageList.forEach(msg => {
-    messageMap.set(msg.id, msg);
-  });
-  
-  // Convert to sorted array
-  const messages = Array.from(messageMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+    
+    // Then add/override with unified messages (real-time updates) for the current session
+    // Filter by sessionId to ensure we only show messages for the current session
+    // If no currentSessionId, show all unified messages (for new sessions being created)
+    const filteredUnified = currentSessionId 
+      ? unifiedMessageList.filter(msg => msg.sessionId === currentSessionId)
+      : unifiedMessageList;
+    
+    filteredUnified.forEach(msg => {
+      messageMap.set(msg.id, msg);
+    });
+    
+    // Convert to sorted array
+    const merged = Array.from(messageMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+    
+    return merged;
+  }, [persistenceMessages, unifiedMessageList, currentSession?.session_id]);
 
   // Sync unified messages with local persistence system (DEBOUNCED for performance)
   // This runs asynchronously to avoid blocking message display
@@ -453,11 +468,7 @@ export default function ChatPage() {
     // Debounce persistence sync to avoid blocking UI updates
     // Messages are displayed immediately from unified cache, persistence happens in background
     const syncTimeout = setTimeout(() => {
-      console.log('🔄 ChatPage: Syncing unified messages with persistence system', {
-        sessionId: currentSession.session_id,
-        unifiedMessageCount: unifiedMessages.length,
-        localMessageCount: currentSession.messages.length
-      });
+      // Sync unified messages with persistence (debounced)
 
       // Only sync messages that belong to the current session
       const sessionMessages = unifiedMessages.filter(msg => msg.sessionId === currentSession.session_id);
@@ -473,7 +484,7 @@ export default function ChatPage() {
 
       // Only add truly new messages to prevent duplication
       if (newMessages.length > 0) {
-        console.log(`📨 ChatPage: Found ${newMessages.length} new messages to add to persistence`);
+        // Adding new messages to persistence
         // Batch persistence operations asynchronously using requestIdleCallback or setTimeout fallback
         const schedulePersistence = (callback: () => void) => {
           if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -495,7 +506,7 @@ export default function ChatPage() {
           });
         });
       } else {
-        console.log('🔄 ChatPage: All unified messages already exist in persistence, skipping sync');
+        // All messages already synced
       }
     }, 100); // 100ms debounce - messages display immediately, persistence happens shortly after
 
@@ -702,17 +713,9 @@ export default function ChatPage() {
     // Set model from session if available
     // Don't reset model - keep user's persistent selection
     
-    // Debug session switching
-    console.log('🔄 SESSION EFFECT: Current session:', {
-      sessionId: currentSessionId,
-      messageCount: currentSession?.messages?.length || 0,
-      messages: currentSession?.messages?.map(m => ({ id: m.id, sender: m.sender, text: m.text.substring(0, 30) + '...' })) || []
-    });
-    
     // If we're switching to a session that has no messages but we expect it to have messages,
     // trigger a reload from the persistence system
     if (currentSessionId && currentSession && currentSession.messages.length === 0) {
-      console.log('🔄 SESSION EFFECT: Session has no messages, checking if we should reload');
       // The persistence system should handle this through its caching mechanism
     }
     
@@ -836,6 +839,13 @@ export default function ChatPage() {
           clearTimeout(loadingTimeoutRefs.current[sessionId]);
           delete loadingTimeoutRefs.current[sessionId];
         }
+        
+        // Also clear "pending" timeout if it exists (shouldn't happen, but safety check)
+        if (sessionId !== 'pending' && loadingTimeoutRefs.current['pending']) {
+          console.log('🔄 ChatPage: Clearing leftover "pending" timeout');
+          clearTimeout(loadingTimeoutRefs.current['pending']);
+          delete loadingTimeoutRefs.current['pending'];
+        }
       }
     });
     
@@ -948,8 +958,7 @@ export default function ChatPage() {
       const newItem: ContextItem = event.detail;
       
       setSessionContext((prev) => {
-        console.log('🔍 DEBUG: ChatPage: Current sessionContext before update:', prev);
-        console.log('🔍 DEBUG: ChatPage: Adding new item:', newItem);
+        // Adding context item
         
         // Check if item already exists (by id prefix to avoid duplicates)
         const baseId = newItem.id.split('_').slice(0, -1).join('_');
@@ -966,11 +975,9 @@ export default function ChatPage() {
         previousContextRef.current = prev; // Keep the old context for change detection
         
         const newContext = [...prev, newItem];
-        console.log('🔍 DEBUG: ChatPage: New sessionContext after update:', newContext);
-        console.log('🔍 DEBUG: ChatPage: Updated previousContextRef.current:', previousContextRef.current);
+        // Context updated
         console.log('🎯 ChatPage: Context change detection scenario completed - context data is ready for next message');
-        console.log('🔍 DEBUG: ChatPage: Final contextItems after direct add:', newContext);
-        console.log('🔍 DEBUG: ChatPage: Context length after direct add:', newContext.length);
+        // Context items added
         
         return newContext;
       });
@@ -984,13 +991,12 @@ export default function ChatPage() {
         // Update previous context ref to mark that context has changed
         // This ensures the next message will send context data
         previousContextRef.current = sessionContext; // Keep the old context for change detection
-        console.log('🔍 DEBUG: ChatPage: Updated previousContextRef.current for sync:', previousContextRef.current);
+        // Context synced
         
         setSessionContext(contextItems);
         console.log('✅ ChatPage: Synced context from Sidebar');
         console.log('🎯 ChatPage: Context change detection scenario completed - context data is ready for next message');
-        console.log('🔍 DEBUG: ChatPage: Final contextItems after sync:', contextItems);
-        console.log('🔍 DEBUG: ChatPage: Context length after sync:', contextItems.length);
+        // Context sync complete
       }
     };
 
@@ -1222,27 +1228,17 @@ export default function ChatPage() {
     }
 
     const selectedSessionsArray = Array.from(selectedSessions);
-    console.log('🔍 DEBUG: Selected sessions array:', selectedSessionsArray);
-    console.log('🔍 DEBUG: Available sessions:', sessions.map(s => ({ id: s.session_id, title: s.title, messageCount: s.messages?.length })));
+    // Processing context from selected sessions
     
     const sessionsToAdd = selectedSessionsArray
       .map(sessionId => {
         const session = sessions.find(s => s.session_id === sessionId);
         if (!session) {
-          console.log('🔍 DEBUG: Session not found for ID:', sessionId);
+          // Session not found
           return null;
         }
         
-        console.log('🔍 DEBUG: Found session for context:', {
-          sessionId: session.session_id,
-          title: session.title,
-          model: session.model,
-          messageCount: session.messages?.length || 0,
-          sessionKeys: Object.keys(session),
-          hasMessages: !!session.messages,
-          messagesLength: session.messages?.length
-        });
-        
+        // Found session for context
         return {
           sessionId: session.session_id,
           title: session.title,
@@ -1423,15 +1419,7 @@ export default function ChatPage() {
       } else if (sessionContext.length > 0 && hasContextChanged()) {
         // Context has changed - send context data for initial message, agent will fetch from database for follow-ups
         console.log(`📋 ChatPage: Context changed (${sessionContext.length} items) - sending context message with tile data`);
-        console.log('🔍 DEBUG: sessionContext state:', sessionContext);
-        console.log('🔍 DEBUG: sessionContext.length:', sessionContext.length);
-        console.log('🔍 DEBUG: hasContextChanged():', hasContextChanged());
-        console.log('🔍 DEBUG: previousContextRef.current:', previousContextRef.current);
-        console.log('🎯 ChatPage: USER SENDING MESSAGE - Context change detection triggered, context data ready to be sent!');
-        console.log('🔍 DEBUG: ChatPage: About to send contextItems to WebSocket:', sessionContext);
-        console.log('🔍 DEBUG: ChatPage: sessionContext state when sending message:', sessionContext);
-        console.log('🔍 DEBUG: ChatPage: sessionContext length when sending message:', sessionContext.length);
-        console.log('🔍 DEBUG: ChatPage: sessionContext content when sending message:', JSON.stringify(sessionContext, null, 2));
+        // Sending context message with context items
         result = await sendUnifiedContextMessage(text, sessionContext, selectedModel);
         // Update previous context after sending
         previousContextRef.current = [...sessionContext];
@@ -1456,6 +1444,13 @@ export default function ChatPage() {
         if (result.sessionId && result.sessionId !== currentSession?.session_id) {
           console.log('🔄 ChatPage: New session created, loading session:', result.sessionId);
           
+          // CRITICAL: Clear timeout for "pending" session if it exists (created before session was known)
+          if (loadingTimeoutRefs.current['pending']) {
+            console.log('🔄 ChatPage: Clearing timeout for "pending" session');
+            clearTimeout(loadingTimeoutRefs.current['pending']);
+            delete loadingTimeoutRefs.current['pending'];
+          }
+          
           // Clear loading state for the old session ID and set it for the new one
           if (currentSession?.session_id) {
             setSessionLoadingStates(prev => ({
@@ -1463,6 +1458,15 @@ export default function ChatPage() {
               [currentSession.session_id]: false
             }));
           }
+          
+          // Clear loading state for "pending" if it exists
+          setSessionLoadingStates(prev => {
+            const newState = { ...prev };
+            if (newState['pending']) {
+              delete newState['pending'];
+            }
+            return newState;
+          });
           
           // Set loading state for the new session
           setSessionLoadingStates(prev => ({
@@ -1473,10 +1477,40 @@ export default function ChatPage() {
           // Broadcast loading state for the new session
           unifiedMessageHandler.broadcastLoadingState(result.sessionId, true, 'chatpage');
           
-          // Load session - this will merge any cached messages with backend messages
-          // For new sessions, the message is already in unifiedMessageHandler cache
-          // and will be preserved when the session loads via the merge logic in loadExistingMessages
-          loadSession(result.sessionId);
+          // CRITICAL: Get cached messages BEFORE loading session to preserve them
+          const cachedMessagesBeforeLoad = unifiedMessageHandler.getMessagesForSession(result.sessionId);
+          console.log(`🔄 ChatPage: Cached messages before loadSession: ${cachedMessagesBeforeLoad.length}`);
+          
+          // CRITICAL: Load session IMMEDIATELY to update currentSession before message display
+          // This ensures the useUnifiedMessaging hook's sessionId prop updates, allowing
+          // the subscription to pick up messages that were already added to cache
+          await loadSession(result.sessionId);
+          
+          // CRITICAL: Wait for React to process the state update and for useUnifiedMessaging
+          // to set up the subscription and load messages from cache
+          // Use a longer delay to ensure React has fully processed the session change
+          await new Promise(resolve => setTimeout(resolve, 150));
+          
+          // After session loads, get messages again and ensure they're displayed
+          const cachedMessagesAfterLoad = unifiedMessageHandler.getMessagesForSession(result.sessionId);
+          console.log(`🔄 ChatPage: Cached messages after loadSession: ${cachedMessagesAfterLoad.length}`);
+          
+          const messagesToDisplay = cachedMessagesAfterLoad.length > 0 
+            ? cachedMessagesAfterLoad 
+            : cachedMessagesBeforeLoad;
+          
+          if (messagesToDisplay.length > 0) {
+            // Force a notification to ensure all subscribers get the update
+            // Use setTimeout to ensure this happens after React has processed the session change
+            setTimeout(() => {
+              unifiedMessageHandler.notifyMessageUpdate(result.sessionId, messagesToDisplay);
+              console.log(`🔄 ChatPage: Forced message update for new session, ${messagesToDisplay.length} messages`);
+            }, 50);
+          } else {
+            console.warn(`⚠️ ChatPage: No messages to display for new session ${result.sessionId}`);
+          }
+          
+          console.log('🔄 ChatPage: Session loaded, unified messages should be visible');
         }
       } else {
         console.error('❌ ChatPage: Failed to send message:', result.error);
@@ -1953,7 +1987,12 @@ export default function ChatPage() {
                 </Typography>
               </Box>
             )}
-            {(messages.slice(Math.max(0, messages.length - visibleCount))).map((message, messageIndex) => (
+            {(() => {
+              const visibleMessages = messages.slice(Math.max(0, messages.length - visibleCount));
+              if (messages.length > 0 && visibleMessages.length === 0) {
+                console.warn(`⚠️ ChatPage: Messages exist (${messages.length}) but visibleMessages is empty. visibleCount: ${visibleCount}`);
+              }
+              return visibleMessages.map((message, messageIndex) => (
               <Box key={message.id} display="flex" gap={2}>
                 <Avatar sx={{ bgcolor: message.sender === 'user' ? '#3b82f6' : '#374151', width: 32, height: 32 }}>
                   {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}
@@ -2098,7 +2137,8 @@ export default function ChatPage() {
                   </Box>
                 </Box>
               </Box>
-            ))}
+            ));
+            })()}
             {(getCurrentSessionLoading() || (currentSession?.session_id && crossInterfaceLoading[currentSession.session_id])) && (
               <Box display="flex" gap={2}>
                 <Avatar sx={{ bgcolor: '#374151', width: 32, height: 32 }}>

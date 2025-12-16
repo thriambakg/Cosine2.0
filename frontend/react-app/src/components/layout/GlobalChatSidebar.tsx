@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
+import React, { useState, useCallback, useEffect, useRef, memo, useMemo } from 'react';
 import MarkdownRenderer from '@/components/common/MarkdownRenderer';
 import {
   Box,
@@ -242,8 +242,7 @@ const GlobalChatSidebar: React.FC = () => {
     const currentContext = sessionContext;
     const previousContext = previousContextRef.current;
     
-    console.log('🔍 DEBUG: Sidebar hasContextChanged - currentContext:', currentContext);
-    console.log('🔍 DEBUG: Sidebar hasContextChanged - previousContext:', previousContext);
+    // Context change detection
     
     // Compare lengths first (quick check)
     if (currentContext.length !== previousContext.length) {
@@ -264,7 +263,7 @@ const GlobalChatSidebar: React.FC = () => {
       }
     }
     
-    console.log('🔍 DEBUG: Sidebar hasContextChanged - no changes detected, returning false');
+      // No context changes detected
     return false;
   }, [sessionContext]);
   
@@ -274,7 +273,7 @@ const GlobalChatSidebar: React.FC = () => {
       // Only update if this is a new session, not a context change
       if (previousContextRef.current.length === 0) {
         previousContextRef.current = [...sessionContext];
-        console.log('🔍 DEBUG: Sidebar: Initial previousContextRef.current set for new session:', previousContextRef.current);
+        // Initial context set for new session
       }
     }
   }, [activeSessionId]);
@@ -562,15 +561,21 @@ const GlobalChatSidebar: React.FC = () => {
   // Use messages from unified messaging system (real-time) as primary source
   // Fall back to persistence system for initial load or when unified messages aren't available
   // Merge both sources to ensure we show all messages (matching ChatPage pattern)
-  const persistenceMessages = currentSession?.messages || [];
-  const unifiedMessageList = unifiedMessages || [];
+  // Memoize persistenceMessages to prevent infinite loops
+  const persistenceMessages = useMemo(() => {
+    return currentSession?.messages || [];
+  }, [currentSession?.messages, currentSession?.session_id]);
   
   // Create a merged list, prioritizing unified messages (real-time) but including persistence messages
   // Use a Map to deduplicate by message ID, with unified messages taking precedence
-  const messages = React.useMemo(() => {
+  // Memoize unifiedMessageList to prevent unnecessary recalculations
+  const unifiedMessageList = useMemo(() => {
+    return unifiedMessages || [];
+  }, [unifiedMessages]);
+  
+  const messages = useMemo(() => {
     if (!activeSessionId) {
-      console.warn('⚠️ Sidebar: No activeSessionId, showing all unifiedMessages:', unifiedMessages.length);
-      return unifiedMessages;
+      return unifiedMessageList;
     }
     
     const messageMap = new Map<string, any>();
@@ -602,9 +607,9 @@ const GlobalChatSidebar: React.FC = () => {
     
     // Convert to sorted array
     const merged = Array.from(messageMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-    console.log(`📨 Sidebar: Merged messages - activeSessionId: ${activeSessionId}, unified: ${filteredUnified.length}, persistence: ${persistenceMessages.length}, merged: ${merged.length}`);
+    
     return merged;
-  }, [unifiedMessages, activeSessionId, persistenceMessages]);
+  }, [unifiedMessageList, activeSessionId, persistenceMessages]);
 
   // Subscribe to agent log updates
   useEffect(() => {
@@ -667,7 +672,7 @@ const GlobalChatSidebar: React.FC = () => {
 
       // Only add truly new messages to prevent duplication
       if (newMessages.length > 0) {
-        console.log(`📨 Sidebar: Found ${newMessages.length} new messages to add to persistence`);
+        // Adding new messages to persistence
         // Batch persistence operations asynchronously using requestIdleCallback or setTimeout fallback
         const schedulePersistence = (callback: () => void) => {
           if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -999,15 +1004,23 @@ const GlobalChatSidebar: React.FC = () => {
         // Don't reset model - keep user's persistent selection
 
         // Load existing messages into unified messaging system only if not already loaded
+        // For new sessions, messages might already be in cache from the message send
+        // so we merge instead of overwriting
+        const existingMessages = unifiedMessageHandler.getMessagesForSession(sessionId);
         if (session.messages && session.messages.length > 0) {
           console.log('📨 Sidebar: Loading existing messages into unified system:', session.messages.length);
-          // Check if messages are already in the unified system to prevent duplication
-          const existingMessages = unifiedMessageHandler.getMessagesForSession(sessionId);
           if (existingMessages.length === 0) {
             unifiedMessageHandler.loadExistingMessages(sessionId, session.messages);
           } else {
-            console.log('📨 Sidebar: Messages already in unified system, skipping load');
+            console.log('📨 Sidebar: Messages already in unified system, merging with database messages');
+            // Merge database messages with cache to ensure nothing is lost
+            unifiedMessageHandler.loadExistingMessages(sessionId, session.messages);
           }
+        } else if (existingMessages.length > 0) {
+          // No messages in database yet, but we have cached messages (new session)
+          // Ensure they're preserved by triggering an update
+          console.log('📨 Sidebar: No database messages yet, but have cached messages, preserving them');
+          unifiedMessageHandler.notifyMessageUpdate(sessionId, existingMessages);
         }
 
         // Load context if available
@@ -1239,8 +1252,7 @@ const GlobalChatSidebar: React.FC = () => {
       }
       
       // Add to current session context
-      console.log('🔍 DEBUG: Sidebar: Current sessionContext before update:', sessionContext);
-      console.log('🔍 DEBUG: Sidebar: Adding new item:', contextItem);
+      // Adding context item
       
       // Update previous context ref to mark that context has changed
       // This ensures the next message will send context data
@@ -1248,11 +1260,9 @@ const GlobalChatSidebar: React.FC = () => {
       
       const newContext = [...sessionContext, contextItem];
       setSessionContext(newContext);
-      console.log('🔍 DEBUG: Sidebar: New sessionContext after update:', newContext);
-      console.log('🔍 DEBUG: Sidebar: Updated previousContextRef.current:', previousContextRef.current);
+      // Context updated
       console.log('🎯 Sidebar: Context change detection scenario completed - context data is ready for next message');
-      console.log('🔍 DEBUG: Sidebar: Final contextItems after direct add:', newContext);
-      console.log('🔍 DEBUG: Sidebar: Context length after direct add:', newContext.length);
+      // Context items added
       
       console.log('✅ Added to sidebar context');
       console.log('📌 Context item data:', JSON.stringify(contextItem, null, 2));
@@ -1350,8 +1360,7 @@ const GlobalChatSidebar: React.FC = () => {
       if (sessionId === activeSessionId) {
         // Don't update previousContextRef here - it should already be set correctly
         // The context sync is just synchronizing the state, not adding new items
-        console.log('🔍 DEBUG: Sidebar: Context sync - not updating previousContextRef.current');
-        console.log('🔍 DEBUG: Sidebar: Current previousContextRef.current:', previousContextRef.current);
+        // Context sync - no update needed
         
         setSessionContext(contextItems);
         console.log('✅ Sidebar: Synced context from ChatPage');
@@ -1776,6 +1785,10 @@ const GlobalChatSidebar: React.FC = () => {
           <IconButton
             size="small"
             onClick={() => {
+              // Clear unified message handler cache for the current session before clearing
+              if (activeSessionId) {
+                unifiedMessageHandler.clearSessionMessages(activeSessionId);
+              }
               setActiveSessionId(null);
               setCurrentSession(null);
               setSessionContext([]);
@@ -1841,7 +1854,13 @@ const GlobalChatSidebar: React.FC = () => {
           },
         }}
       >
-        {(messages.slice(Math.max(0, messages.length - visibleCount))).map((message, messageIndex) => (
+        {(() => {
+          const messagesToRender = messages.slice(Math.max(0, messages.length - visibleCount));
+          if (messagesToRender.length > 0 && activeSessionId) {
+            console.log(`🎨 Sidebar: Rendering ${messagesToRender.length} messages for session ${activeSessionId}`, messagesToRender.map(m => ({ id: m.id, sender: m.sender, text: m.text.substring(0, 30) })));
+          }
+          return messagesToRender;
+        })().map((message, messageIndex) => (
           <Box
             key={message.id}
             sx={{
@@ -2198,7 +2217,13 @@ const GlobalChatSidebar: React.FC = () => {
                 }
                 
                 if (result.success) {
-                  console.log('✅ Sidebar: Message sent successfully via unified system');
+                  // Message sent successfully - it should already be in unifiedMessages via subscription
+                  // Force a refresh of messages to ensure immediate display
+                  if (activeSessionId || result.sessionId) {
+                    const sessionIdToUse = result.sessionId || activeSessionId;
+                    const currentMessages = unifiedMessageHandler.getMessagesForSession(sessionIdToUse);
+                    // The subscription should handle this, but we can force a refresh if needed
+                  }
                   
                   // Update session ID if a new session was created (matching ChatPage pattern)
                   if (result.sessionId && result.sessionId !== activeSessionId) {
@@ -2221,8 +2246,13 @@ const GlobalChatSidebar: React.FC = () => {
                     // Broadcast loading state for the new session
                     unifiedMessageHandler.broadcastLoadingState(result.sessionId, true, 'sidebar');
                     
-                    // Update activeSessionId to the new session
+                    // CRITICAL: Update activeSessionId FIRST to ensure subscription is set up
+                    // before we try to display messages
                     setActiveSessionId(result.sessionId);
+                    
+                    // CRITICAL: Wait for React to process the state update and for useUnifiedMessaging
+                    // to set up the subscription and load messages from cache
+                    await new Promise(resolve => setTimeout(resolve, 50));
                     
                     // Notify ChatPage that a new session was created (matching ChatPage pattern)
                     // This ensures ChatPage can update its session list
@@ -2235,10 +2265,27 @@ const GlobalChatSidebar: React.FC = () => {
                     });
                     window.dispatchEvent(newSessionEvent);
                     
+                    // Get cached messages BEFORE loading from database to ensure we preserve them
+                    const cachedMessagesBeforeLoad = unifiedMessageHandler.getMessagesForSession(result.sessionId);
+                    
                     // Load session - this will merge any cached messages with backend messages
                     // For new sessions, the message is already in unifiedMessageHandler cache
                     // and will be preserved when the session loads via the merge logic in loadExistingMessages
                     await loadSessionFromDatabase(result.sessionId);
+                    
+                    // After session loads, get messages again and ensure they're displayed
+                    // The loadSessionFromDatabase should have preserved cached messages, but
+                    // we'll force an update to be absolutely sure
+                    const cachedMessagesAfterLoad = unifiedMessageHandler.getMessagesForSession(result.sessionId);
+                    const messagesToDisplay = cachedMessagesAfterLoad.length > 0 
+                      ? cachedMessagesAfterLoad 
+                      : cachedMessagesBeforeLoad;
+                    
+                    if (messagesToDisplay.length > 0) {
+                      // Force a notification to ensure all subscribers get the update
+                      unifiedMessageHandler.notifyMessageUpdate(result.sessionId, messagesToDisplay);
+                      console.log(`🔄 Sidebar: Forced message update for new session, ${messagesToDisplay.length} messages`);
+                    }
                     
                     // Reset sync tracking for the new session
                     lastSyncedMessageIdsRef.current = new Set();
