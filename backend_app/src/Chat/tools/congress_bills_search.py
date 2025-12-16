@@ -838,13 +838,25 @@ def search_congress_bills(
         last_evaluated_key: JSON string of pagination token from previous request (optional)
     
     Returns:
-        JSON string with search results. For large results, returns S3 key reference.
+        JSON string with search results. Each bill result includes:
+        - bill_id: Unique bill identifier (e.g., "119-HR-5789")
+        - bill_title: Title of the bill
+        - bill_text_html_s3_key: S3 key to the full HTML bill text (e.g., "billtext/119-HR-5789.html")
+          * If present, use read_s3_file_tool(bill_text_html_s3_key) to read the complete bill text
+          * The bill text is stored as HTML in S3 and contains the full legislative text
+        - summary_text: Brief summary of the bill (if available)
+        - sponsor information, cosponsors, actions, etc.
+        For large result sets (>50KB or >50 results), returns S3 key reference instead of results array.
         
     Example:
         search_congress_bills(
             '{"bipartisan": 1, "bill_title": "Defense Authorization", "congress": 119}',
             limit=50
         )
+        
+    To read full bill text:
+        If a bill has bill_text_html_s3_key="billtext/119-HR-5789.html", 
+        call read_s3_file_tool("billtext/119-HR-5789.html") to get the complete bill text.
     """
     try:
         agent_logger.info(f"Searching congress bills with filters: {filters}")

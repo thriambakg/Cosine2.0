@@ -341,6 +341,11 @@ When get_chat_history_tool returns data:
     bill_number, congress, introduced_date_from/to, latest_action_date_from/to
   * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
   * Large results stored in S3 - use read_s3_file_tool to access via s3_key
+  * Each bill result includes a `bill_text_html_s3_key` field (e.g., "billtext/119-HR-5789.html")
+  * To read the FULL BILL TEXT: When a bill has a `bill_text_html_s3_key` field, use read_s3_file_tool(s3_key) 
+    to retrieve the complete HTML bill text from S3
+  * Example: If search returns bill with bill_text_html_s3_key="billtext/119-HR-5789.html", 
+    call read_s3_file_tool("billtext/119-HR-5789.html") to get the full bill text
   
 - search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards
   * Filters: awarding_agency_name/code, funding_agency_name/code, recipient_name, recipient_location_state/country,
@@ -360,6 +365,23 @@ When get_chat_history_tool returns data:
 - When a search returns an s3_key instead of results array, use read_s3_file_tool to access the data
 - Example: If search_congress_bills returns {"status": "success", "s3_key": "users/.../data-files/..."},
   call read_s3_file_tool(s3_key) to get the full results
+
+📄 READING BILL TEXT FROM S3:
+- When bills are returned from search_congress_bills, each bill includes a `bill_text_html_s3_key` field
+- This field contains the S3 key to the full HTML bill text (e.g., "billtext/119-HR-5789.html")
+- To read the COMPLETE BILL TEXT, use: read_s3_file_tool(bill_text_html_s3_key)
+- The bill text is stored as HTML in S3 and will be returned as readable text
+- ALWAYS check for bill_text_html_s3_key when users ask about:
+  * "What does this bill do?"
+  * "What's in the bill?"
+  * "Full text of the bill"
+  * "Read the bill text"
+  * "What are the details of this bill?"
+- Example workflow:
+  1. search_congress_bills({"bill_title": "NDAA"}) → returns bills with bill_text_html_s3_key fields
+  2. For each bill with bill_text_html_s3_key, call read_s3_file_tool("billtext/119-HR-5789.html")
+  3. Analyze and summarize the full bill text for the user
+- Note: If bill_text_html_s3_key is empty or missing, the full bill text is not available in the database
 
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete
