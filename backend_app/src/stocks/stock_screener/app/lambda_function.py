@@ -160,7 +160,7 @@ def enforce_yf_rate_limit():
     lock = get_rate_limit_lock()
     
     with lock:
-    current_time = time.time()
+        current_time = time.time()
         time_since_last = current_time - _last_yf_request_time
         
         if time_since_last < RATE_LIMIT_DELAY:
