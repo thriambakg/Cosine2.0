@@ -24,6 +24,7 @@ import {
   Alert,
   InputLabel,
   Tooltip,
+  Autocomplete,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -38,6 +39,7 @@ import { useTileCache } from '../../hooks/useDashboardCache';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog } from './common';
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import { CircularProgress } from '@mui/material';
+import { securitySuggestionsServiceV2, Security } from '../../services/securitySuggestionsV2';
 
 interface PortfolioEntry {
   stock: string;
@@ -135,9 +137,38 @@ const PortfolioTile = ({
   const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
   const [displayOptionsDialogOpen, setDisplayOptionsDialogOpen] = useState(false);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
+  const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState(false);
+  const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
   
   // Use the portfolio analysis hook
   const { executeForceRefresh: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
+  
+  // Load security data when dialog opens
+  useEffect(() => {
+    const loadSecurityData = async () => {
+      if (recalculateDialogOpen && !isSecurityDataLoaded) {
+        try {
+          await securitySuggestionsServiceV2.loadSecurities();
+          setIsSecurityDataLoaded(true);
+          // Deduplicate securities by symbol (keep first occurrence)
+          const allSecurities = securitySuggestionsServiceV2.getAllSecurities();
+          const seen = new Set<string>();
+          const uniqueSecurities = allSecurities.filter(security => {
+            if (seen.has(security.symbol)) {
+              return false;
+            }
+            seen.add(security.symbol);
+            return true;
+          });
+          setSecuritySuggestions(uniqueSecurities.slice(0, 50));
+        } catch (error) {
+          console.error('Failed to load security suggestions:', error);
+        }
+      }
+    };
+
+    loadSecurityData();
+  }, [recalculateDialogOpen, isSecurityDataLoaded]);
   
   // Pinning functionality using common hook
   const { isPinned: pinnedState, togglePin } = useTilePinning({
@@ -205,6 +236,47 @@ const PortfolioTile = ({
     newEntries[index] = { ...newEntries[index], [field]: value };
     setEntries(newEntries);
   }, [entries]);
+
+  const handleStockInputChange = useCallback((_index: number, inputValue: string) => {
+    // Only update suggestions based on input, don't update the entry value yet
+    // The entry value will be updated when a selection is made or on blur
+    if (isSecurityDataLoaded && inputValue) {
+      const suggestions = securitySuggestionsServiceV2.getSuggestions(inputValue, 50);
+      // Deduplicate by symbol
+      const seen = new Set<string>();
+      const uniqueSuggestions = suggestions.filter(security => {
+        if (seen.has(security.symbol)) {
+          return false;
+        }
+        seen.add(security.symbol);
+        return true;
+      });
+      setSecuritySuggestions(uniqueSuggestions);
+    } else if (isSecurityDataLoaded) {
+      const allSecurities = securitySuggestionsServiceV2.getAllSecurities();
+      const seen = new Set<string>();
+      const uniqueSecurities = allSecurities.filter(security => {
+        if (seen.has(security.symbol)) {
+          return false;
+        }
+        seen.add(security.symbol);
+        return true;
+      });
+      setSecuritySuggestions(uniqueSecurities.slice(0, 50));
+    }
+  }, [isSecurityDataLoaded]);
+
+  const handleStockChange = useCallback((index: number, value: Security | string | null) => {
+    if (value) {
+      if (typeof value === 'string') {
+        // If it's a string (from freeSolo), use it directly
+        updateEntry(index, 'stock', value.toUpperCase());
+      } else {
+        // If it's a Security object, use the symbol
+        updateEntry(index, 'stock', value.symbol);
+      }
+    }
+  }, [updateEntry]);
 
   const calculateRisk = useCallback(async () => {
     setError(null);
@@ -413,6 +485,29 @@ const PortfolioTile = ({
           }}
           collapsibleActions={
             <>
+              {/* Refresh Button - shown when expanded */}
+              <Tooltip title="Refresh" arrow>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRefresh();
+                    }}
+                    disabled={isLoading || !results}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    sx={{
+                      color: (isLoading || !results) ? '#6b7280' : '#9ca3af',
+                      '&:hover': { color: (isLoading || !results) ? '#6b7280' : '#3b82f6' },
+                      '&.Mui-disabled': { color: '#6b7280' },
+                      padding: '6px',
+                    }}
+                  >
+                    {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+
               <Tooltip title="Recalculate Portfolio">
                 <IconButton
                   size="small"
@@ -709,33 +804,175 @@ const PortfolioTile = ({
                 </Select>
               </FormControl>
 
-              {entries.map((entry, index) => (
-                <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                  <TextField
-                    size="small"
-                    label="Stock"
-                    value={entry.stock}
-                    onChange={(e) => updateEntry(index, 'stock', e.target.value.toUpperCase())}
-                    sx={{ flexGrow: 1 }}
-                  />
-                  <TextField
-                    size="small"
-                    type="number"
-                    label="Shares"
-                    value={entry.shares}
-                    onChange={(e) => updateEntry(index, 'shares', parseFloat(e.target.value) || 0)}
-                    sx={{ flexGrow: 1 }}
-                  />
-                  <IconButton
-                    size="small"
-                    onClick={() => removeEntry(index)}
-                    disabled={entries.length === 1}
-                    sx={{ color: '#ef4444' }}
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-              ))}
+              {entries.map((entry, index) => {
+                // Find security object for current entry
+                const currentSecurity = isSecurityDataLoaded && entry.stock
+                  ? securitySuggestionsServiceV2.findBySymbol(entry.stock)
+                  : null;
+
+                return (
+                  <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
+                    <Autocomplete
+                      value={currentSecurity ?? null}
+                      onChange={(_, newValue) => handleStockChange(index, newValue)}
+                      onInputChange={(_, newInputValue) => {
+                        handleStockInputChange(index, newInputValue);
+                        // If user types and no match, update the entry with the typed value
+                        if (newInputValue && !currentSecurity) {
+                          updateEntry(index, 'stock', newInputValue.toUpperCase());
+                        }
+                      }}
+                      options={securitySuggestions}
+                      getOptionLabel={(option) => typeof option === 'string' ? option : option.displayText}
+                      isOptionEqualToValue={(option, value) => {
+                        // Compare by symbol to handle selection
+                        if (typeof option === 'string' || typeof value === 'string') {
+                          return option === value;
+                        }
+                        return option.symbol === value.symbol;
+                      }}
+                      loading={!isSecurityDataLoaded}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          size="small"
+                          label="Stock"
+                          sx={{
+                            flexGrow: 1,
+                            '& .MuiOutlinedInput-root': {
+                              color: 'white',
+                              '& fieldset': {
+                                borderColor: '#374151',
+                              },
+                              '&:hover fieldset': {
+                                borderColor: '#3b82f6',
+                              },
+                              '&.Mui-focused fieldset': {
+                                borderColor: '#3b82f6',
+                              },
+                            },
+                            '& .MuiInputLabel-root': {
+                              color: '#9ca3af',
+                            },
+                          }}
+                          InputProps={{
+                            ...params.InputProps,
+                            endAdornment: (
+                              <>
+                                {!isSecurityDataLoaded ? <CircularProgress color="inherit" size={20} /> : null}
+                                {params.InputProps.endAdornment}
+                              </>
+                            ),
+                          }}
+                        />
+                      )}
+                      renderOption={(props, option) => {
+                        const capColor = option.marketCap === 'high' ? '#10b981' : option.marketCap === 'mid' ? '#f59e0b' : '#ef4444';
+                        const capLabel = option.marketCap === 'high' ? 'High Cap' : option.marketCap === 'mid' ? 'Mid Cap' : 'Low Cap';
+                        const uniqueKey = `${option.symbol}-${option.marketCap}-${option.name}`;
+                        return (
+                          <Box component="li" {...props} key={uniqueKey} sx={{ py: 1 }}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
+                                  {option.symbol}
+                                </Typography>
+                                <Chip 
+                                  label={capLabel} 
+                                  size="small" 
+                                  sx={{ 
+                                    height: '18px', 
+                                    fontSize: '0.65rem',
+                                    backgroundColor: capColor,
+                                    color: 'white'
+                                  }} 
+                                />
+                              </Box>
+                              <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                                {option.name}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        );
+                      }}
+                      sx={{
+                        flexGrow: 1,
+                        '& .MuiAutocomplete-popper': {
+                          '& .MuiPaper-root': {
+                            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                            border: '1px solid #374151',
+                            '&::-webkit-scrollbar': {
+                              width: '6px',
+                            },
+                            '&::-webkit-scrollbar-track': {
+                              backgroundColor: '#475569',
+                              borderRadius: '3px',
+                            },
+                            '&::-webkit-scrollbar-thumb': {
+                              backgroundColor: '#3b82f6',
+                              borderRadius: '3px',
+                              '&:hover': {
+                                backgroundColor: '#2563eb',
+                              },
+                            },
+                            '& .MuiAutocomplete-listbox': {
+                              '&::-webkit-scrollbar': {
+                                width: '6px',
+                              },
+                              '&::-webkit-scrollbar-track': {
+                                backgroundColor: '#475569',
+                                borderRadius: '3px',
+                              },
+                              '&::-webkit-scrollbar-thumb': {
+                                backgroundColor: '#3b82f6',
+                                borderRadius: '3px',
+                                '&:hover': {
+                                  backgroundColor: '#2563eb',
+                                },
+                              },
+                            },
+                          },
+                        },
+                      }}
+                      freeSolo
+                      autoSelect
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      label="Shares"
+                      value={entry.shares}
+                      onChange={(e) => updateEntry(index, 'shares', parseFloat(e.target.value) || 0)}
+                      sx={{ 
+                        flexGrow: 1,
+                        '& .MuiOutlinedInput-root': {
+                          color: 'white',
+                          '& fieldset': {
+                            borderColor: '#374151',
+                          },
+                          '&:hover fieldset': {
+                            borderColor: '#3b82f6',
+                          },
+                          '&.Mui-focused fieldset': {
+                            borderColor: '#3b82f6',
+                          },
+                        },
+                        '& .MuiInputLabel-root': {
+                          color: '#9ca3af',
+                        },
+                      }}
+                    />
+                    <IconButton
+                      size="small"
+                      onClick={() => removeEntry(index)}
+                      disabled={entries.length === 1}
+                      sx={{ color: '#ef4444' }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                );
+              })}
 
               <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
                 <Button

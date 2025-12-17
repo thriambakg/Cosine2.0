@@ -47,6 +47,7 @@ import {
   Chat as SidebarChatIcon,
   OpenInNew as OpenInNewIcon,
   ViewColumn as ViewColumnIcon,
+  Stop as StopIcon,
 } from '@mui/icons-material';
 import { secSearchAPI, SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../../services/api';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
@@ -249,6 +250,11 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
 
   // Track if initial search has been performed
   const [hasPerformedInitialSearch, setHasPerformedInitialSearch] = useState(false);
+  
+  // Refs for stopping search
+  const shouldContinueSearchRef = useRef<boolean>(true);
+  const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const currentJobIdRef = useRef<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -429,8 +435,40 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
 
       
 
+  // Stop search handler
+  const handleStopSearch = useCallback(() => {
+    console.log('🛑 SECSearchTile: Stopping search');
+    
+    // Set flag to stop polling
+    shouldContinueSearchRef.current = false;
+    
+    // Clear polling timeout
+    if (pollingTimeoutRef.current) {
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = null;
+    }
+    
+    // Cancel the job on backend if we have a job ID
+    if (currentJobIdRef.current) {
+      console.log(`🛑 SECSearchTile: Cancelling job ${currentJobIdRef.current} on backend`);
+      secSearchAPI.cancelJob(currentJobIdRef.current).catch(err => {
+        console.error('❌ SECSearchTile: Error cancelling job:', err);
+      });
+      currentJobIdRef.current = null;
+    }
+    
+    // Clear frontend search state
+    setIsLoading(false);
+    setFetchProgress(null);
+    
+    console.log('🛑 SECSearchTile: Search stopped - backend may continue in background');
+  }, []);
+
   const performSearch = useCallback(async () => {
     if (!currentSearchParams) return;
+    
+    // Reset stop flag
+    shouldContinueSearchRef.current = true;
     
     console.log('🏛️ SECSearchTile: Starting search with params:', currentSearchParams);
     setIsLoading(true);
@@ -471,6 +509,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       }
       
       const jobId = startResponse.job_id;
+      currentJobIdRef.current = jobId; // Store job ID for cancellation
       console.log(`✅ SECSearchTile: Async search started with job_id: ${jobId}`);
       
       // Check if this is a cached response with results
@@ -526,8 +565,24 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       
       // Poll for job completion
       const pollForResults = async () => {
+        // Check if search was stopped
+        if (!shouldContinueSearchRef.current) {
+          console.log(`🛑 SECSearchTile: Polling stopped for job ${jobId}`);
+          setIsLoading(false);
+          setFetchProgress(null);
+          return;
+        }
+        
         try {
           const jobStatus = await secSearchAPI.getJobStatus(jobId);
+          
+          // Check again after async call
+          if (!shouldContinueSearchRef.current) {
+            console.log(`🛑 SECSearchTile: Search was stopped during polling for job ${jobId}`);
+            setIsLoading(false);
+            setFetchProgress(null);
+            return;
+          }
           
           if (!jobStatus) {
             console.warn(`⚠️ SECSearchTile: No status found for job ${jobId}`);
@@ -599,8 +654,10 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
             setIsLoading(false);
             setFetchProgress(null); // Clear progress on failure
           } else {
-            // Still in progress, poll again
-            setTimeout(pollForResults, 2000); // Poll every 2 seconds
+            // Still in progress, poll again (only if search wasn't stopped)
+            if (shouldContinueSearchRef.current) {
+              pollingTimeoutRef.current = setTimeout(pollForResults, 2000); // Poll every 2 seconds
+            }
           }
         } catch (err) {
           console.error('❌ SECSearchTile: Error polling job status:', err);
@@ -613,7 +670,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       };
       
       // Start polling after a short delay
-      setTimeout(pollForResults, 1000);
+      pollingTimeoutRef.current = setTimeout(pollForResults, 1000);
       
     } catch (err) {
       console.error('❌ SECSearchTile: Search error:', err);
@@ -622,8 +679,20 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       setHasPerformedInitialSearch(true);
       setIsLoading(false);
       setFetchProgress(null); // Clear progress on error
+      currentJobIdRef.current = null; // Clear job ID on error
     }
   }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate]);
+  
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      shouldContinueSearchRef.current = false;
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+        pollingTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Dynamic pagination based on tile height
   const calculateResultsPerPage = useCallback(() => {
@@ -792,16 +861,24 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   useEffect(() => {
     if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading) {
       // Only auto-search if we have meaningful search params (not just defaults)
+      // Check for actual values, not just empty arrays or default dates
       const hasSearchCriteria = 
-        currentSearchParams.cik ||
-        currentSearchParams.entityName ||
-        currentSearchParams.keywords ||
+        (currentSearchParams.cik && currentSearchParams.cik.trim() !== '') ||
+        (Array.isArray(currentSearchParams.entityName) && currentSearchParams.entityName.length > 0 && currentSearchParams.entityName.some(name => name && name.trim() !== '')) ||
+        (!Array.isArray(currentSearchParams.entityName) && currentSearchParams.entityName && currentSearchParams.entityName.trim() !== '') ||
+        (Array.isArray(currentSearchParams.keywords) && currentSearchParams.keywords.length > 0 && currentSearchParams.keywords.some(kw => kw && kw.trim() !== '')) ||
+        (!Array.isArray(currentSearchParams.keywords) && currentSearchParams.keywords && currentSearchParams.keywords.trim() !== '') ||
         (currentSearchParams.formTypes && currentSearchParams.formTypes.length > 0) ||
-        currentSearchParams.located;
+        (Array.isArray(currentSearchParams.located) && currentSearchParams.located.length > 0 && currentSearchParams.located.some(loc => loc && loc.trim() !== '')) ||
+        (!Array.isArray(currentSearchParams.located) && currentSearchParams.located && currentSearchParams.located.trim() !== '');
       
       if (hasSearchCriteria) {
         console.log('🔄 SECSearchTile: Initial load - performing search with existing params');
         performSearch();
+      } else {
+        console.log('⏸️ SECSearchTile: No meaningful search criteria - skipping auto-search');
+        // Mark as performed so we don't keep checking
+        setHasPerformedInitialSearch(true);
       }
     }
   }, [hasPerformedInitialSearch, currentResults.length, isLoading, currentSearchParams, performSearch]);
@@ -2211,16 +2288,39 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           })()}
           
           {isLoading && (
-            <>
-              <CircularProgress size={16} sx={{ color: '#3b82f6', ml: 1 }} />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 1 }}>
+              <CircularProgress size={16} sx={{ color: '#3b82f6' }} />
               {fetchProgress && (
-                <Typography variant="caption" sx={{ color: '#3b82f6', ml: 1, fontWeight: 500 }}>
+                <Typography variant="caption" sx={{ color: '#3b82f6', fontWeight: 500 }}>
                   {fetchProgress.totalPages 
-                    ? `Fetching page ${fetchProgress.currentPage} of ${fetchProgress.totalPages}...`
-                    : `Fetching page ${fetchProgress.currentPage}...`}
+                    ? `Fetching page ${fetchProgress.currentPage} of ${fetchProgress.totalPages}`
+                    : `Fetching page ${fetchProgress.currentPage}`}
                 </Typography>
               )}
-            </>
+              {/* Stop Search Button - shown next to progress */}
+              <Tooltip title="Stop Search" arrow>
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleStopSearch();
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{
+                    color: '#ef4444',
+                    border: '1px solid #ef4444',
+                    padding: '4px',
+                    '&:hover': { 
+                      color: '#dc2626', 
+                      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                      borderColor: '#dc2626',
+                    },
+                  }}
+                >
+                  <StopIcon sx={{ fontSize: 14 }} />
+                </IconButton>
+              </Tooltip>
+            </Box>
           )}
           
           {!isLoading && (
@@ -2264,6 +2364,29 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           }}
           collapsibleActions={
             <>
+              {/* Refresh Button - shown when expanded */}
+              <Tooltip title="Refresh" arrow>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      performSearch();
+                    }}
+                    disabled={isLoading}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    sx={{
+                      color: isLoading ? '#6b7280' : '#9ca3af',
+                      '&:hover': { color: isLoading ? '#6b7280' : '#3b82f6' },
+                      '&.Mui-disabled': { color: '#6b7280' },
+                      padding: '6px',
+                    }}
+                  >
+                    {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+
               <Tooltip title="Select columns to display">
                 <IconButton
                   size="small"
@@ -2298,8 +2421,9 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                     e.stopPropagation();
                     setSearchDialogOpen(true);
                   }}
+                  disabled={isLoading}
                   sx={{
-                    color: '#9ca3b8',
+                    color: isLoading ? '#6b7280' : '#9ca3b8',
                     '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
                     padding: '6px',
                   }}

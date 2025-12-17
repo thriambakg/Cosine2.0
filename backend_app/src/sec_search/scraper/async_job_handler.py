@@ -351,8 +351,11 @@ def invoke_async_search(job_id: str, search_params: Dict[str, Any]):
         job_id: Job identifier
         search_params: Search parameters
     """
+    logger.info(f"🔷 INVOKE_ASYNC_SEARCH CALLED: job_id={job_id}, LAMBDA_FUNCTION_NAME={LAMBDA_FUNCTION_NAME}")
+    
     if not LAMBDA_FUNCTION_NAME:
-        logger.error("Lambda function name not configured")
+        logger.error("❌ Lambda function name not configured, cannot invoke async search")
+        fail_job(job_id, "Lambda function name not configured")
         return
     
     try:
@@ -362,14 +365,21 @@ def invoke_async_search(job_id: str, search_params: Dict[str, Any]):
             'search_params': search_params
         }
         
-        lambda_client.invoke(
+        logger.info(f"🔷 Preparing async invocation payload for job {job_id}")
+        logger.info(f"🔷 Payload structure: async_job={payload.get('async_job')}, job_id={payload.get('job_id')}, has_search_params={bool(payload.get('search_params'))}")
+        logger.info(f"🔷 Search params sample: {json.dumps(search_params, default=str)[:200]}")
+        
+        response = lambda_client.invoke(
             FunctionName=LAMBDA_FUNCTION_NAME,
             InvocationType='Event',  # Async invocation
             Payload=json.dumps(payload)
         )
-        logger.info(f"Invoked async search for job {job_id}")
+        
+        logger.info(f"✅ Async invocation response received: StatusCode={response.get('StatusCode')}")
+        logger.info(f"✅ ResponseMetadata: {response.get('ResponseMetadata')}")
+        logger.info(f"✅ Successfully invoked async search for job {job_id}")
     except Exception as e:
-        logger.error(f"Error invoking async search: {e}")
+        logger.error(f"❌ Error invoking async search for job {job_id}: {e}", exc_info=True)
         fail_job(job_id, f"Failed to invoke async search: {str(e)}")
 
 

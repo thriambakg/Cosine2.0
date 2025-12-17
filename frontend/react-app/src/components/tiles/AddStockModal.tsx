@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -12,8 +12,12 @@ import {
   Box,
   Typography,
   Chip,
+  Autocomplete,
+  TextField,
+  CircularProgress,
 } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
+import { securitySuggestionsServiceV2, Security } from '../../services/securitySuggestionsV2';
 
 interface AddStockModalProps {
   open: boolean;
@@ -34,13 +38,6 @@ interface AddStockModalProps {
   existingSymbols: string[];
 }
 
-const STOCK_SYMBOLS = [
-  "AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "META", "NVDA", "NFLX", "AMD", "INTC",
-  "CRM", "ADBE", "PYPL", "UBER", "SPOT", "SQ", "ZM", "DOCU", "SNOW", "PLTR",
-  "ROKU", "PINS", "TWLO", "OKTA", "CRWD", "NET", "DDOG", "ZS", "ESTC", "MDB",
-  "SPY", "QQQ", "IWM", "VTI", "VOO", "ARKK", "TQQQ", "SOXL", "TMF", "UPRO"
-];
-
 const TIMEFRAMES = [
   { value: "1d", label: "1 Day" },
   { value: "7d", label: "7 Days" },
@@ -55,6 +52,7 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
   existingSymbols,
 }) => {
   const [selectedSymbol, setSelectedSymbol] = useState<string>('');
+  const [selectedSecurity, setSelectedSecurity] = useState<Security | null>(null);
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1d');
   const [displayOptions, setDisplayOptions] = useState({
     showPrice: true,
@@ -65,8 +63,41 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
     showChart: true,
   });
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState(false);
+  const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
+  const [autocompleteInput, setAutocompleteInput] = useState<string>('');
 
-  const availableSymbols = STOCK_SYMBOLS.filter(symbol => !existingSymbols.includes(symbol));
+  // Load security data on mount
+  useEffect(() => {
+    const loadSecurityData = async () => {
+      try {
+        await securitySuggestionsServiceV2.loadSecurities();
+        setIsSecurityDataLoaded(true);
+        // Deduplicate securities by symbol (keep first occurrence)
+        const allSecurities = securitySuggestionsServiceV2.getAllSecurities();
+        const seen = new Set<string>();
+        const uniqueSecurities = allSecurities.filter(security => {
+          if (seen.has(security.symbol)) {
+            return false;
+          }
+          seen.add(security.symbol);
+          return true;
+        });
+        setSecuritySuggestions(uniqueSecurities.slice(0, 50));
+      } catch (error) {
+        console.error('Failed to load security suggestions:', error);
+      }
+    };
+
+    if (open) {
+      loadSecurityData();
+    }
+  }, [open]);
+
+  // Filter out existing symbols from suggestions
+  const availableSecurities = securitySuggestions.filter(
+    security => !existingSymbols.includes(security.symbol)
+  );
 
   const handleAdd = () => {
     if (!selectedSymbol) return;
@@ -80,6 +111,8 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
 
     // Reset form
     setSelectedSymbol('');
+    setSelectedSecurity(null);
+    setAutocompleteInput('');
     setSelectedTimeframe('1d');
     setDisplayOptions({
       showPrice: true,
@@ -96,8 +129,47 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
   const handleClose = () => {
     // Reset form on close
     setSelectedSymbol('');
+    setSelectedSecurity(null);
+    setAutocompleteInput('');
     setSelectedTimeframe('1d');
     onClose();
+  };
+
+  const handleSecurityChange = (event: any, newValue: Security | null) => {
+    setSelectedSecurity(newValue);
+    if (newValue) {
+      setSelectedSymbol(newValue.symbol);
+    } else {
+      setSelectedSymbol('');
+    }
+  };
+
+  const handleInputChange = (event: any, newInputValue: string) => {
+    setAutocompleteInput(newInputValue);
+    if (isSecurityDataLoaded && newInputValue) {
+      const suggestions = securitySuggestionsServiceV2.getSuggestions(newInputValue, 50);
+      // Deduplicate by symbol and filter existing
+      const seen = new Set<string>();
+      const uniqueSuggestions = suggestions.filter(s => {
+        if (seen.has(s.symbol) || existingSymbols.includes(s.symbol)) {
+          return false;
+        }
+        seen.add(s.symbol);
+        return true;
+      });
+      setSecuritySuggestions(uniqueSuggestions);
+    } else if (isSecurityDataLoaded) {
+      const allSecurities = securitySuggestionsServiceV2.getAllSecurities();
+      const seen = new Set<string>();
+      const uniqueSecurities = allSecurities.filter(s => {
+        if (seen.has(s.symbol) || existingSymbols.includes(s.symbol)) {
+          return false;
+        }
+        seen.add(s.symbol);
+        return true;
+      });
+      setSecuritySuggestions(uniqueSecurities.slice(0, 50));
+    }
   };
 
   return (
@@ -125,33 +197,123 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
 
       <DialogContent sx={{ pt: 2 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {/* Stock Selection */}
-          <FormControl fullWidth>
-            <InputLabel sx={{ color: '#9ca3af' }}>Stock Symbol</InputLabel>
-            <Select
-              value={selectedSymbol}
-              label="Stock Symbol"
-              onChange={(e) => setSelectedSymbol(e.target.value)}
-              sx={{
-                color: 'white',
-                '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#374151',
+          {/* Stock Selection - Autocomplete */}
+          <Autocomplete
+            value={selectedSecurity ?? null}
+            onChange={handleSecurityChange}
+            inputValue={autocompleteInput}
+            onInputChange={handleInputChange}
+            options={availableSecurities}
+            getOptionLabel={(option) => option.displayText}
+            isOptionEqualToValue={(option, value) => option.symbol === value.symbol}
+            loading={!isSecurityDataLoaded}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Stock Symbol"
+                variant="outlined"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    color: 'white',
+                    '& fieldset': {
+                      borderColor: '#374151',
+                    },
+                    '&:hover fieldset': {
+                      borderColor: '#10b981',
+                    },
+                    '&.Mui-focused fieldset': {
+                      borderColor: '#10b981',
+                    },
+                  },
+                  '& .MuiInputLabel-root': {
+                    color: '#9ca3af',
+                  },
+                }}
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {!isSecurityDataLoaded ? <CircularProgress color="inherit" size={20} /> : null}
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+            getOptionKey={(option) => {
+              // Create unique key: symbol + marketCap + name to handle duplicates
+              return `${option.symbol}-${option.marketCap}-${option.name}`;
+            }}
+            renderOption={(props, option) => {
+              const capColor = option.marketCap === 'high' ? '#10b981' : option.marketCap === 'mid' ? '#f59e0b' : '#ef4444';
+              const capLabel = option.marketCap === 'high' ? 'High Cap' : option.marketCap === 'mid' ? 'Mid Cap' : 'Low Cap';
+              const uniqueKey = `${option.symbol}-${option.marketCap}-${option.name}`;
+              return (
+                <Box component="li" {...props} key={uniqueKey} sx={{ py: 1 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
+                        {option.symbol}
+                      </Typography>
+                      <Chip 
+                        label={capLabel} 
+                        size="small" 
+                        sx={{ 
+                          height: '18px', 
+                          fontSize: '0.65rem',
+                          backgroundColor: capColor,
+                          color: 'white'
+                        }} 
+                      />
+                    </Box>
+                    <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                      {option.name}
+                    </Typography>
+                  </Box>
+                </Box>
+              );
+            }}
+            sx={{
+              '& .MuiAutocomplete-popper': {
+                '& .MuiPaper-root': {
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  border: '1px solid #374151',
+                  '&::-webkit-scrollbar': {
+                    width: '6px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    backgroundColor: '#475569',
+                    borderRadius: '3px',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    backgroundColor: '#3b82f6',
+                    borderRadius: '3px',
+                    '&:hover': {
+                      backgroundColor: '#2563eb',
+                    },
+                  },
+                  '& .MuiAutocomplete-listbox': {
+                    '&::-webkit-scrollbar': {
+                      width: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      backgroundColor: '#475569',
+                      borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: '#3b82f6',
+                      borderRadius: '3px',
+                      '&:hover': {
+                        backgroundColor: '#2563eb',
+                      },
+                    },
+                  },
                 },
-                '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#10b981',
-                },
-                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                  borderColor: '#10b981',
-                },
-              }}
-            >
-              {availableSymbols.map((symbol) => (
-                <MenuItem key={symbol} value={symbol} sx={{ color: '#1e293b' }}>
-                  {symbol}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+              },
+            }}
+            freeSolo
+            autoSelect
+          />
 
           {/* Timeframe Selection */}
           <FormControl fullWidth>

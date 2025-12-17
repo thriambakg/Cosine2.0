@@ -156,7 +156,11 @@ def get_cached_filings(filing_ids: List[str]) -> Dict[str, Dict[str, Any]]:
                 except Exception as e:
                     logger.warning(f"Failed to update lastAccessed for {filing_id}: {e}")
         
-        logger.info(f"Found {len(cached_items)}/{len(filing_ids)} filings in cache")
+        logger.info(f"🔍 Cache lookup complete: Found {len(cached_items)}/{len(filing_ids)} filing(s) in cache")
+        if len(cached_items) < len(filing_ids):
+            missing_ids = set(filing_ids) - set(cached_items.keys())
+            logger.info(f"📋 Missing from cache ({len(missing_ids)} filing(s)): {', '.join(list(missing_ids)[:10])}" + 
+                       (f" and {len(missing_ids) - 10} more..." if len(missing_ids) > 10 else ""))
         return cached_items
         
     except Exception as e:
@@ -257,59 +261,79 @@ def scrape_filing_page_for_data_files(filing_page_url: str) -> List[str]:
         
         html_text = response.text
         
-        # Find the "Data Files" table section
-        data_table_start_patterns = [
+        # Find the "Data Files" header text (usually in <p>Data Files</p>)
+        # Look for the pattern: <p>Data Files</p> or similar
+        data_files_header_patterns = [
+            r'<p[^>]*>Data Files</p>',
+            r'<p[^>]*>Data Files',
             r'Data Files',
-            r'<table[^>]*>.*?Data Files',
-            r'<th[^>]*>.*?Data Files',
         ]
         
-        # Find the start of Data Files table
-        data_table_start = -1
-        for pattern in data_table_start_patterns:
+        data_files_header_pos = -1
+        for pattern in data_files_header_patterns:
             match = re.search(pattern, html_text, re.IGNORECASE)
             if match:
-                data_table_start = match.start()
+                data_files_header_pos = match.end()  # Position after "Data Files" text
+                logger.info(f"Found 'Data Files' header at position {data_files_header_pos}")
                 break
         
-        if data_table_start < 0:
-            # No Data Files table found
+        if data_files_header_pos < 0:
+            # No Data Files section found
+            logger.info("No 'Data Files' section found in filing page")
             return []
         
-        # Find the end of the Data Files table (next table or end of HTML)
-        # Look for next table or end of document
-        after_data_start = html_text[data_table_start:]
-        next_table_match = re.search(r'<table[^>]*>', after_data_start[100:], re.IGNORECASE)
-        if next_table_match:
-            data_table_end = data_table_start + 100 + next_table_match.start()
-        else:
-            data_table_end = len(html_text)
+        # Find the <table> tag that comes AFTER "Data Files" header
+        # This is the Data Files table (not Document Format Files which comes before)
+        after_header = html_text[data_files_header_pos:]
+        table_match = re.search(r'<table[^>]*>', after_header, re.IGNORECASE)
         
-        # Extract the section containing Data Files table
-        before_start = html_text[:data_table_start]
-        table_open_match = before_start.rfind('<table')
-        if table_open_match >= 0:
-            table_section_full = html_text[table_open_match:data_table_end]
-            table_close_match = table_section_full.find('</table>')
-            if table_close_match > 0:
-                table_section = table_section_full[:table_close_match + 8]
-            else:
-                table_section = table_section_full
-        else:
-            table_section = html_text[data_table_start:data_table_end]
+        if not table_match:
+            logger.warning("Found 'Data Files' header but no table tag after it")
+            return []
+        
+        # Get the position of the Data Files table start
+        data_table_start = data_files_header_pos + table_match.start()
+        logger.info(f"Found Data Files table starting at position {data_table_start}")
+        
+        # Find the closing </table> tag for this table
+        table_content = html_text[data_table_start:]
+        table_close_match = re.search(r'</table>', table_content, re.IGNORECASE)
+        
+        if not table_close_match:
+            logger.warning("Found Data Files table start but no closing </table> tag")
+            return []
+        
+        # Extract the complete table section
+        table_section = table_content[:table_close_match.end()]
+        logger.info(f"Extracted Data Files table section ({len(table_section)} chars)")
+        
+        # Verify this is actually the Data Files table by checking for the summary attribute
+        # SEC pages often have: <table class="tableFile" summary="Data Files">
+        if 'summary="Data Files"' not in table_section and "summary='Data Files'" not in table_section:
+            # Check if it contains Data Files in the table
+            if 'Data Files' not in table_section:
+                logger.warning("Extracted table doesn't appear to be the Data Files table, verifying...")
         
         # Extract links from Data Files table
-        # Extract all file links (XML, HTML, TXT, etc.)
-        link_pattern = r'href="([^"]*)"'
-        all_links = re.findall(link_pattern, table_section, re.IGNORECASE)
+        # Extract all href links from within this table
+        href_pattern = r'<a[^>]+href="([^"]+)"[^>]*>'
+        all_links = re.findall(href_pattern, table_section, re.IGNORECASE)
+        logger.info(f"Found {len(all_links)} href links in Data Files table")
         
-        # Filter out index pages and XBRL taxonomy files
+        # Data Files typically contain XBRL files (.xsd, .xml), so we should NOT filter them out
+        # However, we should still filter out index pages and navigation links
         for link in all_links:
-            if ('index' not in link.lower() and 
-                'xbrl' not in link.lower() and
-                'taxonomy' not in link.lower() and
-                'schema' not in link.lower()):
+            href_lower = link.lower()
+            # Skip index pages and SEC navigation/search pages, but KEEP XBRL files
+            if ('index' not in href_lower and 
+                'browse-edgar' not in href_lower and
+                'browse' not in href_lower and
+                '/cgi-bin/' not in href_lower and
+                'search' not in href_lower and
+                '/viewer?' not in href_lower):  # Skip interactive data viewer links
                 data_file_urls.append(link)
+        
+        logger.info(f"After filtering, {len(data_file_urls)} data file links remain")
         
         # Remove duplicates while preserving order
         seen = set()
@@ -332,10 +356,13 @@ def scrape_filing_page_for_data_files(filing_page_url: str) -> List[str]:
             
             absolute_urls.append(absolute_url)
         
+        logger.info(f"Returning {len(absolute_urls)} absolute data file URLs")
+        if absolute_urls:
+            logger.info(f"Data file URLs extracted: {absolute_urls[:10]}")  # Log first 10 URLs
         return absolute_urls
         
     except Exception as e:
-        logger.error(f"Error scraping data files from filing page: {e}")
+        logger.error(f"Error scraping data files from filing page: {e}", exc_info=True)
         return []
 
 
@@ -556,19 +583,25 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
         all_hrefs = re.findall(href_pattern, table_section, re.IGNORECASE)
         
         # Filter out index pages, XBRL/taxonomy files, and SEC navigation pages
+        # Document Format Files should NOT include XBRL files (those are in Data Files table)
         document_urls = []
+        logger.info(f"Found {len(all_hrefs)} total href links in Document Format Files table")
         for href in all_hrefs:
             href_lower = href.lower()
             # Skip index pages, XBRL, taxonomy files, and SEC navigation/search pages
+            # XBRL files (.xsd, .xml taxonomy files) belong in Data Files, not Document Format Files
             if ('index' not in href_lower and 
                 'xbrl' not in href_lower and
                 'taxonomy' not in href_lower and
                 'schema' not in href_lower and
+                '.xsd' not in href_lower and  # XBRL schema files
                 'browse-edgar' not in href_lower and
                 'browse' not in href_lower and
                 '/cgi-bin/' not in href_lower and
                 'search' not in href_lower):
                 document_urls.append(href)
+        
+        logger.info(f"After filtering, {len(document_urls)} document format file links remain (XBRL files filtered out)")
         
         # Remove duplicates while preserving order
         seen = set()
@@ -615,6 +648,10 @@ def scrape_filing_page_for_documents(filing_page_url: str) -> List[str]:
                 return 4
         
         sorted_urls = sorted(absolute_urls, key=link_priority)
+        
+        logger.info(f"Returning {len(sorted_urls)} document format file URLs")
+        if sorted_urls:
+            logger.info(f"Document format file URLs: {sorted_urls[:5]}...")  # Log first 5 URLs
         
         return sorted_urls
         
@@ -1493,7 +1530,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         logger.info(f"Fetching display page {page} (API page {api_page}, params: page={params.get('page', 'N/A')}, from={params.get('from', 'N/A')})...")
         logger.info(f"Base parameters: {base_params}")
         
-        # Retry logic for handling timeouts
+        # Retry logic for handling timeouts and transient errors (500, 502, 503, 504)
         # HTTP timeout must be less than Lambda timeout (30s) to get proper error handling
         # Using 25 seconds to leave buffer for processing time
         HTTP_TIMEOUT = 25
@@ -1507,13 +1544,37 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 response = session.get(url, params=params, headers=headers, timeout=HTTP_TIMEOUT)
                 response.raise_for_status()
                 break  # Success, exit retry loop
+            except requests.exceptions.HTTPError as e:
+                # Check if it's a server error (500, 502, 503, 504) - potentially transient
+                status_code = e.response.status_code if hasattr(e, 'response') and e.response else None
+                is_transient_error = status_code in [500, 502, 503, 504]
+                
+                retry_count += 1
+                if retry_count >= max_retries:
+                    if is_transient_error:
+                        logger.error(f"⚠️  Transient server error ({status_code}) on API page {api_page} after {max_retries} retries: {e}")
+                        logger.error(f"   This may be a temporary SEC API issue. Consider retrying the search later.")
+                    else:
+                        logger.error(f"Failed to fetch API page {api_page} after {max_retries} retries: {e}")
+                    raise
+                
+                # Exponential backoff for transient errors, linear for others
+                if is_transient_error:
+                    backoff_delay = min(2 ** retry_count, 10)  # Exponential: 2s, 4s, 8s (capped at 10s)
+                    logger.warning(f"⚠️  Transient server error ({status_code}) on API page {api_page}, retry {retry_count}/{max_retries} after {backoff_delay}s: {e}")
+                else:
+                    backoff_delay = retry_count  # Linear: 1s, 2s, 3s
+                    logger.warning(f"Timeout/error on API page {api_page}, retry {retry_count}/{max_retries} after {backoff_delay}s: {e}")
+                
+                time.sleep(backoff_delay)
             except (requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
                 retry_count += 1
                 if retry_count >= max_retries:
                     logger.error(f"Failed to fetch API page {api_page} after {max_retries} retries: {e}")
                     raise
-                logger.warning(f"Timeout/error on API page {api_page}, retry {retry_count}/{max_retries}: {e}")
-                time.sleep(1)  # Wait before retry
+                backoff_delay = min(2 ** retry_count, 10)  # Exponential backoff for timeouts
+                logger.warning(f"Timeout/error on API page {api_page}, retry {retry_count}/{max_retries} after {backoff_delay}s: {e}")
+                time.sleep(backoff_delay)
         
         data = response.json()
         
@@ -1679,13 +1740,14 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
         # Slice to get exactly 10 results for this display page
         limited_hits = hits_list[start_idx:end_idx]
         
-        logger.info(f"Sliced to {len(limited_hits)} results for display page {page} (from index {start_idx} to {end_idx})")
+        logger.info(f"✂️  Sliced to {len(limited_hits)} results for display page {page} (from index {start_idx} to {end_idx})")
         
         # Extract results with all column data and construct filing IDs
         filing_ids = []
         filing_data_list = []
         
-        for hit in limited_hits:
+        logger.info(f"🔄 Processing {len(limited_hits)} filing record(s) from API results...")
+        for idx, hit in enumerate(limited_hits, 1):
             source = hit.get('_source', {})
             _id = hit.get('_id', '')
             
@@ -1730,17 +1792,18 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             # We split by '-' and check we have at least 4 parts (form, CIK, fileNumber, filmNumber)
             parts = filing_id.split('-')
             if len(parts) < 4:
-                logger.error(f"CRITICAL: Invalid filing_id format for DynamoDB/S3: '{filing_id}'. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. "
+                logger.error(f"❌ [{idx}/{len(limited_hits)}] CRITICAL: Invalid filing_id format for DynamoDB/S3: '{filing_id}'. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. "
                            f"Components: form='{form_str}', cik='{cik_str}', file_number='{file_number_str}', film_number='{film_number_str}'. "
                            f"Split into {len(parts)} parts: {parts}. Skipping this filing.")
                 continue  # Skip this filing - don't add to list
             
             # Additional validation - ensure form and CIK are not N/A
             if filing_id.startswith('N/A-') or parts[1] == 'N/A':
-                logger.error(f"CRITICAL: Invalid filing_id - form or CIK is N/A: '{filing_id}'. Skipping this filing.")
+                logger.error(f"❌ [{idx}/{len(limited_hits)}] CRITICAL: Invalid filing_id - form or CIK is N/A: '{filing_id}'. Skipping this filing.")
                 continue  # Skip this filing
             
             filing_ids.append(filing_id)
+            logger.info(f"✅ [{idx}/{len(limited_hits)}] Extracted filing record: {filing_id} (form={form_str}, cik={cik_str}, date={file_date})")
             
             filing_data_list.append({
                 'filingId': filing_id,
@@ -1759,32 +1822,38 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
             })
         
         # Check cache for existing filings
+        logger.info(f"🔍 Checking cache for {len(filing_ids)} filing(s)")
         cached_filings = get_cached_filings(filing_ids)
+        logger.info(f"✅ Cache check complete: Found {len(cached_filings)}/{len(filing_ids)} filing(s) in cache")
         
         # Process results: use cache if available, otherwise scrape
         results = []
         filings_to_store_in_dynamodb = []  # New filings to store in DynamoDB
         filings_to_download = []  # All filings (cached and new) that need S3 downloads
         
-        for filing_data in filing_data_list:
+        logger.info(f"📋 Processing {len(filing_data_list)} filing record(s) in new record loop")
+        for idx, filing_data in enumerate(filing_data_list, 1):
             filing_id = filing_data.get('filingId', '')
+            logger.info(f"📄 [{idx}/{len(filing_data_list)}] Processing filing record: {filing_id}")
             
             # Validate filing_id before proceeding
             # file_number may contain dashes, so we check by splitting instead of counting dashes
             if not filing_id:
-                logger.error(f"Invalid filing_id in filing_data: missing filing_id. Skipping this filing.")
+                logger.error(f"❌ [{idx}/{len(filing_data_list)}] Invalid filing_id in filing_data: missing filing_id. Skipping this filing.")
                 continue
             
             # Split by '-' and ensure we have at least 4 parts (form, CIK, fileNumber, filmNumber)
             parts = filing_id.split('-')
             if len(parts) < 4:
-                logger.error(f"Invalid filing_id in filing_data: '{filing_id}'. Expected at least 4 parts when split by '-', got {len(parts)}. Skipping this filing.")
+                logger.error(f"❌ [{idx}/{len(filing_data_list)}] Invalid filing_id in filing_data: '{filing_id}'. Expected at least 4 parts when split by '-', got {len(parts)}. Skipping this filing.")
                 continue
             
             # Check if filing is in cache
+            logger.info(f"🔎 [{idx}/{len(filing_data_list)}] Checking cache for filing: {filing_id}")
             if filing_id in cached_filings:
+                logger.info(f"✅ [{idx}/{len(filing_data_list)}] Filing found in cache: {filing_id}")
                 cached_item = cached_filings[filing_id]
-                logger.info(f"Using cached data for filing {filing_id}")
+                logger.info(f"✅ [{idx}/{len(filing_data_list)}] Using cached data for filing {filing_id}")
                 
                 # Handle documentUrls - convert set to list if needed
                 document_urls = cached_item.get('documentUrls', [])
@@ -1834,13 +1903,14 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'filingId': filing_id,
                 }
                 results.append(result)
+                logger.info(f"✅ [{idx}/{len(filing_data_list)}] RECORD ADDED: Cached filing {filing_id} added to results. Total results now: {len(results)}")
                 
                 # Skip S3 download for cached filings - they should already be in S3
                 # Since indexing and downloading are tied together, if it's in DynamoDB, files should already be in S3
-                logger.info(f"Skipping S3 download for cached filing {filing_id} - files should already be in S3")
+                logger.info(f"⏭️  [{idx}/{len(filing_data_list)}] Skipping S3 download for cached filing {filing_id} - files should already be in S3")
             else:
                 # Cache miss - need to scrape
-                logger.info(f"Cache miss for filing {filing_id}, scraping...")
+                logger.info(f"❌ [{idx}/{len(filing_data_list)}] Filing not found in cache: {filing_id}, scraping and downloading...")
                 
                 # Build filing page URL from accession
                 filing_page_url = None
@@ -1859,11 +1929,21 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 # Scrape data file URLs from filing page (Data Files table)
                 data_file_urls = []
                 if filing_page_url:
+                    logger.info(f"📥 [{idx}/{len(filing_data_list)}] Scraping filing page for documents and data files: {filing_page_url}")
                     document_urls = scrape_filing_page_for_documents(filing_page_url)
                     if document_urls:
                         primary_document_url = document_urls[0]
+                        logger.info(f"📄 [{idx}/{len(filing_data_list)}] Found {len(document_urls)} document URL(s) for filing {filing_id}")
+                    else:
+                        logger.warning(f"⚠️  [{idx}/{len(filing_data_list)}] No document URLs found for filing {filing_id}")
                     # Also scrape data files from Data Files table
                     data_file_urls = scrape_filing_page_for_data_files(filing_page_url)
+                    if data_file_urls:
+                        logger.info(f"📊 [{idx}/{len(filing_data_list)}] Found {len(data_file_urls)} data file URL(s) for filing {filing_id}")
+                    else:
+                        logger.info(f"ℹ️  [{idx}/{len(filing_data_list)}] No data file URLs found for filing {filing_id}")
+                else:
+                    logger.warning(f"⚠️  [{idx}/{len(filing_data_list)}] No filing page URL available for filing {filing_id}, skipping document/data file scraping")
                 
                 # Prepare result
                 result = {
@@ -1884,6 +1964,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'filingId': filing_id,  # Store filing_id for download step
                 }
                 results.append(result)
+                logger.info(f"✅ [{idx}/{len(filing_data_list)}] RECORD ADDED: New filing {filing_id} added to results. Total results now: {len(results)}")
                 
                 # Prepare data for DynamoDB storage and download
                 filing_data['filingPageUrl'] = filing_page_url
@@ -1894,6 +1975,7 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                 filing_data['documentS3Keys'] = {}
                 filing_data['dataFileS3Keys'] = {}
                 filings_to_store_in_dynamodb.append(filing_data)
+                logger.info(f"📝 [{idx}/{len(filing_data_list)}] Added filing {filing_id} to DynamoDB storage queue")
                 
                 # Add to download list
                 filings_to_download.append({
@@ -1902,47 +1984,52 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                     'documentUrls': document_urls,
                     'dataFileUrls': data_file_urls,
                 })
+                logger.info(f"⬇️  [{idx}/{len(filing_data_list)}] Added filing {filing_id} to S3 download queue ({len(document_urls)} documents, {len(data_file_urls)} data files)")
         
         # Step 1: Store new filings in DynamoDB cache
         if filings_to_store_in_dynamodb:
-            logger.info(f"Storing {len(filings_to_store_in_dynamodb)} new filings in DynamoDB cache")
-            for filing_data in filings_to_store_in_dynamodb:
+            logger.info(f"💾 Storing {len(filings_to_store_in_dynamodb)} new filing(s) in DynamoDB cache")
+            for idx, filing_data in enumerate(filings_to_store_in_dynamodb, 1):
+                filing_id = filing_data.get('filingId', 'UNKNOWN')
                 try:
+                    logger.info(f"💾 [{idx}/{len(filings_to_store_in_dynamodb)}] Storing filing in DynamoDB: {filing_id}")
                     store_filing_in_cache(filing_data)
-                    logger.info(f"Stored filing {filing_data.get('filingId')} in DynamoDB cache")
+                    logger.info(f"✅ [{idx}/{len(filings_to_store_in_dynamodb)}] Successfully stored filing {filing_id} in DynamoDB cache")
                 except Exception as e:
-                    logger.error(f"Failed to cache filing {filing_data.get('filingId')}: {e}")
+                    logger.error(f"❌ [{idx}/{len(filings_to_store_in_dynamodb)}] Failed to cache filing {filing_id}: {e}")
                     # Continue - don't fail the request if caching fails
         
         # Step 2: Download documents to S3 for NEW filings only (not cached ones)
         # Cached filings should already have their files in S3 since indexing and downloading are tied together
         # This happens after DynamoDB storage to ensure the index exists
         if filings_to_download:
-            logger.info(f"Downloading documents to S3 for {len(filings_to_download)} NEW filings (cached filings skipped)")
-            for filing_download_info in filings_to_download:
+            logger.info(f"⬇️  Downloading documents to S3 for {len(filings_to_download)} NEW filing(s) (cached filings skipped)")
+            for idx, filing_download_info in enumerate(filings_to_download, 1):
                 try:
                     filing_id = filing_download_info.get('filingId')
                     document_urls = filing_download_info.get('documentUrls', [])
                     data_file_urls = filing_download_info.get('dataFileUrls', [])
                     filing_page_url = filing_download_info.get('filingPageUrl', '')
                     
+                    logger.info(f"⬇️  [{idx}/{len(filings_to_download)}] Processing S3 download for filing: {filing_id}")
+                    
                     if not filing_id:
-                        logger.warning(f"Skipping S3 download: missing filing_id")
+                        logger.warning(f"⚠️  [{idx}/{len(filings_to_download)}] Skipping S3 download: missing filing_id")
                         continue
                     
                     if not document_urls and not data_file_urls:
-                        logger.info(f"Skipping S3 download for filing_id {filing_id}: no document or data file URLs to download")
+                        logger.info(f"⏭️  [{idx}/{len(filings_to_download)}] Skipping S3 download for filing_id {filing_id}: no document or data file URLs to download")
                         continue
                     
                     # Validate filing_id format one more time before downloading
                     # file_number may contain dashes, so we split and check parts
                     parts = filing_id.split('-')
                     if len(parts) < 4:
-                        logger.error(f"Invalid filing_id format '{filing_id}' - skipping S3 download. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. "
+                        logger.error(f"❌ [{idx}/{len(filings_to_download)}] Invalid filing_id format '{filing_id}' - skipping S3 download. Expected format: {{form}}-{{CIK}}-{{fileNumber}}-{{filmNumber}}. "
                                    f"Split into {len(parts)} parts: {parts}")
                         continue
                     
-                    logger.info(f"Downloading {len(document_urls)} document(s) and {len(data_file_urls)} data file(s) to S3 for filing_id: {filing_id}")
+                    logger.info(f"⬇️  [{idx}/{len(filings_to_download)}] Downloading {len(document_urls)} document(s) and {len(data_file_urls)} data file(s) to S3 for filing_id: {filing_id}")
                     download_result = download_filing_documents_to_s3(
                         filing_id=filing_id,
                         document_urls=document_urls,
@@ -1950,10 +2037,18 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                         filing_page_url=filing_page_url if filing_page_url else None
                     )
                     
+                    if download_result:
+                        logger.info(f"✅ [{idx}/{len(filings_to_download)}] Successfully downloaded filing {filing_id} to S3")
+                    else:
+                        logger.warning(f"⚠️  [{idx}/{len(filings_to_download)}] Download result is None or empty for filing {filing_id}")
+                    
                     # Update the filing_data with S3 keys for cache update
-                    document_s3_keys = download_result.get('documentS3Keys', {})
-                    data_file_s3_keys = download_result.get('dataFileS3Keys', {})
-                    xbrl_s3_key = download_result.get('xbrlS3Key')
+                    document_s3_keys = download_result.get('documentS3Keys', {}) if download_result else {}
+                    data_file_s3_keys = download_result.get('dataFileS3Keys', {}) if download_result else {}
+                    xbrl_s3_key = download_result.get('xbrlS3Key') if download_result else None
+                    
+                    logger.info(f"📦 [{idx}/{len(filings_to_download)}] Download result for {filing_id}: {len(document_s3_keys)} document S3 key(s), {len(data_file_s3_keys)} data file S3 key(s)" + 
+                              (f", XBRL key: {xbrl_s3_key}" if xbrl_s3_key else ", no XBRL key"))
                     
                     # Update results with S3 keys if this filing is in the current page results
                     for result in results:
@@ -2011,8 +2106,15 @@ def search_by_search_index_api(search_params: Dict[str, Any], page: int = 1) -> 
                         # Continue - don't fail the request if cache update fails
                         
                 except Exception as e:
-                    logger.error(f"Failed to download documents for filing {filing_download_info.get('filingId')}: {e}")
+                    filing_id_error = filing_download_info.get('filingId', 'UNKNOWN')
+                    logger.error(f"❌ [{idx}/{len(filings_to_download)}] Failed to download documents for filing {filing_id_error}: {e}", exc_info=True)
                     # Continue - don't fail the request if downloading fails
+        else:
+            logger.info(f"ℹ️  No new filings to download to S3 (all filings were cached)")
+        
+        # Summary log
+        logger.info(f"📊 Processing summary: {len(results)} result(s) total, {len(cached_filings)} from cache, {len(filings_to_store_in_dynamodb)} new filing(s) stored, {len(filings_to_download)} new filing(s) downloaded")
+        logger.info(f"✅ Returning {len(results)} filing result(s) from search_by_search_index_api")
         
         return {
             'success': True,
@@ -2082,6 +2184,9 @@ def handle_autocomplete(event: Dict[str, Any]) -> Dict[str, Any]:
 
 def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
     """Handle full search requests - supports both sync and async modes"""
+    logger.info(f"🔍🔍🔍 HANDLE_SEARCH CALLED 🔍🔍🔍")
+    logger.info(f"📥 Event body type: {type(event.get('body'))}")
+    logger.info(f"📥 Event body (first 500 chars): {str(event.get('body', ''))[:500]}")
     try:
         # Parse request body or query params
         if event.get('body'):
@@ -2178,13 +2283,22 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
                 # Fall through to create new job
         
         # Cache miss - create new job
+        logger.info(f"🔴🔴🔴 CACHE MISS - CREATING NEW JOB 🔴🔴🔴")
         logger.info(f"Query cache miss for hash {query_hash}, creating new job")
+        logger.info(f"📋 Search params for new job: {json.dumps(search_params, default=str)}")
         job_id = create_job(search_params)
+        logger.info(f"✅✅✅ Created new job: {job_id} ✅✅✅")
         
         # Store in query cache with initial job status
+        logger.info(f"💾 Storing job in query cache...")
         store_cached_query(query_hash, job_id, search_params, job_status='PENDING')
+        logger.info(f"💾✅ Stored job in query cache")
         
+        logger.info(f"🚀🚀🚀 ABOUT TO INVOKE ASYNC SEARCH 🚀🚀🚀")
+        logger.info(f"🚀 Invoking async search for job {job_id} with params: {json.dumps(search_params, default=str)}")
+        logger.info(f"🚀 Calling invoke_async_search function...")
         invoke_async_search(job_id, search_params)
+        logger.info(f"✅✅✅ Async search invocation sent for job {job_id} ✅✅✅")
         
         return {
             'statusCode': 202,  # Accepted
@@ -2222,7 +2336,10 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
         query_params = event.get('queryStringParameters') or {}
         job_id = query_params.get('job_id')
         
+        logger.info(f"📊 Status check request received for job_id: {job_id}")
+        
         if not job_id:
+            logger.warning(f"⚠️  Status check request missing job_id parameter")
             return {
                 'statusCode': 400,
                 'headers': {
@@ -2236,7 +2353,26 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
                 })
             }
         
+        logger.info(f"🔍 Fetching job status for: {job_id}")
         job_status = get_job_status(job_id)
+        
+        if not job_status:
+            logger.warning(f"⚠️  Job not found: {job_id}")
+        else:
+            status = job_status.get('status', 'UNKNOWN')
+            logger.info(f"✅ Job status retrieved for {job_id}: {status}")
+            if status == 'FAILED':
+                error_msg = job_status.get('error', 'Unknown error')
+                logger.info(f"   Error details: {error_msg}")
+            elif status == 'COMPLETED':
+                results_count = job_status.get('results_count', 0)
+                logger.info(f"   Results count: {results_count}")
+            elif status == 'IN_PROGRESS':
+                progress = job_status.get('progress', {})
+                current_page = progress.get('current_page', 0)
+                total_pages = progress.get('total_pages', 'Unknown')
+                results_loaded = progress.get('results_loaded', 0)
+                logger.info(f"   Progress: page {current_page}/{total_pages}, {results_loaded} results loaded")
         
         if not job_status:
             return {
@@ -2494,8 +2630,11 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
     Checks for cancellation after each page
     """
     try:
-        logger.info(f"Starting async search for job {job_id}")
+        logger.info(f"🚀🚀🚀 PROCESS_ASYNC_SEARCH CALLED FOR JOB {job_id} 🚀🚀🚀")
+        logger.info(f"📋 Search parameters: {json.dumps(search_params, default=str)}")
+        logger.info(f"⏰ Timestamp: {datetime.now(timezone.utc).isoformat()}")
         update_job_progress(job_id, 0, None, 0, 0, 'IN_PROGRESS')
+        logger.info(f"✅ Updated job progress to IN_PROGRESS for job {job_id}")
         
         # Fetch all pages (up to MAX_RESULTS_TO_FETCH)
         MAX_RESULTS_TO_FETCH = 1000
@@ -2504,6 +2643,7 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
         page = 1
         total_found = 0
         estimated_total_pages = None
+        logger.info(f"⚙️  Configuration: MAX_RESULTS_TO_FETCH={MAX_RESULTS_TO_FETCH}, RESULTS_PER_PAGE={RESULTS_PER_PAGE}")
         
         while len(all_results) < MAX_RESULTS_TO_FETCH:
             # Check for cancellation before starting next page
@@ -2524,30 +2664,47 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
                 return
             
             # Update progress
+            logger.info(f"📄 [{job_id}] Processing page {page} (current results: {len(all_results)}, total found: {total_found})")
             if estimated_total_pages:
                 update_job_progress(job_id, page, estimated_total_pages, len(all_results), total_found, 'IN_PROGRESS')
+                logger.info(f"📊 [{job_id}] Updated progress: page {page}/{estimated_total_pages}, {len(all_results)} results loaded, {total_found} total found")
             else:
                 update_job_progress(job_id, page, None, len(all_results), total_found, 'IN_PROGRESS')
+                logger.info(f"📊 [{job_id}] Updated progress: page {page}/Unknown, {len(all_results)} results loaded, {total_found} total found")
             
             # Fetch page
+            logger.info(f"🔍 [{job_id}] Fetching page {page} from SEC API...")
             result = search_by_search_index_api(search_params, page=page)
             
             if not result.get('success'):
-                fail_job(job_id, result.get('error', 'Search failed'))
+                error_msg = result.get('error', 'Search failed')
+                logger.error(f"❌ [{job_id}] Page {page} fetch failed: {error_msg}")
+                fail_job(job_id, error_msg)
                 return
+            
+            logger.info(f"✅ [{job_id}] Successfully fetched page {page} from SEC API")
             
             if page == 1:
                 total_found = result.get('total_found', 0)
+                logger.info(f"📊 [{job_id}] First page results: total_found={total_found}")
                 if total_found > 0:
                     estimated_total_pages = min(MAX_RESULTS_TO_FETCH, total_found) // RESULTS_PER_PAGE
                     if total_found % RESULTS_PER_PAGE > 0:
                         estimated_total_pages += 1
+                    logger.info(f"📊 [{job_id}] Estimated total pages: {estimated_total_pages} (based on {total_found} total results, {RESULTS_PER_PAGE} per page)")
+                else:
+                    logger.warning(f"⚠️  [{job_id}] First page returned total_found=0, no results available")
             
             page_results = result.get('results', [])
+            logger.info(f"📋 [{job_id}] Page {page} returned {len(page_results)} filing result(s)")
+            
             if not page_results:
+                logger.info(f"ℹ️  [{job_id}] No more results on page {page}, stopping search")
                 break
             
+            logger.info(f"📥 [{job_id}] Processing {len(page_results)} filing(s) from page {page}...")
             all_results.extend(page_results)
+            logger.info(f"✅ [{job_id}] Added {len(page_results)} filing(s) to results. Total results so far: {len(all_results)}")
             
             # Check for cancellation after processing page
             if is_job_cancelled(job_id):
@@ -2571,6 +2728,7 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
         
         # Complete job (only if not cancelled)
         if not is_job_cancelled(job_id):
+            logger.info(f"✅ [{job_id}] Completing job with {len(all_results)} result(s), total_found={total_found}")
             final_result = {
                 'success': True,
                 'total_found': total_found,
@@ -2581,6 +2739,7 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
                 'incorporation_filters': result.get('incorporation_filters', [])
             }
             complete_job(job_id, final_result)
+            logger.info(f"✅ [{job_id}] Job marked as completed")
             
             # Update query cache with results
             # Get job status to find results_s3_key (set by complete_job if results >200KB)
@@ -2589,19 +2748,24 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
                 query_hash = generate_query_hash(search_params)
                 results_s3_key = job_status.get('results_s3_key')
                 if results_s3_key:
+                    logger.info(f"💾 [{job_id}] Updating query cache with S3 key: {results_s3_key}")
                     update_cached_query_results(query_hash, results_s3_key, total_found, len(all_results))
                 else:
                     # Results are inline, update cache without S3 key
+                    logger.info(f"💾 [{job_id}] Updating query cache with inline results")
                     store_cached_query(query_hash, job_id, search_params, 
                                      results_s3_key=None, total_found=total_found, 
                                      results_count=len(all_results))
             
-            logger.info(f"Completed async search for job {job_id}: {len(all_results)} results")
+            logger.info(f"🎉 Completed async search for job {job_id}: {len(all_results)} results, {total_found} total found")
         
     except Exception as e:
-        logger.error(f"Error in process_async_search: {e}")
+        logger.error(f"❌ [{job_id}] Error in process_async_search: {e}", exc_info=True)
         if not is_job_cancelled(job_id):
+            logger.error(f"❌ [{job_id}] Failing job due to error: {str(e)}")
             fail_job(job_id, str(e))
+        else:
+            logger.info(f"ℹ️  [{job_id}] Job was cancelled, not failing due to error")
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -2609,13 +2773,36 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Main Lambda handler - routes requests based on path
     Also handles async job processing
     """
+    # Log ALL invocations at the very start
+    logger.info(f"🔵🔵🔵 LAMBDA HANDLER ENTRY POINT 🔵🔵🔵")
+    logger.info(f"📥 Event keys: {list(event.keys())}")
+    logger.info(f"📥 Event type: {type(event)}")
+    logger.info(f"📥 Has 'async_job' key: {event.get('async_job')}")
+    logger.info(f"📥 Full event (first 1000 chars): {str(event)[:1000]}")
+    if context:
+        logger.info(f"📥 Request ID: {context.request_id if hasattr(context, 'request_id') else 'N/A'}")
+    
     try:
         # Check if this is an async job invocation
         if event.get('async_job'):
+            logger.info(f"🔄🔄🔄 ASYNC JOB INVOCATION DETECTED IN LAMBDA HANDLER 🔄🔄🔄")
             job_id = event.get('job_id')
             search_params = event.get('search_params', {})
+            logger.info(f"🔄 ASYNC JOB INVOCATION DETECTED: job_id={job_id}, has_search_params={bool(search_params)}")
+            logger.info(f"📋 Async job event structure: async_job={event.get('async_job')}, job_id={job_id}")
+            logger.info(f"📋 Search params keys: {list(search_params.keys()) if search_params else 'None'}")
+            
             if job_id and search_params:
-                process_async_search(job_id, search_params)
+                logger.info(f"✅ Invoking process_async_search for job {job_id}")
+                try:
+                    process_async_search(job_id, search_params)
+                    logger.info(f"✅ process_async_search completed successfully for job {job_id}")
+                except Exception as e:
+                    logger.error(f"❌ Exception in process_async_search for job {job_id}: {e}", exc_info=True)
+                    raise  # Re-raise to be caught by outer try-except
+            else:
+                logger.error(f"❌ Missing job_id or search_params: job_id={job_id}, search_params={bool(search_params)}")
+                logger.error(f"❌ Event structure: {json.dumps(event, default=str)[:500]}")
             return {'statusCode': 200, 'body': 'Async job started'}
         
         # Regular HTTP request
@@ -2655,7 +2842,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 })
             }
     except Exception as e:
-        logger.error(f"Error in lambda_handler: {e}")
+        logger.error(f"❌❌❌ UNHANDLED EXCEPTION IN LAMBDA_HANDLER ❌❌❌")
+        logger.error(f"❌ Error type: {type(e).__name__}")
+        logger.error(f"❌ Error message: {str(e)}")
+        logger.error(f"❌ Error details: {repr(e)}")
+        logger.error(f"❌ Full traceback:", exc_info=True)
+        logger.error(f"❌ Event that caused error: {json.dumps(event, default=str)[:1000]}")
         return {
             'statusCode': 500,
             'headers': {

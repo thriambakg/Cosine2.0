@@ -1162,6 +1162,29 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
           }}
           collapsibleActions={
             <>
+              {/* Refresh Button - shown when expanded */}
+              <Tooltip title="Refresh" arrow>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRefresh();
+                    }}
+                    disabled={isLoading}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    sx={{
+                      color: isLoading ? '#6b7280' : '#9ca3af',
+                      '&:hover': { color: isLoading ? '#6b7280' : '#3b82f6' },
+                      '&.Mui-disabled': { color: '#6b7280' },
+                      padding: '6px',
+                    }}
+                  >
+                    {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+
               <Tooltip title="Select columns to display">
                 <IconButton
                   size="small"

@@ -1286,6 +1286,33 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           }}
           collapsibleActions={
             <>
+              {/* Refresh Button - shown when expanded */}
+              <Tooltip title="Refresh" arrow>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      runScreener();
+                    }}
+                    disabled={isLoading}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    sx={{
+                      color: isLoading ? '#6b7280' : '#9ca3af',
+                      '&:hover': { color: isLoading ? '#6b7280' : '#3b82f6' },
+                      '&.Mui-disabled': { color: '#6b7280' },
+                      padding: '6px',
+                    }}
+                  >
+                    {isLoading ? (
+                      <CircularProgress size={18} sx={{ color: '#3b82f6' }} />
+                    ) : (
+                      <RefreshIcon sx={{ fontSize: 18 }} />
+                    )}
+                  </IconButton>
+                </span>
+              </Tooltip>
+
               <Tooltip title="Select columns to display">
                 <IconButton
                   size="small"
