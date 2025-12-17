@@ -863,7 +863,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       // Only auto-search if we have meaningful search params (not just defaults)
       // Check for actual values, not just empty arrays or default dates
       const hasSearchCriteria = 
-        (currentSearchParams.cik && currentSearchParams.cik.trim() !== '') ||
+        (currentSearchParams.cik && (Array.isArray(currentSearchParams.cik) ? currentSearchParams.cik.length > 0 : currentSearchParams.cik.trim() !== '')) ||
         (Array.isArray(currentSearchParams.entityName) && currentSearchParams.entityName.length > 0 && currentSearchParams.entityName.some(name => name && name.trim() !== '')) ||
         (!Array.isArray(currentSearchParams.entityName) && currentSearchParams.entityName && currentSearchParams.entityName.trim() !== '') ||
         (Array.isArray(currentSearchParams.keywords) && currentSearchParams.keywords.length > 0 && currentSearchParams.keywords.some(kw => kw && kw.trim() !== '')) ||

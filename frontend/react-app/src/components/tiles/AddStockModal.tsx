@@ -135,16 +135,21 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
     onClose();
   };
 
-  const handleSecurityChange = (event: any, newValue: Security | null) => {
-    setSelectedSecurity(newValue);
-    if (newValue) {
-      setSelectedSymbol(newValue.symbol);
+  const handleSecurityChange = (_event: any, newValue: Security | string | null) => {
+    if (typeof newValue === 'string') {
+      setSelectedSecurity(null);
+      setSelectedSymbol(newValue.toUpperCase());
     } else {
-      setSelectedSymbol('');
+      setSelectedSecurity(newValue);
+      if (newValue) {
+        setSelectedSymbol(newValue.symbol);
+      } else {
+        setSelectedSymbol('');
+      }
     }
   };
 
-  const handleInputChange = (event: any, newInputValue: string) => {
+  const handleInputChange = (_event: any, newInputValue: string) => {
     setAutocompleteInput(newInputValue);
     if (isSecurityDataLoaded && newInputValue) {
       const suggestions = securitySuggestionsServiceV2.getSuggestions(newInputValue, 50);
@@ -204,8 +209,13 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
             inputValue={autocompleteInput}
             onInputChange={handleInputChange}
             options={availableSecurities}
-            getOptionLabel={(option) => option.displayText}
-            isOptionEqualToValue={(option, value) => option.symbol === value.symbol}
+            getOptionLabel={(option) => typeof option === 'string' ? option : option.displayText}
+            isOptionEqualToValue={(option, value) => {
+              if (typeof option === 'string' || typeof value === 'string') {
+                return option === value;
+              }
+              return option.symbol === value.symbol;
+            }}
             loading={!isSecurityDataLoaded}
             renderInput={(params) => (
               <TextField
@@ -240,10 +250,6 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
                 }}
               />
             )}
-            getOptionKey={(option) => {
-              // Create unique key: symbol + marketCap + name to handle duplicates
-              return `${option.symbol}-${option.marketCap}-${option.name}`;
-            }}
             renderOption={(props, option) => {
               const capColor = option.marketCap === 'high' ? '#10b981' : option.marketCap === 'mid' ? '#f59e0b' : '#ef4444';
               const capLabel = option.marketCap === 'high' ? 'High Cap' : option.marketCap === 'mid' ? 'Mid Cap' : 'Low Cap';
