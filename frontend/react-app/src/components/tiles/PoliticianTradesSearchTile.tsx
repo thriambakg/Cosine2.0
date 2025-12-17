@@ -141,9 +141,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   autoRefresh = false,
   isPinned = false,
 }) => {
-  // Alias paginationState for consistency
-  const paginationState = initialPaginationState;
-  
   const { user } = useAuth();
   const { activeSessionId } = useGlobalChat();
   
