@@ -269,8 +269,11 @@ const PortfolioTile = ({
   const handleStockChange = useCallback((index: number, value: Security | string | null) => {
     if (value) {
       if (typeof value === 'string') {
-        // If it's a string (from freeSolo), use it directly
-        updateEntry(index, 'stock', value.toUpperCase());
+        // If it's a string (from freeSolo), extract symbol if it's in display format
+        // Pattern: "SYMBOL - Name (Cap)" or just "SYMBOL"
+        const symbolMatch = value.match(/^([A-Z.]+)(?:\s*-|$)/);
+        const symbol = symbolMatch ? symbolMatch[1].trim() : value.trim();
+        updateEntry(index, 'stock', symbol.toUpperCase());
       } else {
         // If it's a Security object, use the symbol
         updateEntry(index, 'stock', value.symbol);
@@ -284,7 +287,13 @@ const PortfolioTile = ({
     try {
       const portfolioData = entries
         .filter(entry => entry.stock && entry.shares > 0)
-        .map(entry => [entry.stock, entry.shares, 0] as [string, number, number]);
+        .map(entry => {
+          // Extract just the symbol if entry.stock is in display format
+          // Pattern: "SYMBOL - Name (Cap)" or just "SYMBOL"
+          const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+          const symbol = symbolMatch ? symbolMatch[1].trim() : entry.stock.trim();
+          return [symbol.toUpperCase(), entry.shares, 0] as [string, number, number];
+        });
       
       if (portfolioData.length === 0) {
         setError('Please add at least one stock with shares > 0');
@@ -817,9 +826,12 @@ const PortfolioTile = ({
                       onChange={(_, newValue) => handleStockChange(index, newValue)}
                       onInputChange={(_, newInputValue) => {
                         handleStockInputChange(index, newInputValue);
-                        // If user types and no match, update the entry with the typed value
+                        // If user types and no match, extract symbol from display text format if present
                         if (newInputValue && !currentSecurity) {
-                          updateEntry(index, 'stock', newInputValue.toUpperCase());
+                          // Extract symbol if it's in display format: "SYMBOL - Name (Cap)" or just "SYMBOL"
+                          const symbolMatch = newInputValue.match(/^([A-Z.]+)(?:\s*-|$)/);
+                          const symbol = symbolMatch ? symbolMatch[1].trim() : newInputValue.trim();
+                          updateEntry(index, 'stock', symbol.toUpperCase());
                         }
                       }}
                       options={securitySuggestions}
@@ -901,6 +913,8 @@ const PortfolioTile = ({
                           '& .MuiPaper-root': {
                             backgroundColor: 'rgba(15, 23, 42, 0.95)',
                             border: '1px solid #374151',
+                          },
+                          '& .MuiAutocomplete-listbox': {
                             '&::-webkit-scrollbar': {
                               width: '6px',
                             },
@@ -915,21 +929,23 @@ const PortfolioTile = ({
                                 backgroundColor: '#2563eb',
                               },
                             },
-                            '& .MuiAutocomplete-listbox': {
-                              '&::-webkit-scrollbar': {
-                                width: '6px',
-                              },
-                              '&::-webkit-scrollbar-track': {
-                                backgroundColor: '#475569',
-                                borderRadius: '3px',
-                              },
-                              '&::-webkit-scrollbar-thumb': {
-                                backgroundColor: '#3b82f6',
-                                borderRadius: '3px',
-                                '&:hover': {
-                                  backgroundColor: '#2563eb',
-                                },
-                              },
+                          },
+                        },
+                      }}
+                      ListboxProps={{
+                        sx: {
+                          '&::-webkit-scrollbar': {
+                            width: '6px',
+                          },
+                          '&::-webkit-scrollbar-track': {
+                            backgroundColor: '#475569',
+                            borderRadius: '3px',
+                          },
+                          '&::-webkit-scrollbar-thumb': {
+                            backgroundColor: '#3b82f6',
+                            borderRadius: '3px',
+                            '&:hover': {
+                              backgroundColor: '#2563eb',
                             },
                           },
                         },

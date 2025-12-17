@@ -216,7 +216,7 @@ export default function AppSidebar() {
         }}
       />
       
-      <Box sx={{ position: 'relative', zIndex: 2, height: '100%' }}>
+      <Box sx={{ position: 'relative', zIndex: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
         <Box
           sx={{
@@ -224,6 +224,7 @@ export default function AppSidebar() {
             borderBottom: '1px solid #374151',
             background: 'rgba(15, 23, 42, 0.95)',
             backdropFilter: 'blur(10px)',
+            flexShrink: 0,
           }}
         >
           <Box display="flex" alignItems="center">
@@ -241,7 +242,28 @@ export default function AppSidebar() {
         </Box>
 
         {/* Navigation Items */}
-        <Box sx={{ flex: 1, overflow: 'auto', py: 2 }}>
+        <Box 
+          sx={{ 
+            flex: 1, 
+            overflow: 'auto', 
+            py: 2,
+            minHeight: 0, // Important for flexbox scrolling
+            '&::-webkit-scrollbar': {
+              width: '6px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: '#475569',
+              borderRadius: '3px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#3b82f6',
+              borderRadius: '3px',
+              '&:hover': {
+                backgroundColor: '#2563eb',
+              },
+            },
+          }}
+        >
           {categoryOrder.map((category) => {
             const items = groupedItems[category];
             return items && items.length > 0 ? renderNavigationSection(category, items) : null;
@@ -254,6 +276,7 @@ export default function AppSidebar() {
           borderTop: '1px solid #374151',
           background: 'rgba(15, 23, 42, 0.95)',
           backdropFilter: 'blur(10px)',
+          flexShrink: 0,
         }}>
           <Box 
             sx={{ 

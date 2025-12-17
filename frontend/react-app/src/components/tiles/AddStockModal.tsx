@@ -284,6 +284,8 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
                 '& .MuiPaper-root': {
                   backgroundColor: 'rgba(15, 23, 42, 0.95)',
                   border: '1px solid #374151',
+                },
+                '& .MuiAutocomplete-listbox': {
                   '&::-webkit-scrollbar': {
                     width: '6px',
                   },
@@ -298,21 +300,23 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
                       backgroundColor: '#2563eb',
                     },
                   },
-                  '& .MuiAutocomplete-listbox': {
-                    '&::-webkit-scrollbar': {
-                      width: '6px',
-                    },
-                    '&::-webkit-scrollbar-track': {
-                      backgroundColor: '#475569',
-                      borderRadius: '3px',
-                    },
-                    '&::-webkit-scrollbar-thumb': {
-                      backgroundColor: '#3b82f6',
-                      borderRadius: '3px',
-                      '&:hover': {
-                        backgroundColor: '#2563eb',
-                      },
-                    },
+                },
+              },
+            }}
+            ListboxProps={{
+              sx: {
+                '&::-webkit-scrollbar': {
+                  width: '6px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  backgroundColor: '#475569',
+                  borderRadius: '3px',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  backgroundColor: '#3b82f6',
+                  borderRadius: '3px',
+                  '&:hover': {
+                    backgroundColor: '#2563eb',
                   },
                 },
               },
