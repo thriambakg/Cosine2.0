@@ -400,13 +400,13 @@ module "api_gateway" {
       lambda_arn              = module.file_return_lambda.function_arn
       request_parameters      = {}
     }
-    # POST method for SEC search
+    # POST method for SEC search (uses wrapper Lambda for SQS integration)
     sec_search_post = {
       resource_key            = "sec_search"
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.sec_search_lambda.function_arn
+      lambda_arn              = module.sec_search_lambda.wrapper_function_arn != null ? module.sec_search_lambda.wrapper_function_arn : module.sec_search_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
@@ -622,7 +622,7 @@ module "api_gateway" {
       resource_path = "file-download"
     }
     sec_search_post = {
-      function_arn  = module.sec_search_lambda.function_arn
+      function_arn  = module.sec_search_lambda.wrapper_function_arn != null ? module.sec_search_lambda.wrapper_function_arn : module.sec_search_lambda.function_arn
       http_method   = "POST"
       resource_path = "sec-search"
     }
@@ -2009,9 +2009,9 @@ module "sec_search_progress_sns" {
   })
 }
 
-# SEC Search Lambda Function
+# SEC Search Lambda Function (with SQS and wrapper support)
 module "sec_search_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-sec-search-${var.environment}"
   description   = "Lambda function for SEC EDGAR search and autocomplete functionality"
@@ -2024,6 +2024,7 @@ module "sec_search_lambda" {
   source_dir = "../backend_app/src/sec_search/scraper"
 
   # Environment variables
+  # Note: Completion SNS topic ARN will be added via a separate resource after module creation
   environment_variables = {
     ENVIRONMENT                       = var.environment
     LOG_LEVEL                         = var.environment == "development" ? "DEBUG" : "INFO"
@@ -2034,13 +2035,13 @@ module "sec_search_lambda" {
     SEC_SEARCH_PROGRESS_SNS_TOPIC_ARN = module.sec_search_progress_sns.topic_arn
   }
 
-
   # Attach core layer
   layers = [
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
   # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, KMS for S3 encryption, SNS for progress updates, Lambda self-invocation for async jobs, and query cache table access
+  # Note: SNS publish for completion will be added by the module
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
     data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
@@ -2050,6 +2051,24 @@ module "sec_search_lambda" {
     aws_iam_policy.lambda_sns_publish_policy_restricted.arn,
     aws_iam_policy.lambda_invoke_policy.arn
   ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda = true
+  wrapper_timeout       = 300 # 5 minutes to match worker timeout
+  sns_topic_name        = "${var.project_name}-sec-search-completion-${var.environment}"
+  # Use DynamoDB query cache table for response correlation (optional, can use SNS message attributes instead)
+  response_table_name = data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_name
+  # Environment variable name for completion SNS topic in worker Lambda
+  completion_sns_env_var_name = "SEC_SEARCH_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # SQS configuration
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10 # Limit concurrent SEC search operations
 
   tags = var.common_tags
 }

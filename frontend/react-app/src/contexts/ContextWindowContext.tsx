@@ -78,6 +78,11 @@ export const ContextWindowProvider: React.FC<ContextWindowProviderProps> = ({ ch
         setIsVisible(true);
         console.log('🔼 Context window opened automatically');
         
+        // Dispatch event to ensure visibility is updated everywhere
+        window.dispatchEvent(new CustomEvent('context-window-visibility-changed', {
+          detail: { isVisible: true }
+        }));
+        
         return [...prev, newItem];
       });
     };

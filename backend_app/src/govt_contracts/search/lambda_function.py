@@ -391,9 +391,9 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
             # Build conditions for codes
             code_conditions = []
             if codes:
-                if len(codes) == 1:
+        if len(codes) == 1:
                     code_conditions.append(Attr('awarding_agency_code').eq(codes[0]))
-                else:
+        else:
                     code_conditions.append(Attr('awarding_agency_code').is_in(codes))
             
             # Build conditions for names (use contains for partial matching, like recipient_name)
@@ -436,41 +436,6 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
                         combined = combined | cond
                     conditions.append(combined)
     
-    # Awarding agency name filter (separate from code)
-    # Only process if awarding_agency_code wasn't already processed (to avoid duplication)
-    if filters.get('awarding_agency_name') and not filters.get('awarding_agency_code'):
-        values = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
-        values = [v for v in values if v and str(v).strip()]
-        if values:
-            name_conditions = []
-            for name in values:
-                name_str = str(name).strip()
-                if name_str:
-                    # Use contains for partial matching (case-sensitive in DynamoDB)
-                    # Try both original case and lowercase for case-insensitive matching
-                    variations = [name_str]
-                    if name_str.lower() != name_str:
-                        variations.append(name_str.lower())
-                    
-                    # Create OR condition for variations
-                    if len(variations) == 1:
-                        name_conditions.append(Attr('awarding_agency_name').contains(variations[0]))
-                    else:
-                        combined = Attr('awarding_agency_name').contains(variations[0])
-                        for var in variations[1:]:
-                            combined = combined | Attr('awarding_agency_name').contains(var)
-                        name_conditions.append(combined)
-            
-            if name_conditions:
-                if len(name_conditions) == 1:
-                    conditions.extend(name_conditions)
-                else:
-                    # Multiple names: combine with OR
-                    combined = name_conditions[0]
-                    for cond in name_conditions[1:]:
-                        combined = combined | cond
-                    conditions.append(combined)
-    
     if filters.get('funding_agency_code'):
         values = filters['funding_agency_code'] if isinstance(filters['funding_agency_code'], list) else [filters['funding_agency_code']]
         # Filter out empty strings
@@ -486,9 +451,9 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
             # Build conditions for codes
             code_conditions = []
             if codes:
-                if len(codes) == 1:
+        if len(codes) == 1:
                     code_conditions.append(Attr('funding_agency_code').eq(codes[0]))
-                else:
+        else:
                     code_conditions.append(Attr('funding_agency_code').is_in(codes))
             
             # Build conditions for names (use contains for partial matching, like recipient_name)
@@ -505,7 +470,7 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
                         # Create OR condition for variations
                         if len(variations) == 1:
                             name_conditions.append(Attr('funding_agency_name').contains(variations[0]))
-                        else:
+        else:
                             combined = Attr('funding_agency_name').contains(variations[0])
                             for var in variations[1:]:
                                 combined = combined | Attr('funding_agency_name').contains(var)
@@ -625,26 +590,6 @@ def determine_query_method(filters: Dict[str, Any]) -> tuple[str, Optional[str],
         key_condition: Dict with hash_key and range_key conditions
     """
     # Check for GSI-optimized queries
-    
-    # AwardingAgencyNameFiscalYearIndex: hash_key=awarding_agency_name, range_key=fiscal_year
-    # Check awarding_agency_name first (preferred when frontend sends names)
-    if filters.get('awarding_agency_name'):
-        values = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
-        values = [v for v in values if v and str(v).strip()]
-        if values:
-            # Use first agency name for hash key (exact match required for GSI)
-            agency_name = values[0].strip()
-            fiscal_year = None
-            if filters.get('fiscal_year'):
-                fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
-                if fiscal_years:
-                    fiscal_year = fiscal_years[0]
-            
-            key_condition = {
-                'hash_key': ('awarding_agency_name', agency_name),
-                'range_key': ('fiscal_year', fiscal_year) if fiscal_year else None
-            }
-            return ('query', 'AwardingAgencyNameFiscalYearIndex', key_condition)
     
     # AwardingAgencyCodeFiscalYearIndex: hash_key=awarding_agency_code, range_key=fiscal_year
     if filters.get('awarding_agency_code'):
@@ -899,33 +844,8 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     query_configs = []
     
-    # AwardingAgencyNameFiscalYearIndex: hash_key=awarding_agency_name, range_key=fiscal_year
-    # Check awarding_agency_name first (preferred when frontend sends names)
-    if filters.get('awarding_agency_name'):
-        values = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
-        values = [v for v in values if v and str(v).strip()]
-        if values:
-            # Use first agency name for hash key (exact match required for GSI)
-            agency_name = values[0].strip()
-            fiscal_year = None
-            if filters.get('fiscal_year'):
-                fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
-                if fiscal_years:
-                    fiscal_year = fiscal_years[0]
-            
-            query_configs.append({
-                'filter_key': 'awarding_agency_name',
-                'index_name': 'AwardingAgencyNameFiscalYearIndex',
-                'hash_key': 'awarding_agency_name',
-                'hash_value': agency_name,
-                'range_key': 'fiscal_year' if fiscal_year else None,
-                'range_value': fiscal_year,
-                'range_condition': None
-            })
-    
     # AwardingAgencyCodeFiscalYearIndex: hash_key=awarding_agency_code, range_key=fiscal_year
-    # Only use code if name wasn't already added (name takes precedence)
-    if not any(c['filter_key'] == 'awarding_agency_name' for c in query_configs) and filters.get('awarding_agency_code'):
+    if filters.get('awarding_agency_code'):
         values = filters['awarding_agency_code'] if isinstance(filters['awarding_agency_code'], list) else [filters['awarding_agency_code']]
         values = [v for v in values if v and str(v).strip()]
         if values:
@@ -1108,142 +1028,6 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     return query_configs
 
 
-def get_award_by_id(award_id: str) -> Dict[str, Any]:
-    """
-    Fetch a single award by ID from DynamoDB (for refreshing after enrichment)
-    
-    Args:
-        award_id: The award ID to fetch
-    
-    Returns:
-        Dictionary with the award data or error
-    """
-    if not awards_table:
-        raise Exception("DynamoDB awards table not initialized")
-    
-    try:
-        # Get item from DynamoDB
-        response = awards_table.get_item(Key={'award_id': award_id})
-        item = response.get('Item')
-        
-        if not item:
-            return {
-                'success': False,
-                'error': f'Award {award_id} not found'
-            }
-        
-        # Check if this is an oversized award (stored in S3)
-        oversize_s3_key = item.get('oversize_s3_key')
-        if oversize_s3_key:
-            logger.info(f"Fetching oversized award {award_id} from S3")
-            full_award = fetch_oversized_award_from_s3(oversize_s3_key)
-            if full_award:
-                # Merge S3 data with DynamoDB GSI fields (S3 data takes precedence)
-                full_award.update(item)
-                item = full_award
-            else:
-                logger.warning(f"Failed to fetch from S3 for {award_id}, using DynamoDB data only")
-        
-        # Convert Decimal to float and handle other types
-        award = convert_decimal_to_float(item)
-        
-        # Check if this is an oversized item (full details in S3)
-        oversize_s3_key = award.get('oversize_s3_key')
-        if oversize_s3_key:
-            # Fetch full award details from S3
-            full_award = fetch_oversized_award_from_s3(oversize_s3_key)
-            if full_award:
-                # Replace award with full details from S3
-                award = convert_decimal_to_float(full_award)
-        
-        # Transactions and subawards are now stored directly in the table
-        # Ensure they exist (may be None or missing)
-        if 'transactions' not in award or award.get('transactions') is None:
-            award['transactions'] = []
-        if 'subawards' not in award or award.get('subawards') is None:
-            award['subawards'] = []
-        
-        # Parse is_assistance binary byte if present
-        if 'is_assistance' in award:
-            is_assistance_val = award['is_assistance']
-            if isinstance(is_assistance_val, bytes):
-                award['is_assistance'] = bool(is_assistance_val[0]) if len(is_assistance_val) > 0 else False
-            elif isinstance(is_assistance_val, int):
-                award['is_assistance'] = bool(is_assistance_val)
-        
-        # Calculate combined obligated amount from transactions for IDVs
-        if award.get('transactions') and isinstance(award['transactions'], list):
-            combined_obligated = 0.0
-            for transaction in award['transactions']:
-                if isinstance(transaction, dict):
-                    obligation = transaction.get('federal_action_obligation') or \
-                                transaction.get('total_obligated_amount') or \
-                                transaction.get('obligated_amount') or 0
-                    try:
-                        if isinstance(obligation, (int, float)):
-                            combined_obligated += float(obligation)
-                        elif isinstance(obligation, str):
-                            combined_obligated += float(obligation)
-                    except (ValueError, TypeError):
-                        pass
-            
-            if combined_obligated > 0 and (not award.get('total_obligated_amount') or award.get('total_obligated_amount') == 0):
-                award['combined_obligated_amount'] = combined_obligated
-        
-        # Handle child awards if this is an IDV
-        if award.get('is_idv_parent') and award.get('child_awards'):
-            child_award_ids = award.get('child_awards', [])
-            if isinstance(child_award_ids, list) and len(child_award_ids) > 0:
-                logger.info(f"Fetching details for {len(child_award_ids)} child awards for IDV {award_id}")
-                child_awards_details = []
-                for child_id in child_award_ids:
-                    try:
-                        child_response = awards_table.get_item(Key={'award_id': str(child_id)})
-                        if 'Item' in child_response:
-                            child_item = child_response['Item']
-                            child_item = convert_decimal_to_float(child_item)
-                            # Create summary for child award (same format as search function)
-                            child_summary = {
-                                'award_id': child_item.get('award_id'),
-                                'award_id_piid': child_item.get('award_id_piid'),
-                                'description': child_item.get('description'),
-                                'total_obligated_amount': child_item.get('total_obligated_amount'),
-                                'period_of_performance_start_date': child_item.get('period_of_performance_start_date') or child_item.get('period_start_date'),
-                                'period_of_performance_current_end_date': child_item.get('period_of_performance_current_end_date') or child_item.get('period_end_date'),
-                                'transaction_count': child_item.get('transaction_count', 0),
-                                'subaward_count': child_item.get('subaward_count', 0),
-                                'award_type': child_item.get('award_type'),
-                                'award_type_description': child_item.get('award_type_description'),
-                                'recipient_name': child_item.get('recipient_name'),
-                                'awarding_agency_name': child_item.get('awarding_agency_name'),
-                                'parent_idv_id': child_item.get('parent_idv_id'),
-                                'is_idv_child': child_item.get('is_idv_child', False),
-                            }
-                            child_awards_details.append(child_summary)
-                        else:
-                            logger.warning(f"Child award {child_id} not found in DynamoDB")
-                    except Exception as e:
-                        logger.error(f"Error fetching child award {child_id}: {str(e)}")
-                        continue
-                
-                if child_awards_details:
-                    award['child_awards_details'] = child_awards_details
-                    logger.info(f"Added {len(child_awards_details)} child award details for IDV {award_id}")
-        
-        return {
-            'success': True,
-            'result': award,
-            'count': 1
-        }
-        
-    except Exception as e:
-        logger.error(f"Error fetching award {award_id}: {str(e)}", exc_info=True)
-        return {
-            'success': False,
-            'error': str(e)
-        }
-
-
 def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Search awards in DynamoDB using filters with multi-GSI intersection approach
@@ -1306,12 +1090,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         # Remove the source filter from filters (we've already applied it via GSI)
         # Keep all other filters to apply in Python
         remaining_filters = filters.copy()
-        if shortest_key == 'awarding_agency_name':
-            del remaining_filters['awarding_agency_name']
-            # Also remove awarding_agency_code if present (name takes precedence when using GSI)
-            if 'awarding_agency_code' in remaining_filters:
-                del remaining_filters['awarding_agency_code']
-        elif shortest_key == 'awarding_agency_code':
+        if shortest_key == 'awarding_agency_code':
             del remaining_filters['awarding_agency_code']
             # Also remove awarding_agency_name if present (code takes precedence when using GSI)
             if 'awarding_agency_name' in remaining_filters:
@@ -1539,24 +1318,12 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         
         # Remove hash key from filter - it's already in KeyConditionExpression
         # This is critical: DynamoDB doesn't allow primary key attributes in FilterExpression
-        if hash_key_name == 'awarding_agency_name':
-            # Remove awarding_agency_name from filters since we're using it as hash key
-            # Note: We can't filter for multiple agency names when using GSI query
-            # The first one is used for the hash key, others would need to be filtered client-side
-            if 'awarding_agency_name' in filter_filters:
-                del filter_filters['awarding_agency_name']
-            # Also remove awarding_agency_code if present (name takes precedence)
-            if 'awarding_agency_code' in filter_filters:
-                del filter_filters['awarding_agency_code']
-        elif hash_key_name == 'awarding_agency_code':
+        if hash_key_name == 'awarding_agency_code' or hash_key_name == 'awarding_agency_name':
             # Remove awarding_agency_code from filters since we're using it as hash key
-            # Note: We can't filter for multiple agency codes when using GSI query
+            # Note: We can't filter for multiple agency codes/names when using GSI query
             # The first one is used for the hash key, others would need to be filtered client-side
             if 'awarding_agency_code' in filter_filters:
                 del filter_filters['awarding_agency_code']
-            # Also remove awarding_agency_name if present (code takes precedence when using GSI)
-            if 'awarding_agency_name' in filter_filters:
-                del filter_filters['awarding_agency_name']
         elif hash_key_name == 'recipient_name_normalized':
             # Remove recipient_name from filters since we're using it as hash key
             if 'recipient_name' in filter_filters:
@@ -1604,7 +1371,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         # Scan more items to increase chances of finding matches after filtering
         # Use a multiplier to scan more items (e.g., scan 10x the limit to find matches)
         scan_limit = max(limit * 10, 1000)  # Scan at least 10x the limit, minimum 1000 items
-        params = {
+    params = {
             'Limit': scan_limit
         }
         logger.info(f"Using scan with Limit={scan_limit} (result limit={limit}) to find matches")
@@ -1659,7 +1426,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                 # If range_key_value is None and no filter matches, don't add range key condition
             else:
                 # Default to equals
-                params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).eq(range_key_value)
+            params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).eq(range_key_value)
         
         # For KEYS_ONLY GSIs, we cannot use FilterExpression on non-key attributes
         # All filtering will be done after fetching full items with BatchGetItem
@@ -1683,7 +1450,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                         range_key_name = key_condition['range_key'][0]
                         has_range_key = range_key_name in last_evaluated_key
                         if has_hash_key and has_range_key:
-                            params['ExclusiveStartKey'] = last_evaluated_key
+            params['ExclusiveStartKey'] = last_evaluated_key
                         else:
                             logger.warning(f"last_evaluated_key structure doesn't match GSI {index_name} (hash_key={hash_key_name}, range_key={range_key_name}), ignoring pagination")
                     else:
@@ -1964,9 +1731,9 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         # Transactions and subawards are now stored directly in the table
         # Ensure they exist (may be None or missing)
         if 'transactions' not in award or award.get('transactions') is None:
-            award['transactions'] = []
+                award['transactions'] = []
         if 'subawards' not in award or award.get('subawards') is None:
-            award['subawards'] = []
+                award['subawards'] = []
         
         # Parse is_assistance binary byte if present (should already be converted by convert_decimal_to_float)
         # is_assistance: b'\x01' = True (assistance), b'\x00' = False (contract)
@@ -2035,7 +1802,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                                 'is_idv_child': child_item.get('is_idv_child', False),
                             }
                             child_awards_details.append(child_summary)
-                        else:
+        else:
                             logger.warning(f"Child award {child_id} not found in DynamoDB")
                     except Exception as e:
                         logger.error(f"Error fetching child award {child_id}: {str(e)}")
@@ -2102,27 +1869,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Direct Lambda invocation
             body = event
         
-        # Check if this is a single-item fetch request (for refreshing after enrichment)
-        award_id = body.get('award_id')
-        if award_id:
-            logger.info(f"Fetching single award by ID: {award_id}")
-            result = get_award_by_id(award_id)
-        else:
-            # Extract parameters for search
-            filters = body.get('filters', {})
-            limit = int(body.get('limit', 100))
-            last_evaluated_key = body.get('last_evaluated_key')
-            
-            # Validate limit
-            if limit > 1000:
-                limit = 1000  # Cap at 1000
-            if limit < 1:
-                limit = 100
-            
-            logger.info(f"Searching awards with filters: {json.dumps(filters, default=str)}, limit: {limit}")
-            
-            # Search awards
-            result = search_awards(filters, limit=limit, last_evaluated_key=last_evaluated_key)
+        # Extract parameters
+        filters = body.get('filters', {})
+        limit = int(body.get('limit', 100))
+        last_evaluated_key = body.get('last_evaluated_key')
+        
+        # Validate limit
+        if limit > 1000:
+            limit = 1000  # Cap at 1000
+        if limit < 1:
+            limit = 100
+        
+        logger.info(f"Searching awards with filters: {json.dumps(filters, default=str)}, limit: {limit}")
+        
+        # Search awards
+        result = search_awards(filters, limit=limit, last_evaluated_key=last_evaluated_key)
         
         # Log final results
         result_count = result.get('count', 0)

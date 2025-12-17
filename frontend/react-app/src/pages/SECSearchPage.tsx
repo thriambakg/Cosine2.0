@@ -1835,166 +1835,166 @@ const SECSearchPage: React.FC = () => {
             <Box sx={{ p: 3 }}>
               <Typography variant="h6" sx={{ color: '#ffffff', mb: 3, fontSize: '1.1rem', fontWeight: 600 }}>
                 Search Parameters
-              </Typography>
+            </Typography>
 
               {/* Search Parameters - Vertical Layout */}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {/* Multi-Select Filers */}
-                <MultiSelectField<SECAutocompleteSuggestion>
-                  label="Filers (Companies/Individuals)"
-                  selectedItems={selectedFilers}
-                  onItemsChange={setSelectedFilers}
-                  suggestions={companySuggestions}
-                  renderItem={(filer) => `${filer.name} (${filer.ticker || 'N/A'}) - CIK: ${filer.cik}`}
-                  getItemKey={(filer) => filer.cik}
-                  placeholder="Add company, CIK, or individual name..."
-                  allowCustomInput={false}
-                  isLoading={autocompleteLoading}
-                  onSearch={handleFilerSearch}
-                />
+              {/* Multi-Select Filers */}
+              <MultiSelectField<SECAutocompleteSuggestion>
+                label="Filers (Companies/Individuals)"
+                selectedItems={selectedFilers}
+                onItemsChange={setSelectedFilers}
+                suggestions={companySuggestions}
+                renderItem={(filer) => `${filer.name} (${filer.ticker || 'N/A'}) - CIK: ${filer.cik}`}
+                getItemKey={(filer) => filer.cik}
+                placeholder="Add company, CIK, or individual name..."
+                allowCustomInput={false}
+                isLoading={autocompleteLoading}
+                onSearch={handleFilerSearch}
+              />
 
-                {/* Multi-Select Keywords */}
-                <MultiSelectField<string>
-                  label="Keywords"
-                  selectedItems={selectedKeywords}
-                  onItemsChange={setSelectedKeywords}
-                  suggestions={[]}
-                  renderItem={(keyword) => keyword}
-                  getItemKey={(keyword) => keyword}
-                  placeholder="Type keyword and press Enter to add..."
-                  allowCustomInput={true}
-                  isLoading={false}
-                />
+              {/* Multi-Select Keywords */}
+              <MultiSelectField<string>
+                label="Keywords"
+                selectedItems={selectedKeywords}
+                onItemsChange={setSelectedKeywords}
+                suggestions={[]}
+                renderItem={(keyword) => keyword}
+                getItemKey={(keyword) => keyword}
+                placeholder="Type keyword and press Enter to add..."
+                allowCustomInput={true}
+                isLoading={false}
+              />
 
-                {/* Form Types - Button to open modal */}
-                <Box>
-                  <TextField
-                    label="Filing category"
-                    value={
-                      searchParams.formTypes && searchParams.formTypes.length > 0
-                        ? `${searchParams.formTypes.length} form${searchParams.formTypes.length > 1 ? 's' : ''} selected`
-                        : 'View all'
-                    }
-                    onClick={() => setFormTypesModalOpen(true)}
-                    InputProps={{
-                      readOnly: true,
-                      endAdornment: <ExpandMoreIcon sx={{ color: '#9ca3af' }} />,
-                    }}
-                    variant="outlined"
+              {/* Form Types - Button to open modal */}
+              <Box>
+                <TextField
+                  label="Filing category"
+                  value={
+                    searchParams.formTypes && searchParams.formTypes.length > 0
+                      ? `${searchParams.formTypes.length} form${searchParams.formTypes.length > 1 ? 's' : ''} selected`
+                      : 'View all'
+                  }
+                  onClick={() => setFormTypesModalOpen(true)}
+                  InputProps={{
+                    readOnly: true,
+                    endAdornment: <ExpandMoreIcon sx={{ color: '#9ca3af' }} />,
+                  }}
+                  variant="outlined"
                     fullWidth
-                    sx={{
-                      cursor: 'pointer',
-                      '& .MuiOutlinedInput-root': {
-                        '& fieldset': { borderColor: '#374151' },
-                        '&:hover fieldset': { borderColor: '#3b82f6' },
-                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                      },
-                      '& .MuiInputLabel-root': { color: '#9ca3af' },
-                      '& .MuiInputBase-input': { color: '#ffffff', cursor: 'pointer' },
-                    }}
-                  />
-                  {searchParams.formTypes && searchParams.formTypes.length > 0 && (
-                    <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                      {searchParams.formTypes.slice(0, 3).map((formType) => (
-                        <Chip
-                          key={formType}
-                          label={formType}
-                          size="small"
-                          onDelete={() => handleFormTypeToggle(formType)}
-                          sx={{
-                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                            color: '#93c5fd',
-                            border: '1px solid #3b82f6',
-                            '& .MuiChip-deleteIcon': { color: '#93c5fd' },
-                          }}
-                        />
-                      ))}
-                      {searchParams.formTypes.length > 3 && (
-                        <Chip
-                          label={`+${searchParams.formTypes.length - 3} more`}
-                          size="small"
-                          sx={{
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            color: '#93c5fd',
-                            border: '1px solid #3b82f6',
-                          }}
-                        />
-                      )}
-                    </Box>
-                  )}
-                </Box>
-
-                {/* Location Filter */}
-                <FormControl 
-                  variant="outlined" 
-                  size="medium"
-                  fullWidth
                   sx={{
+                    cursor: 'pointer',
                     '& .MuiOutlinedInput-root': {
                       '& fieldset': { borderColor: '#374151' },
                       '&:hover fieldset': { borderColor: '#3b82f6' },
                       '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
                     },
                     '& .MuiInputLabel-root': { color: '#9ca3af' },
-                    '& .MuiSelect-select': { color: '#ffffff' },
+                    '& .MuiInputBase-input': { color: '#ffffff', cursor: 'pointer' },
                   }}
-                >
-                  <InputLabel id="located-label">Located</InputLabel>
-                  <Select
-                    labelId="located-label"
-                    value={searchParams.located || 'all'}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setSearchParams(prev => ({ 
-                        ...prev, 
-                        located: value === 'all' ? undefined : value 
-                      }));
-                    }}
-                    label="Located"
-                    MenuProps={{
-                      PaperProps: {
-                        sx: {
-                          bgcolor: '#1f2937',
-                          border: '1px solid #374151',
-                          '& .MuiMenuItem-root': {
-                            color: '#ffffff',
+                />
+                {searchParams.formTypes && searchParams.formTypes.length > 0 && (
+                  <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {searchParams.formTypes.slice(0, 3).map((formType) => (
+                      <Chip
+                        key={formType}
+                        label={formType}
+                        size="small"
+                        onDelete={() => handleFormTypeToggle(formType)}
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': { color: '#93c5fd' },
+                        }}
+                      />
+                    ))}
+                    {searchParams.formTypes.length > 3 && (
+                      <Chip
+                        label={`+${searchParams.formTypes.length - 3} more`}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                        }}
+                      />
+                    )}
+                  </Box>
+                )}
+              </Box>
+
+              {/* Location Filter */}
+              <FormControl 
+                variant="outlined" 
+                size="medium"
+                  fullWidth
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    '& fieldset': { borderColor: '#374151' },
+                    '&:hover fieldset': { borderColor: '#3b82f6' },
+                    '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                  },
+                  '& .MuiInputLabel-root': { color: '#9ca3af' },
+                  '& .MuiSelect-select': { color: '#ffffff' },
+                }}
+              >
+                <InputLabel id="located-label">Located</InputLabel>
+                <Select
+                  labelId="located-label"
+                  value={searchParams.located || 'all'}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSearchParams(prev => ({ 
+                      ...prev, 
+                      located: value === 'all' ? undefined : value 
+                    }));
+                  }}
+                  label="Located"
+                  MenuProps={{
+                    PaperProps: {
+                      sx: {
+                        bgcolor: '#1f2937',
+                        border: '1px solid #374151',
+                        '& .MuiMenuItem-root': {
+                          color: '#ffffff',
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          },
+                          '&.Mui-selected': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
                             '&:hover': {
-                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                              backgroundColor: 'rgba(59, 130, 246, 0.3)',
                             },
-                            '&.Mui-selected': {
-                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                              '&:hover': {
-                                backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                              },
-                            },
-                          },
-                          '&::-webkit-scrollbar': {
-                            width: '8px',
-                          },
-                          '&::-webkit-scrollbar-track': {
-                            backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                            borderRadius: '4px',
-                          },
-                          '&::-webkit-scrollbar-thumb': {
-                            backgroundColor: '#3b82f6',
-                            borderRadius: '4px',
-                          },
-                          '&::-webkit-scrollbar-thumb:hover': {
-                            backgroundColor: '#2563eb',
                           },
                         },
+                        '&::-webkit-scrollbar': {
+                          width: '8px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '4px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          backgroundColor: '#2563eb',
+                        },
                       },
-                    }}
-                  >
-                    {LOCATION_OPTIONS.map((option) => (
-                      <MenuItem key={option.value} value={option.value}>
-                        {option.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                    },
+                  }}
+                >
+                  {LOCATION_OPTIONS.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
 
-                {/* Date Range */}
+              {/* Date Range */}
                 <TextField
                   label="Filed from"
                   type="date"
@@ -2040,88 +2040,88 @@ const SECSearchPage: React.FC = () => {
                   }}
                 />
 
-                {/* Search Button and Stop Button */}
+          {/* Search Button and Stop Button */}
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <Button
-                    variant="contained"
-                    onClick={() => handleSearch()}
-                    disabled={searchLoading || searchState.isSearching}
-                    startIcon={(searchLoading || searchState.isSearching) ? <CircularProgress size={20} /> : <SearchIcon />}
-                    sx={{
-                      background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                      color: '#ffffff',
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      letterSpacing: '1px',
-                      py: 1.5,
+            <Button
+              variant="contained"
+              onClick={() => handleSearch()}
+              disabled={searchLoading || searchState.isSearching}
+              startIcon={(searchLoading || searchState.isSearching) ? <CircularProgress size={20} /> : <SearchIcon />}
+              sx={{
+                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                color: '#ffffff',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '1px',
+                py: 1.5,
                       width: '100%',
-                      '&:hover': {
-                        background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
-                      },
-                      '&:disabled': {
-                        background: 'rgba(59, 130, 246, 0.3)',
-                      },
-                    }}
-                  >
-                    {searchState.isSearching
-                      ? searchState.totalPages 
-                        ? `Fetching page ${searchState.currentPage} of ${searchState.totalPages}...`
-                        : `Fetching page ${searchState.currentPage}...`
-                      : (searchLoading || searchState.isSearching)
-                        ? 'Searching...'
-                        : 'Search SEC Filings'}
-                  </Button>
-                  
-                  {/* Stop Button - red border, clear background, red square icon, only show when search is in progress */}
-                  {searchState.isSearching && (
-                    <Button
-                      variant="outlined"
-                      onClick={handleStopSearch}
-                      sx={{
-                        borderColor: '#ef4444',
-                        backgroundColor: 'transparent',
-                        color: '#ef4444',
+                '&:hover': {
+                  background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
+                },
+                '&:disabled': {
+                  background: 'rgba(59, 130, 246, 0.3)',
+                },
+              }}
+            >
+              {searchState.isSearching
+                ? searchState.totalPages 
+                  ? `Fetching page ${searchState.currentPage} of ${searchState.totalPages}...`
+                  : `Fetching page ${searchState.currentPage}...`
+                : (searchLoading || searchState.isSearching)
+                  ? 'Searching...'
+                  : 'Search SEC Filings'}
+            </Button>
+            
+            {/* Stop Button - red border, clear background, red square icon, only show when search is in progress */}
+            {searchState.isSearching && (
+              <Button
+                variant="outlined"
+                onClick={handleStopSearch}
+                sx={{
+                  borderColor: '#ef4444',
+                  backgroundColor: 'transparent',
+                  color: '#ef4444',
                         width: '100%',
                         py: 1.5,
-                        '&:hover': {
-                          borderColor: '#dc2626',
-                          backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                        },
-                      }}
-                    >
+                  '&:hover': {
+                    borderColor: '#dc2626',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  },
+                }}
+              >
                       Stop Search
-                    </Button>
-                  )}
-                </Box>
+              </Button>
+            )}
+          </Box>
 
                 {/* Column Selection */}
                 <Box sx={{ p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px' }}>
-                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
-                    Select columns to display:
-                  </Typography>
+            <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
+              Select columns to display:
+            </Typography>
                   <FormGroup>
-                    {DEFAULT_COLUMNS.map((col) => (
-                      <FormControlLabel
-                        key={col}
-                        control={
-                          <Checkbox
-                            checked={selectedColumns.length === 0 || selectedColumns.includes(col)}
-                            onChange={() => handleColumnToggle(col)}
-                            sx={{
-                              color: '#9ca3af',
-                              '&.Mui-checked': { color: '#3b82f6' },
-                            }}
-                          />
-                        }
-                        label={col}
-                        sx={{ color: '#9ca3af', '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
-                      />
-                    ))}
-                  </FormGroup>
-                </Box>
-              </Box>
+              {DEFAULT_COLUMNS.map((col) => (
+                <FormControlLabel
+                  key={col}
+                  control={
+                    <Checkbox
+                      checked={selectedColumns.length === 0 || selectedColumns.includes(col)}
+                      onChange={() => handleColumnToggle(col)}
+                      sx={{
+                        color: '#9ca3af',
+                        '&.Mui-checked': { color: '#3b82f6' },
+                      }}
+                    />
+                  }
+                  label={col}
+                  sx={{ color: '#9ca3af', '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                />
+              ))}
+            </FormGroup>
+          </Box>
             </Box>
-          </GlassCard>
+            </Box>
+        </GlassCard>
 
         {/* Form Types Selection Modal */}
         <Dialog
@@ -2774,7 +2774,7 @@ const SECSearchPage: React.FC = () => {
             </Box>
 
           {/* Right Sidebar - Client-side Filters */}
-          {allSearchResults.length > 0 && (
+        {allSearchResults.length > 0 && (
             <GlassCard sx={{ 
               p: 2, 
               minWidth: 280, 

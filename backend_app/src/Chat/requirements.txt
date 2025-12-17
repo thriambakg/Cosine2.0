@@ -12,6 +12,7 @@ yfinance>=0.2.18
 numpy>=1.24.0,<2.0.0
 pandas>=2.0.0,<3.0.0
 matplotlib>=3.7.0,<4.0.0
+openpyxl>=3.1.0,<4.0.0
 
 # Cryptocurrency data processing
 ccxt>=4.0.0,<5.0.0

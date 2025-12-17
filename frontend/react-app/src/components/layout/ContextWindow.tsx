@@ -41,9 +41,39 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
   // Use external visibility control if provided, otherwise use context
   const isVisible = externalIsVisible !== undefined ? externalIsVisible : contextIsVisible;
   
+  // Bring window to foreground when items are added
+  useEffect(() => {
+    if (isVisible && contextItems.length > 0) {
+      setIsForeground(true);
+      // Reset foreground after a short delay
+      const timer = setTimeout(() => {
+        setIsForeground(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [contextItems.length, isVisible]);
+  
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
     const saved = sessionStorage.getItem('context-window-position');
-    return saved ? JSON.parse(saved) : { x: window.innerWidth - 424, y: 24 }; // Right side by default
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Ensure position is within viewport bounds
+        const maxX = Math.max(0, window.innerWidth - 424);
+        const maxY = Math.max(0, window.innerHeight - 600);
+        return {
+          x: Math.min(parsed.x || window.innerWidth - 424, maxX),
+          y: Math.min(parsed.y || 24, maxY),
+        };
+      } catch (e) {
+        console.error('Error parsing saved position:', e);
+      }
+    }
+    // Default position: right side, 24px from bottom
+    return { 
+      x: Math.max(0, window.innerWidth - 424), 
+      y: 24 
+    };
   });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -257,7 +287,7 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
         borderRadius: '12px',
         backdropFilter: 'blur(10px)',
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-        zIndex: isForeground ? 1300 : 1000,
+        zIndex: isForeground ? 1400 : 1300,
         width: 400,
         height: 600,
         display: 'flex',

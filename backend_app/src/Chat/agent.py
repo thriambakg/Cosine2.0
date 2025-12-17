@@ -149,6 +149,7 @@ from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
 from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
 from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
 from tools.chart_generator import generate_chart_tool, generate_stock_chart
+from tools.excel_generator import generate_excel_with_charts_tool
 from tools.chat_history_tool import get_chat_history_tool, search_chat_history_tool
 from tools.chat_session_context_tool import process_chat_session_context_tool, analyze_chat_session_context_tool
 from tools.web_scraper import fetch_web_content_tool
@@ -2042,6 +2043,7 @@ enhanced_tools = [
     download_filing_pdf,  # Download SEC filing as PDF
     generate_chart_tool,  # Generate unified charts for both stocks and crypto (requires pre-fetched data)
     generate_stock_chart,  # Convenience tool: fetch stock data and generate chart in one step
+    generate_excel_with_charts_tool,  # Generate Excel (.xlsx) files with embedded charts from financial data
     get_chat_history_tool,  # Get chat history on-demand with pagination
     search_chat_history_tool,  # Search chat history for specific terms
     process_chat_session_context_tool,  # Process chat session context from history sidebar

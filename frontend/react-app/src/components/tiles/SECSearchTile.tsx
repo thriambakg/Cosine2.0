@@ -48,6 +48,7 @@ import {
   OpenInNew as OpenInNewIcon,
   ViewColumn as ViewColumnIcon,
   Stop as StopIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 import { secSearchAPI, SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../../services/api';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
@@ -2952,7 +2953,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                       display: 'flex', 
                       flexDirection: 'column', 
                       gap: 1, 
-                      maxHeight: '200px', 
+                      maxHeight: '400px', 
                       overflowY: 'auto',
                       '&::-webkit-scrollbar': {
                         width: '8px',
@@ -2970,6 +2971,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                     }}>
                       {selectedFiling.documentUrls.map((url, index) => {
                         const filename = url.split('/').pop() || `Document ${index + 1}`;
+                        const s3Key = selectedFiling.documentS3Keys?.[url];
                         return (
                           <Box
                             key={index}
@@ -2997,6 +2999,60 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                                 {filename}
                                 <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
                               </Link>
+                              {s3Key && (
+                                <IconButton
+                                  size="small"
+                                  onClick={async () => {
+                                    try {
+                                      console.log('📥 Downloading SEC filing document:', filename);
+                                      
+                                      if (!user?.id || !activeSessionId) {
+                                        console.error('Missing user ID or session ID for file download');
+                                        return;
+                                      }
+                                      
+                                      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                                      const response = await fetch(`${apiUrl}/file-download`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          user_id: user.id,
+                                          session_id: activeSessionId,
+                                          bucket: 'SEC_FILINGS',
+                                          s3_key: s3Key,
+                                          filename: filename
+                                        })
+                                      });
+                                      
+                                      if (!response.ok) {
+                                        throw new Error(`Download request failed: ${response.status}`);
+                                      }
+                                      
+                                      const { download_url } = await response.json();
+                                      
+                                      // Create download link and trigger download
+                                      const link = document.createElement('a');
+                                      link.href = download_url;
+                                      link.download = filename;
+                                      link.target = '_blank';
+                                      document.body.appendChild(link);
+                                      link.click();
+                                      document.body.removeChild(link);
+                                      
+                                      console.log('✅ File download started');
+                                    } catch (error) {
+                                      console.error('❌ Download failed:', error);
+                                    }
+                                  }}
+                                  sx={{
+                                    color: '#3b82f6',
+                                    ml: 'auto',
+                                    '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                                  }}
+                                >
+                                  <DownloadIcon fontSize="small" />
+                                </IconButton>
+                              )}
                             </Box>
                           </Box>
                         );
@@ -3004,6 +3060,125 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                     </Box>
                   ) : (
                     <Typography variant="body2" sx={{ color: '#9ca3af' }}>No document format files available</Typography>
+                  )}
+                </Grid>
+
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
+                    Data Files ({selectedFiling.dataFileUrls?.length || 0})
+                  </Typography>
+                  {selectedFiling.dataFileUrls && selectedFiling.dataFileUrls.length > 0 ? (
+                    <Box sx={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: 1, 
+                      maxHeight: '400px', 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '8px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '4px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {selectedFiling.dataFileUrls.map((url, index) => {
+                        const filename = url.split('/').pop() || `Data File ${index + 1}`;
+                        const s3Key = selectedFiling.dataFileS3Keys?.[url];
+                        return (
+                          <Box
+                            key={index}
+                            sx={{
+                              p: 1.5,
+                              border: '1px solid #374151',
+                              borderRadius: '4px',
+                              backgroundColor: 'rgba(31, 41, 55, 0.5)',
+                            }}
+                          >
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
+                              <Link
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  color: '#3b82f6',
+                                  textDecoration: 'none',
+                                  fontSize: '0.875rem',
+                                  flex: 1,
+                                  '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                                }}
+                              >
+                                {filename}
+                                <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
+                              </Link>
+                              {s3Key && (
+                                <IconButton
+                                  size="small"
+                                  onClick={async () => {
+                                    try {
+                                      console.log('📥 Downloading SEC filing data file:', filename);
+                                      
+                                      if (!user?.id || !activeSessionId) {
+                                        console.error('Missing user ID or session ID for file download');
+                                        return;
+                                      }
+                                      
+                                      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                                      const response = await fetch(`${apiUrl}/file-download`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          user_id: user.id,
+                                          session_id: activeSessionId,
+                                          bucket: 'SEC_FILINGS',
+                                          s3_key: s3Key,
+                                          filename: filename
+                                        })
+                                      });
+                                      
+                                      if (!response.ok) {
+                                        throw new Error(`Download request failed: ${response.status}`);
+                                      }
+                                      
+                                      const { download_url } = await response.json();
+                                      
+                                      // Create download link and trigger download
+                                      const link = document.createElement('a');
+                                      link.href = download_url;
+                                      link.download = filename;
+                                      link.target = '_blank';
+                                      document.body.appendChild(link);
+                                      link.click();
+                                      document.body.removeChild(link);
+                                      
+                                      console.log('✅ File download started');
+                                    } catch (error) {
+                                      console.error('❌ Download failed:', error);
+                                    }
+                                  }}
+                                  sx={{
+                                    color: '#3b82f6',
+                                    ml: 'auto',
+                                    '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                                  }}
+                                >
+                                  <DownloadIcon fontSize="small" />
+                                </IconButton>
+                              )}
+                            </Box>
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No data files available</Typography>
                   )}
                 </Grid>
               </Grid>

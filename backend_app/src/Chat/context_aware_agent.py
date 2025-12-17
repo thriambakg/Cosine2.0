@@ -256,6 +256,7 @@ class ContextAwareAgent:
 - search_chat_history_tool(session_id, user_id, search_term, limit) - Search chat history
 - generate_agent_file_tool(filename, content, file_type) - Create files
 - generate_excel_file_tool(filename, content, template_type, include_charts) - Create CSV files
+- generate_excel_with_charts_tool(data, filename, chart_type, sheet_name) - Generate Excel (.xlsx) files with embedded charts from financial data
 - get_session_context_tool(session_id, user_id) - Get full session context when needed
 - get_session_files_tool(session_id, user_id, file_type) - Get specific files when needed
 - get_current_datetime(format) - Get current date/time (use "date" for YYYY-MM-DD format)

@@ -48,6 +48,13 @@ cache_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if dynamodb and DYNAMODB_TABLE
 S3_BUCKET_NAME = os.environ.get('SEC_FILINGS_S3_BUCKET', 'cosine-sec-filings-production')
 s3_client = boto3.client('s3') if S3_BUCKET_NAME else None
 
+# SNS configuration for completion notifications (wrapper Lambda)
+COMPLETION_SNS_TOPIC_ARN = os.environ.get('SEC_SEARCH_COMPLETION_SNS_TOPIC_ARN')
+completion_sns_client = boto3.client('sns') if COMPLETION_SNS_TOPIC_ARN else None
+
+# Global variable to store request_id for completion notification
+current_request_id: Optional[str] = None
+
 
 def create_session():
     """Create a requests session with proper headers"""
@@ -2289,9 +2296,17 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         job_id = create_job(search_params)
         logger.info(f"✅✅✅ Created new job: {job_id} ✅✅✅")
         
+        # Store request_id with job if available (from SQS wrapper)
+        if current_request_id:
+            logger.info(f"📝 Storing request_id {current_request_id} with job {job_id}")
+            # Store request_id in job progress for later retrieval
+            job_progress = {'request_id': current_request_id}
+        else:
+            job_progress = None
+        
         # Store in query cache with initial job status
         logger.info(f"💾 Storing job in query cache...")
-        store_cached_query(query_hash, job_id, search_params, job_status='PENDING')
+        store_cached_query(query_hash, job_id, search_params, job_status='PENDING', job_progress=job_progress)
         logger.info(f"💾✅ Stored job in query cache")
         
         logger.info(f"🚀🚀🚀 ABOUT TO INVOKE ASYNC SEARCH 🚀🚀🚀")
@@ -2771,7 +2786,7 @@ def process_async_search(job_id: str, search_params: Dict[str, Any]):
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main Lambda handler - routes requests based on path
-    Also handles async job processing
+    Also handles async job processing and SQS events
     """
     # Log ALL invocations at the very start
     logger.info(f"🔵🔵🔵 LAMBDA HANDLER ENTRY POINT 🔵🔵🔵")
@@ -2782,7 +2797,38 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if context:
         logger.info(f"📥 Request ID: {context.request_id if hasattr(context, 'request_id') else 'N/A'}")
     
+    # Global variable to store request_id for completion notification
+    global current_request_id
+    current_request_id = None
+    
     try:
+        # Check if this is an SQS event (from wrapper Lambda)
+        if 'Records' in event and isinstance(event.get('Records'), list) and len(event.get('Records', [])) > 0:
+            first_record = event['Records'][0]
+            if first_record.get('eventSource') == 'aws:sqs':
+                logger.info(f"📬 SQS EVENT DETECTED - Processing message from queue")
+                try:
+                    # Parse SQS message body
+                    message_body_str = first_record.get('body', '{}')
+                    message_body = json.loads(message_body_str) if isinstance(message_body_str, str) else message_body_str
+                    
+                    # Extract request_id and API Gateway event
+                    current_request_id = message_body.get('request_id')
+                    api_gateway_event = message_body.get('api_gateway_event', {})
+                    
+                    logger.info(f"📬 Extracted request_id: {current_request_id}")
+                    logger.info(f"📬 API Gateway event keys: {list(api_gateway_event.keys())}")
+                    
+                    # Replace event with API Gateway event for processing
+                    event = api_gateway_event
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
+                    return {
+                        'statusCode': 500,
+                        'body': json.dumps({'error': f'Failed to parse SQS message: {str(e)}'})
+                    }
+        
         # Check if this is an async job invocation
         if event.get('async_job'):
             logger.info(f"🔄🔄🔄 ASYNC JOB INVOCATION DETECTED IN LAMBDA HANDLER 🔄🔄🔄")

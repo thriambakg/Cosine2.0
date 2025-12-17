@@ -27,6 +27,10 @@ LAMBDA_FUNCTION_NAME = os.environ.get('AWS_LAMBDA_FUNCTION_NAME')
 sns_client = boto3.client('sns')
 SNS_TOPIC_ARN = os.environ.get('SEC_SEARCH_PROGRESS_SNS_TOPIC_ARN')
 
+# SNS client for completion notifications (wrapper Lambda)
+COMPLETION_SNS_TOPIC_ARN = os.environ.get('SEC_SEARCH_COMPLETION_SNS_TOPIC_ARN')
+completion_sns_client = boto3.client('sns') if COMPLETION_SNS_TOPIC_ARN else None
+
 
 def create_job(search_params: Dict[str, Any]) -> str:
     """
@@ -161,6 +165,55 @@ def complete_job(job_id: str, results: Dict[str, Any]):
         )
         
         logger.info(f"Published job {job_id} completion to SNS with {completion_message.get('results_count', 0)} results")
+        
+        # Also publish to completion SNS topic for wrapper Lambda (if configured)
+        if COMPLETION_SNS_TOPIC_ARN and completion_sns_client:
+            try:
+                # Get request_id from job status (stored in job_progress when job was created)
+                job_status = get_job_status(job_id)
+                request_id = None
+                if job_status:
+                    progress = job_status.get('progress', {})
+                    request_id = progress.get('request_id') if isinstance(progress, dict) else None
+                
+                if request_id:
+                    # Prepare completion message for wrapper
+                    wrapper_completion = {
+                        'request_id': request_id,
+                        'statusCode': 200,
+                        'body': {
+                            'success': True,
+                            'job_id': job_id,
+                            'status': 'COMPLETED',
+                            'results_count': len(results.get('results', [])),
+                            'total_found': results.get('total_found', 0)
+                        },
+                        'status': 'completed'
+                    }
+                    
+                    # Add results or S3 key to body
+                    if 'results_s3_key' in completion_message:
+                        wrapper_completion['body']['results_s3_key'] = completion_message['results_s3_key']
+                    else:
+                        wrapper_completion['body']['results'] = results
+                    
+                    # Publish to completion SNS with request_id in message attributes
+                    completion_sns_client.publish(
+                        TopicArn=COMPLETION_SNS_TOPIC_ARN,
+                        Message=json.dumps(wrapper_completion),
+                        Subject=f'SEC Search Completion: {request_id}',
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                    logger.info(f"Published completion to wrapper SNS for request {request_id}")
+                else:
+                    logger.warning(f"No request_id found for job {job_id}, skipping completion SNS publish")
+            except Exception as e:
+                logger.error(f"Error publishing to completion SNS: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"Error completing job {job_id}: {e}", exc_info=True)
 
@@ -193,6 +246,48 @@ def fail_job(job_id: str, error: str):
         )
         
         logger.info(f"Published job {job_id} failure to SNS: {error}")
+        
+        # Also publish to completion SNS topic for wrapper Lambda (if configured)
+        if COMPLETION_SNS_TOPIC_ARN and completion_sns_client:
+            try:
+                # Get request_id from job status (stored in job_progress when job was created)
+                job_status = get_job_status(job_id)
+                request_id = None
+                if job_status:
+                    progress = job_status.get('progress', {})
+                    request_id = progress.get('request_id') if isinstance(progress, dict) else None
+                
+                if request_id:
+                    # Prepare failure message for wrapper
+                    wrapper_failure = {
+                        'request_id': request_id,
+                        'statusCode': 500,
+                        'body': {
+                            'success': False,
+                            'job_id': job_id,
+                            'status': 'FAILED',
+                            'error': error
+                        },
+                        'status': 'failed'
+                    }
+                    
+                    # Publish to completion SNS
+                    completion_sns_client.publish(
+                        TopicArn=COMPLETION_SNS_TOPIC_ARN,
+                        Message=json.dumps(wrapper_failure),
+                        Subject=f'SEC Search Failed: {request_id}',
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                    logger.info(f"Published failure to wrapper SNS for request {request_id}")
+                else:
+                    logger.warning(f"No request_id found for job {job_id}, skipping failure SNS publish")
+            except Exception as e:
+                logger.error(f"Error publishing failure to completion SNS: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"Error failing job {job_id}: {e}", exc_info=True)
 
