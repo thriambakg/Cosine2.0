@@ -342,31 +342,13 @@ const UnifiedDashboardPage: React.FC = () => {
   const [configValid, setConfigValid] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
   
-  // Zoom state with session persistence
+  // Zoom state with session persistence per tab
   const MIN_ZOOM = 0.5;
   const MAX_ZOOM = 2.0;
   const ZOOM_STEP = 0.1;
   
   // Initialize zoom level from sessionStorage or default to 1.0
-  const [zoomLevel, setZoomLevel] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const savedZoom = sessionStorage.getItem('dashboard-zoom-level');
-      if (savedZoom) {
-        const parsed = parseFloat(savedZoom);
-        if (!isNaN(parsed) && parsed >= MIN_ZOOM && parsed <= MAX_ZOOM) {
-          return parsed;
-        }
-      }
-    }
-    return 1.0;
-  });
-  
-  // Persist zoom level to sessionStorage whenever it changes
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('dashboard-zoom-level', zoomLevel.toString());
-    }
-  }, [zoomLevel]);
+  const [zoomLevel, setZoomLevel] = useState(1.0);
 
   // Tab management - only initialize when user is authenticated
   const tabManagement = useTabManagement({ 
@@ -398,6 +380,30 @@ const UnifiedDashboardPage: React.FC = () => {
 
   // Derive activeTab from activeTabId
   const activeTab = tabs.find(tab => tab.id === activeTabId);
+
+  // Load zoom level for the active tab from sessionStorage
+  useEffect(() => {
+    if (activeTabId && typeof window !== 'undefined') {
+      const savedZoom = sessionStorage.getItem(`dashboard-zoom-level-${activeTabId}`);
+      if (savedZoom) {
+        const parsed = parseFloat(savedZoom);
+        if (!isNaN(parsed) && parsed >= MIN_ZOOM && parsed <= MAX_ZOOM) {
+          setZoomLevel(parsed);
+        } else {
+          setZoomLevel(1.0);
+        }
+      } else {
+        setZoomLevel(1.0);
+      }
+    }
+  }, [activeTabId]);
+
+  // Persist zoom level to sessionStorage whenever it changes (per tab)
+  useEffect(() => {
+    if (activeTabId && typeof window !== 'undefined') {
+      sessionStorage.setItem(`dashboard-zoom-level-${activeTabId}`, zoomLevel.toString());
+    }
+  }, [zoomLevel, activeTabId]);
 
   // Handle hot reload scenario where user might be temporarily undefined
   useEffect(() => {
@@ -1372,14 +1378,18 @@ const UnifiedDashboardPage: React.FC = () => {
       return;
     }
 
-    // Filter out results and lastUpdated - these should only be in session storage, not database
-    // onUpdate is for session-only data (results), onSettingsChange is for database persistence (config)
-    const { results, lastUpdated, ...configData } = data;
+    // Filter out results, paginationState, and lastUpdated - these should only be in session storage, not database
+    // onUpdate is for session-only data (results, paginationState), onSettingsChange is for database persistence (config)
+    const { results, paginationState, lastUpdated, ...configData } = data;
     
-    // Store results in sessionStorage only (not in tile state that gets saved to database)
-    if (results !== undefined) {
+    // Store results and paginationState in sessionStorage only (not in tile state that gets saved to database)
+    if (results !== undefined || paginationState !== undefined) {
       try {
-        sessionStorage.setItem(`tile_results_${id}`, JSON.stringify({ results, lastUpdated }));
+        const sessionData: any = {};
+        if (results !== undefined) sessionData.results = results;
+        if (paginationState !== undefined) sessionData.paginationState = paginationState;
+        if (lastUpdated !== undefined) sessionData.lastUpdated = lastUpdated;
+        sessionStorage.setItem(`tile_results_${id}`, JSON.stringify(sessionData));
       } catch (error) {
         console.error('Failed to store results in sessionStorage:', error);
       }

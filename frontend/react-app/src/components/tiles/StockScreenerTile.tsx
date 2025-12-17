@@ -500,10 +500,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         
         // Don't set filteredResults here - let applyFilters handle it after state update
         
-        // Update tile with results
+        // Update tile with results - include pagination state in session state
         onUpdate(id, {
           results: response.results,
           criteria: localCriteria,
+          paginationState: {
+            totalResultsLoaded: response.results.length,
+            lastEvaluatedKeys: newLastEvaluatedKeys,
+            hasMore: response.has_more || false,
+          },
           lastUpdated: new Date().toISOString(),
         });
         
@@ -656,10 +661,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           console.log('✅ StockScreenerTile: Filters active, applyFilters will update filteredResults');
         }
         
-        // Update tile with results
+        // Update tile with results - include pagination state
         onUpdate(id, {
           results: updatedResults,
           criteria: localCriteria,
+          paginationState: {
+            totalResultsLoaded: updatedResults.length,
+            lastEvaluatedKeys: updatedKeys,
+            hasMore: response.has_more || false,
+          },
           lastUpdated: new Date().toISOString(),
         });
         
@@ -723,15 +733,26 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       let currentResults = [...(results || [])];
       let keysToLoad = [...paginationState.lastEvaluatedKeys];
       
-      // Skip keys that were already used (if we have more results than initial page)
+      // Skip keys that were already used
+      // The first page (100 results) doesn't use a key, so:
+      // - 100 results = 1 page loaded, 0 keys used -> skip 0 keys
+      // - 200 results = 2 pages loaded, 1 key used -> skip 1 key
+      // - 300 results = 3 pages loaded, 2 keys used -> skip 2 keys
+      // lastEvaluatedKeys contains: [key1, key2, key3, ...] where:
+      // - key1 was used to load page 2
+      // - key2 was used to load page 3
+      // - key3 is for loading page 4 (not used yet)
       const initialPageSize = 100;
       if (currentResults.length > initialPageSize) {
-        // Calculate how many pages we've already loaded
-        const pagesLoaded = Math.ceil(currentResults.length / initialPageSize);
-        keysToLoad = keysToLoad.slice(pagesLoaded - 1); // Skip already loaded keys
+        // Calculate how many pages beyond the first have been loaded
+        // Each page after the first uses one key from the array
+        const totalPages = Math.ceil(currentResults.length / initialPageSize);
+        const keysUsed = totalPages - 1; // Number of keys used (pages beyond first)
+        keysToLoad = keysToLoad.slice(keysUsed); // Skip keys that were already used
       }
 
       // Load each page sequentially until we reach totalResultsLoaded
+      // Stop when we have enough results OR when we run out of keys
       while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0) {
         const nextKey = keysToLoad[0];
         
@@ -753,10 +774,20 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         if (response?.results) {
           currentResults = [...currentResults, ...response.results];
           keysToLoad = keysToLoad.slice(1);
+          
+          // Stop immediately if we've reached or exceeded the target
+          if (currentResults.length >= paginationState.totalResultsLoaded) {
+            break;
+          }
         } else {
           // No more results or error, stop loading
           break;
         }
+      }
+      
+      // Ensure we don't exceed the target (trim if we loaded one extra page)
+      if (currentResults.length > paginationState.totalResultsLoaded) {
+        currentResults = currentResults.slice(0, paginationState.totalResultsLoaded);
       }
       
       // Update state with restored results
@@ -764,10 +795,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
       setHasMore(paginationState.hasMore);
       
-      // Update tile with restored results
+      // Update tile with restored results - include pagination state
       onUpdate(id, {
         results: currentResults,
         criteria: localCriteria,
+        paginationState: {
+          totalResultsLoaded: currentResults.length,
+          lastEvaluatedKeys: paginationState.lastEvaluatedKeys,
+          hasMore: paginationState.hasMore,
+        },
         lastUpdated: new Date().toISOString(),
       });
       
@@ -1228,34 +1264,28 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
             tooltip: `Add ${selectedStocks.length > 0 ? `${selectedStocks.length} stock(s)` : 'selected stocks'} to context`,
             icon: <AddToContextIcon sx={{ fontSize: 18 }} />,
           }}
+          customizeButton={{
+            onClick: () => setCustomizeDialogOpen(true),
+          }}
+          refreshButton={{
+            onClick: (e) => {
+              e.stopPropagation();
+              runScreener();
+            },
+            disabled: isLoading,
+            isLoading: isLoading,
+            icon: isLoading ? (
+              <CircularProgress size={18} sx={{ color: '#3b82f6' }} />
+            ) : (
+              <RefreshIcon sx={{ fontSize: 18 }} />
+            ),
+          }}
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
           }}
-          customizeButton={{
-            onClick: () => setCustomizeDialogOpen(true),
-          }}
           collapsibleActions={
             <>
-              <Tooltip title="Refresh">
-                <IconButton
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    runScreener();
-                  }}
-                  disabled={isLoading}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-                >
-                  {isLoading ? (
-                    <CircularProgress size={18} sx={{ color: '#3b82f6' }} />
-                  ) : (
-                    <RefreshIcon sx={{ fontSize: 18 }} />
-                  )}
-                </IconButton>
-              </Tooltip>
-
               <Tooltip title="Select columns to display">
                 <IconButton
                   size="small"

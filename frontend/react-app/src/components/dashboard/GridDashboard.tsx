@@ -777,11 +777,25 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
+    // Restore paginationState from sessionStorage if available (for session persistence)
+    let sessionPaginationStateScreener = tile.paginationState;
+    try {
+      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        if (parsed.paginationState) {
+          sessionPaginationStateScreener = parsed.paginationState;
+        }
+      }
+    } catch (error) {
+      // Ignore sessionStorage errors
+    }
+
     const stockScreenerProps = {
       ...commonProps,
       criteria: tile.criteria,
       results: tile.results,
-      paginationState: tile.paginationState,
+      paginationState: sessionPaginationStateScreener,
       displayOptions: (tile.displayOptions as any) || {
         showIndustry: true,
         showMarketCap: true,
@@ -800,12 +814,26 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
+    // Restore paginationState from sessionStorage if available (for session persistence)
+    let sessionPaginationStateNews = tile.paginationState;
+    try {
+      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        if (parsed.paginationState) {
+          sessionPaginationStateNews = parsed.paginationState;
+        }
+      }
+    } catch (error) {
+      // Ignore sessionStorage errors
+    }
+
     const newsProps = {
       ...commonProps,
       searchParams: tile.searchParams, // Include searchParams like PoliticianTradesSearchTile
       filterSettings: tile.filterSettings,
       articles: tile.articles,
-      paginationState: tile.paginationState,
+      paginationState: sessionPaginationStateNews,
       displayOptions: (tile.displayOptions as any) || {
         showTitle: true,
         showSource: true,
@@ -843,11 +871,25 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
+    // Restore paginationState from sessionStorage if available (for session persistence)
+    let sessionPaginationStateTrades = tile.paginationState;
+    try {
+      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        if (parsed.paginationState) {
+          sessionPaginationStateTrades = parsed.paginationState;
+        }
+      }
+    } catch (error) {
+      // Ignore sessionStorage errors
+    }
+
     const politicianTradesProps = {
       ...commonProps,
       searchParams: tile.searchParams,
       results: tile.trades,
-      paginationState: tile.paginationState,
+      paginationState: sessionPaginationStateTrades,
       displayOptions: (tile.displayOptions as any) || {
         showPolitician: true,
         showParty: true,
@@ -892,12 +934,26 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
+    // Restore paginationState from sessionStorage if available (for session persistence)
+    let sessionPaginationState = tile.paginationState;
+    try {
+      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        if (parsed.paginationState) {
+          sessionPaginationState = parsed.paginationState;
+        }
+      }
+    } catch (error) {
+      // Ignore sessionStorage errors
+    }
+
     const govtContractsProps = {
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
       results: tile.results as any,
-      paginationState: tile.paginationState,
+      paginationState: sessionPaginationState,
       displayOptions: {
         showRecipient: true,
         showAwardingAgency: true,
@@ -920,12 +976,26 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
+    // Restore paginationState from sessionStorage if available (for session persistence)
+    let sessionPaginationStateBills = tile.paginationState;
+    try {
+      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        if (parsed.paginationState) {
+          sessionPaginationStateBills = parsed.paginationState;
+        }
+      }
+    } catch (error) {
+      // Ignore sessionStorage errors
+    }
+
     const congressBillsProps = {
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
       results: tile.results as any,
-      paginationState: tile.paginationState,
+      paginationState: sessionPaginationStateBills,
       displayOptions: {
         showBillTitle: true,
         showBillType: true,

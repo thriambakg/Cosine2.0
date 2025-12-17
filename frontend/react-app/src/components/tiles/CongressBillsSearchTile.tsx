@@ -460,9 +460,14 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
           },
         });
         
-        // Update parent component
+        // Update parent component - include pagination state in session state
         onUpdate(id, {
           results: response.results,
+          paginationState: {
+            totalResultsLoaded: response.results.length,
+            lastEvaluatedKeys: response.last_evaluated_key ? [response.last_evaluated_key] : [],
+            hasMore: response.has_more || false,
+          },
           lastUpdated: Date.now(),
         });
       } else {
@@ -560,6 +565,11 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         
         onUpdate(id, {
           results: updatedResults,
+          paginationState: {
+            totalResultsLoaded: updatedResults.length,
+            lastEvaluatedKeys: updatedKeys,
+            hasMore: response.has_more || false,
+          },
           lastUpdated: Date.now(),
         });
       } else {
@@ -667,9 +677,14 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       setHasMore(paginationState.hasMore);
       setHasPerformedInitialSearch(true);
       
-      // Update tile with restored results
+      // Update tile with restored results - include pagination state
       onUpdate(id, {
         results: currentResults,
+        paginationState: {
+          totalResultsLoaded: currentResults.length,
+          lastEvaluatedKeys: paginationState.lastEvaluatedKeys,
+          hasMore: paginationState.hasMore,
+        },
         lastUpdated: Date.now(),
       });
       
@@ -1132,28 +1147,21 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               setCustomizeDialogOpen(true);
             },
           }}
+          refreshButton={{
+            onClick: (e) => {
+              e.stopPropagation();
+              handleRefresh();
+            },
+            disabled: isLoading,
+            isLoading: isLoading,
+            icon: isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />,
+          }}
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
           }}
           collapsibleActions={
             <>
-              <Tooltip title="Run Search">
-                <IconButton
-                  size="small"
-                  onClick={handleRefresh}
-                  disabled={isLoading}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  sx={{ 
-                    color: isLoading ? '#6b7280' : '#9ca3af',
-                    '&:hover': { color: '#3b82f6' },
-                    '&.Mui-disabled': { color: '#6b7280' }
-                  }}
-                >
-                  {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
-                </IconButton>
-              </Tooltip>
-
               <Tooltip title="Select columns to display">
                 <IconButton
                   size="small"

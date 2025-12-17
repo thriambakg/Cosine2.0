@@ -402,6 +402,15 @@ const PortfolioTile = ({
           customizeButton={{
             onClick: () => setCustomizeDialogOpen(true),
           }}
+          refreshButton={{
+            onClick: (e) => {
+              e.stopPropagation();
+              handleRefresh();
+            },
+            disabled: isLoading || !results,
+            isLoading: isLoading,
+            icon: isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />,
+          }}
           collapsibleActions={
             <>
               <Tooltip title="Recalculate Portfolio">
@@ -412,18 +421,6 @@ const PortfolioTile = ({
                   sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
                 >
                   <CalculateIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-
-              <Tooltip title="Refresh data">
-                <IconButton
-                  size="small"
-                  onClick={handleRefresh}
-                  disabled={isLoading || !results}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  sx={{ color: '#9ca3af', '&:hover': { color: '#10b981' } }}
-                >
-                  <RefreshIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
               

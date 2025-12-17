@@ -454,8 +454,14 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         });
         
         // Update parent component - persist results in session only (not database)
+        // Include pagination state in session state
         onUpdate(id, {
           results: processedResults, // Session persistence - full results for duration of login only
+          paginationState: {
+            totalResultsLoaded: processedResults.length,
+            lastEvaluatedKeys: response.last_evaluated_key ? [response.last_evaluated_key] : [],
+            hasMore: response.has_more || false,
+          },
           lastUpdated: Date.now(),
         });
       } else {
@@ -527,23 +533,11 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         
         // Append new results to existing results
         const newLastEvaluatedKey = response.last_evaluated_key || null;
-        setAllResults(prev => {
-          const updated = [...prev, ...processedResults];
-          // Update parent component
-          onUpdate(id, {
-            results: updated,
-            lastUpdated: Date.now(),
-          });
-          return updated;
-        });
-        setFilteredResults(prev => [...prev, ...processedResults]);
-        setCurrentResults(prev => [...prev, ...processedResults]);
-        setHasMore(response.has_more || false);
-        setLastEvaluatedKey(newLastEvaluatedKey);
         
         // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        let updatedKeys: any[] = [];
         setLastEvaluatedKeys(prev => {
-          const updatedKeys = newLastEvaluatedKey 
+          updatedKeys = newLastEvaluatedKey 
             ? [...prev, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
             : prev;
           
@@ -558,6 +552,25 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           
           return updatedKeys;
         });
+        
+        setAllResults(prev => {
+          const updated = [...prev, ...processedResults];
+          // Update parent component - include pagination state
+          onUpdate(id, {
+            results: updated,
+            paginationState: {
+              totalResultsLoaded: updated.length,
+              lastEvaluatedKeys: updatedKeys,
+              hasMore: response.has_more || false,
+            },
+            lastUpdated: Date.now(),
+          });
+          return updated;
+        });
+        setFilteredResults(prev => [...prev, ...processedResults]);
+        setCurrentResults(prev => [...prev, ...processedResults]);
+        setHasMore(response.has_more || false);
+        setLastEvaluatedKey(newLastEvaluatedKey);
       } else {
         console.error('🏛️ PoliticianTradesSearchTile: Load more failed:', response.error);
         setError(response.error || 'Load more failed');
@@ -1446,31 +1459,24 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
             tooltip: `Add ${selectedTrades.size > 0 ? `${selectedTrades.size} trade(s)` : 'selected trades'} to context`,
             icon: <AddToContextIcon fontSize="small" />,
           }}
+          customizeButton={{
+            onClick: () => setCustomizeDialogOpen(true),
+          }}
+          refreshButton={{
+            onClick: (e) => {
+              e.stopPropagation();
+              handleRefresh();
+            },
+            disabled: isLoading,
+            isLoading: isLoading,
+            icon: isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />,
+          }}
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
           }}
-          customizeButton={{
-            onClick: () => setCustomizeDialogOpen(true),
-          }}
           collapsibleActions={
             <>
-              <Tooltip title="Run Search">
-                <IconButton
-                  size="small"
-                  onClick={handleRefresh}
-                  disabled={isLoading}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  sx={{ 
-                    color: isLoading ? '#6b7280' : '#9ca3af',
-                    '&:hover': { color: '#3b82f6' },
-                    '&.Mui-disabled': { color: '#6b7280' }
-                  }}
-                >
-                  {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
-                </IconButton>
-              </Tooltip>
-
               <Tooltip title="Select columns to display">
                 <IconButton
                   size="small"

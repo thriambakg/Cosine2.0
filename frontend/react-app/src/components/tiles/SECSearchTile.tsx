@@ -2249,27 +2249,21 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               setCustomizeDialogOpen(true);
             },
           }}
+          refreshButton={{
+            onClick: (e) => {
+              e.stopPropagation();
+              performSearch();
+            },
+            disabled: isLoading,
+            isLoading: isLoading,
+            icon: isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />,
+          }}
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
           }}
           collapsibleActions={
             <>
-              <Tooltip title="Refresh" arrow>
-                <IconButton
-                  onClick={performSearch}
-                  disabled={isLoading}
-                  sx={{
-                    color: '#9ca3b8',
-                    '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
-                    padding: '6px',
-                  }}
-                  size="small"
-                >
-                  <RefreshIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-
               <Tooltip title="Select columns to display">
                 <IconButton
                   size="small"

@@ -123,7 +123,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     dateRange: 'all',
   },
   filterSettings: initialFilterSettings,
-  paginationState: _ = {
+  paginationState: initialPaginationState = {
     totalResultsLoaded: 0,
     lastEvaluatedKeys: [],
     hasMore: false,
@@ -197,7 +197,16 @@ const NewsTile: React.FC<NewsTileProps> = ({
     dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
   }>(searchParams);
   const [currentResults, setCurrentResults] = useState<NewsArticle[]>(articles);
+  const paginationState = initialPaginationState;
+  
+  // Restore pagination state from prop (session/database persistence)
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<{ published_date?: string; SK?: string } | null>(() => {
+    // First try to get from paginationState prop
+    if (initialPaginationState?.lastEvaluatedKeys && initialPaginationState.lastEvaluatedKeys.length > 0) {
+      // Use the last key in the array (most recent)
+      return initialPaginationState.lastEvaluatedKeys[initialPaginationState.lastEvaluatedKeys.length - 1];
+    }
+    // Fallback to localStorage for backward compatibility
     try {
       const saved = localStorage.getItem(`newsTile_lastEvaluatedKey_${id}`);
       return saved ? JSON.parse(saved) : null;
@@ -205,10 +214,21 @@ const NewsTile: React.FC<NewsTileProps> = ({
       return null;
     }
   });
-  const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
+  const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>(() => {
+    // Restore from paginationState prop if available
+    if (initialPaginationState?.lastEvaluatedKeys && initialPaginationState.lastEvaluatedKeys.length > 0) {
+      return initialPaginationState.lastEvaluatedKeys;
+    }
+    return [];
+  });
   const [isRestoringPagination] = useState<boolean>(false);
   // Note: setIsRestoringPagination will be used when restorePaginationState is implemented
   const [hasMore, setHasMore] = useState<boolean>(() => {
+    // First try to get from paginationState prop
+    if (initialPaginationState?.hasMore !== undefined) {
+      return initialPaginationState.hasMore;
+    }
+    // Fallback to localStorage for backward compatibility
     try {
       const saved = localStorage.getItem(`newsTile_hasMore_${id}`);
       return saved === 'true';
@@ -293,7 +313,14 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const tileRef = useRef<HTMLDivElement>(null);
   
   // Ref to track pending onUpdate calls (to avoid calling during render)
-  const pendingUpdateRef = useRef<{ articles: NewsArticle[] } | null>(null);
+  const pendingUpdateRef = useRef<{ 
+    articles: NewsArticle[];
+    paginationState?: {
+      totalResultsLoaded: number;
+      lastEvaluatedKeys: any[];
+      hasMore: boolean;
+    };
+  } | null>(null);
 
   // Category and country options (from NewsSearchPage)
   const categoryOptions = [
@@ -486,21 +513,12 @@ const NewsTile: React.FC<NewsTileProps> = ({
         }));
         
         // Append new results to existing results
-        setAllResults(prev => {
-          const updated = [...prev, ...processedResults];
-          // Store for useEffect to call onUpdate (avoid calling during render)
-          pendingUpdateRef.current = { articles: updated };
-          return updated;
-        });
         const newLastEvaluatedKey = response.last_evaluated_key || null;
-        setFilteredResults(prev => [...prev, ...processedResults]);
-        setCurrentResults(prev => [...prev, ...processedResults]);
-        setHasMore(response.has_more || false);
-        setLastEvaluatedKey(newLastEvaluatedKey);
         
         // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        let updatedKeys: any[] = [];
         setLastEvaluatedKeys(prev => {
-          const updatedKeys = newLastEvaluatedKey 
+          updatedKeys = newLastEvaluatedKey 
             ? [...prev, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
             : prev;
           
@@ -515,6 +533,25 @@ const NewsTile: React.FC<NewsTileProps> = ({
           
           return updatedKeys;
         });
+        
+        setAllResults(prev => {
+          const updated = [...prev, ...processedResults];
+          // Store for useEffect to call onUpdate (avoid calling during render)
+          // Include pagination state in the pending update
+          pendingUpdateRef.current = { 
+            articles: updated,
+            paginationState: {
+              totalResultsLoaded: updated.length,
+              lastEvaluatedKeys: updatedKeys,
+              hasMore: response.has_more || false,
+            }
+          };
+          return updated;
+        });
+        setFilteredResults(prev => [...prev, ...processedResults]);
+        setCurrentResults(prev => [...prev, ...processedResults]);
+        setHasMore(response.has_more || false);
+        setLastEvaluatedKey(newLastEvaluatedKey);
       } else {
         console.error('📰 NewsTile: Load more failed - no articles returned');
         setError('Load more failed - no articles returned');
@@ -626,17 +663,38 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
   }, [articles]);
 
+  // Restore pagination state from prop when it changes (e.g., on mount or when navigating back)
+  useEffect(() => {
+    if (paginationState) {
+      // Restore lastEvaluatedKeys
+      if (paginationState.lastEvaluatedKeys && paginationState.lastEvaluatedKeys.length > 0) {
+        setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
+        // Set lastEvaluatedKey to the most recent key
+        setLastEvaluatedKey(paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1]);
+      }
+      // Restore hasMore
+      if (paginationState.hasMore !== undefined) {
+        setHasMore(paginationState.hasMore);
+      }
+    }
+  }, [paginationState]);
+
   // Handle pending onUpdate calls (to avoid calling during render)
   useEffect(() => {
     if (pendingUpdateRef.current) {
-      const { articles } = pendingUpdateRef.current;
+      const { articles, paginationState: pendingPaginationState } = pendingUpdateRef.current;
       pendingUpdateRef.current = null;
       onUpdate(id, {
         articles,
+        paginationState: pendingPaginationState || {
+          totalResultsLoaded: articles.length,
+          lastEvaluatedKeys: lastEvaluatedKeys,
+          hasMore: hasMore,
+        },
         lastUpdated: Date.now(),
       });
     }
-  }, [allResults, id, onUpdate]);
+  }, [allResults, id, onUpdate, lastEvaluatedKeys, hasMore]);
 
   // Sync searchParams prop to state when it changes (e.g., on refresh when parent loads saved state)
   // Only sync if prop has meaningful data and current state is empty/defaults
@@ -1294,28 +1352,21 @@ const NewsTile: React.FC<NewsTileProps> = ({
               setCustomizeDialogOpen(true);
             },
           }}
+          refreshButton={{
+            onClick: (e) => {
+              e.stopPropagation();
+              handleRefresh();
+            },
+            disabled: isLoading,
+            isLoading: isLoading,
+            icon: isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />,
+          }}
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
           }}
           collapsibleActions={
             <>
-              <Tooltip title="Run Search">
-                <IconButton
-                  size="small"
-                  onClick={handleRefresh}
-                  disabled={isLoading}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  sx={{ 
-                    color: isLoading ? '#6b7280' : '#9ca3af',
-                    '&:hover': { color: '#3b82f6' },
-                    '&.Mui-disabled': { color: '#6b7280' }
-                  }}
-                >
-                  {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
-                </IconButton>
-              </Tooltip>
-
               <Tooltip title="Select columns to display">
                 <IconButton
                   size="small"

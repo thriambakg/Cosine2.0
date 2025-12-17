@@ -19,9 +19,16 @@ interface TileHeaderActionsProps {
     onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
     icon: React.ReactNode;
   };
-  // Customize button (optional)
+  // Customize button (optional) - shown when expanded, hidden when collapsed
   customizeButton?: {
     onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  };
+  // Refresh button (optional) - shown when collapsed, replaces customize
+  refreshButton?: {
+    onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+    disabled?: boolean;
+    isLoading?: boolean;
+    icon: React.ReactNode;
   };
   // Collapsible actions (optional)
   collapsibleActions?: React.ReactNode;
@@ -40,6 +47,7 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
   contextButton,
   deleteButton,
   customizeButton,
+  refreshButton,
   collapsibleActions,
   defaultCollapsed = true,
   onCollapseChange,
@@ -71,9 +79,9 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
             }}
           >
             {collapsed ? (
-              <ChevronLeftIcon sx={{ fontSize: 18 }} />
-            ) : (
               <ChevronRightIcon sx={{ fontSize: 18 }} />
+            ) : (
+              <ChevronLeftIcon sx={{ fontSize: 18 }} />
             )}
           </IconButton>
         </Tooltip>
@@ -106,20 +114,24 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
         </Tooltip>
       )}
 
-      {/* Always visible: Customize Button */}
-      {customizeButton && (
-        <Tooltip title="Customize tile">
-          <IconButton
-            size="small"
-            onClick={customizeButton.onClick}
-            onMouseDown={(e) => e.stopPropagation()}
-            sx={{
-              color: '#9ca3af',
-              '&:hover': { color: '#8b5cf6' },
-            }}
-          >
-            <PaletteIcon fontSize="small" />
-          </IconButton>
+      {/* Refresh Button - shown when collapsed (replaces customize) */}
+      {collapsed && refreshButton && (
+        <Tooltip title="Refresh">
+          <span>
+            <IconButton
+              size="small"
+              onClick={refreshButton.onClick}
+              disabled={refreshButton.disabled}
+              onMouseDown={(e) => e.stopPropagation()}
+              sx={{
+                color: refreshButton.disabled ? '#6b7280' : '#9ca3af',
+                '&:hover': { color: refreshButton.disabled ? '#6b7280' : '#3b82f6' },
+                '&.Mui-disabled': { color: '#6b7280' },
+              }}
+            >
+              {refreshButton.icon}
+            </IconButton>
+          </span>
         </Tooltip>
       )}
 
@@ -139,6 +151,23 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
         >
           {collapsibleActions}
         </Box>
+      )}
+
+      {/* Customize Button - shown when expanded, next to delete */}
+      {!collapsed && customizeButton && (
+        <Tooltip title="Customize tile">
+          <IconButton
+            size="small"
+            onClick={customizeButton.onClick}
+            onMouseDown={(e) => e.stopPropagation()}
+            sx={{
+              color: '#9ca3af',
+              '&:hover': { color: '#8b5cf6' },
+            }}
+          >
+            <PaletteIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
       )}
 
       {/* Always visible: Delete Button */}
