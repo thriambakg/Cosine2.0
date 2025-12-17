@@ -49,7 +49,8 @@ import {
   ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../../services/api';
-import { useTilePinning, TileHeaderActions, addTradeToContext, addMultipleTradesToContext, confirmDialog } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addTradeToContext, addMultipleTradesToContext, confirmDialog } from './common';
+import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
@@ -100,6 +101,9 @@ interface PoliticianTradesSearchTileProps {
   };
   autoRefresh?: boolean;
   isPinned?: boolean;
+  customTitle?: string;
+  customColor?: string;
+  customIcon?: string;
 }
 
 const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
@@ -144,6 +148,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   },
   autoRefresh = false,
   isPinned = false,
+  customTitle,
+  customColor,
+  customIcon,
 }) => {
   const { user } = useAuth();
   const { activeSessionId } = useGlobalChat();
@@ -160,6 +167,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   
@@ -1307,12 +1315,14 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     </Dialog>
   );
 
+  const tileColor = customColor || '#3b82f6';
+  
   return (
     <Box
       sx={{
         p: 3,
         background: 'rgba(15, 23, 42, 0.8)',
-        border: '1px solid #374151',
+        border: `1px solid ${tileColor}40`,
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
@@ -1324,9 +1334,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         display: 'flex',
         flexDirection: 'column',
         '&:hover': {
-          borderColor: '#3b82f6',
+          borderColor: tileColor,
           transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
-          boxShadow: (isDragging || pinnedState) ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
+          boxShadow: (isDragging || pinnedState) ? 'none' : `0 8px 25px ${tileColor}25`,
         },
         '&::before': {
           content: '""',
@@ -1335,7 +1345,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           left: 0,
           right: 0,
           height: '3px',
-          background: currentResults.length > 0 ? '#3b82f6' : '#dc2626',
+          background: currentResults.length > 0 ? tileColor : '#dc2626',
         },
       }}
       ref={tileRef}
@@ -1363,10 +1373,19 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
             />
           )}
           
-          <FilterIcon sx={{ color: '#3b82f6', fontSize: '1.5rem', mr: 1 }} />
-          <Typography variant="h6" color="white" fontWeight={600}>
-            Politician Trades
-          </Typography>
+          {(() => {
+            const TileIcon = getIconByName(customIcon, getDefaultIconForTileType('politician_trades'));
+            const iconColor = customColor || '#3b82f6';
+            const displayTitle = customTitle || 'Politician Trades';
+            return (
+              <>
+                <TileIcon sx={{ color: iconColor, fontSize: '1.5rem', mr: 1 }} />
+                <Typography variant="h6" color="white" fontWeight={600}>
+                  {displayTitle}
+                </Typography>
+              </>
+            );
+          })()}
           
           <Chip
             label={
@@ -1430,6 +1449,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
+          }}
+          customizeButton={{
+            onClick: () => setCustomizeDialogOpen(true),
           }}
           collapsibleActions={
             <>
@@ -2904,15 +2926,34 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Tile Customization Dialog */}
+      <TileCustomizationDialog
+        open={customizeDialogOpen}
+        onClose={() => setCustomizeDialogOpen(false)}
+        onSave={(customizations) => {
+          onSettingsChange(id, customizations);
+        }}
+        currentTitle={customTitle || 'Politician Trades'}
+        currentColor={customColor}
+        currentIcon={customIcon}
+      />
     </Box>
   );
 };
 
-// Custom comparison function for memo like StockScreenerTile
+// Custom comparison function for memo - matches SEC tile pattern but with optimization
 const PoliticianTradesSearchTileMemo = memo(PoliticianTradesSearchTile, (prevProps, nextProps) => {
   // Always re-render if key props change
   if (prevProps.id !== nextProps.id ||
       prevProps.dashboardContext !== nextProps.dashboardContext) {
+    return false; // Re-render
+  }
+  
+  // Check customization props FIRST - these should always trigger re-render
+  if (prevProps.customTitle !== nextProps.customTitle ||
+      prevProps.customColor !== nextProps.customColor ||
+      prevProps.customIcon !== nextProps.customIcon) {
     return false; // Re-render
   }
   
@@ -2943,16 +2984,9 @@ const PoliticianTradesSearchTileMemo = memo(PoliticianTradesSearchTile, (prevPro
     return false; // Re-render
   }
   
-  // If size changed significantly, re-render
-  if (prevProps.size && nextProps.size) {
-    const sizeThreshold = 10; // 10px threshold
-    if (Math.abs(prevProps.size.width - nextProps.size.width) > sizeThreshold ||
-        Math.abs(prevProps.size.height - nextProps.size.height) > sizeThreshold) {
-      return false; // Re-render
-    }
-  }
-  
   return true; // Don't re-render
 });
+
+PoliticianTradesSearchTileMemo.displayName = 'PoliticianTradesSearchTile';
 
 export default PoliticianTradesSearchTileMemo;

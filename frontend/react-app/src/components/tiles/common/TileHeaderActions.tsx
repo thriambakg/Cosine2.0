@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, IconButton, Tooltip } from '@mui/material';
-import { ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from '@mui/icons-material';
+import { ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon, Palette as PaletteIcon } from '@mui/icons-material';
 import { PinButton } from './PinButton';
 
 interface TileHeaderActionsProps {
@@ -9,7 +9,7 @@ interface TileHeaderActionsProps {
     isPinned: boolean;
     onTogglePin: () => void;
   };
-  contextButton: {
+  contextButton?: {
     onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
     disabled?: boolean;
     tooltip: string;
@@ -18,6 +18,10 @@ interface TileHeaderActionsProps {
   deleteButton: {
     onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
     icon: React.ReactNode;
+  };
+  // Customize button (optional)
+  customizeButton?: {
+    onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   };
   // Collapsible actions (optional)
   collapsibleActions?: React.ReactNode;
@@ -28,13 +32,14 @@ interface TileHeaderActionsProps {
 
 /**
  * Shared tile header actions component with collapse functionality
- * Always shows: Pin, Context, Delete
+ * Always shows: Pin, (Context if provided), Delete
  * Collapsible: Other actions (Refresh, Column Selection, Filter, etc.)
  */
 export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
   pinButton,
   contextButton,
   deleteButton,
+  customizeButton,
   collapsibleActions,
   defaultCollapsed = true,
   onCollapseChange,
@@ -80,24 +85,43 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
         onTogglePin={pinButton.onTogglePin}
       />
 
-      {/* Always visible: Context Button */}
-      <Tooltip title={contextButton.tooltip}>
-        <span>
+      {/* Always visible: Context Button (if provided) */}
+      {contextButton && (
+        <Tooltip title={contextButton.tooltip}>
+          <span>
+            <IconButton
+              size="small"
+              onClick={contextButton.onClick}
+              disabled={contextButton.disabled}
+              onMouseDown={(e) => e.stopPropagation()}
+              sx={{
+                color: contextButton.disabled ? '#6b7280' : '#9ca3af',
+                '&:hover': { color: contextButton.disabled ? '#6b7280' : '#10b981' },
+                '&.Mui-disabled': { color: '#6b7280' },
+              }}
+            >
+              {contextButton.icon}
+            </IconButton>
+          </span>
+        </Tooltip>
+      )}
+
+      {/* Always visible: Customize Button */}
+      {customizeButton && (
+        <Tooltip title="Customize tile">
           <IconButton
             size="small"
-            onClick={contextButton.onClick}
-            disabled={contextButton.disabled}
+            onClick={customizeButton.onClick}
             onMouseDown={(e) => e.stopPropagation()}
             sx={{
-              color: contextButton.disabled ? '#6b7280' : '#9ca3af',
-              '&:hover': { color: contextButton.disabled ? '#6b7280' : '#10b981' },
-              '&.Mui-disabled': { color: '#6b7280' },
+              color: '#9ca3af',
+              '&:hover': { color: '#8b5cf6' },
             }}
           >
-            {contextButton.icon}
+            <PaletteIcon fontSize="small" />
           </IconButton>
-        </span>
-      </Tooltip>
+        </Tooltip>
+      )}
 
       {/* Collapsible Actions */}
       {collapsibleActions && (

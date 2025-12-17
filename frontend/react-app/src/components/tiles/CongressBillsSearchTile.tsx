@@ -46,7 +46,7 @@ import {
   CongressBillsSearchFilters,
   CongressBill 
 } from '../../services/api';
-import { useTilePinning, TileHeaderActions, confirmDialog, addBillToContext, addMultipleBillsToContext } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog, addBillToContext, addMultipleBillsToContext, getIconByName, getDefaultIconForTileType } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { politicianSuggestionsService } from '../../services/politicianSuggestions';
 import { policyAreaSuggestionsService } from '../../services/policyAreaSuggestions';
@@ -120,9 +120,12 @@ interface CongressBillsSearchTileProps {
   };
   autoRefresh?: boolean;
   isPinned?: boolean;
+  customTitle?: string;
+  customColor?: string;
+  customIcon?: string;
 }
 
-const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
+const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   id,
   size,
   onRemove,
@@ -169,6 +172,9 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   },
   autoRefresh = false,
   isPinned = false,
+  customTitle,
+  customColor,
+  customIcon,
 }) => {
   // Alias paginationState for consistency
   const paginationState = initialPaginationState;
@@ -181,6 +187,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [selectedBillForDetails, setSelectedBillForDetails] = useState<CongressBill | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
+  const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   
   // Search state
   const [currentSearchParams, setCurrentSearchParams] = useState<CongressBillsSearchFilters>(searchParams);
@@ -988,16 +995,14 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   const startIndex = (currentPage - 1) * resultsPerPage;
   const endIndex = startIndex + resultsPerPage;
   const currentPageResults = filteredResults.slice(startIndex, endIndex);
-  
-  // This is a simplified version - the full file would continue with dialogs and table rendering
-  // Due to file size limits, I'll create the complete file in the next step
+  const tileColor = customColor || '#3b82f6';
   
   return (
     <Box
       sx={{
         p: 3,
         background: 'rgba(15, 23, 42, 0.8)',
-        border: '1px solid #374151',
+        border: `1px solid ${tileColor}40`,
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
@@ -1009,9 +1014,9 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
         display: 'flex',
         flexDirection: 'column',
         '&:hover': {
-          borderColor: '#3b82f6',
+          borderColor: tileColor,
           transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
-          boxShadow: (isDragging || pinnedState) ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
+          boxShadow: (isDragging || pinnedState) ? 'none' : `0 8px 25px ${tileColor}25`,
         },
         '&::before': {
           content: '""',
@@ -1020,7 +1025,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
           left: 0,
           right: 0,
           height: '3px',
-          background: filteredResults.length > 0 ? '#3b82f6' : '#dc2626',
+          background: filteredResults.length > 0 ? tileColor : '#dc2626',
         },
       }}
       ref={tileRef}
@@ -1048,10 +1053,19 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
             />
           )}
           
-          <GavelIcon sx={{ color: '#3b82f6', fontSize: '1.5rem', mr: 1 }} />
-          <Typography variant="h6" color="white" fontWeight={600}>
-            Congress Bills
-          </Typography>
+          {(() => {
+            const TileIcon = getIconByName(customIcon, getDefaultIconForTileType('congress_bills'));
+            const iconColor = customColor || '#3b82f6';
+            const displayTitle = customTitle || 'Congress Bills';
+            return (
+              <>
+                <TileIcon sx={{ color: iconColor, fontSize: '1.5rem', mr: 1 }} />
+                <Typography variant="h6" color="white" fontWeight={600}>
+                  {displayTitle}
+                </Typography>
+              </>
+            );
+          })()}
           
           <Chip
             label={
@@ -1111,6 +1125,12 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
             disabled: selectedBills.size === 0,
             tooltip: `Add ${selectedBills.size > 0 ? `${selectedBills.size} bill(s)` : 'selected bills'} to context`,
             icon: <AddToContextIcon fontSize="small" />,
+          }}
+          customizeButton={{
+            onClick: (e) => {
+              e.stopPropagation();
+              setCustomizeDialogOpen(true);
+            },
           }}
           deleteButton={{
             onClick: handleRemove,
@@ -2902,17 +2922,38 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
           Add to Current Sidebar Chat
         </MenuItem>
       </Menu>
+
+      {/* Tile Customization Dialog */}
+      <TileCustomizationDialog
+        open={customizeDialogOpen}
+        onClose={() => setCustomizeDialogOpen(false)}
+        onSave={(customizations) => {
+          onSettingsChange(id, customizations);
+        }}
+        currentTitle={customTitle || 'Congress Bills'}
+        currentColor={customColor}
+        currentIcon={customIcon}
+      />
     </Box>
   );
-});
+};
 
-// Custom comparison function for memo
+// Custom comparison function for memo - matches SEC tile pattern but with optimization
 const CongressBillsSearchTileMemo = memo(CongressBillsSearchTile, (prevProps, nextProps) => {
+  // Always re-render if key props change
   if (prevProps.id !== nextProps.id ||
       prevProps.dashboardContext !== nextProps.dashboardContext) {
-    return false;
+    return false; // Re-render
   }
   
+  // Check customization props FIRST - these should always trigger re-render
+  if (prevProps.customTitle !== nextProps.customTitle ||
+      prevProps.customColor !== nextProps.customColor ||
+      prevProps.customIcon !== nextProps.customIcon) {
+    return false; // Re-render
+  }
+  
+  // Check if display options changed
   const prevDisplay = prevProps.displayOptions;
   const nextDisplay = nextProps.displayOptions;
   if (prevDisplay && nextDisplay) {
@@ -2923,28 +2964,23 @@ const CongressBillsSearchTileMemo = memo(CongressBillsSearchTile, (prevProps, ne
         prevDisplay.showCongress !== nextDisplay.showCongress ||
         prevDisplay.showResultsTable !== nextDisplay.showResultsTable ||
         prevDisplay.maxResults !== nextDisplay.maxResults) {
-      return false;
+      return false; // Re-render
     }
   }
   
+  // Check if other important props changed
   if (prevProps.autoRefresh !== nextProps.autoRefresh ||
       prevProps.isPinned !== nextProps.isPinned ||
       prevProps.isDragging !== nextProps.isDragging ||
       prevProps.isResizing !== nextProps.isResizing ||
       prevProps.isSelected !== nextProps.isSelected) {
-    return false;
+    return false; // Re-render
   }
   
-  if (prevProps.size && nextProps.size) {
-    const sizeThreshold = 10;
-    if (Math.abs(prevProps.size.width - nextProps.size.width) > sizeThreshold ||
-        Math.abs(prevProps.size.height - nextProps.size.height) > sizeThreshold) {
-      return false;
-    }
-  }
-  
-  return true;
+  return true; // Don't re-render
 });
+
+CongressBillsSearchTileMemo.displayName = 'CongressBillsSearchTile';
 
 export default CongressBillsSearchTileMemo;
 

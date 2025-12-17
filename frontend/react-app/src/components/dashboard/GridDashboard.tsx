@@ -753,6 +753,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       },
       autoRefresh: tile.autoRefresh,
       isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
     };
 
     const stockProps = {
@@ -769,6 +772,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       },
       autoRefresh: tile.autoRefresh,
       isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
     };
 
     const stockScreenerProps = {
@@ -789,6 +795,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       },
       autoRefresh: tile.autoRefresh,
       isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
     };
 
     const newsProps = {
@@ -813,6 +822,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       },
       autoRefresh: tile.autoRefresh,
       isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
     };
 
     const portfolioProps = {
@@ -826,6 +838,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       },
       portfolioData: tile.portfolioData,
       isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
     };
 
     const politicianTradesProps = {
@@ -847,6 +862,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       },
       autoRefresh: tile.autoRefresh,
       isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
     };
 
     const secSearchProps = {
@@ -869,6 +887,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       },
       autoRefresh: tile.autoRefresh,
       isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
     };
 
     const govtContractsProps = {
@@ -894,6 +915,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       },
       autoRefresh: tile.autoRefresh,
       isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
     };
 
     const congressBillsProps = {
@@ -921,6 +945,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       },
       autoRefresh: tile.autoRefresh,
       isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
     };
 
 

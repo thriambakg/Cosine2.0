@@ -28,15 +28,16 @@ import {
 import {
   Refresh as RefreshIcon,
   Close as CloseIcon,
-  Visibility as VisibilityIcon,
-  Assessment as AssessmentIcon,
+  FilterList as FilterIcon,
   Add as AddIcon,
   Delete as DeleteIcon,
   Calculate as CalculateIcon,
 } from '@mui/icons-material';
 import { usePortfolioAnalysis } from '../../hooks/useAPI';
 import { useTileCache } from '../../hooks/useDashboardCache';
-import { useTilePinning, PinButton, confirmDialog } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog } from './common';
+import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
+import { CircularProgress } from '@mui/material';
 
 interface PortfolioEntry {
   stock: string;
@@ -88,9 +89,12 @@ interface PortfolioTileProps {
   isResizing?: boolean;
   isSelected?: boolean;
   onSelectionChange?: (id: string, selected: boolean) => void;
+  customTitle?: string;
+  customColor?: string;
+  customIcon?: string;
 }
 
-const PortfolioTile = memo(({
+const PortfolioTile = ({
   id,
   displayOptions = {
     showHoldings: true,
@@ -106,7 +110,7 @@ const PortfolioTile = memo(({
   portfolioData,
   onRemove,
   onUpdate,
-  onSettingsChange: _onSettingsChange,
+  onSettingsChange,
   onResize: _onResize,
   onDragStart,
   onResizeStart: _onResizeStart,
@@ -114,6 +118,9 @@ const PortfolioTile = memo(({
   isResizing: _isResizing = false,
   isSelected = false,
   onSelectionChange,
+  customTitle,
+  customColor,
+  customIcon,
 }: PortfolioTileProps) => {
   const [entries, setEntries] = useState<PortfolioEntry[]>(
     portfolioData?.entries || [{ stock: '', shares: 0 }]
@@ -127,6 +134,7 @@ const PortfolioTile = memo(({
   );
   const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
   const [displayOptionsDialogOpen, setDisplayOptionsDialogOpen] = useState(false);
+  const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   
   // Use the portfolio analysis hook
   const { executeForceRefresh: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
@@ -290,13 +298,15 @@ const PortfolioTile = memo(({
     }
   };
 
+  const tileColor = customColor || '#3b82f6';
+
   return (
     <Box
       sx={{
         width: '100%',
         height: '100%',
         backgroundColor: 'rgba(15, 23, 42, 0.8)',
-        border: '1px solid #374151',
+        border: `1px solid ${tileColor}40`,
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
@@ -306,8 +316,9 @@ const PortfolioTile = memo(({
         transition: isDragging ? 'none' : 'all 0.3s ease',
         opacity: isDragging ? 0.8 : 1,
         '&:hover': {
-          borderColor: '#3b82f6',
+          borderColor: tileColor,
           transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
+          boxShadow: (isDragging || pinnedState) ? 'none' : `0 8px 25px ${tileColor}25`,
         },
         '&::before': {
           content: '""',
@@ -316,7 +327,7 @@ const PortfolioTile = memo(({
           left: 0,
           right: 0,
           height: '3px',
-          background: results ? '#3b82f6' : '#6b7280',
+          background: results ? tileColor : '#6b7280',
         },
       }}
       onMouseDown={pinnedState ? undefined : onDragStart}
@@ -348,120 +359,148 @@ const PortfolioTile = memo(({
               size="small"
             />
           )}
-          <AssessmentIcon sx={{ color: '#3b82f6', fontSize: '1.2rem' }} />
-          <Typography
-            variant="h6"
-            sx={{
-              color: '#ffffff',
-              fontWeight: 600,
-              fontSize: '0.9rem',
-            }}
-          >
-            Portfolio Analysis
-          </Typography>
+          {(() => {
+            const TileIcon = getIconByName(customIcon, getDefaultIconForTileType('portfolio'));
+            const iconColor = customColor || '#3b82f6';
+            const displayTitle = customTitle || 'Portfolio Analysis';
+            return (
+              <>
+                <TileIcon sx={{ color: iconColor, fontSize: '1.2rem', mr: 1 }} />
+                <Typography
+                  variant="h6"
+                  sx={{
+                    color: '#ffffff',
+                    fontWeight: 600,
+                    fontSize: '0.9rem',
+                  }}
+                >
+                  {displayTitle}
+                </Typography>
+              </>
+            );
+          })()}
+          
+          {isLoading && (
+            <>
+              <CircularProgress size={16} sx={{ color: tileColor, ml: 1 }} />
+              <Typography variant="caption" sx={{ color: tileColor, ml: 1, fontWeight: 500 }}>
+                Calculating...
+              </Typography>
+            </>
+          )}
         </Box>
         
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <PinButton
-            isPinned={pinnedState}
-            onTogglePin={togglePin}
-          />
-          
-          <Tooltip title="Recalculate Portfolio">
-            <IconButton
-              size="small"
-              onClick={handleRecalculateDialogOpen}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-            >
-              <CalculateIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+        <TileHeaderActions
+          pinButton={{
+            isPinned: pinnedState,
+            onTogglePin: togglePin,
+          }}
+          deleteButton={{
+            onClick: handleRemove,
+            icon: <CloseIcon sx={{ fontSize: 18 }} />,
+          }}
+          customizeButton={{
+            onClick: () => setCustomizeDialogOpen(true),
+          }}
+          collapsibleActions={
+            <>
+              <Tooltip title="Recalculate Portfolio">
+                <IconButton
+                  size="small"
+                  onClick={handleRecalculateDialogOpen}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <CalculateIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
 
-          <Tooltip title="Refresh data">
-            <IconButton
-              size="small"
-              onClick={handleRefresh}
-              disabled={isLoading || !results}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#10b981' } }}
-            >
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          
-          <Tooltip title="Display Options">
-            <IconButton
-              size="small"
-              onClick={handleDisplayOptionsDialogOpen}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-            >
-              <VisibilityIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+              <Tooltip title="Refresh data">
+                <IconButton
+                  size="small"
+                  onClick={handleRefresh}
+                  disabled={isLoading || !results}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#10b981' } }}
+                >
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              
+              <Tooltip title="Display Options">
+                <IconButton
+                  size="small"
+                  onClick={handleDisplayOptionsDialogOpen}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <FilterIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
 
-          <Tooltip title="Clear Data">
-            <IconButton
-              size="small"
-              onClick={handleClear}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#ef4444' } }}
-            >
-              <DeleteIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title="Remove tile">
-            <IconButton
-              size="small"
-              onClick={handleRemove}
-              onMouseDown={(e) => e.stopPropagation()}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#dc2626' } }}
-            >
-              <CloseIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Box>
+              <Tooltip title="Clear Data">
+                <IconButton
+                  size="small"
+                  onClick={handleClear}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#ef4444' } }}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          }
+        />
       </Box>
 
-      {/* Content */}
-      <Box 
-        sx={{ 
-          flex: 1, 
-          overflow: 'auto', 
-          p: 2, 
-          position: 'relative',
-          '&::-webkit-scrollbar': {
-            width: '6px',
-          },
-          '&::-webkit-scrollbar-track': {
-            backgroundColor: '#475569',
-            borderRadius: '3px',
-          },
-          '&::-webkit-scrollbar-thumb': {
-            backgroundColor: '#3b82f6',
-            borderRadius: '3px',
-            '&:hover': {
-              backgroundColor: '#2563eb',
-            },
-          },
-        }}
-      >
-        {error && (
-          <Alert severity="error" sx={{ mb: 2, backgroundColor: 'rgba(239, 68, 68, 0.1)' }}>
-            {error}
-          </Alert>
-        )}
+      {/* Loading state */}
+      {isLoading && (
+        <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
+          <CircularProgress size={32} sx={{ color: tileColor, mb: 2 }} />
+          <Typography variant="body2" color="#9ca3af">
+            Calculating portfolio metrics...
+          </Typography>
+        </Box>
+      )}
 
-        {/* Empty State - Show when no results */}
-        {!results && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 4 }}>
-            <Typography variant="body2" sx={{ color: '#9ca3af', textAlign: 'center' }}>
-              No portfolio analysis yet. Click the Recalculate button in the toolbar to get started.
-            </Typography>
-          </Box>
-        )}
+      {/* Content */}
+      {!isLoading && (
+        <Box 
+          sx={{ 
+            flex: 1, 
+            overflow: 'auto', 
+            p: 2, 
+            position: 'relative',
+            '&::-webkit-scrollbar': {
+              width: '6px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: '#475569',
+              borderRadius: '3px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: tileColor,
+              borderRadius: '3px',
+              '&:hover': {
+                backgroundColor: '#2563eb',
+              },
+            },
+          }}
+        >
+          {error && (
+            <Alert severity="error" sx={{ mb: 2, backgroundColor: 'rgba(239, 68, 68, 0.1)' }}>
+              {error}
+            </Alert>
+          )}
+
+          {/* Empty State - Show when no results */}
+          {!results && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 4 }}>
+              <Typography variant="body2" sx={{ color: '#9ca3af', textAlign: 'center' }}>
+                No portfolio analysis yet. Click the Recalculate button in the toolbar to get started.
+              </Typography>
+            </Box>
+          )}
 
 
         {/* Results Section */}
@@ -623,7 +662,8 @@ const PortfolioTile = memo(({
             </Box>
           </Box>
         )}
-      </Box>
+        </Box>
+      )}
 
       {/* Recalculate Dialog */}
       <Dialog
@@ -800,10 +840,62 @@ const PortfolioTile = memo(({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Tile Customization Dialog */}
+      <TileCustomizationDialog
+        open={customizeDialogOpen}
+        onClose={() => setCustomizeDialogOpen(false)}
+        onSave={(customizations) => {
+          onSettingsChange(id, customizations);
+        }}
+        currentTitle={customTitle || 'Portfolio Analysis'}
+        currentColor={customColor}
+        currentIcon={customIcon}
+      />
     </Box>
   );
+};
+
+// Custom comparison function for memo - matches SEC tile pattern but with optimization
+const PortfolioTileMemo = memo(PortfolioTile, (prevProps, nextProps) => {
+  // Always re-render if key props change
+  if (prevProps.id !== nextProps.id ||
+      prevProps.dashboardContext !== nextProps.dashboardContext) {
+    return false; // Re-render
+  }
+  
+  // Check customization props FIRST - these should always trigger re-render
+  if (prevProps.customTitle !== nextProps.customTitle ||
+      prevProps.customColor !== nextProps.customColor ||
+      prevProps.customIcon !== nextProps.customIcon) {
+    return false; // Re-render
+  }
+  
+  // Check if display options changed
+  const prevDisplay = prevProps.displayOptions;
+  const nextDisplay = nextProps.displayOptions;
+  if (prevDisplay && nextDisplay) {
+    if (prevDisplay.showHoldings !== nextDisplay.showHoldings ||
+        prevDisplay.showPerformance !== nextDisplay.showPerformance ||
+        prevDisplay.showAllocation !== nextDisplay.showAllocation ||
+        prevDisplay.showRiskMetrics !== nextDisplay.showRiskMetrics ||
+        prevDisplay.showStockDetails !== nextDisplay.showStockDetails) {
+      return false; // Re-render
+    }
+  }
+  
+  // Check if other important props changed
+  if (prevProps.autoRefresh !== nextProps.autoRefresh ||
+      prevProps.isPinned !== nextProps.isPinned ||
+      prevProps.isDragging !== nextProps.isDragging ||
+      prevProps.isResizing !== nextProps.isResizing ||
+      prevProps.isSelected !== nextProps.isSelected) {
+    return false; // Re-render
+  }
+  
+  return true; // Don't re-render
 });
 
-PortfolioTile.displayName = 'PortfolioTile';
+PortfolioTileMemo.displayName = 'PortfolioTile';
 
-export default PortfolioTile;
+export default PortfolioTileMemo;

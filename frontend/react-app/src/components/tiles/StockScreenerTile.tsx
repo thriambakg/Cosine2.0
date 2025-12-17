@@ -47,7 +47,8 @@ import {
   ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
-import { useTilePinning, TileHeaderActions, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
+import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 
 interface StockScreenerTileProps {
   id: string;
@@ -89,6 +90,9 @@ interface StockScreenerTileProps {
     hasMore: boolean;
   };
   isPinned?: boolean;
+  customTitle?: string;
+  customColor?: string;
+  customIcon?: string;
 }
 
 interface StockScreenerCriteria {
@@ -150,12 +154,16 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   filterSettings: initialFilterSettings,
   paginationState: initialPaginationState,
   isPinned = false,
+  customTitle,
+  customColor,
+  customIcon,
 }) => {
   // Alias paginationState for consistency
   const paginationState = initialPaginationState;
   
   const [criteriaDialogOpen, setCriteriaDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
 
   // Pinning functionality
   const { isPinned: pinnedState, togglePin } = useTilePinning({
@@ -1091,12 +1099,14 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const endIndex = startIndex + resultsPerPage;
   const currentResults = filteredResults.slice(startIndex, endIndex);
 
+  const tileColor = customColor || '#3b82f6';
+  
   return (
     <Box
       sx={{
         p: 3,
         background: 'rgba(15, 23, 42, 0.8)',
-        border: '1px solid #374151',
+        border: `1px solid ${tileColor}40`,
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
@@ -1108,9 +1118,9 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         display: 'flex',
         flexDirection: 'column',
         '&:hover': {
-          borderColor: '#3b82f6',
+          borderColor: tileColor,
           transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
-          boxShadow: (isDragging || pinnedState) ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
+          boxShadow: (isDragging || pinnedState) ? 'none' : `0 8px 25px ${tileColor}25`,
         },
         '&::before': {
           content: '""',
@@ -1119,7 +1129,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           left: 0,
           right: 0,
           height: '3px',
-          background: filteredResults.length > 0 ? '#3b82f6' : '#dc2626',
+          background: filteredResults.length > 0 ? tileColor : '#dc2626',
         },
       }}
       ref={tileRef}
@@ -1154,10 +1164,19 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
             />
           )}
           
-          <FilterIcon sx={{ color: '#3b82f6', fontSize: '1.5rem', mr: 1 }} />
-          <Typography variant="h6" color="white" fontWeight={600}>
-            Stock Screener
-          </Typography>
+          {(() => {
+            const TileIcon = getIconByName(customIcon, getDefaultIconForTileType('stock_screener'));
+            const iconColor = customColor || '#3b82f6';
+            const displayTitle = customTitle || 'Stock Screener';
+            return (
+              <>
+                <TileIcon sx={{ color: iconColor, fontSize: '1.5rem', mr: 1 }} />
+                <Typography variant="h6" color="white" fontWeight={600}>
+                  {displayTitle}
+                </Typography>
+              </>
+            );
+          })()}
           
           <Chip
             label={
@@ -1212,6 +1231,9 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
+          }}
+          customizeButton={{
+            onClick: () => setCustomizeDialogOpen(true),
           }}
           collapsibleActions={
             <>
@@ -2376,15 +2398,33 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         </DialogActions>
       </Dialog>
 
+      {/* Tile Customization Dialog */}
+      <TileCustomizationDialog
+        open={customizeDialogOpen}
+        onClose={() => setCustomizeDialogOpen(false)}
+        onSave={(customizations) => {
+          onSettingsChange(id, customizations);
+        }}
+        currentTitle={customTitle || 'Stock Screener'}
+        currentColor={customColor}
+        currentIcon={customIcon}
+      />
     </Box>
   );
 };
 
-// Custom comparison function for memo
+// Custom comparison function for memo - matches SEC tile pattern but with optimization
 const StockScreenerTileMemo = memo(StockScreenerTile, (prevProps, nextProps) => {
   // Always re-render if key props change
   if (prevProps.id !== nextProps.id ||
       prevProps.dashboardContext !== nextProps.dashboardContext) {
+    return false; // Re-render
+  }
+  
+  // Check customization props FIRST - these should always trigger re-render
+  if (prevProps.customTitle !== nextProps.customTitle ||
+      prevProps.customColor !== nextProps.customColor ||
+      prevProps.customIcon !== nextProps.customIcon) {
     return false; // Re-render
   }
   
@@ -2410,16 +2450,9 @@ const StockScreenerTileMemo = memo(StockScreenerTile, (prevProps, nextProps) => 
     return false; // Re-render
   }
   
-  // If size changed significantly, re-render
-  if (prevProps.size && nextProps.size) {
-    const sizeThreshold = 10; // 10px threshold
-    if (Math.abs(prevProps.size.width - nextProps.size.width) > sizeThreshold ||
-        Math.abs(prevProps.size.height - nextProps.size.height) > sizeThreshold) {
-      return false; // Re-render
-    }
-  }
-  
   return true; // Don't re-render
 });
+
+StockScreenerTileMemo.displayName = 'StockScreenerTile';
 
 export default StockScreenerTileMemo;

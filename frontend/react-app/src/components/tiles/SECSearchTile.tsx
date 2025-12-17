@@ -49,7 +49,8 @@ import {
   ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { secSearchAPI, SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../../services/api';
-import { useTilePinning, TileHeaderActions, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
+import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
@@ -154,6 +155,9 @@ interface SECSearchTileProps {
   };
   autoRefresh?: boolean;
   isPinned?: boolean;
+  customTitle?: string;
+  customColor?: string;
+  customIcon?: string;
 }
 
 /**
@@ -191,6 +195,9 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   },
   autoRefresh = false,
   isPinned = false,
+  customTitle,
+  customColor,
+  customIcon,
 }) => {
   const { user } = useAuth();
   const { activeSessionId } = useGlobalChat();
@@ -210,6 +217,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   
   // Search state - matching SEC search page structure
   // Convert initialSearchParams to use arrays for entityName and keywords (like PoliticianTradesSearchTile)
@@ -2131,12 +2139,14 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   );
 
   // Context Menu
+  const tileColor = customColor || '#3b82f6';
+  
   return (
     <Box
       sx={{
         p: 3,
         background: 'rgba(15, 23, 42, 0.8)',
-        border: '1px solid #374151',
+        border: `1px solid ${tileColor}40`,
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
@@ -2148,9 +2158,9 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
         display: 'flex',
         flexDirection: 'column',
         '&:hover': {
-          borderColor: '#3b82f6',
+          borderColor: tileColor,
           transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
-          boxShadow: (isDragging || pinnedState) ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
+          boxShadow: (isDragging || pinnedState) ? 'none' : `0 8px 25px ${tileColor}25`,
         },
         '&::before': {
           content: '""',
@@ -2159,7 +2169,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           left: 0,
           right: 0,
           height: '3px',
-          background: currentResults.length > 0 ? '#3b82f6' : '#dc2626',
+          background: currentResults.length > 0 ? tileColor : '#dc2626',
         },
       }}
       ref={tileRef}
@@ -2186,10 +2196,19 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
             />
           )}
           
-          <DocumentIcon sx={{ color: '#3b82f6', fontSize: '1.5rem' }} />
-          <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '1.1rem' }}>
-            SEC Search
-          </Typography>
+          {(() => {
+            const TileIcon = getIconByName(customIcon, getDefaultIconForTileType('sec_search'));
+            const iconColor = customColor || '#3b82f6';
+            const displayTitle = customTitle || 'SEC Search';
+            return (
+              <>
+                <TileIcon sx={{ color: iconColor, fontSize: '1.5rem' }} />
+                <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '1.1rem' }}>
+                  {displayTitle}
+                </Typography>
+              </>
+            );
+          })()}
           
           {isLoading && (
             <>
@@ -2223,6 +2242,12 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
             disabled: selectedResults.size === 0,
             tooltip: `Add ${selectedResults.size > 0 ? `${selectedResults.size} filing(s)` : 'selected filings'} to context`,
             icon: <AddToContextIcon fontSize="small" />,
+          }}
+          customizeButton={{
+            onClick: (e) => {
+              e.stopPropagation();
+              setCustomizeDialogOpen(true);
+            },
           }}
           deleteButton={{
             onClick: handleRemove,
@@ -2879,6 +2904,18 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           </>
         )}
       </Dialog>
+
+      {/* Tile Customization Dialog */}
+      <TileCustomizationDialog
+        open={customizeDialogOpen}
+        onClose={() => setCustomizeDialogOpen(false)}
+        onSave={(customizations) => {
+          onSettingsChange(id, customizations);
+        }}
+        currentTitle={customTitle || 'SEC Search'}
+        currentColor={customColor}
+        currentIcon={customIcon}
+      />
     </Box>
   );
 });

@@ -59,6 +59,9 @@ export interface UnifiedTile {
   id: string;
   type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills';
   title: string;
+  customTitle?: string; // Custom tile name set by user
+  customColor?: string; // Custom tile color (for header/icon)
+  customIcon?: string; // Custom icon name (Material-UI icon name)
   symbol?: string; // For crypto/stock tiles
   timeframe?: string; // For crypto/stock tiles
   name?: string; // For portfolio tiles

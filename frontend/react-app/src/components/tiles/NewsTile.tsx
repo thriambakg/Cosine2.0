@@ -50,10 +50,8 @@ import {
   ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../../services/api';
-import { useTilePinning, TileHeaderActions, addArticleToContext, addMultipleArticlesToContext, confirmDialog } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addArticleToContext, addMultipleArticlesToContext, confirmDialog, getIconByName, getDefaultIconForTileType } from './common';
 import MultiSelectField from '../MultiSelectField';
-import { useAuth } from '@/contexts/AuthContext';
-import { useGlobalChat } from '@/contexts/GlobalChatContext';
 
 interface NewsTileProps {
   id: string;
@@ -101,6 +99,9 @@ interface NewsTileProps {
   };
   autoRefresh?: boolean;
   isPinned?: boolean;
+  customTitle?: string;
+  customColor?: string;
+  customIcon?: string;
 }
 
 const NewsTile: React.FC<NewsTileProps> = ({
@@ -141,11 +142,13 @@ const NewsTile: React.FC<NewsTileProps> = ({
   },
   autoRefresh = false,
   isPinned = false,
+  customTitle,
+  customColor,
+  customIcon,
 }) => {
-  const { user } = useAuth();
-  const { activeSessionId } = useGlobalChat();
   
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
@@ -1154,12 +1157,14 @@ const NewsTile: React.FC<NewsTileProps> = ({
     </Dialog>
   );
 
+  const tileColor = customColor || '#3b82f6';
+  
   return (
     <Box
       sx={{
         p: 3,
         background: 'rgba(15, 23, 42, 0.8)',
-        border: '1px solid #374151',
+        border: `1px solid ${tileColor}40`,
         borderRadius: '0px',
         position: 'relative',
         overflow: 'hidden',
@@ -1171,9 +1176,9 @@ const NewsTile: React.FC<NewsTileProps> = ({
         display: 'flex',
         flexDirection: 'column',
         '&:hover': {
-          borderColor: '#3b82f6',
+          borderColor: tileColor,
           transform: (isDragging || pinnedState) ? 'none' : 'translateY(-2px)',
-          boxShadow: (isDragging || pinnedState) ? 'none' : '0 8px 25px rgba(59, 130, 246, 0.15)',
+          boxShadow: (isDragging || pinnedState) ? 'none' : `0 8px 25px ${tileColor}25`,
         },
         '&::before': {
           content: '""',
@@ -1182,7 +1187,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
           left: 0,
           right: 0,
           height: '3px',
-          background: currentResults.length > 0 ? '#3b82f6' : '#dc2626',
+          background: currentResults.length > 0 ? tileColor : '#dc2626',
         },
       }}
       ref={tileRef}
@@ -1210,10 +1215,19 @@ const NewsTile: React.FC<NewsTileProps> = ({
             />
           )}
           
-          <ArticleIcon sx={{ color: '#3b82f6', fontSize: '1.5rem', mr: 1 }} />
-          <Typography variant="h6" color="white" fontWeight={600}>
-            News Articles
-          </Typography>
+          {(() => {
+            const TileIcon = getIconByName(customIcon, getDefaultIconForTileType('news'));
+            const iconColor = customColor || '#3b82f6';
+            const displayTitle = customTitle || 'News Articles';
+            return (
+              <>
+                <TileIcon sx={{ color: iconColor, fontSize: '1.5rem', mr: 1 }} />
+                <Typography variant="h6" color="white" fontWeight={600}>
+                  {displayTitle}
+                </Typography>
+              </>
+            );
+          })()}
           
           <Chip
             label={
@@ -1273,6 +1287,12 @@ const NewsTile: React.FC<NewsTileProps> = ({
             disabled: selectedArticles.size === 0,
             tooltip: `Add ${selectedArticles.size > 0 ? `${selectedArticles.size} article(s)` : 'selected articles'} to context`,
             icon: <AddToContextIcon fontSize="small" />,
+          }}
+          customizeButton={{
+            onClick: (e) => {
+              e.stopPropagation();
+              setCustomizeDialogOpen(true);
+            },
           }}
           deleteButton={{
             onClick: handleRemove,
@@ -1830,6 +1850,18 @@ const NewsTile: React.FC<NewsTileProps> = ({
           </MenuItem>
         ))}
       </Menu>
+
+      {/* Tile Customization Dialog */}
+      <TileCustomizationDialog
+        open={customizeDialogOpen}
+        onClose={() => setCustomizeDialogOpen(false)}
+        onSave={(customizations) => {
+          onSettingsChange(id, customizations);
+        }}
+        currentTitle={customTitle || 'News Articles'}
+        currentColor={customColor}
+        currentIcon={customIcon}
+      />
 
       {/* Search Dialog */}
       {renderSearchDialog()}
@@ -2486,11 +2518,18 @@ const NewsTile: React.FC<NewsTileProps> = ({
   );
 };
 
-// Custom comparison function for memo
+// Custom comparison function for memo - matches SEC tile pattern but with optimization
 const NewsTileMemo = memo(NewsTile, (prevProps, nextProps) => {
   // Always re-render if key props change
   if (prevProps.id !== nextProps.id ||
       prevProps.dashboardContext !== nextProps.dashboardContext) {
+    return false; // Re-render
+  }
+  
+  // Check customization props FIRST - these should always trigger re-render
+  if (prevProps.customTitle !== nextProps.customTitle ||
+      prevProps.customColor !== nextProps.customColor ||
+      prevProps.customIcon !== nextProps.customIcon) {
     return false; // Re-render
   }
   
@@ -2518,17 +2557,10 @@ const NewsTileMemo = memo(NewsTile, (prevProps, nextProps) => {
     return false; // Re-render
   }
   
-  // If size changed significantly, re-render
-  if (prevProps.size && nextProps.size) {
-    const sizeThreshold = 10; // 10px threshold
-    if (Math.abs(prevProps.size.width - nextProps.size.width) > sizeThreshold ||
-        Math.abs(prevProps.size.height - nextProps.size.height) > sizeThreshold) {
-      return false; // Re-render
-    }
-  }
-  
   return true; // Don't re-render
 });
+
+NewsTileMemo.displayName = 'NewsTile';
 
 export default NewsTileMemo;
 

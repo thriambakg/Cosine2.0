@@ -3,7 +3,6 @@ import {
   Box, 
   Typography, 
   Container,
-  Alert,
   Fab,
   Dialog,
   DialogTitle,
@@ -52,22 +51,6 @@ import NewGroupDialog from '../components/dialogs/NewGroupDialog';
 import { useTabManagement } from '../hooks/useTabManagement';
 import { UnifiedTile, GridPosition } from '../types/dashboardTypes';
 
-// Custom styled components for Wall Street chic
-const GlassCard = ({ children, sx = {}, ...props }: any) => (
-  <Box
-    sx={{
-      background: 'rgba(15, 23, 42, 0.95)',
-      border: '2px solid #374151',
-      borderRadius: '0px',
-      backdropFilter: 'blur(10px)',
-      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-      ...sx
-    }}
-    {...props}
-  >
-    {children}
-  </Box>
-);
 
 
 // Tile category definitions
@@ -357,7 +340,6 @@ const tileCategories: TileCategory[] = [
 const UnifiedDashboardPage: React.FC = () => {
   const { user } = useAuth();
   const [configValid, setConfigValid] = useState<boolean>(false);
-  const [configErrors, setConfigErrors] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   
   // Zoom state with session persistence
@@ -640,7 +622,6 @@ const UnifiedDashboardPage: React.FC = () => {
         await loadConfig();
         const validation = validateConfig();
         setConfigValid(validation.isValid);
-        setConfigErrors(validation.errors);
         
         logApiConfig();
         
@@ -652,7 +633,6 @@ const UnifiedDashboardPage: React.FC = () => {
       } catch (error) {
         console.error('❌ Failed to load configuration:', error);
         setConfigValid(false);
-        setConfigErrors(['Failed to load configuration']);
       }
     };
 
@@ -1426,10 +1406,31 @@ const UnifiedDashboardPage: React.FC = () => {
     // Use a function-based approach to get CURRENT tiles from state
     // This ensures we always work with the latest data, not stale closures
     // Note: All settings (including paginationState) are persisted to database via updateTabTiles -> debouncedSaveToDatabase
+    // Deep merge for nested objects like paginationState to preserve existing values
     updateTabTiles(activeTabId, (currentTiles: any[]) => {
-      const updatedTiles = currentTiles.map((tile: any) => 
-        tile.id === id ? { ...tile, ...settings } : tile
-      );
+      const updatedTiles = currentTiles.map((tile: any) => {
+        if (tile.id === id) {
+          // Deep merge for nested objects (paginationState, displayOptions, etc.)
+          // Always create a new object to ensure React detects the change
+          const mergedSettings = { ...tile };
+          Object.keys(settings).forEach(key => {
+            // Special handling for paginationState - always replace entirely to preserve lastEvaluatedKeys array
+            if (key === 'paginationState' && settings[key] && typeof settings[key] === 'object' && !Array.isArray(settings[key])) {
+              mergedSettings[key] = { ...settings[key] }; // Replace entirely, don't merge
+            } else if (typeof settings[key] === 'object' && settings[key] !== null && !Array.isArray(settings[key]) && tile[key]) {
+              // Deep merge for other objects (displayOptions, filterSettings, etc.)
+              mergedSettings[key] = { ...tile[key], ...settings[key] };
+            } else {
+              // Shallow merge for primitives and arrays
+              mergedSettings[key] = settings[key];
+            }
+          });
+          // Always return a new object reference to ensure React detects changes
+          // This is especially important for customization props (customTitle, customColor, customIcon)
+          return { ...mergedSettings };
+        }
+        return tile;
+      });
       
       return updatedTiles;
     });
