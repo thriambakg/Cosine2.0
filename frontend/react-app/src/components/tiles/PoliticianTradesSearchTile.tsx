@@ -123,7 +123,11 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     transactionType: [],
   },
   filterSettings: initialFilterSettings,
-  paginationState: initialPaginationState,
+  paginationState: _ = {
+    totalResultsLoaded: 0,
+    lastEvaluatedKeys: [],
+    hasMore: false,
+  },
   results = [],
   displayOptions = {
     showPolitician: true,

@@ -122,7 +122,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
     dateRange: 'all',
   },
   filterSettings: initialFilterSettings,
-  paginationState: initialPaginationState,
+  paginationState: _ = {
+    totalResultsLoaded: 0,
+    lastEvaluatedKeys: [],
+    hasMore: false,
+  },
   articles = [],
   displayOptions = {
     showTitle: true,
