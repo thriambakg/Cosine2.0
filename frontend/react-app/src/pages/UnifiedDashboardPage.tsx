@@ -15,7 +15,8 @@ import {
   Card,
   CardActionArea,
   Chip,
-  IconButton
+  IconButton,
+  Tooltip
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -30,7 +31,10 @@ import {
   Article as ArticleIcon,
   Assessment as AssessmentIcon,
   Description as DescriptionIcon,
-  Gavel as GavelIcon
+  Gavel as GavelIcon,
+  ZoomIn,
+  ZoomOut,
+  ZoomOutMap
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
@@ -355,6 +359,32 @@ const UnifiedDashboardPage: React.FC = () => {
   const [configValid, setConfigValid] = useState<boolean>(false);
   const [configErrors, setConfigErrors] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Zoom state with session persistence
+  const MIN_ZOOM = 0.5;
+  const MAX_ZOOM = 2.0;
+  const ZOOM_STEP = 0.1;
+  
+  // Initialize zoom level from sessionStorage or default to 1.0
+  const [zoomLevel, setZoomLevel] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const savedZoom = sessionStorage.getItem('dashboard-zoom-level');
+      if (savedZoom) {
+        const parsed = parseFloat(savedZoom);
+        if (!isNaN(parsed) && parsed >= MIN_ZOOM && parsed <= MAX_ZOOM) {
+          return parsed;
+        }
+      }
+    }
+    return 1.0;
+  });
+  
+  // Persist zoom level to sessionStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('dashboard-zoom-level', zoomLevel.toString());
+    }
+  }, [zoomLevel]);
 
   // Tab management - only initialize when user is authenticated
   const tabManagement = useTabManagement({ 
@@ -396,6 +426,27 @@ const UnifiedDashboardPage: React.FC = () => {
       window.location.reload();
     }
   }, [user]);
+
+  // Keyboard shortcuts for zoom (Ctrl/Cmd + Plus/Minus/0)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        if (e.key === '=' || e.key === '+') {
+          e.preventDefault();
+          setZoomLevel(prev => Math.min(prev + ZOOM_STEP, MAX_ZOOM));
+        } else if (e.key === '-') {
+          e.preventDefault();
+          setZoomLevel(prev => Math.max(prev - ZOOM_STEP, MIN_ZOOM));
+        } else if (e.key === '0') {
+          e.preventDefault();
+          setZoomLevel(1.0);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Multi-step tile addition state
   const [addTileStep, setAddTileStep] = useState<'closed' | 'category-selection' | 'subcategory-selection' | 'tile-selection' | 'configuration'>('closed');
@@ -1472,34 +1523,73 @@ const UnifiedDashboardPage: React.FC = () => {
           </Typography>
         </Box>
 
-        {/* Configuration Status */}
-        {!configValid && (
-          <GlassCard sx={{ p: 4, mb: 4 }}>
-            <Alert severity="warning" sx={{ 
-              backgroundColor: 'rgba(245, 158, 11, 0.1)',
-              border: '1px solid #f59e0b',
-              color: '#fbbf24',
-              '& .MuiAlert-icon': {
-                color: '#fbbf24',
-              }
-            }}>
-              <Typography variant="h6" sx={{ color: '#fbbf24', mb: 1 }}>
-                Configuration Issue
-              </Typography>
-              <Typography variant="body2" sx={{ color: '#fbbf24', mb: 2 }}>
-                The API configuration is not properly set up. Please check the following:
-              </Typography>
-              <Box component="ul" sx={{ color: '#fbbf24', pl: 2 }}>
-                {configErrors.map((error, index) => (
-                  <li key={index}>{error}</li>
-                ))}
-              </Box>
-              <Typography variant="body2" sx={{ color: '#fbbf24', mt: 2 }}>
-                Current API URL: {getConfig('apiGatewayUrl') || 'Not configured'}
-              </Typography>
-            </Alert>
-          </GlassCard>
-        )}
+        {/* Zoom Controls - positioned closer to dashboard */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            mb: 2,
+            justifyContent: 'flex-start',
+          }}
+        >
+            <Tooltip title="Zoom Out (Ctrl/Cmd + -)">
+              <IconButton
+                onClick={() => setZoomLevel(prev => Math.max(prev - ZOOM_STEP, MIN_ZOOM))}
+                disabled={zoomLevel <= MIN_ZOOM}
+                size="small"
+                sx={{
+                  color: '#94a3b8',
+                  '&:hover': { color: '#ffffff', backgroundColor: 'rgba(59, 130, 246, 0.2)' },
+                  '&:disabled': { color: '#475569' },
+                }}
+              >
+                <ZoomOut fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            
+            <Chip
+              label={`${Math.round(zoomLevel * 100)}%`}
+              size="small"
+              sx={{
+                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                color: '#60a5fa',
+                fontWeight: 600,
+                minWidth: 60,
+                cursor: 'default',
+              }}
+            />
+            
+            <Tooltip title="Zoom In (Ctrl/Cmd + +)">
+              <IconButton
+                onClick={() => setZoomLevel(prev => Math.min(prev + ZOOM_STEP, MAX_ZOOM))}
+                disabled={zoomLevel >= MAX_ZOOM}
+                size="small"
+                sx={{
+                  color: '#94a3b8',
+                  '&:hover': { color: '#ffffff', backgroundColor: 'rgba(59, 130, 246, 0.2)' },
+                  '&:disabled': { color: '#475569' },
+                }}
+              >
+                <ZoomIn fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            
+            <Tooltip title="Reset Zoom (Ctrl/Cmd + 0)">
+              <IconButton
+                onClick={() => setZoomLevel(1.0)}
+                disabled={zoomLevel === 1.0}
+                size="small"
+                sx={{
+                  color: '#94a3b8',
+                  '&:hover': { color: '#ffffff', backgroundColor: 'rgba(59, 130, 246, 0.2)' },
+                  '&:disabled': { color: '#475569' },
+                }}
+              >
+                <ZoomOutMap fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
 
         {/* Dashboard Grid */}
         {isLoading ? (
@@ -1517,6 +1607,7 @@ const UnifiedDashboardPage: React.FC = () => {
             onSettingsChange={handleSettingsChange}
             onResizeTile={handleResizeTile}
             onMoveTile={handleMoveTile}
+            zoomLevel={zoomLevel}
           />
         )}
 

@@ -852,11 +852,19 @@ export const addAwardToContext = (
     }).format(amount);
   };
 
-  const title = `${award.recipient_name || 'Unknown Recipient'} - ${award.award_type || 'Award'}`;
-  const amount = award.total_obligated_amount || award.total_obligation;
-  const subtitle = award.period_start_date 
-    ? `${formatDate(award.period_start_date)}${amount ? ` • ${formatCurrency(amount)}` : ''}${award.awarding_agency_name ? ` • ${award.awarding_agency_name}` : ''}`
-    : amount ? formatCurrency(amount) : 'Government Contract Award';
+  // Format title and subtitle with only basic fields
+  const title = `${award.awarding_agency_name || 'Unknown Agency'} - ${award.recipient_name || 'Unknown Recipient'}`;
+  const obligatedAmount = award.total_obligated_amount || award.total_obligation;
+  const outlayedAmount = award.total_outlayed_amount || award.total_outlay;
+  const startDate = award.period_start_date;
+  
+  const subtitleParts: string[] = [];
+  if (award.funding_agency_name) subtitleParts.push(`Funding: ${award.funding_agency_name}`);
+  if (obligatedAmount) subtitleParts.push(`Obligated: ${formatCurrency(obligatedAmount)}`);
+  if (outlayedAmount) subtitleParts.push(`Outlayed: ${formatCurrency(outlayedAmount)}`);
+  if (startDate) subtitleParts.push(`Start: ${formatDate(startDate)}`);
+  
+  const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Government Contract Award';
   
   const contextItem: ContextItem = {
     id: `govt_contract_award_${awardId}_${Date.now()}`,
@@ -926,11 +934,20 @@ export const addMultipleAwardsToContext = (
 
   const contextItems: ContextItem[] = awards.map(award => {
     const awardId = award.award_id || award.id || `award_${Date.now()}`;
-    const title = `${award.recipient_name || 'Unknown Recipient'} - ${award.award_type || 'Award'}`;
-    const amount = award.total_obligated_amount || award.total_obligation;
-    const subtitle = award.period_start_date 
-      ? `${formatDate(award.period_start_date)}${amount ? ` • ${formatCurrency(amount)}` : ''}${award.awarding_agency_name ? ` • ${award.awarding_agency_name}` : ''}`
-      : amount ? formatCurrency(amount) : 'Government Contract Award';
+    
+    // Format title and subtitle with only basic fields
+    const title = `${award.awarding_agency_name || 'Unknown Agency'} - ${award.recipient_name || 'Unknown Recipient'}`;
+    const obligatedAmount = award.total_obligated_amount || award.total_obligation;
+    const outlayedAmount = award.total_outlayed_amount || award.total_outlay;
+    const startDate = award.period_start_date;
+    
+    const subtitleParts: string[] = [];
+    if (award.funding_agency_name) subtitleParts.push(`Funding: ${award.funding_agency_name}`);
+    if (obligatedAmount) subtitleParts.push(`Obligated: ${formatCurrency(obligatedAmount)}`);
+    if (outlayedAmount) subtitleParts.push(`Outlayed: ${formatCurrency(outlayedAmount)}`);
+    if (startDate) subtitleParts.push(`Start: ${formatDate(startDate)}`);
+    
+    const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Government Contract Award';
     
     return {
       id: `govt_contract_award_${awardId}_${Date.now()}_${Math.random()}`,
@@ -989,10 +1006,15 @@ export const addBillToContext = (
     }
   };
 
-  const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
-  const subtitle = bill.introduced_date 
-    ? `${formatDate(bill.introduced_date)}${bill.sponsor_full_name ? ` • ${bill.sponsor_full_name}` : ''}${bill.congress ? ` • ${bill.congress}th Congress` : ''}`
-    : bill.sponsor_full_name ? bill.sponsor_full_name : 'Congress Bill';
+  // Format title and subtitle with only basic fields
+  const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''}`.trim();
+  const subtitleParts: string[] = [];
+  if (bill.sponsor_full_name) subtitleParts.push(bill.sponsor_full_name);
+  if (bill.sponsor_party) subtitleParts.push(bill.sponsor_party);
+  if (bill.policy_area) subtitleParts.push(bill.policy_area);
+  if (bill.introduced_date) subtitleParts.push(`Introduced: ${formatDate(bill.introduced_date)}`);
+  
+  const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Congress Bill';
   
   const contextItem: ContextItem = {
     id: `congress_bill_${billId}_${Date.now()}`,
@@ -1046,10 +1068,16 @@ export const addMultipleBillsToContext = (
 
   const contextItems: ContextItem[] = bills.map(bill => {
     const billId = bill.bill_id || bill.id || `bill_${Date.now()}`;
-    const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
-    const subtitle = bill.introduced_date 
-      ? `${formatDate(bill.introduced_date)}${bill.sponsor_full_name ? ` • ${bill.sponsor_full_name}` : ''}${bill.congress ? ` • ${bill.congress}th Congress` : ''}`
-      : bill.sponsor_full_name ? bill.sponsor_full_name : 'Congress Bill';
+    
+    // Format title and subtitle with only basic fields
+    const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''}`.trim();
+    const subtitleParts: string[] = [];
+    if (bill.sponsor_full_name) subtitleParts.push(bill.sponsor_full_name);
+    if (bill.sponsor_party) subtitleParts.push(bill.sponsor_party);
+    if (bill.policy_area) subtitleParts.push(bill.policy_area);
+    if (bill.introduced_date) subtitleParts.push(`Introduced: ${formatDate(bill.introduced_date)}`);
+    
+    const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Congress Bill';
     
     return {
       id: `congress_bill_${billId}_${Date.now()}_${Math.random()}`,

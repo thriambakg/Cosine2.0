@@ -23,6 +23,7 @@ interface GridDashboardProps {
   onSettingsChange: (id: string, settings: any) => void;
   onResizeTile: (id: string, size: { width: number; height: number }) => void;
   onMoveTile: (id: string, position: GridPosition) => void;
+  zoomLevel?: number;
 }
 
 interface DragState {
@@ -63,6 +64,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   onSettingsChange,
   onResizeTile,
   onMoveTile: _onMoveTile,
+  zoomLevel: zoomLevelProp = 1.0,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -84,6 +86,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   // State for responsive grid dimensions
   const [gridColumns, setGridColumns] = useState(12);
   const [cellSize, setCellSize] = useState(GRID_CELL_SIZE);
+  
+  // Use zoom level from props
+  const zoomLevel = zoomLevelProp;
 
   const [resizeState, setResizeState] = useState<ResizeState>({
     isResizing: false,
@@ -1036,6 +1041,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     );
   };
 
+
   if (tiles.length === 0) {
     return (
       <Box
@@ -1239,6 +1245,11 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             height: 'fit-content',
             minHeight: '600px', // Minimum height for visual consistency
             position: 'relative',
+            // Apply zoom transform
+            transform: `scale(${zoomLevel})`,
+            transformOrigin: 'top left',
+            // Adjust container size to account for zoom
+            transition: 'transform 0.2s ease-in-out',
           }}
         >
       {/* Grid background */}

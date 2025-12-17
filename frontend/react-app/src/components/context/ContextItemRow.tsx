@@ -61,6 +61,12 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
   const isArticle =
     item.type === 'article' ||
     Boolean(data?.source_url || data?.source_name || data?.published_date);
+  const isGovtContract =
+    item.type === 'govt_contract_award' ||
+    Boolean(data?.award_id || data?.awarding_agency_name || data?.recipient_name);
+  const isCongressBill =
+    item.type === 'congress_bill' ||
+    Boolean(data?.bill_id || data?.bill_type || data?.bill_number);
 
   const secDocuments = useMemo(() => {
     const urls: string[] = data.documentUrls || [];
@@ -326,6 +332,89 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
             </Table>
           </Box>
         )}
+      </Box>
+    );
+  };
+
+  const formatCurrency = (amount?: number): string => {
+    if (amount === undefined || amount === null) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return 'N/A';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  const renderGovtContractDetails = () => {
+    const infoFields = [
+      { label: 'Awarding Agency', value: data.awarding_agency_name },
+      { label: 'Funding Agency', value: data.funding_agency_name },
+      { label: 'Recipient', value: data.recipient_name },
+      { label: 'Amount Obligated', value: data.total_obligated_amount ? formatCurrency(data.total_obligated_amount) : (data.total_obligation ? formatCurrency(data.total_obligation) : 'N/A') },
+      { label: 'Amount Outlayed', value: data.total_outlayed_amount ? formatCurrency(data.total_outlayed_amount) : (data.total_outlay ? formatCurrency(data.total_outlay) : 'N/A') },
+      { label: 'Contract Start Date', value: formatDate(data.period_start_date) },
+    ];
+
+    return (
+      <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1 }}>
+          {infoFields
+            .filter((field) => field.value && field.value !== 'N/A')
+            .map((field) => (
+              <Box key={field.label} sx={{ backgroundColor: 'rgba(59, 130, 246, 0.08)', borderRadius: 1, p: 1 }}>
+                <Typography variant="caption" sx={{ color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  {field.label}
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'white', wordBreak: 'break-word' }}>
+                  {field.value}
+                </Typography>
+              </Box>
+            ))}
+        </Box>
+      </Box>
+    );
+  };
+
+  const renderCongressBillDetails = () => {
+    const infoFields = [
+      { label: 'Bill Type', value: data.bill_type },
+      { label: 'Bill Number', value: data.bill_number },
+      { label: 'Sponsor Full Name', value: data.sponsor_full_name },
+      { label: 'Party', value: data.sponsor_party },
+      { label: 'Policy Area', value: data.policy_area },
+      { label: 'Introduction Date', value: formatDate(data.introduced_date) },
+    ];
+
+    return (
+      <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1 }}>
+          {infoFields
+            .filter((field) => field.value && field.value !== 'N/A')
+            .map((field) => (
+              <Box key={field.label} sx={{ backgroundColor: 'rgba(59, 130, 246, 0.08)', borderRadius: 1, p: 1 }}>
+                <Typography variant="caption" sx={{ color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  {field.label}
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'white', wordBreak: 'break-word' }}>
+                  {field.value}
+                </Typography>
+              </Box>
+            ))}
+        </Box>
       </Box>
     );
   };
@@ -634,7 +723,12 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
 
       <Collapse in={expanded} timeout="auto" unmountOnExit>
         <Divider sx={{ my: 1, borderColor: 'rgba(148, 163, 184, 0.2)' }} />
-        {isSecFiling ? renderSecDetails() : isPoliticianTrade ? renderPoliticianTradeDetails() : isArticle ? renderArticleDetails() : renderGenericDetails(item.data || {})}
+        {isSecFiling ? renderSecDetails() 
+          : isPoliticianTrade ? renderPoliticianTradeDetails() 
+          : isArticle ? renderArticleDetails()
+          : isGovtContract ? renderGovtContractDetails()
+          : isCongressBill ? renderCongressBillDetails()
+          : renderGenericDetails(item.data || {})}
       </Collapse>
     </Box>
   );

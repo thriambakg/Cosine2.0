@@ -2229,7 +2229,7 @@ const GlobalChatSidebar: React.FC = () => {
                     const sessionIdToUse = result.sessionId || activeSessionId;
                     if (sessionIdToUse) {
                       // const currentMessages = unifiedMessageHandler.getMessagesForSession(sessionIdToUse);
-                      // The subscription should handle this, but we can force a refresh if needed
+                    // The subscription should handle this, but we can force a refresh if needed
                     }
                   }
                   
