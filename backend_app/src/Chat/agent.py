@@ -431,7 +431,7 @@ class FinancialTools:
             # If S3 didn't work or it's a small timeframe, use yfinance
             if result is None:
                 logger.debug(f"Fetching {symbol} from yfinance (timeframe: {timeframe})")
-                result = FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
+            result = FinancialTools._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
             
             # Check for errors
             if isinstance(result, dict) and result.get('status') == 'error':

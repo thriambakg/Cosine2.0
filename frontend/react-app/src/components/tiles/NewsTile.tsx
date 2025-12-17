@@ -145,15 +145,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const { user } = useAuth();
   const { activeSessionId } = useGlobalChat();
   
-  // Debug authentication state
-  useEffect(() => {
-    console.log('📰 NewsTile Auth State:', { 
-      userId: user?.id, 
-      activeSessionId,
-      userExists: !!user 
-    });
-  }, [user?.id, activeSessionId]);
-  
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
@@ -1567,20 +1558,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
                         <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
                           {/* Image on the left - match ContextItemRow pattern */}
                           {(() => {
-                            // Debug: Check if image_url exists
                             const hasImage = !!(article.image_url && article.image_url.trim());
                             const showImage = localDisplayOptions.showImage;
-                            
-                            // Debug first article only
-                            if (article.id === currentPageResults[0]?.id) {
-                              console.log('📰 NewsTile: Image rendering check:', {
-                                articleId: article.id,
-                                hasImage,
-                                showImage,
-                                image_url: article.image_url?.substring(0, 50),
-                                localDisplayOptions_showImage: localDisplayOptions.showImage,
-                              });
-                            }
                             
                             return hasImage && showImage ? (
                               <Box
