@@ -31,6 +31,16 @@ def decimal_to_float(obj):
         return [decimal_to_float(item) for item in obj]
     return obj
 
+def float_to_decimal(obj):
+    """Convert float objects to Decimal for DynamoDB queries"""
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    elif isinstance(obj, dict):
+        return {k: float_to_decimal(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [float_to_decimal(item) for item in obj]
+    return obj
+
 def normalize_sector_name(sector: str) -> str:
     """
     Normalize sector names to match GICS standard.
@@ -90,6 +100,13 @@ def query_stocks_by_criteria(
         table = get_stock_data_table()
         results = []
         last_evaluated_key_result = last_evaluated_key  # Track pagination key
+        
+        # Convert last_evaluated_key from float to Decimal if needed (for DynamoDB compatibility)
+        if last_evaluated_key:
+            try:
+                last_evaluated_key = float_to_decimal(last_evaluated_key)
+            except Exception as e:
+                logger.warning(f"Error converting last_evaluated_key to Decimal: {e}")
         
         # Normalize sector names to handle legacy values
         if criteria.get('sectors'):

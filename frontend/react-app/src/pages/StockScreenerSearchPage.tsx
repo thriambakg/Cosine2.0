@@ -125,13 +125,13 @@ const StockScreenerSearchPage: React.FC = () => {
     };
   });
   
-  const [allResults, setAllResults] = useState<StockResult[]>([]);
-  const [filteredResults, setFilteredResults] = useState<StockResult[]>([]);
+  const [allResults, setAllResults] = useState<StockResult[]>(savedState?.allResults || []);
+  const [filteredResults, setFilteredResults] = useState<StockResult[]>(savedState?.filteredResults || []);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
-  const [hasMore, setHasMore] = useState<boolean>(false);
+  const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(savedState?.lastEvaluatedKey || null);
+  const [hasMore, setHasMore] = useState<boolean>(savedState?.hasMore || false);
   const [selectedStocks, setSelectedStocks] = useState<Set<string>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   
@@ -366,9 +366,20 @@ const StockScreenerSearchPage: React.FC = () => {
     setFilteredResults(filtered);
   }, [allResults, selectedFilters]);
 
+  // Restore results and apply filters on mount if saved state exists
+  useEffect(() => {
+    // If we have results from sessionStorage but filteredResults is empty, apply filters
+    if (allResults.length > 0 && filteredResults.length === 0) {
+      // Results were restored from sessionStorage, apply filters
+      applyFilters();
+    }
+  }, []); // Only run once on mount
+
   // Apply filters when selectedFilters or allResults change
   useEffect(() => {
-    applyFilters();
+    if (allResults.length > 0) {
+      applyFilters();
+    }
   }, [applyFilters]);
 
   // Generate available filters from all results
@@ -422,13 +433,15 @@ const StockScreenerSearchPage: React.FC = () => {
   }, [allResults]);
 
   // Save state to sessionStorage whenever relevant state changes
-  // Note: We don't save full results arrays to avoid quota exceeded errors
+  // Try to save results like other search pages, but handle quota exceeded gracefully
   useEffect(() => {
     try {
       const stateToSave = {
         criteria,
-        // Don't save full results - they can be very large and exceed sessionStorage quota
-        // Results will be re-fetched on page load if needed
+        allResults,
+        filteredResults,
+        lastEvaluatedKey,
+        hasMore,
         visibleColumns,
         filterSettings: {
           industries: Array.from(selectedFilters.industries),
@@ -444,18 +457,25 @@ const StockScreenerSearchPage: React.FC = () => {
     } catch (error: any) {
       // Handle quota exceeded errors gracefully
       if (error.name === 'QuotaExceededError') {
-        console.warn('SessionStorage quota exceeded, clearing old data and retrying...');
+        console.warn('SessionStorage quota exceeded, saving state without results...');
         try {
-          // Clear old state and try again with minimal data
-          sessionStorage.removeItem(SESSION_STORAGE_KEY);
-          const minimalState = {
+          // Save state without results if quota is exceeded
+          const stateWithoutResults = {
             criteria,
+            lastEvaluatedKey,
+            hasMore,
             visibleColumns,
+            filterSettings: {
+              industries: Array.from(selectedFilters.industries),
+              marketCapRanges: Array.from(selectedFilters.marketCapRanges),
+              volatilityRanges: Array.from(selectedFilters.volatilityRanges),
+              priceChangeRanges: Array.from(selectedFilters.priceChangeRanges),
+            },
             currentPage,
             pageSize,
             searchFormExpanded,
           };
-          sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(minimalState));
+          sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateWithoutResults));
         } catch (retryError) {
           console.error('Failed to save state to sessionStorage:', retryError);
         }
@@ -463,7 +483,7 @@ const StockScreenerSearchPage: React.FC = () => {
         console.error('Error saving state to sessionStorage:', error);
       }
     }
-  }, [criteria, visibleColumns, selectedFilters, currentPage, pageSize, searchFormExpanded]);
+  }, [criteria, allResults, filteredResults, lastEvaluatedKey, hasMore, visibleColumns, selectedFilters, currentPage, pageSize, searchFormExpanded]);
 
   // Pagination
   const totalPages = Math.ceil(filteredResults.length / pageSize);
@@ -847,7 +867,7 @@ const StockScreenerSearchPage: React.FC = () => {
                       )}
                       {currentResults.length > 0 ? (
                         <Chip
-                          label={`${currentResults.length} stock${currentResults.length !== 1 ? 's' : ''} found`}
+                          label={`${allResults.length} stock${allResults.length !== 1 ? 's' : ''} found`}
                           sx={{
                             backgroundColor: 'rgba(34, 197, 94, 0.2)',
                             color: '#86efac',

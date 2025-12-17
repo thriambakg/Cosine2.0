@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
   Box,
   Typography,
@@ -27,6 +27,9 @@ import {
   Pagination,
   Alert,
   CircularProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -41,6 +44,7 @@ import {
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   ViewColumn as ViewColumnIcon,
+  ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
 import { useTilePinning, TileHeaderActions, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
@@ -78,6 +82,11 @@ interface StockScreenerTileProps {
     marketCapRanges?: string[];
     volatilityRanges?: string[];
     priceChangeRanges?: string[];
+  };
+  paginationState?: {
+    totalResultsLoaded: number;
+    lastEvaluatedKeys: any[];
+    hasMore: boolean;
   };
   isPinned?: boolean;
 }
@@ -139,10 +148,14 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     maxResults: 100000, // Get all matching stocks (effectively unlimited)
   },
   filterSettings: initialFilterSettings,
+  paginationState: initialPaginationState,
   isPinned = false,
 }) => {
+  // Alias paginationState for consistency
+  const paginationState = initialPaginationState;
+  
   const [criteriaDialogOpen, setCriteriaDialogOpen] = useState(false);
-  // const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false);
 
   // Pinning functionality
   const { isPinned: pinnedState, togglePin } = useTilePinning({
@@ -157,6 +170,17 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     peRatioRange: criteria.peRatioRange || [0, 100],
     dividendYieldRange: criteria.dividendYieldRange || [0, 20],
   });
+
+  // Sync localCriteria with criteria prop changes
+  useEffect(() => {
+    if (criteria && JSON.stringify(criteria) !== JSON.stringify(localCriteria)) {
+      setLocalCriteria({
+        ...criteria,
+        peRatioRange: criteria.peRatioRange || [0, 100],
+        dividendYieldRange: criteria.dividendYieldRange || [0, 20],
+      });
+    }
+  }, [criteria]);
   // Ensure maxResults is high enough for proper pagination (upgrade old tiles with maxResults: 10)
   const [localDisplayOptions, setLocalDisplayOptions] = useState({
     ...displayOptions,
@@ -171,9 +195,15 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const [selectedStocks, setSelectedStocks] = useState<string[]>([]);
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  // Pagination state
+  const [hasMore, setHasMore] = useState<boolean>(false);
+  const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
+  const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
+  const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   
   // Client-side filter state - restore from props if available
-  const [selectedFilters] = useState<{
+  const [selectedFilters, setSelectedFilters] = useState<{
     industries: Set<string>;
     marketCapRanges: Set<string>;
     volatilityRanges: Set<string>;
@@ -393,15 +423,19 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 
   // Use the real stock screener API hook
   const stockScreenerHook = useStockScreener();
-  const { loading: apiLoading, error: apiError, execute: executeScreener } = stockScreenerHook;
+  const { loading: apiLoading, error: apiError, execute: executeScreener, executeForceRefresh: executeScreenerForceRefresh } = stockScreenerHook;
 
   // Handle API loading state - only update if we're not already in a manual loading state
   // This prevents the API hook from clearing loading state prematurely
   useEffect(() => {
+    console.log('🔄 StockScreenerTile: apiLoading changed', { apiLoading, currentIsLoading: isLoading });
     if (apiLoading !== undefined && apiLoading) {
       setIsLoading(true);
+    } else if (apiLoading === false && !isLoadingMore) {
+      // Only clear loading if we're not in a manual loading state
+      setIsLoading(false);
     }
-  }, [apiLoading]);
+  }, [apiLoading, isLoadingMore]);
 
   // Handle API errors
   useEffect(() => {
@@ -415,6 +449,10 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const runScreener = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    setLastEvaluatedKey(null);
+    setHasMore(false);
+    setIsLoadingMore(false);
+    setLastEvaluatedKeys([]); // Clear keys on new search
     
     try {
       // Format the request properly for the API
@@ -427,14 +465,31 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       
       const requestPayload = {
         criteria: backendCriteria,
-        maxResults: localDisplayOptions.maxResults || 100000  // Get all matching stocks (effectively unlimited)
+        maxResults: 100  // Page size for pagination
       };
       
-      // Use the API hook to fetch data with criteria
-      const response = await executeScreener(requestPayload);
+      // Use the API hook to fetch data with criteria (force refresh to bypass cache for new searches)
+      const response = await executeScreenerForceRefresh(requestPayload);
       
       if (response?.results) {
+        const newLastEvaluatedKey = response.last_evaluated_key || null;
         setAllResults(response.results);
+        setLastEvaluatedKey(newLastEvaluatedKey);
+        setHasMore(response.has_more || false);
+        
+        // Store pagination state (only first page key for initial search)
+        const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey] : [];
+        setLastEvaluatedKeys(newLastEvaluatedKeys);
+        
+        // Persist pagination state
+        onSettingsChange(id, {
+          paginationState: {
+            totalResultsLoaded: response.results.length,
+            lastEvaluatedKeys: newLastEvaluatedKeys,
+            hasMore: response.has_more || false,
+          },
+        });
+        
         // Don't set filteredResults here - let applyFilters handle it after state update
         
         // Update tile with results
@@ -450,29 +505,292 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         // Show message from backend (e.g., "No stocks match criteria")
         setAllResults([]);
         setFilteredResults([]);
+        setHasMore(false);
+        setLastEvaluatedKeys([]);
+        // Clear pagination state
+        onSettingsChange(id, {
+          paginationState: {
+            totalResultsLoaded: 0,
+            lastEvaluatedKeys: [],
+            hasMore: false,
+          },
+        });
         setError(null);  // Not an error, just no results
       } else {
         // Unknown response format
         setAllResults([]);
         setFilteredResults([]);
+        setHasMore(false);
+        setLastEvaluatedKeys([]);
+        // Clear pagination state
+        onSettingsChange(id, {
+          paginationState: {
+            totalResultsLoaded: 0,
+            lastEvaluatedKeys: [],
+            hasMore: false,
+          },
+        });
         setError('Unexpected response format');
       }
     } catch (err) {
       setError('Failed to fetch stock data. Please try again.');
       setAllResults([]);
       setFilteredResults([]);
+      setHasMore(false);
+      setLastEvaluatedKeys([]);
+      // Clear pagination state on error
+      onSettingsChange(id, {
+        paginationState: {
+          totalResultsLoaded: 0,
+          lastEvaluatedKeys: [],
+          hasMore: false,
+        },
+      });
       console.error('Stock screener error:', err);
     } finally {
       setIsLoading(false);
+      setIsLoadingMore(false);
     }
-  }, [executeScreener, localCriteria, localDisplayOptions.maxResults, id, onUpdate]);
+  }, [executeScreenerForceRefresh, localCriteria, id, onUpdate]);
 
-  // Initial load
+  // Load more results
+  const handleLoadMore = useCallback(async () => {
+    console.log('🔄 StockScreenerTile: handleLoadMore called', {
+      hasMore,
+      lastEvaluatedKey,
+      isLoadingMore,
+      isLoading,
+      allResultsCount: allResults.length
+    });
+    
+    if (!hasMore || !lastEvaluatedKey || isLoadingMore || isLoading) {
+      console.log('❌ StockScreenerTile: Load more blocked', {
+        hasMore,
+        hasLastEvaluatedKey: !!lastEvaluatedKey,
+        isLoadingMore,
+        isLoading
+      });
+      return;
+    }
+    
+    console.log('✅ StockScreenerTile: Starting load more...');
+    setIsLoadingMore(true);
+    setError(null);
+    
+    try {
+      // Format the request properly for the API
+      const { industries, ...criteriaWithoutIndustries } = localCriteria;
+      const backendCriteria = {
+        ...criteriaWithoutIndustries,
+        sectors: industries,  // Map industries to sectors
+      };
+      
+      const requestPayload = {
+        criteria: backendCriteria,
+        maxResults: 100,  // Page size
+        lastEvaluatedKey: lastEvaluatedKey
+      };
+      
+      console.log('📡 StockScreenerTile: Load more request payload', requestPayload);
+      
+      // Use the API hook to fetch data with criteria
+      const response = await executeScreener(requestPayload);
+      
+      console.log('📥 StockScreenerTile: Load more response', {
+        hasResponse: !!response,
+        resultsCount: response?.results?.length,
+        hasMore: response?.has_more,
+        hasLastEvaluatedKey: !!response?.last_evaluated_key
+      });
+      
+      if (response?.results) {
+        const updatedResults = [...allResults, ...response.results];
+        const newLastEvaluatedKey = response.last_evaluated_key || null;
+        console.log('✅ StockScreenerTile: Updating results', {
+          previousCount: allResults.length,
+          newCount: response.results.length,
+          totalCount: updatedResults.length
+        });
+        
+        setAllResults(updatedResults);
+        setLastEvaluatedKey(newLastEvaluatedKey);
+        setHasMore(response.has_more || false);
+        
+        // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        const updatedKeys = newLastEvaluatedKey 
+          ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
+          : lastEvaluatedKeys;
+        setLastEvaluatedKeys(updatedKeys);
+        
+        // Persist pagination state
+        onSettingsChange(id, {
+          paginationState: {
+            totalResultsLoaded: updatedResults.length,
+            lastEvaluatedKeys: updatedKeys,
+            hasMore: response.has_more || false,
+          },
+        });
+        
+        // Immediately update filteredResults to match allResults
+        // This ensures the UI updates immediately instead of waiting for useEffect
+        const hasFilters = selectedFilters.industries.size > 0 || 
+                         selectedFilters.marketCapRanges.size > 0 || 
+                         selectedFilters.volatilityRanges.size > 0 ||
+                         selectedFilters.priceChangeRanges.size > 0;
+        
+        if (!hasFilters) {
+          // No filters - show all results immediately
+          setFilteredResults(updatedResults);
+          console.log('✅ StockScreenerTile: Updated filteredResults (no filters)', updatedResults.length);
+        } else {
+          // Filters active - applyFilters will be called by useEffect when allResults changes
+          // But we can also call it directly here to ensure immediate update
+          console.log('✅ StockScreenerTile: Filters active, applyFilters will update filteredResults');
+        }
+        
+        // Update tile with results
+        onUpdate(id, {
+          results: updatedResults,
+          criteria: localCriteria,
+          lastUpdated: new Date().toISOString(),
+        });
+        
+        console.log('✅ StockScreenerTile: Load more completed successfully');
+      } else {
+        console.log('⚠️ StockScreenerTile: No results in response, setting hasMore to false');
+        // No more results or error
+        setHasMore(false);
+        // Update pagination state to reflect no more results
+        onSettingsChange(id, {
+          paginationState: {
+            totalResultsLoaded: allResults.length,
+            lastEvaluatedKeys: lastEvaluatedKeys,
+            hasMore: false,
+          },
+        });
+      }
+    } catch (err) {
+      console.error('❌ StockScreenerTile: Load more error', err);
+      setError('Failed to load more results. Please try again.');
+      setHasMore(false);
+      // Preserve current pagination state on error
+      onSettingsChange(id, {
+        paginationState: {
+          totalResultsLoaded: allResults.length,
+          lastEvaluatedKeys: lastEvaluatedKeys,
+          hasMore: false,
+        },
+      });
+    } finally {
+      console.log('🏁 StockScreenerTile: Load more finally block - setting isLoadingMore to false');
+      setIsLoadingMore(false);
+      // Also ensure isLoading is false after load more completes
+      setIsLoading(false);
+      console.log('✅ StockScreenerTile: Load more complete - isLoadingMore and isLoading both set to false');
+    }
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, isLoading, executeScreener, localCriteria, allResults, id, onUpdate, selectedFilters, lastEvaluatedKeys, onSettingsChange]);
+
+  // Restore pagination state on mount
+  const restorePaginationState = useCallback(async () => {
+    if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
+      return;
+    }
+
+    if (paginationState.totalResultsLoaded <= (results?.length || 0)) {
+      // Already have all results, no need to restore
+      return;
+    }
+
+    console.log('🔄 StockScreenerTile: Restoring pagination state', {
+      totalResultsLoaded: paginationState.totalResultsLoaded,
+      currentResults: results?.length || 0,
+      keysToLoad: paginationState.lastEvaluatedKeys.length,
+    });
+
+    setIsRestoringPagination(true);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      let currentResults = [...(results || [])];
+      let keysToLoad = [...paginationState.lastEvaluatedKeys];
+      
+      // Skip keys that were already used (if we have more results than initial page)
+      const initialPageSize = 100;
+      if (currentResults.length > initialPageSize) {
+        // Calculate how many pages we've already loaded
+        const pagesLoaded = Math.ceil(currentResults.length / initialPageSize);
+        keysToLoad = keysToLoad.slice(pagesLoaded - 1); // Skip already loaded keys
+      }
+
+      // Load each page sequentially until we reach totalResultsLoaded
+      while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0) {
+        const nextKey = keysToLoad[0];
+        
+        // Format the request properly for the API
+        const { industries, ...criteriaWithoutIndustries } = localCriteria;
+        const backendCriteria = {
+          ...criteriaWithoutIndustries,
+          sectors: industries,
+        };
+        
+        const requestPayload = {
+          criteria: backendCriteria,
+          maxResults: 100,
+          lastEvaluatedKey: nextKey,
+        };
+        
+        const response = await executeScreener(requestPayload);
+        
+        if (response?.results) {
+          currentResults = [...currentResults, ...response.results];
+          keysToLoad = keysToLoad.slice(1);
+        } else {
+          // No more results or error, stop loading
+          break;
+        }
+      }
+      
+      // Update state with restored results
+      setAllResults(currentResults);
+      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
+      setHasMore(paginationState.hasMore);
+      
+      // Update tile with restored results
+      onUpdate(id, {
+        results: currentResults,
+        criteria: localCriteria,
+        lastUpdated: new Date().toISOString(),
+      });
+      
+      console.log('✅ StockScreenerTile: Pagination state restored', {
+        restoredCount: currentResults.length,
+        targetCount: paginationState.totalResultsLoaded,
+      });
+    } catch (err) {
+      console.error('❌ StockScreenerTile: Error restoring pagination state', err);
+      setError('Failed to restore previous results. Please refresh.');
+    } finally {
+      setIsRestoringPagination(false);
+      setIsLoading(false);
+    }
+  }, [paginationState, results, localCriteria, executeScreener, id, onUpdate]);
+
+  // Restore pagination state on mount if needed
   useEffect(() => {
-    if (allResults.length === 0) {
+    if (paginationState && paginationState.totalResultsLoaded > (results?.length || 0) && !isRestoringPagination && !isLoading) {
+      restorePaginationState();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
+
+  // Initial load - only run once on mount if no results and not restoring
+  useEffect(() => {
+    if (allResults.length === 0 && !isLoading && !isRestoringPagination) {
       runScreener();
     }
-  }, [runScreener, allResults.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount
 
   const handleCriteriaChange = (newCriteria: StockScreenerCriteria) => {
     setLocalCriteria(newCriteria);
@@ -707,55 +1025,66 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   }, [applyFilters]);
 
   // Generate available filters from all results
-  // TODO: Implement filter dialog that uses availableFilters
-  // const availableFilters = useMemo(() => {
-  //   const industryMap = new Map<string, number>();
-  //   const marketCapCounts = { micro: 0, small: 0, mid: 0, large: 0, mega: 0 };
-  //   const volatilityCounts = { low: 0, medium: 0, high: 0 };
-  //   const priceChangeCounts = { gain: 0, loss: 0, 'big-gain': 0, 'big-loss': 0 };
-  //   
-  //   allResults.forEach(stock => {
-  //     // Industries
-  //     const industry = stock.industry || 'Unknown';
-  //     industryMap.set(industry, (industryMap.get(industry) || 0) + 1);
-  //     
-  //     // Market cap ranges
-  //     const marketCap = stock.marketCap || 0;
-  //     if (marketCap < 300_000_000) marketCapCounts.micro++;
-  //     else if (marketCap < 2_000_000_000) marketCapCounts.small++;
-  //     else if (marketCap < 10_000_000_000) marketCapCounts.mid++;
-  //     else if (marketCap < 200_000_000_000) marketCapCounts.large++;
-  //     else marketCapCounts.mega++;
-  //     
-  //     // Volatility ranges
-  //     const volatility = stock.volatility || 0;
-  //     if (volatility < 20) volatilityCounts.low++;
-  //     else if (volatility < 40) volatilityCounts.medium++;
-  //     else volatilityCounts.high++;
-  //     
-  //     // Price change ranges
-  //     const priceChange = stock.priceChangePercent || 0;
-  //     if (priceChange > 5) priceChangeCounts['big-gain']++;
-  //     else if (priceChange > 0) priceChangeCounts.gain++;
-  //     else if (priceChange < -5) priceChangeCounts['big-loss']++;
-  //     else if (priceChange < 0) priceChangeCounts.loss++;
-  //   });
-  //   
-  //   return {
-  //     industries: Array.from(industryMap.entries())
-  //       .map(([industry, count]) => ({ industry, count }))
-  //       .sort((a, b) => b.count - a.count),
-  //     marketCapRanges: Object.entries(marketCapCounts)
-  //       .map(([range, count]) => ({ range, count }))
-  //       .filter(item => item.count > 0),
-  //     volatilityRanges: Object.entries(volatilityCounts)
-  //       .map(([range, count]) => ({ range, count }))
-  //       .filter(item => item.count > 0),
-  //     priceChangeRanges: Object.entries(priceChangeCounts)
-  //       .map(([range, count]) => ({ range, count }))
-  //       .filter(item => item.count > 0),
-  //   };
-  // }, [allResults]);
+  const availableFilters = useMemo(() => {
+    const industryMap = new Map<string, number>();
+    const marketCapCounts = { micro: 0, small: 0, mid: 0, large: 0, mega: 0 };
+    const volatilityCounts = { low: 0, medium: 0, high: 0 };
+    const priceChangeCounts = { gain: 0, loss: 0, 'big-gain': 0, 'big-loss': 0 };
+    
+    allResults.forEach(stock => {
+      // Industries
+      const industry = stock.industry || 'Unknown';
+      industryMap.set(industry, (industryMap.get(industry) || 0) + 1);
+      
+      // Market cap ranges
+      const marketCap = stock.marketCap || 0;
+      if (marketCap < 300_000_000) marketCapCounts.micro++;
+      else if (marketCap < 2_000_000_000) marketCapCounts.small++;
+      else if (marketCap < 10_000_000_000) marketCapCounts.mid++;
+      else if (marketCap < 200_000_000_000) marketCapCounts.large++;
+      else marketCapCounts.mega++;
+      
+      // Volatility ranges
+      const volatility = stock.volatility || 0;
+      if (volatility < 20) volatilityCounts.low++;
+      else if (volatility < 40) volatilityCounts.medium++;
+      else volatilityCounts.high++;
+      
+      // Price change ranges
+      const priceChange = stock.priceChangePercent || 0;
+      if (priceChange > 5) priceChangeCounts['big-gain']++;
+      else if (priceChange > 0) priceChangeCounts.gain++;
+      else if (priceChange < -5) priceChangeCounts['big-loss']++;
+      else if (priceChange < 0) priceChangeCounts.loss++;
+    });
+    
+    return {
+      industries: Array.from(industryMap.entries())
+        .map(([industry, count]) => ({ industry, count }))
+        .sort((a, b) => b.count - a.count),
+      marketCapRanges: Object.entries(marketCapCounts)
+        .map(([range, count]) => ({ range, count }))
+        .filter(item => item.count > 0)
+        .sort((a, b) => {
+          const order = ['micro', 'small', 'mid', 'large', 'mega'];
+          return order.indexOf(a.range) - order.indexOf(b.range);
+        }),
+      volatilityRanges: Object.entries(volatilityCounts)
+        .map(([range, count]) => ({ range, count }))
+        .filter(item => item.count > 0)
+        .sort((a, b) => {
+          const order = ['low', 'medium', 'high'];
+          return order.indexOf(a.range) - order.indexOf(b.range);
+        }),
+      priceChangeRanges: Object.entries(priceChangeCounts)
+        .map(([range, count]) => ({ range, count }))
+        .filter(item => item.count > 0)
+        .sort((a, b) => {
+          const order = ['big-loss', 'loss', 'gain', 'big-gain'];
+          return order.indexOf(a.range) - order.indexOf(b.range);
+        }),
+    };
+  }, [allResults]);
 
   const totalPages = Math.ceil(filteredResults.length / resultsPerPage);
   const startIndex = (currentPage - 1) * resultsPerPage;
@@ -831,14 +1160,39 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           </Typography>
           
           <Chip
-            label={`${filteredResults.length}${filteredResults.length !== allResults.length ? ` of ${allResults.length}` : ''} results`}
+            label={
+              isLoadingMore 
+                ? 'Loading...' 
+                : hasMore && allResults.length > 0 && filteredResults.length === allResults.length
+                  ? `Load More (${allResults.length} loaded)`
+                  : allResults.length > 0 && filteredResults.length !== allResults.length 
+                    ? `${filteredResults.length} of ${allResults.length} results`
+                    : `${filteredResults.length} results`
+            }
             size="small"
+            onClick={
+              hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? handleLoadMore
+                : undefined
+            }
+            disabled={isLoadingMore || isLoading || !hasMore || filteredResults.length !== allResults.length}
             sx={{
-              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+              backgroundColor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? 'rgba(59, 130, 246, 0.3)'
+                : 'rgba(59, 130, 246, 0.2)',
               color: '#3b82f6',
               border: '1px solid #3b82f6',
               fontSize: '0.75rem',
               height: '20px',
+              cursor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? 'pointer'
+                : 'default',
+              '&:hover': hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+                ? {
+                    backgroundColor: 'rgba(59, 130, 246, 0.4)',
+                    transform: 'scale(1.05)',
+                  }
+                : {},
             }}
           />
           
@@ -961,11 +1315,11 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       </Box>
 
       {/* Loading state */}
-      {isLoading && (
+      {(isLoading || isRestoringPagination) && (
         <Box sx={{ textAlign: 'center', py: 2, flexShrink: 0 }}>
           <CircularProgress size={24} sx={{ color: '#3b82f6', mb: 1 }} />
           <Typography variant="body2" color="#9ca3af">
-            Screening stocks...
+            {isRestoringPagination ? 'Restoring previous results...' : 'Screening stocks...'}
           </Typography>
         </Box>
       )}
@@ -1015,7 +1369,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       )}
 
       {/* Results Table */}
-      {localDisplayOptions.showResultsTable && filteredResults.length > 0 && !isLoading && (
+      {localDisplayOptions.showResultsTable && filteredResults.length > 0 && !isLoading && !isRestoringPagination && (
         <Box sx={{ 
           flex: 1, 
           display: 'flex', 
@@ -1216,7 +1570,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       )}
 
       {/* No Results */}
-      {!isLoading && filteredResults.length === 0 && !error && (
+      {!isLoading && !isRestoringPagination && filteredResults.length === 0 && !error && (
         <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
           <Typography variant="body2" color="#9ca3af">
             No stocks match your criteria. Try adjusting your filters.
@@ -1485,6 +1839,539 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
             }}
           >
             {isLoading ? 'Running...' : 'Apply & Run'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Filter Dialog */}
+      <Dialog
+        open={filterDialogOpen}
+        onClose={() => setFilterDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: '#1e293b',
+            color: '#ffffff',
+            border: '1px solid #334155',
+          },
+        }}
+      >
+        <DialogTitle sx={{ borderBottom: '1px solid #334155' }}>
+          <Box display="flex" alignItems="center" gap={1}>
+            <FilterIcon />
+            <Typography variant="h6">Filter Results</Typography>
+            <Chip
+              label={`${filteredResults.length} of ${allResults.length} results`}
+              size="small"
+              sx={{
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                color: '#3b82f6',
+                border: '1px solid #3b82f6',
+                ml: 1
+              }}
+            />
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
+            Refine search results by: Click headings to show top filters. Stock counts shown in <span style={{ color: '#3b82f6' }}>#</span>
+          </Typography>
+
+          {/* Applied Filters Section */}
+          {(selectedFilters.industries.size > 0 || 
+            selectedFilters.marketCapRanges.size > 0 || 
+            selectedFilters.volatilityRanges.size > 0 ||
+            selectedFilters.priceChangeRanges.size > 0) && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
+              <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 2, fontWeight: 600 }}>
+                Applied Filters:
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {Array.from(selectedFilters.industries).map(industry => (
+                  <Chip
+                    key={`industry-${industry}`}
+                    label={`Industry: ${industry}`}
+                    onDelete={() => {
+                      setSelectedFilters(prev => {
+                        const newSet = new Set(prev.industries);
+                        newSet.delete(industry);
+                        return { ...prev, industries: newSet };
+                      });
+                    }}
+                    size="small"
+                    sx={{
+                      backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                      color: '#3b82f6',
+                      border: '1px solid #3b82f6',
+                      '& .MuiChip-deleteIcon': { color: '#3b82f6' }
+                    }}
+                  />
+                ))}
+                {Array.from(selectedFilters.marketCapRanges).map(range => (
+                  <Chip
+                    key={`marketCap-${range}`}
+                    label={`Market Cap: ${range.charAt(0).toUpperCase() + range.slice(1)}`}
+                    onDelete={() => {
+                      setSelectedFilters(prev => {
+                        const newSet = new Set(prev.marketCapRanges);
+                        newSet.delete(range);
+                        return { ...prev, marketCapRanges: newSet };
+                      });
+                    }}
+                    size="small"
+                    sx={{
+                      backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                      color: '#10b981',
+                      border: '1px solid #10b981',
+                      '& .MuiChip-deleteIcon': { color: '#10b981' }
+                    }}
+                  />
+                ))}
+                {Array.from(selectedFilters.volatilityRanges).map(range => (
+                  <Chip
+                    key={`volatility-${range}`}
+                    label={`Volatility: ${range.charAt(0).toUpperCase() + range.slice(1)}`}
+                    onDelete={() => {
+                      setSelectedFilters(prev => {
+                        const newSet = new Set(prev.volatilityRanges);
+                        newSet.delete(range);
+                        return { ...prev, volatilityRanges: newSet };
+                      });
+                    }}
+                    size="small"
+                    sx={{
+                      backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                      color: '#f59e0b',
+                      border: '1px solid #f59e0b',
+                      '& .MuiChip-deleteIcon': { color: '#f59e0b' }
+                    }}
+                  />
+                ))}
+                {Array.from(selectedFilters.priceChangeRanges).map(range => {
+                  const rangeLabel = range === 'big-gain' ? 'Big Gain' : 
+                                    range === 'big-loss' ? 'Big Loss' :
+                                    range.charAt(0).toUpperCase() + range.slice(1);
+                  return (
+                    <Chip
+                      key={`priceChange-${range}`}
+                      label={`Price Change: ${rangeLabel}`}
+                      onDelete={() => {
+                        setSelectedFilters(prev => {
+                          const newSet = new Set(prev.priceChangeRanges);
+                          newSet.delete(range);
+                          return { ...prev, priceChangeRanges: newSet };
+                        });
+                      }}
+                      size="small"
+                      sx={{
+                        backgroundColor: 'rgba(139, 92, 246, 0.2)',
+                        color: '#8b5cf6',
+                        border: '1px solid #8b5cf6',
+                        '& .MuiChip-deleteIcon': { color: '#8b5cf6' }
+                      }}
+                    />
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
+
+          {/* Filter Accordions */}
+          {allResults.length > 0 && (
+            <Box>
+              {/* Industries Accordion */}
+              {availableFilters.industries.length > 0 && (
+                <Accordion
+                  defaultExpanded={selectedFilters.industries.size > 0}
+                  sx={{
+                    backgroundColor: '#0f172a',
+                    border: '1px solid #334155',
+                    mb: 1,
+                    '&:before': { display: 'none' },
+                    '&.Mui-expanded': { margin: '0 0 8px 0' },
+                  }}
+                >
+                  <AccordionSummary
+                    expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}
+                    sx={{
+                      '& .MuiAccordionSummary-content': {
+                        my: 1.5,
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                      Industries ({availableFilters.industries.length})
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {availableFilters.industries.map((filter) => (
+                        <Box
+                          key={filter.industry}
+                          onClick={() => {
+                            setSelectedFilters(prev => {
+                              const newSet = new Set(prev.industries);
+                              if (newSet.has(filter.industry)) {
+                                newSet.delete(filter.industry);
+                              } else {
+                                newSet.add(filter.industry);
+                              }
+                              return { ...prev, industries: newSet };
+                            });
+                          }}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            p: 1.5,
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            backgroundColor: selectedFilters.industries.has(filter.industry) 
+                              ? 'rgba(59, 130, 246, 0.1)' 
+                              : 'transparent',
+                            border: selectedFilters.industries.has(filter.industry)
+                              ? '1px solid #3b82f6'
+                              : '1px solid transparent',
+                            '&:hover': {
+                              backgroundColor: selectedFilters.industries.has(filter.industry)
+                                ? 'rgba(59, 130, 246, 0.15)'
+                                : 'rgba(59, 130, 246, 0.05)',
+                            },
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1, fontSize: '0.875rem' }}>
+                            {filter.industry}
+                          </Typography>
+                          <Chip
+                            label={filter.count}
+                            size="small"
+                            sx={{
+                              backgroundColor: '#3b82f6',
+                              color: '#ffffff',
+                              minWidth: '28px',
+                              height: '22px',
+                              fontSize: '0.75rem',
+                              fontWeight: 500,
+                            }}
+                          />
+                        </Box>
+                      ))}
+                    </Box>
+                  </AccordionDetails>
+                </Accordion>
+              )}
+
+              {/* Market Cap Ranges Accordion */}
+              {availableFilters.marketCapRanges.length > 0 && (
+                <Accordion
+                  defaultExpanded={selectedFilters.marketCapRanges.size > 0}
+                  sx={{
+                    backgroundColor: '#0f172a',
+                    border: '1px solid #334155',
+                    mb: 1,
+                    '&:before': { display: 'none' },
+                    '&.Mui-expanded': { margin: '0 0 8px 0' },
+                  }}
+                >
+                  <AccordionSummary
+                    expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}
+                    sx={{
+                      '& .MuiAccordionSummary-content': {
+                        my: 1.5,
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                      Market Cap Ranges ({availableFilters.marketCapRanges.length})
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {availableFilters.marketCapRanges.map((filter) => {
+                        const rangeLabel = filter.range === 'micro' ? 'Micro (< $300M)' :
+                                          filter.range === 'small' ? 'Small ($300M - $2B)' :
+                                          filter.range === 'mid' ? 'Mid ($2B - $10B)' :
+                                          filter.range === 'large' ? 'Large ($10B - $200B)' :
+                                          'Mega (≥ $200B)';
+                        return (
+                          <Box
+                            key={filter.range}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const newSet = new Set(prev.marketCapRanges);
+                                if (newSet.has(filter.range)) {
+                                  newSet.delete(filter.range);
+                                } else {
+                                  newSet.add(filter.range);
+                                }
+                                return { ...prev, marketCapRanges: newSet };
+                              });
+                            }}
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              p: 1.5,
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              backgroundColor: selectedFilters.marketCapRanges.has(filter.range) 
+                                ? 'rgba(16, 185, 129, 0.1)' 
+                                : 'transparent',
+                              border: selectedFilters.marketCapRanges.has(filter.range)
+                                ? '1px solid #10b981'
+                                : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: selectedFilters.marketCapRanges.has(filter.range)
+                                  ? 'rgba(16, 185, 129, 0.15)'
+                                  : 'rgba(16, 185, 129, 0.05)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1, fontSize: '0.875rem' }}>
+                              {rangeLabel}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                backgroundColor: '#10b981',
+                                color: '#ffffff',
+                                minWidth: '28px',
+                                height: '22px',
+                                fontSize: '0.75rem',
+                                fontWeight: 500,
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </AccordionDetails>
+                </Accordion>
+              )}
+
+              {/* Volatility Ranges Accordion */}
+              {availableFilters.volatilityRanges.length > 0 && (
+                <Accordion
+                  defaultExpanded={selectedFilters.volatilityRanges.size > 0}
+                  sx={{
+                    backgroundColor: '#0f172a',
+                    border: '1px solid #334155',
+                    mb: 1,
+                    '&:before': { display: 'none' },
+                    '&.Mui-expanded': { margin: '0 0 8px 0' },
+                  }}
+                >
+                  <AccordionSummary
+                    expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}
+                    sx={{
+                      '& .MuiAccordionSummary-content': {
+                        my: 1.5,
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                      Volatility Ranges ({availableFilters.volatilityRanges.length})
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {availableFilters.volatilityRanges.map((filter) => {
+                        const rangeLabel = filter.range === 'low' ? 'Low (< 20%)' :
+                                          filter.range === 'medium' ? 'Medium (20% - 40%)' :
+                                          'High (≥ 40%)';
+                        return (
+                          <Box
+                            key={filter.range}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const newSet = new Set(prev.volatilityRanges);
+                                if (newSet.has(filter.range)) {
+                                  newSet.delete(filter.range);
+                                } else {
+                                  newSet.add(filter.range);
+                                }
+                                return { ...prev, volatilityRanges: newSet };
+                              });
+                            }}
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              p: 1.5,
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              backgroundColor: selectedFilters.volatilityRanges.has(filter.range) 
+                                ? 'rgba(245, 158, 11, 0.1)' 
+                                : 'transparent',
+                              border: selectedFilters.volatilityRanges.has(filter.range)
+                                ? '1px solid #f59e0b'
+                                : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: selectedFilters.volatilityRanges.has(filter.range)
+                                  ? 'rgba(245, 158, 11, 0.15)'
+                                  : 'rgba(245, 158, 11, 0.05)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1, fontSize: '0.875rem' }}>
+                              {rangeLabel}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                backgroundColor: '#f59e0b',
+                                color: '#ffffff',
+                                minWidth: '28px',
+                                height: '22px',
+                                fontSize: '0.75rem',
+                                fontWeight: 500,
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </AccordionDetails>
+                </Accordion>
+              )}
+
+              {/* Price Change Ranges Accordion */}
+              {availableFilters.priceChangeRanges.length > 0 && (
+                <Accordion
+                  defaultExpanded={selectedFilters.priceChangeRanges.size > 0}
+                  sx={{
+                    backgroundColor: '#0f172a',
+                    border: '1px solid #334155',
+                    mb: 1,
+                    '&:before': { display: 'none' },
+                    '&.Mui-expanded': { margin: '0 0 8px 0' },
+                  }}
+                >
+                  <AccordionSummary
+                    expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}
+                    sx={{
+                      '& .MuiAccordionSummary-content': {
+                        my: 1.5,
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                      Price Change Ranges ({availableFilters.priceChangeRanges.length})
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {availableFilters.priceChangeRanges.map((filter) => {
+                        const rangeLabel = filter.range === 'big-gain' ? 'Big Gain (> 5%)' :
+                                          filter.range === 'gain' ? 'Gain (> 0%)' :
+                                          filter.range === 'loss' ? 'Loss (< 0%)' :
+                                          'Big Loss (< -5%)';
+                        return (
+                          <Box
+                            key={filter.range}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const newSet = new Set(prev.priceChangeRanges);
+                                if (newSet.has(filter.range)) {
+                                  newSet.delete(filter.range);
+                                } else {
+                                  newSet.add(filter.range);
+                                }
+                                return { ...prev, priceChangeRanges: newSet };
+                              });
+                            }}
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              p: 1.5,
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              backgroundColor: selectedFilters.priceChangeRanges.has(filter.range) 
+                                ? 'rgba(139, 92, 246, 0.1)' 
+                                : 'transparent',
+                              border: selectedFilters.priceChangeRanges.has(filter.range)
+                                ? '1px solid #8b5cf6'
+                                : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: selectedFilters.priceChangeRanges.has(filter.range)
+                                  ? 'rgba(139, 92, 246, 0.15)'
+                                  : 'rgba(139, 92, 246, 0.05)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1, fontSize: '0.875rem' }}>
+                              {rangeLabel}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                backgroundColor: '#8b5cf6',
+                                color: '#ffffff',
+                                minWidth: '28px',
+                                height: '22px',
+                                fontSize: '0.75rem',
+                                fontWeight: 500,
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </AccordionDetails>
+                </Accordion>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid #334155' }}>
+          <Button 
+            onClick={() => {
+              setSelectedFilters({
+                industries: new Set(),
+                marketCapRanges: new Set(),
+                volatilityRanges: new Set(),
+                priceChangeRanges: new Set(),
+              });
+            }}
+            disabled={
+              selectedFilters.industries.size === 0 && 
+              selectedFilters.marketCapRanges.size === 0 && 
+              selectedFilters.volatilityRanges.size === 0 &&
+              selectedFilters.priceChangeRanges.size === 0
+            }
+            sx={{ 
+              color: '#9ca3af',
+              '&:hover': {
+                backgroundColor: 'rgba(148, 163, 184, 0.1)',
+              },
+              '&.Mui-disabled': {
+                color: '#64748b',
+              },
+            }}
+          >
+            Clear All Filters
+          </Button>
+          <Button 
+            onClick={() => {
+              // Persist filter settings
+              onSettingsChange(id, {
+                filterSettings: {
+                  industries: Array.from(selectedFilters.industries),
+                  marketCapRanges: Array.from(selectedFilters.marketCapRanges),
+                  volatilityRanges: Array.from(selectedFilters.volatilityRanges),
+                  priceChangeRanges: Array.from(selectedFilters.priceChangeRanges),
+                },
+              });
+              setFilterDialogOpen(false);
+            }}
+            sx={{ color: '#9ca3af' }}
+          >
+            Close
           </Button>
         </DialogActions>
       </Dialog>

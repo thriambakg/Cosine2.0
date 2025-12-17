@@ -94,6 +94,11 @@ interface NewsTileProps {
     maxResults: number;
     compactView: boolean;
   };
+  paginationState?: {
+    totalResultsLoaded: number;
+    lastEvaluatedKeys: any[];
+    hasMore: boolean;
+  };
   autoRefresh?: boolean;
   isPinned?: boolean;
 }
@@ -117,6 +122,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     dateRange: 'all',
   },
   filterSettings: initialFilterSettings,
+  paginationState: initialPaginationState,
   articles = [],
   displayOptions = {
     showTitle: true,
@@ -201,6 +207,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
       return null;
     }
   });
+  const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
+  const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(`newsTile_hasMore_${id}`);
@@ -210,26 +218,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
   });
   
-  // Persist lastEvaluatedKey and hasMore to localStorage whenever they change
-  useEffect(() => {
-    try {
-      if (lastEvaluatedKey) {
-        localStorage.setItem(`newsTile_lastEvaluatedKey_${id}`, JSON.stringify(lastEvaluatedKey));
-      } else {
-        localStorage.removeItem(`newsTile_lastEvaluatedKey_${id}`);
-      }
-    } catch (error) {
-      console.error('❌ Error saving lastEvaluatedKey to localStorage:', error);
-    }
-  }, [lastEvaluatedKey, id]);
-  
-  useEffect(() => {
-    try {
-      localStorage.setItem(`newsTile_hasMore_${id}`, hasMore.toString());
-    } catch (error) {
-      console.error('❌ Error saving hasMore to localStorage:', error);
-    }
-  }, [hasMore, id]);
   
   // Ensure defaults are set
   const defaultDisplayOptions = {
@@ -355,14 +343,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     setError(null);
     setLastEvaluatedKey(null);
     setHasMore(false);
-    
-    // Clear persisted pagination state when starting new search
-    try {
-      localStorage.removeItem(`newsTile_lastEvaluatedKey_${id}`);
-      localStorage.removeItem(`newsTile_hasMore_${id}`);
-    } catch (error) {
-      console.error('❌ Error clearing pagination state from localStorage:', error);
-    }
+    setLastEvaluatedKeys([]); // Clear keys on new search
     
     try {
       // Build simplified search request - only keywords are sent to API
@@ -403,27 +384,49 @@ const NewsTile: React.FC<NewsTileProps> = ({
         }));
         
         // Store all results for filtering
+        const newLastEvaluatedKey = response.last_evaluated_key || null;
         setAllResults(processedResults);
         setFilteredResults(processedResults);
         setCurrentResults(processedResults);
         setHasPerformedInitialSearch(true);
         setHasMore(response.has_more || false);
-        setLastEvaluatedKey(response.last_evaluated_key || null);
+        setLastEvaluatedKey(newLastEvaluatedKey);
+        
+        // Store pagination state (only first page key for initial search)
+        const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey] : [];
+        setLastEvaluatedKeys(newLastEvaluatedKeys);
+        
+        // Persist pagination state
+        onSettingsChange(id, {
+          searchParams: currentSearchParams,
+          paginationState: {
+            totalResultsLoaded: processedResults.length,
+            lastEvaluatedKeys: newLastEvaluatedKeys,
+            hasMore: response.has_more || false,
+          },
+        });
         
         // Update parent component - persist results in session only (not database)
         onUpdate(id, {
           articles: processedResults,
           lastUpdated: Date.now(),
         });
-        
-        // Persist search params to backend (database) - NOT results
-        onSettingsChange(id, { searchParams: currentSearchParams });
       } else {
         console.error('📰 NewsTile: Search failed - no articles returned');
         setError('Search failed - no articles returned');
         setCurrentResults([]);
         setHasMore(false);
         setHasPerformedInitialSearch(true);
+        setLastEvaluatedKeys([]);
+        // Clear pagination state
+        onSettingsChange(id, {
+          searchParams: currentSearchParams,
+          paginationState: {
+            totalResultsLoaded: 0,
+            lastEvaluatedKeys: [],
+            hasMore: false,
+          },
+        });
       }
     } catch (err: any) {
       console.error('📰 NewsTile: Search error:', err);
@@ -431,6 +434,16 @@ const NewsTile: React.FC<NewsTileProps> = ({
       setCurrentResults([]);
       setHasPerformedInitialSearch(true);
       setHasMore(false);
+      setLastEvaluatedKeys([]);
+      // Clear pagination state on error
+      onSettingsChange(id, {
+        searchParams: currentSearchParams,
+        paginationState: {
+          totalResultsLoaded: 0,
+          lastEvaluatedKeys: [],
+          hasMore: false,
+        },
+      });
     } finally {
       setIsLoading(false);
     }
@@ -480,23 +493,58 @@ const NewsTile: React.FC<NewsTileProps> = ({
           pendingUpdateRef.current = { articles: updated };
           return updated;
         });
+        const newLastEvaluatedKey = response.last_evaluated_key || null;
         setFilteredResults(prev => [...prev, ...processedResults]);
         setCurrentResults(prev => [...prev, ...processedResults]);
         setHasMore(response.has_more || false);
-        setLastEvaluatedKey(response.last_evaluated_key || null);
+        setLastEvaluatedKey(newLastEvaluatedKey);
+        
+        // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        setLastEvaluatedKeys(prev => {
+          const updatedKeys = newLastEvaluatedKey 
+            ? [...prev, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
+            : prev;
+          
+          // Persist pagination state
+          onSettingsChange(id, {
+            paginationState: {
+              totalResultsLoaded: allResults.length + processedResults.length,
+              lastEvaluatedKeys: updatedKeys,
+              hasMore: response.has_more || false,
+            },
+          });
+          
+          return updatedKeys;
+        });
       } else {
         console.error('📰 NewsTile: Load more failed - no articles returned');
         setError('Load more failed - no articles returned');
         setHasMore(false);
+        // Update pagination state to reflect no more results
+        onSettingsChange(id, {
+          paginationState: {
+            totalResultsLoaded: allResults.length,
+            lastEvaluatedKeys: lastEvaluatedKeys,
+            hasMore: false,
+          },
+        });
       }
     } catch (err: any) {
       console.error('📰 NewsTile: Load more error:', err);
       setError(err.message || 'An error occurred while loading more results');
       setHasMore(false);
+      // Preserve current pagination state on error
+      onSettingsChange(id, {
+        paginationState: {
+          totalResultsLoaded: allResults.length,
+          lastEvaluatedKeys: lastEvaluatedKeys,
+          hasMore: false,
+        },
+      });
     } finally {
       setIsLoadingMore(false);
     }
-  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate]);
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange]);
 
   // Dynamic pagination based on tile height
   const calculateResultsPerPage = useCallback(() => {
@@ -680,7 +728,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
 
   // Initial load: Fetch fresh results if none exist
   useEffect(() => {
-    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading) {
+    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading && !isRestoringPagination) {
       // Only auto-search if we have meaningful search params (not just defaults)
       const hasSearchCriteria = 
         (currentSearchParams.keywords && currentSearchParams.keywords.length > 0) ||
@@ -1347,7 +1395,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       )}
 
       {/* Results Table */}
-      {localDisplayOptions.showResultsTable && currentResults.length > 0 && !isLoading && (
+      {localDisplayOptions.showResultsTable && currentResults.length > 0 && !isLoading && !isRestoringPagination && (
         <Box sx={{ 
           flex: 1, 
           display: 'flex', 
@@ -1730,7 +1778,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       )}
 
       {/* No Results */}
-      {!isLoading && currentResults.length === 0 && !error && (
+      {!isLoading && !isRestoringPagination && currentResults.length === 0 && !error && (
         <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
           <Typography variant="body2" color="#9ca3af">
             No articles match your criteria. Try adjusting your search parameters.

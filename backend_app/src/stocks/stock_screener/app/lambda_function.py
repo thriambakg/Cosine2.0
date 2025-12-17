@@ -1619,26 +1619,26 @@ def lambda_handler(event, context):
     except TimeoutError as e:
         logger.warning(f"=== LAMBDA TIMEOUT ===")
         logger.warning(f"Timeout error: {str(e)}")
-            
-            return {
+        
+        return {
             'statusCode': 408,  # Request Timeout
-                'headers': {
-                    'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
-                    'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Max-Age': '1728000',
-                    'Content-Type': 'application/json'
-                },
-                'body': json.dumps({
+            'headers': {
+                'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
+                'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Max-Age': '1728000',
+                'Content-Type': 'application/json'
+            },
+            'body': json.dumps({
                 'success': False,
                 'results': [],
                 'totalResults': 0,
-                    'criteria': criteria,
-                    'timestamp': datetime.now().isoformat(),
+                'criteria': criteria,
+                'timestamp': datetime.now().isoformat(),
                 'error': 'Request timeout',
                 'message': 'The screening request took too long. Please try with fewer criteria.'
-                })
-            }
+            })
+        }
         
     except Exception as e:
         logger.error(f"=== STOCK SCREENER LAMBDA ERROR ===")

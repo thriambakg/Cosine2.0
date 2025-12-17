@@ -93,6 +93,11 @@ interface PoliticianTradesSearchTileProps {
     maxResults: number;
     compactView: boolean;
   };
+  paginationState?: {
+    totalResultsLoaded: number;
+    lastEvaluatedKeys: any[];
+    hasMore: boolean;
+  };
   autoRefresh?: boolean;
   isPinned?: boolean;
 }
@@ -118,6 +123,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     transactionType: [],
   },
   filterSettings: initialFilterSettings,
+  paginationState: initialPaginationState,
   results = [],
   displayOptions = {
     showPolitician: true,
@@ -177,6 +183,8 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const [currentSearchParams, setCurrentSearchParams] = useState<PoliticianTradesSearchParams>(searchParams);
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>(results);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<{ transactionDate?: number; tradeId?: string } | null>(null);
+  const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
+  const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(false);
   // Ensure defaults are set
   const defaultDisplayOptions = {
@@ -389,6 +397,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     setError(null);
     setLastEvaluatedKey(null);
     setHasMore(false);
+    setLastEvaluatedKeys([]); // Clear keys on new search
     
     try {
       const searchRequest = {
@@ -409,27 +418,49 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         }));
         
         // Store all results for filtering
+        const newLastEvaluatedKey = response.last_evaluated_key || null;
         setAllResults(processedResults);
         setFilteredResults(processedResults);
         setCurrentResults(processedResults);
         setHasPerformedInitialSearch(true);
         setHasMore(response.has_more || false);
-        setLastEvaluatedKey(response.last_evaluated_key || null);
+        setLastEvaluatedKey(newLastEvaluatedKey);
+        
+        // Store pagination state (only first page key for initial search)
+        const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey] : [];
+        setLastEvaluatedKeys(newLastEvaluatedKeys);
+        
+        // Persist pagination state
+        onSettingsChange(id, {
+          searchParams: currentSearchParams,
+          paginationState: {
+            totalResultsLoaded: processedResults.length,
+            lastEvaluatedKeys: newLastEvaluatedKeys,
+            hasMore: response.has_more || false,
+          },
+        });
         
         // Update parent component - persist results in session only (not database)
         onUpdate(id, {
           results: processedResults, // Session persistence - full results for duration of login only
           lastUpdated: Date.now(),
         });
-        
-        // Persist search params to backend (database) - NOT results
-        onSettingsChange(id, { searchParams: currentSearchParams });
       } else {
         console.error('🏛️ PoliticianTradesSearchTile: Search failed:', response.error);
         setError(response.error || 'Search failed');
         setCurrentResults([]);
         setHasMore(false);
         setHasPerformedInitialSearch(true);
+        setLastEvaluatedKeys([]);
+        // Clear pagination state
+        onSettingsChange(id, {
+          searchParams: currentSearchParams,
+          paginationState: {
+            totalResultsLoaded: 0,
+            lastEvaluatedKeys: [],
+            hasMore: false,
+          },
+        });
       }
     } catch (err: any) {
       console.error('🏛️ PoliticianTradesSearchTile: Search error:', err);
@@ -437,6 +468,16 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       setCurrentResults([]);
       setHasPerformedInitialSearch(true);
       setHasMore(false);
+      setLastEvaluatedKeys([]);
+      // Clear pagination state on error
+      onSettingsChange(id, {
+        searchParams: currentSearchParams,
+        paginationState: {
+          totalResultsLoaded: 0,
+          lastEvaluatedKeys: [],
+          hasMore: false,
+        },
+      });
     } finally {
       setIsLoading(false);
     }
@@ -472,6 +513,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         }));
         
         // Append new results to existing results
+        const newLastEvaluatedKey = response.last_evaluated_key || null;
         setAllResults(prev => {
           const updated = [...prev, ...processedResults];
           // Update parent component
@@ -484,20 +526,54 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         setFilteredResults(prev => [...prev, ...processedResults]);
         setCurrentResults(prev => [...prev, ...processedResults]);
         setHasMore(response.has_more || false);
-        setLastEvaluatedKey(response.last_evaluated_key || null);
+        setLastEvaluatedKey(newLastEvaluatedKey);
+        
+        // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        setLastEvaluatedKeys(prev => {
+          const updatedKeys = newLastEvaluatedKey 
+            ? [...prev, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
+            : prev;
+          
+          // Persist pagination state
+          onSettingsChange(id, {
+            paginationState: {
+              totalResultsLoaded: allResults.length + processedResults.length,
+              lastEvaluatedKeys: updatedKeys,
+              hasMore: response.has_more || false,
+            },
+          });
+          
+          return updatedKeys;
+        });
       } else {
         console.error('🏛️ PoliticianTradesSearchTile: Load more failed:', response.error);
         setError(response.error || 'Load more failed');
         setHasMore(false);
+        // Update pagination state to reflect no more results
+        onSettingsChange(id, {
+          paginationState: {
+            totalResultsLoaded: allResults.length,
+            lastEvaluatedKeys: lastEvaluatedKeys,
+            hasMore: false,
+          },
+        });
       }
     } catch (err: any) {
       console.error('🏛️ PoliticianTradesSearchTile: Load more error:', err);
       setError(err.message || 'An error occurred while loading more results');
       setHasMore(false);
+      // Preserve current pagination state on error
+      onSettingsChange(id, {
+        paginationState: {
+          totalResultsLoaded: allResults.length,
+          lastEvaluatedKeys: lastEvaluatedKeys,
+          hasMore: false,
+        },
+      });
     } finally {
       setIsLoadingMore(false);
     }
-  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, displayOptions.maxResults, id, onUpdate]);
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, displayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange]);
 
   // Dynamic pagination based on tile height
   const calculateResultsPerPage = useCallback(() => {
@@ -564,7 +640,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
 
   // Initial load: Fetch fresh results if none exist
   useEffect(() => {
-    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading) {
+    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading && !isRestoringPagination) {
       // Only auto-search if we have meaningful search params (not just defaults)
       const hasSearchCriteria = 
         (currentSearchParams.politicianName && currentSearchParams.politicianName.length > 0) ||
@@ -1452,11 +1528,11 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       </Box>
 
       {/* Loading state */}
-      {isLoading && (
+      {(isLoading || isRestoringPagination) && (
         <Box sx={{ textAlign: 'center', py: 2, flexShrink: 0 }}>
           <CircularProgress size={24} sx={{ color: '#3b82f6', mb: 1 }} />
           <Typography variant="body2" color="#9ca3af">
-            Searching trades...
+            {isRestoringPagination ? 'Restoring previous results...' : 'Searching trades...'}
           </Typography>
         </Box>
       )}
@@ -1469,7 +1545,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       )}
 
       {/* Results Table */}
-      {localDisplayOptions.showResultsTable && currentResults.length > 0 && !isLoading && (
+      {localDisplayOptions.showResultsTable && currentResults.length > 0 && !isLoading && !isRestoringPagination && (
         <Box sx={{ 
           flex: 1, 
           display: 'flex', 
@@ -1942,7 +2018,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       )}
 
       {/* No Results */}
-      {!isLoading && currentResults.length === 0 && !error && (
+      {!isLoading && !isRestoringPagination && currentResults.length === 0 && !error && (
         <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
           <Typography variant="body2" color="#9ca3af">
             No trades match your criteria. Try adjusting your search parameters.

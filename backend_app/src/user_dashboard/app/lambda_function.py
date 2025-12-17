@@ -223,6 +223,8 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
             return create_response(400, {"error": "Invalid dashboard configuration structure"})
         
         # Update the user profile
+        # Note: All tile properties (including paginationState, searchParams, filterSettings, etc.) 
+        # are preserved and saved to database. Only results and lastUpdated are filtered out on frontend.
         table.update_item(
             Key={'user_id': user_id},
             UpdateExpression='SET dashboard_config = :config, updated_at = :updated',
@@ -632,7 +634,12 @@ def handle_remove_tile(user_id: str, tile_id: str) -> Dict:
 # Helper functions
 
 def cleanup_old_data_structure(config: Dict) -> Dict:
-    """Clean up old data structure by removing dashboards field and ensuring tabs have tiles"""
+    """Clean up old data structure by removing dashboards field and ensuring tabs have tiles
+    
+    Note: This function only removes the old 'dashboards' field and ensures structure.
+    All tile properties (including paginationState, searchParams, filterSettings, etc.) 
+    are preserved and not filtered out.
+    """
     cleaned_config = config.copy()
     
     # Remove old dashboards field if it exists
@@ -646,6 +653,7 @@ def cleanup_old_data_structure(config: Dict) -> Dict:
         cleaned_config['tabs'] = []
     
     # Ensure all tabs have tiles array
+    # Note: All tile properties are preserved - we only ensure the array exists
     for tab in cleaned_config.get('tabs', []):
         if 'tiles' not in tab:
             tab['tiles'] = []

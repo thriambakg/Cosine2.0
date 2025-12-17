@@ -1374,6 +1374,7 @@ const UnifiedDashboardPage: React.FC = () => {
     
     // Use a function-based approach to get CURRENT tiles from state
     // This ensures we always work with the latest data, not stale closures
+    // Note: All settings (including paginationState) are persisted to database via updateTabTiles -> debouncedSaveToDatabase
     updateTabTiles(activeTabId, (currentTiles: any[]) => {
       const updatedTiles = currentTiles.map((tile: any) => 
         tile.id === id ? { ...tile, ...settings } : tile

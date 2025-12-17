@@ -43,7 +43,6 @@ import {
 } from '@mui/icons-material';
 import { 
   congressBillsSearchAPI, 
-  congressBillsAutocompleteAPI,
   CongressBillsSearchFilters,
   CongressBill 
 } from '../../services/api';
@@ -114,6 +113,11 @@ interface CongressBillsSearchTileProps {
     maxResults: number;
     compactView: boolean;
   };
+  paginationState?: {
+    totalResultsLoaded: number;
+    lastEvaluatedKeys: any[];
+    hasMore: boolean;
+  };
   autoRefresh?: boolean;
   isPinned?: boolean;
 }
@@ -145,6 +149,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
     bill_number: undefined,
   },
   filterSettings: initialFilterSettings,
+  paginationState: initialPaginationState,
   results = [],
   displayOptions = {
     showBillTitle: true,
@@ -165,6 +170,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   autoRefresh = false,
   isPinned = false,
 }) => {
+  // Alias paginationState for consistency
+  const paginationState = initialPaginationState;
   // const { user } = useAuth();
   // const { activeSessionId } = useGlobalChat();
   
@@ -189,6 +196,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
+  const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
+  const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(false);
   
   // Filter state - restore from props if available
@@ -307,8 +316,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   // Autocomplete state
   const [isPoliticianDataLoaded, setIsPoliticianDataLoaded] = useState<boolean>(false);
   const [isPolicyAreaDataLoaded, setIsPolicyAreaDataLoaded] = useState<boolean>(false);
-  const [sponsorNameSuggestions, setSponsorNameSuggestions] = useState<string[]>([]);
-  const [policyAreaSuggestions] = useState<string[]>([]);
+  const [, setSponsorNameSuggestions] = useState<string[]>([]);
   const [sponsorNameLoading, setSponsorNameLoading] = useState<boolean>(false);
   // const [policyAreaLoading, setPolicyAreaLoading] = useState<boolean>(false);
   
@@ -396,6 +404,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
     setError(null);
     setLastEvaluatedKey(null);
     setHasMore(false);
+    setLastEvaluatedKeys([]); // Clear keys on new search
     
     try {
       const filters: any = {
@@ -423,20 +432,32 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
       if (response.success && response.results) {
         console.log('📋 CongressBillsSearchTile: Retrieved', response.results.length, 'bills');
         
+        const newLastEvaluatedKey = response.last_evaluated_key || null;
         setAllResults(response.results);
         setFilteredResults(response.results);
         setHasPerformedInitialSearch(true);
         setHasMore(response.has_more || false);
-        setLastEvaluatedKey(response.last_evaluated_key || null);
+        setLastEvaluatedKey(newLastEvaluatedKey);
+        
+        // Store pagination state (only first page key for initial search)
+        const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey] : [];
+        setLastEvaluatedKeys(newLastEvaluatedKeys);
+        
+        // Persist pagination state
+        onSettingsChange(id, {
+          searchParams: currentSearchParams,
+          paginationState: {
+            totalResultsLoaded: response.results.length,
+            lastEvaluatedKeys: newLastEvaluatedKeys,
+            hasMore: response.has_more || false,
+          },
+        });
         
         // Update parent component
         onUpdate(id, {
           results: response.results,
           lastUpdated: Date.now(),
         });
-        
-        // Persist search params to backend
-        onSettingsChange(id, { searchParams: currentSearchParams });
       } else {
         console.error('📋 CongressBillsSearchTile: Search failed');
         setError('Search failed');
@@ -444,6 +465,16 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
         setFilteredResults([]);
         setHasPerformedInitialSearch(true);
         setHasMore(false);
+        setLastEvaluatedKeys([]);
+        // Clear pagination state
+        onSettingsChange(id, {
+          searchParams: currentSearchParams,
+          paginationState: {
+            totalResultsLoaded: 0,
+            lastEvaluatedKeys: [],
+            hasMore: false,
+          },
+        });
       }
     } catch (err: any) {
       console.error('📋 CongressBillsSearchTile: Search error:', err);
@@ -452,6 +483,16 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
       setFilteredResults([]);
       setHasPerformedInitialSearch(true);
       setHasMore(false);
+      setLastEvaluatedKeys([]);
+      // Clear pagination state on error
+      onSettingsChange(id, {
+        searchParams: currentSearchParams,
+        paginationState: {
+          totalResultsLoaded: 0,
+          lastEvaluatedKeys: [],
+          hasMore: false,
+        },
+      });
     } finally {
       setIsLoading(false);
     }
@@ -489,10 +530,26 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
       
       if (response.success && response.results) {
         const updatedResults = [...allResults, ...response.results];
+        const newLastEvaluatedKey = response.last_evaluated_key || null;
         setAllResults(updatedResults);
         setFilteredResults(updatedResults);
         setHasMore(response.has_more || false);
-        setLastEvaluatedKey(response.last_evaluated_key || null);
+        setLastEvaluatedKey(newLastEvaluatedKey);
+        
+        // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        const updatedKeys = newLastEvaluatedKey 
+          ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
+          : lastEvaluatedKeys;
+        setLastEvaluatedKeys(updatedKeys);
+        
+        // Persist pagination state
+        onSettingsChange(id, {
+          paginationState: {
+            totalResultsLoaded: updatedResults.length,
+            lastEvaluatedKeys: updatedKeys,
+            hasMore: response.has_more || false,
+          },
+        });
         
         onUpdate(id, {
           results: updatedResults,
@@ -502,15 +559,133 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
         console.error('📋 CongressBillsSearchTile: Load more failed');
         setError('Load more failed');
         setHasMore(false);
+        // Update pagination state to reflect no more results
+        onSettingsChange(id, {
+          paginationState: {
+            totalResultsLoaded: allResults.length,
+            lastEvaluatedKeys: lastEvaluatedKeys,
+            hasMore: false,
+          },
+        });
       }
     } catch (err: any) {
       console.error('📋 CongressBillsSearchTile: Load more error:', err);
       setError(err.message || 'An error occurred while loading more results');
       setHasMore(false);
+      // Preserve current pagination state on error
+      onSettingsChange(id, {
+        paginationState: {
+          totalResultsLoaded: allResults.length,
+          lastEvaluatedKeys: lastEvaluatedKeys,
+          hasMore: false,
+        },
+      });
     } finally {
       setIsLoadingMore(false);
     }
-  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, allResults]);
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange]);
+  
+  // Restore pagination state on mount
+  const restorePaginationState = useCallback(async () => {
+    if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
+      return;
+    }
+
+    if (paginationState.totalResultsLoaded <= (results?.length || 0)) {
+      // Already have all results, no need to restore
+      return;
+    }
+
+    console.log('🔄 CongressBillsSearchTile: Restoring pagination state', {
+      totalResultsLoaded: paginationState.totalResultsLoaded,
+      currentResults: results?.length || 0,
+      keysToLoad: paginationState.lastEvaluatedKeys.length,
+    });
+
+    setIsRestoringPagination(true);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      let currentResults = [...(results || [])];
+      let keysToLoad = [...paginationState.lastEvaluatedKeys];
+      
+      // Skip keys that were already used (if we have more results than initial page)
+      const initialPageSize = localDisplayOptions.maxResults || 50;
+      if (currentResults.length > initialPageSize) {
+        // Calculate how many pages we've already loaded
+        const pagesLoaded = Math.ceil(currentResults.length / initialPageSize);
+        keysToLoad = keysToLoad.slice(pagesLoaded - 1); // Skip already loaded keys
+      }
+
+      // Load each page sequentially until we reach totalResultsLoaded
+      while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0 && currentSearchParams) {
+        const nextKey = keysToLoad[0];
+        
+        const filters: any = {
+          ...currentSearchParams,
+        };
+        
+        Object.keys(filters).forEach((key) => {
+          const value = filters[key];
+          if (Array.isArray(value) && value.length === 0) {
+            delete filters[key];
+          }
+          if (value === '' || value === null || value === undefined) {
+            delete filters[key];
+          }
+        });
+        
+        const searchRequest = {
+          filters,
+          limit: localDisplayOptions.maxResults,
+          last_evaluated_key: nextKey,
+        };
+        
+        const response = await congressBillsSearchAPI.search(searchRequest);
+        
+        if (response.success && response.results) {
+          currentResults = [...currentResults, ...response.results];
+          keysToLoad = keysToLoad.slice(1);
+        } else {
+          // No more results or error, stop loading
+          break;
+        }
+      }
+      
+      // Update state with restored results
+      setAllResults(currentResults);
+      setFilteredResults(currentResults);
+      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
+      setHasMore(paginationState.hasMore);
+      setHasPerformedInitialSearch(true);
+      
+      // Update tile with restored results
+      onUpdate(id, {
+        results: currentResults,
+        lastUpdated: Date.now(),
+      });
+      
+      console.log('✅ CongressBillsSearchTile: Pagination state restored', {
+        restoredCount: currentResults.length,
+        targetCount: paginationState.totalResultsLoaded,
+      });
+    } catch (err) {
+      console.error('❌ CongressBillsSearchTile: Error restoring pagination state', err);
+      setError('Failed to restore previous results. Please refresh.');
+    } finally {
+      setIsRestoringPagination(false);
+      setIsLoading(false);
+    }
+  }, [paginationState, results, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate]);
+
+  // Restore pagination state on mount if needed
+  useEffect(() => {
+    if (paginationState && paginationState.totalResultsLoaded > (results?.length || 0) && !isRestoringPagination && !isLoading) {
+      restorePaginationState();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
   
   // Dynamic pagination based on tile height
   const calculateResultsPerPage = useCallback(() => {
@@ -569,7 +744,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
   
   // Restore results from props on mount (session persistence)
   useEffect(() => {
-    if (results && results.length > 0 && allResults.length === 0) {
+    if (results && results.length > 0 && allResults.length === 0 && !isRestoringPagination) {
       console.log('🔄 CongressBillsSearchTile: Restoring', results.length, 'results from session');
       setAllResults(results);
       setFilteredResults(results);
@@ -580,7 +755,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
 
   // Initial load: Fetch fresh results if none exist
   useEffect(() => {
-    if (!hasPerformedInitialSearch && filteredResults.length === 0 && !isLoading) {
+    if (!hasPerformedInitialSearch && filteredResults.length === 0 && !isLoading && !isRestoringPagination) {
       const hasSearchCriteria = 
         (currentSearchParams.bill_title && currentSearchParams.bill_title.length > 0) ||
         (currentSearchParams.bill_type && currentSearchParams.bill_type.length > 0) ||
@@ -1046,11 +1221,11 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
       </Box>
 
       {/* Loading state */}
-      {isLoading && (
+      {(isLoading || isRestoringPagination) && (
         <Box sx={{ textAlign: 'center', py: 2, flexShrink: 0 }}>
           <CircularProgress size={24} sx={{ color: '#3b82f6', mb: 1 }} />
           <Typography variant="body2" color="#9ca3af">
-            Searching bills...
+            {isRestoringPagination ? 'Restoring previous results...' : 'Searching bills...'}
           </Typography>
         </Box>
       )}
@@ -1063,7 +1238,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
       )}
 
       {/* Results Table */}
-      {localDisplayOptions.showResultsTable && filteredResults.length > 0 && !isLoading && (
+      {localDisplayOptions.showResultsTable && filteredResults.length > 0 && !isLoading && !isRestoringPagination && (
         <Box sx={{ 
           flex: 1, 
           display: 'flex', 
@@ -1327,7 +1502,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
       )}
 
       {/* Empty state */}
-      {filteredResults.length === 0 && !isLoading && (
+      {filteredResults.length === 0 && !isLoading && !isRestoringPagination && (
         <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
           <Typography variant="body2" color="#9ca3af">
             No results. Click the search icon to configure search parameters.
@@ -1412,7 +1587,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = memo(({
                 setCurrentSearchParams((prev) => ({ ...prev, bill_title: titles }));
               }}
               suggestions={[]}
-              onSearch={(query: string) => {
+              onSearch={(_query: string) => {
                 // Note: MultiSelectField expects synchronous function, but autocomplete API is async
                 // For now, return empty array - autocomplete functionality can be added later
                 // TODO: Implement state-based autocomplete suggestions or update MultiSelectField to support async

@@ -87,6 +87,8 @@ export const useTabManagement = ({
           isPinned: tab.isPinned || false,
           tiles: (tab.tiles || []).map((tile: any) => {
             // Remove results and lastUpdated from tile data before saving to database
+            // These are session-only and should not be persisted to database
+            // Note: paginationState is preserved and will be saved to database for permanent persistence
             const { results, lastUpdated, ...tileConfig } = tile;
             return tileConfig;
           }),
@@ -192,7 +194,9 @@ export const useTabManagement = ({
                 name: tab.name,
                 color: tab.color,
                 isPinned: tab.isPinned || false,
-                tiles: tab.tiles || [],
+                // Preserve all tile properties including paginationState, searchParams, filterSettings, etc.
+            // Only results and lastUpdated are filtered out (session-only data)
+            tiles: tab.tiles || [],
                 layout: tab.layout || 'grid',
                 created_at: tab.created_at,
                 updated_at: tab.updated_at
@@ -783,6 +787,8 @@ export const useTabManagement = ({
             name: tab.name,
             color: tab.color || '#3b82f6',
             isPinned: tab.isPinned || false,
+            // Preserve all tile properties including paginationState, searchParams, filterSettings, etc.
+            // Only results and lastUpdated are filtered out (session-only data)
             tiles: tab.tiles || [],
             layout: tab.layout || 'grid',
             created_at: tab.created_at || new Date().toISOString(),
