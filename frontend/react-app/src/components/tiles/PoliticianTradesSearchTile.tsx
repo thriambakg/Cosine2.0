@@ -141,6 +141,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   autoRefresh = false,
   isPinned = false,
 }) => {
+  // Alias paginationState for consistency
+  const paginationState = initialPaginationState;
+  
   const { user } = useAuth();
   const { activeSessionId } = useGlobalChat();
   
@@ -184,7 +187,8 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>(results);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<{ transactionDate?: number; tradeId?: string } | null>(null);
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
-  const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
+  const [isRestoringPagination] = useState<boolean>(false);
+  // Note: setIsRestoringPagination will be used when restorePaginationState is implemented
   const [hasMore, setHasMore] = useState<boolean>(false);
   // Ensure defaults are set
   const defaultDisplayOptions = {

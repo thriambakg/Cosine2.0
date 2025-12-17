@@ -138,6 +138,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
   autoRefresh = false,
   isPinned = false,
 }) => {
+  // Alias paginationState for consistency
+  const paginationState = initialPaginationState;
   const { user } = useAuth();
   const { activeSessionId } = useGlobalChat();
   
@@ -208,7 +210,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
   });
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
-  const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
+  const [isRestoringPagination] = useState<boolean>(false);
+  // Note: setIsRestoringPagination will be used when restorePaginationState is implemented
   const [hasMore, setHasMore] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(`newsTile_hasMore_${id}`);

@@ -84,6 +84,11 @@ export interface UnifiedTile {
   displayOptions: {
     [key: string]: any; // Flexible display options for different tile types
   };
+  paginationState?: { // For search tiles - pagination state persistence
+    totalResultsLoaded: number;
+    lastEvaluatedKeys: any[];
+    hasMore: boolean;
+  };
   autoRefresh: boolean;
   isPinned: boolean;
   size: { width: number; height: number }; // Legacy pixel-based size
