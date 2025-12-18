@@ -391,9 +391,9 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
             # Build conditions for codes
             code_conditions = []
             if codes:
-        if len(codes) == 1:
+                if len(codes) == 1:
                     code_conditions.append(Attr('awarding_agency_code').eq(codes[0]))
-        else:
+                else:
                     code_conditions.append(Attr('awarding_agency_code').is_in(codes))
             
             # Build conditions for names (use contains for partial matching, like recipient_name)
@@ -436,6 +436,40 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
                         combined = combined | cond
                     conditions.append(combined)
     
+    # Handle awarding_agency_name directly (when not using awarding_agency_code)
+    if filters.get('awarding_agency_name') and not filters.get('awarding_agency_code'):
+        values = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
+        # Filter out empty strings
+        values = [v for v in values if v and str(v).strip()]
+        if values:
+            name_conditions = []
+            for name in values:
+                name_str = str(name).strip()
+                if name_str:
+                    # Try both original case and lowercase for case-insensitive matching
+                    variations = [name_str]
+                    if name_str.lower() != name_str:
+                        variations.append(name_str.lower())
+                    
+                    # Create OR condition for variations
+                    if len(variations) == 1:
+                        name_conditions.append(Attr('awarding_agency_name').contains(variations[0]))
+                    else:
+                        combined = Attr('awarding_agency_name').contains(variations[0])
+                        for var in variations[1:]:
+                            combined = combined | Attr('awarding_agency_name').contains(var)
+                        name_conditions.append(combined)
+            
+            if name_conditions:
+                if len(name_conditions) == 1:
+                    conditions.extend(name_conditions)
+                else:
+                    # Multiple names: combine with OR
+                    combined = name_conditions[0]
+                    for cond in name_conditions[1:]:
+                        combined = combined | cond
+                    conditions.append(combined)
+    
     if filters.get('funding_agency_code'):
         values = filters['funding_agency_code'] if isinstance(filters['funding_agency_code'], list) else [filters['funding_agency_code']]
         # Filter out empty strings
@@ -451,9 +485,9 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
             # Build conditions for codes
             code_conditions = []
             if codes:
-        if len(codes) == 1:
+                if len(codes) == 1:
                     code_conditions.append(Attr('funding_agency_code').eq(codes[0]))
-        else:
+                else:
                     code_conditions.append(Attr('funding_agency_code').is_in(codes))
             
             # Build conditions for names (use contains for partial matching, like recipient_name)
@@ -470,7 +504,7 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
                         # Create OR condition for variations
                         if len(variations) == 1:
                             name_conditions.append(Attr('funding_agency_name').contains(variations[0]))
-        else:
+                        else:
                             combined = Attr('funding_agency_name').contains(variations[0])
                             for var in variations[1:]:
                                 combined = combined | Attr('funding_agency_name').contains(var)
@@ -1371,7 +1405,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         # Scan more items to increase chances of finding matches after filtering
         # Use a multiplier to scan more items (e.g., scan 10x the limit to find matches)
         scan_limit = max(limit * 10, 1000)  # Scan at least 10x the limit, minimum 1000 items
-    params = {
+        params = {
             'Limit': scan_limit
         }
         logger.info(f"Using scan with Limit={scan_limit} (result limit={limit}) to find matches")
@@ -1426,7 +1460,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                 # If range_key_value is None and no filter matches, don't add range key condition
             else:
                 # Default to equals
-            params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).eq(range_key_value)
+                params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key(range_key_name).eq(range_key_value)
         
         # For KEYS_ONLY GSIs, we cannot use FilterExpression on non-key attributes
         # All filtering will be done after fetching full items with BatchGetItem
@@ -1450,7 +1484,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                         range_key_name = key_condition['range_key'][0]
                         has_range_key = range_key_name in last_evaluated_key
                         if has_hash_key and has_range_key:
-            params['ExclusiveStartKey'] = last_evaluated_key
+                            params['ExclusiveStartKey'] = last_evaluated_key
                         else:
                             logger.warning(f"last_evaluated_key structure doesn't match GSI {index_name} (hash_key={hash_key_name}, range_key={range_key_name}), ignoring pagination")
                     else:
@@ -1608,11 +1642,15 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         
         logger.info(f"Fetched {len(items)} full award item(s) from main table using BatchGetItem")
     
-    # Apply filters in Python after fetching full items (for KEYS_ONLY GSI queries)
-    # This is necessary because KEYS_ONLY GSIs don't project non-key attributes,
-    # so FilterExpression can't be used in the GSI query
-    if method == 'query' and items and filter_filters:
-        logger.info(f"Applying filters in Python to {len(items)} items (KEYS_ONLY GSI doesn't support FilterExpression)")
+    # Apply filters in Python after fetching full items
+    # This is necessary for:
+    # 1. KEYS_ONLY GSI queries (FilterExpression can't be used on non-key attributes)
+    # 2. Scans with filters that aren't supported in FilterExpression (like awarding_agency_name)
+    if items and filter_filters:
+        if method == 'query':
+            logger.info(f"Applying filters in Python to {len(items)} items (KEYS_ONLY GSI doesn't support FilterExpression)")
+        elif method == 'scan':
+            logger.info(f"Applying filters in Python to {len(items)} items from scan (some filters like awarding_agency_name not in FilterExpression)")
         logger.debug(f"Filter criteria: {json.dumps(filter_filters, default=str)}")
         filtered_items = []
         filter_failures = {}
@@ -1631,12 +1669,12 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                     }
                 # Only log first few failures to avoid spam
                 if len(filter_failures) <= 3:
-                    logger.debug(f"Item {award_id} filtered out: recipient_name='{item.get('recipient_name')}', recipient_name_normalized='{item.get('recipient_name_normalized')}', awarding_agency_code='{item.get('awarding_agency_code')}'")
+                    logger.debug(f"Item {award_id} filtered out: recipient_name='{item.get('recipient_name')}', recipient_name_normalized='{item.get('recipient_name_normalized')}', awarding_agency_code='{item.get('awarding_agency_code')}', awarding_agency_name='{item.get('awarding_agency_name')}'")
         
         if len(filtered_items) == 0 and len(items) > 0:
             logger.warning(f"All {len(items)} items were filtered out. Sample filtered items: {json.dumps(list(filter_failures.values())[:3], default=str)}")
         
-        # If we don't have enough filtered results, continue querying with pagination
+        # If we don't have enough filtered results, continue querying with pagination (only for queries, not scans)
         if len(filtered_items) < limit and method == 'query' and index_name and 'initial_last_eval_key' in locals() and initial_last_eval_key:
             logger.info(f"Only found {len(filtered_items)} matching items, need {limit}. Continuing query with pagination...")
             max_pagination_rounds = 10  # Limit pagination to avoid infinite loops
@@ -1802,7 +1840,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                                 'is_idv_child': child_item.get('is_idv_child', False),
                             }
                             child_awards_details.append(child_summary)
-        else:
+                        else:
                             logger.warning(f"Child award {child_id} not found in DynamoDB")
                     except Exception as e:
                         logger.error(f"Error fetching child award {child_id}: {str(e)}")

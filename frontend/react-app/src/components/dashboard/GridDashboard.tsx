@@ -292,6 +292,23 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
   // Handle drag start
   const handleDragStart = useCallback((tileId: string, event: React.MouseEvent) => {
+    const target = event.target as HTMLElement;
+    
+    // Check if the click is on an interactive element
+    const isInteractiveElement = (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'BUTTON' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable ||
+      target.closest('input, textarea, button, select, [contenteditable="true"], .MuiDialog-root, .MuiDialog-container, .MuiAutocomplete-popper, .MuiMenu-root, .MuiPopover-root, .MuiTooltip-popper')
+    );
+    
+    // Don't start drag if clicking on interactive elements
+    if (isInteractiveElement) {
+      return;
+    }
+    
     event.preventDefault();
     const tile = tiles.find(t => t.id === tileId);
     if (!tile) {
