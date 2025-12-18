@@ -167,40 +167,46 @@ resource "aws_iam_policy" "sqs_read_policy" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sqs:ReceiveMessage",
-          "sqs:DeleteMessage",
-          "sqs:GetQueueAttributes",
-          "sqs:ChangeMessageVisibility"
-        ]
-        Resource = [
-          aws_sqs_queue.main.arn
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = var.sqs_enable_dlq ? [
-          aws_sqs_queue.dlq[0].arn
-        ] : []
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt",
-          "kms:GenerateDataKey",
-          "kms:DescribeKey"
-        ]
-        Resource = var.kms_key_id != null ? [
-          "arn:aws:kms:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:key/${var.kms_key_id}"
-        ] : []
-      }
-    ]
+    Statement = concat(
+      [
+        {
+          Effect = "Allow"
+          Action = [
+            "sqs:ReceiveMessage",
+            "sqs:DeleteMessage",
+            "sqs:GetQueueAttributes",
+            "sqs:ChangeMessageVisibility"
+          ]
+          Resource = [
+            aws_sqs_queue.main.arn
+          ]
+        }
+      ],
+      var.sqs_enable_dlq ? [
+        {
+          Effect = "Allow"
+          Action = [
+            "sqs:GetQueueAttributes"
+          ]
+          Resource = [
+            aws_sqs_queue.dlq[0].arn
+          ]
+        }
+      ] : [],
+      var.kms_key_id != null ? [
+        {
+          Effect = "Allow"
+          Action = [
+            "kms:Decrypt",
+            "kms:GenerateDataKey",
+            "kms:DescribeKey"
+          ]
+          Resource = [
+            "arn:aws:kms:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:key/${var.kms_key_id}"
+          ]
+        }
+      ] : []
+    )
   })
 
   tags = var.tags
@@ -313,29 +319,33 @@ resource "aws_iam_policy" "wrapper_sqs_send_policy" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sqs:SendMessage",
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = [
-          aws_sqs_queue.main.arn
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt",
-          "kms:GenerateDataKey",
-          "kms:DescribeKey"
-        ]
-        Resource = var.kms_key_id != null ? [
-          "arn:aws:kms:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:key/${var.kms_key_id}"
-        ] : []
-      }
-    ]
+    Statement = concat(
+      [
+        {
+          Effect = "Allow"
+          Action = [
+            "sqs:SendMessage",
+            "sqs:GetQueueAttributes"
+          ]
+          Resource = [
+            aws_sqs_queue.main.arn
+          ]
+        }
+      ],
+      var.kms_key_id != null ? [
+        {
+          Effect = "Allow"
+          Action = [
+            "kms:Decrypt",
+            "kms:GenerateDataKey",
+            "kms:DescribeKey"
+          ]
+          Resource = [
+            "arn:aws:kms:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:key/${var.kms_key_id}"
+          ]
+        }
+      ] : []
+    )
   })
 
   tags = var.tags
