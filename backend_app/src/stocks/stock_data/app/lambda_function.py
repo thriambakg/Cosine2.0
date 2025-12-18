@@ -15,6 +15,9 @@ import boto3
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# AWS clients
+sns_client = boto3.client('sns')
+
 # Rate limiting configuration - increased to avoid 429 errors
 RATE_LIMIT_DELAY = 5.0  # Minimum delay between requests (increased from 2.0)
 MAX_RETRIES = 5  # Increased retries
@@ -155,21 +158,9 @@ def make_yahoo_request_with_retry(url, headers, max_retries=MAX_RETRIES):
     
     raise Exception(f"All {max_retries} attempts failed")
 
-def lambda_handler(event, context):
+def process_stock_data_request(event, context):
     """
-    AWS Lambda handler to fetch stock statistics in crypto stats format for tile compatibility.
-    
-    Expected event format:
-    {
-        "ticker": "AAPL",
-        "period": "1y"  # optional, defaults to "1y"
-    }
-    
-    Returns stock statistics matching crypto stats format:
-    - Current price and 24h change
-    - 7-day and annual returns
-    - Volatility
-    - Chart data for visualization
+    Process stock data request (extracted from lambda_handler for reuse)
     """
     try:
         print(f"🚀 === LAMBDA HANDLER START (ENHANCED LOGGING VERSION) ===")
@@ -299,6 +290,107 @@ def lambda_handler(event, context):
                 'ticker': event.get('ticker', 'unknown') if isinstance(event, dict) else 'unknown'
             })
         }
+
+
+def lambda_handler(event, context):
+    """
+    AWS Lambda handler to fetch stock statistics in crypto stats format for tile compatibility.
+    
+    Expected event format:
+    {
+        "ticker": "AAPL",
+        "period": "1y"  # optional, defaults to "1y"
+    }
+    
+    Or from SQS:
+    {
+        "Records": [
+            {
+                "body": "{\"request_id\": \"...\", \"api_gateway_event\": {...}}"
+            }
+        ]
+    }
+    
+    Returns stock statistics matching crypto stats format:
+    - Current price and 24h change
+    - 7-day and annual returns
+    - Volatility
+    - Chart data for visualization
+    """
+    completion_sns_topic = os.environ.get('STOCK_DATA_COMPLETION_SNS_TOPIC_ARN')
+    
+    # Handle SQS events (from wrapper Lambda when worker is at concurrency)
+    if 'Records' in event and isinstance(event.get('Records'), list) and len(event.get('Records', [])) > 0:
+        first_record = event['Records'][0]
+        if first_record.get('eventSource') == 'aws:sqs':
+            logger.info("📬 SQS EVENT DETECTED - Processing queued request")
+            try:
+                # Parse SQS message body
+                message_body_str = first_record.get('body', '{}')
+                message_body = json.loads(message_body_str) if isinstance(message_body_str, str) else message_body_str
+                
+                # Extract request_id and API Gateway event
+                request_id = message_body.get('request_id')
+                api_gateway_event = message_body.get('api_gateway_event', {})
+                
+                logger.info(f"📬 Processing SQS message - request_id: {request_id}")
+                
+                # Replace event with API Gateway event for processing
+                event = api_gateway_event
+                
+                # Process the request
+                try:
+                    result = process_stock_data_request(event, context)
+                    
+                    # Publish completion notification
+                    if completion_sns_topic:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'completed',
+                                'response': result
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ Error processing SQS event: {str(e)}", exc_info=True)
+                    
+                    # Publish failure notification
+                    if completion_sns_topic:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'failed',
+                                'error': str(e)
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    raise
+            except Exception as e:
+                logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({'error': f'Failed to parse SQS message: {str(e)}'})
+                }
+    
+    # Regular API Gateway or direct invocation
+    return process_stock_data_request(event, context)
+
 
 def fetch_stock_data(ticker, period="1y"):
     """

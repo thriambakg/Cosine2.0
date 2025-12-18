@@ -22,6 +22,9 @@ user_profiles_table_name = os.environ.get('USER_PROFILES_TABLE_NAME', 'cosine-us
 alerts_table = dynamodb.Table(alerts_table_name)
 user_profiles_table = dynamodb.Table(user_profiles_table_name)
 
+# AWS clients
+sns_client = boto3.client('sns')
+
 def validate_ticker_and_get_price(ticker: str) -> Dict[str, Any]:
     """
     Validate that a ticker exists and return current price information using direct HTTP requests
@@ -152,9 +155,9 @@ def validate_alert_threshold(alert_type: str, threshold: float, current_price: f
             'error': f"Error validating threshold: {str(e)}"
         }
 
-def lambda_handler(event, context):
+def process_alert_request(event, context):
     """
-    Handle stock alert operations (GET, POST, DELETE) using the new alerts table
+    Process alert request (extracted from lambda_handler for reuse)
     """
     try:
         logger.info("=== LAMBDA HANDLER STARTED ===")
@@ -192,6 +195,86 @@ def lambda_handler(event, context):
             "headers": {"Access-Control-Allow-Origin": "*"},
             "body": json.dumps({"message": "Internal server error"})
         }
+
+
+def lambda_handler(event, context):
+    """
+    Handle stock alert operations (GET, POST, DELETE) using the new alerts table
+    Supports SQS events from wrapper Lambda
+    """
+    completion_sns_topic = os.environ.get('STOCK_ALERTS_COMPLETION_SNS_TOPIC_ARN')
+    
+    # Handle SQS events (from wrapper Lambda when worker is at concurrency)
+    if 'Records' in event and isinstance(event.get('Records'), list) and len(event.get('Records', [])) > 0:
+        first_record = event['Records'][0]
+        if first_record.get('eventSource') == 'aws:sqs':
+            logger.info("📬 SQS EVENT DETECTED - Processing queued request")
+            try:
+                # Parse SQS message body
+                message_body_str = first_record.get('body', '{}')
+                message_body = json.loads(message_body_str) if isinstance(message_body_str, str) else message_body_str
+                
+                # Extract request_id and API Gateway event
+                request_id = message_body.get('request_id')
+                api_gateway_event = message_body.get('api_gateway_event', {})
+                
+                logger.info(f"📬 Processing SQS message - request_id: {request_id}")
+                
+                # Replace event with API Gateway event for processing
+                event = api_gateway_event
+                
+                # Process the request
+                try:
+                    result = process_alert_request(event, context)
+                    
+                    # Publish completion notification
+                    if completion_sns_topic:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'completed',
+                                'response': result
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ Error processing SQS event: {str(e)}", exc_info=True)
+                    
+                    # Publish failure notification
+                    if completion_sns_topic:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'failed',
+                                'error': str(e)
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    raise
+            except Exception as e:
+                logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({'error': f'Failed to parse SQS message: {str(e)}'})
+                }
+    
+    # Regular API Gateway or direct invocation
+    return process_alert_request(event, context)
 
 def handle_get_alerts(event):
     """

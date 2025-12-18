@@ -17,6 +17,9 @@ QUERY_CACHE_TABLE_NAME = os.environ.get('SEC_SEARCH_QUERY_CACHE_TABLE')
 dynamodb = boto3.resource('dynamodb') if QUERY_CACHE_TABLE_NAME else None
 query_cache_table = dynamodb.Table(QUERY_CACHE_TABLE_NAME) if dynamodb and QUERY_CACHE_TABLE_NAME else None
 
+# AWS clients
+sns_client = boto3.client('sns')
+
 
 def update_job_progress(job_id: str, progress_data: Dict[str, Any]) -> bool:
     """
@@ -202,16 +205,9 @@ def update_job_failure(job_id: str, failure_data: Dict[str, Any]) -> bool:
         return False
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def process_progress_subscriber_request(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Handle SNS event and update DynamoDB with progress
-    
-    Args:
-        event: SNS event containing progress update
-        context: Lambda context
-        
-    Returns:
-        Dict with statusCode
+    Process progress subscriber request (extracted from lambda_handler for reuse)
     """
     try:
         # SNS events come wrapped in Records
@@ -265,4 +261,91 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'statusCode': 500,
             'body': json.dumps({'error': str(e)})
         }
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Handle SNS event and update DynamoDB with progress
+    Supports SQS events from wrapper Lambda (though primarily SNS-triggered)
+    
+    Args:
+        event: SNS event containing progress update, or SQS event
+        context: Lambda context
+        
+    Returns:
+        Dict with statusCode
+    """
+    completion_sns_topic = os.environ.get('SEC_SEARCH_PROGRESS_SUBSCRIBER_COMPLETION_SNS_TOPIC_ARN')
+    
+    # Handle SQS events (from wrapper Lambda when worker is at concurrency)
+    if 'Records' in event and isinstance(event.get('Records'), list) and len(event.get('Records', [])) > 0:
+        first_record = event['Records'][0]
+        if first_record.get('eventSource') == 'aws:sqs':
+            logger.info("📬 SQS EVENT DETECTED - Processing queued request")
+            try:
+                # Parse SQS message body
+                message_body_str = first_record.get('body', '{}')
+                message_body = json.loads(message_body_str) if isinstance(message_body_str, str) else message_body_str
+                
+                # Extract request_id and API Gateway event (or SNS event)
+                request_id = message_body.get('request_id')
+                api_gateway_event = message_body.get('api_gateway_event', event)
+                
+                logger.info(f"📬 Processing SQS message - request_id: {request_id}")
+                
+                # Replace event with API Gateway event for processing
+                event = api_gateway_event
+                
+                # Process the request
+                try:
+                    result = process_progress_subscriber_request(event, context)
+                    
+                    # Publish completion notification
+                    if completion_sns_topic and request_id:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'completed',
+                                'response': result
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ Error processing SQS event: {str(e)}", exc_info=True)
+                    
+                    # Publish failure notification
+                    if completion_sns_topic and request_id:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'failed',
+                                'error': str(e)
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    raise
+            except Exception as e:
+                logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({'error': f'Failed to parse SQS message: {str(e)}'})
+                }
+    
+    # Regular SNS event or direct invocation
+    return process_progress_subscriber_request(event, context)
 

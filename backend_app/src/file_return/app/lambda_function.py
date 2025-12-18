@@ -18,6 +18,7 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3', config=boto3.session.Config(signature_version='s3v4'))
+sns_client = boto3.client('sns')
 
 # Environment variables
 S3_BUCKET = os.environ.get('S3_BUCKET')
@@ -253,9 +254,9 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             'body': json.dumps({'error': 'Internal server error'})
         }
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def process_file_return_request(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Main Lambda handler for file downloads - generates fresh presigned URLs
+    Process file return request (extracted from lambda_handler for reuse)
     """
     try:
         logger.info(f"🔍 File download request: {json.dumps(event, default=str)}")
@@ -292,3 +293,83 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'headers': get_cors_headers(),
             'body': json.dumps({'error': 'Internal server error'})
         }
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Main Lambda handler for file downloads - generates fresh presigned URLs
+    Supports SQS events from wrapper Lambda
+    """
+    completion_sns_topic = os.environ.get('FILE_RETURN_COMPLETION_SNS_TOPIC_ARN')
+    
+    # Handle SQS events (from wrapper Lambda when worker is at concurrency)
+    if 'Records' in event and isinstance(event.get('Records'), list) and len(event.get('Records', [])) > 0:
+        first_record = event['Records'][0]
+        if first_record.get('eventSource') == 'aws:sqs':
+            logger.info("📬 SQS EVENT DETECTED - Processing queued request")
+            try:
+                # Parse SQS message body
+                message_body_str = first_record.get('body', '{}')
+                message_body = json.loads(message_body_str) if isinstance(message_body_str, str) else message_body_str
+                
+                # Extract request_id and API Gateway event
+                request_id = message_body.get('request_id')
+                api_gateway_event = message_body.get('api_gateway_event', {})
+                
+                logger.info(f"📬 Processing SQS message - request_id: {request_id}")
+                
+                # Replace event with API Gateway event for processing
+                event = api_gateway_event
+                
+                # Process the request
+                try:
+                    result = process_file_return_request(event, context)
+                    
+                    # Publish completion notification
+                    if completion_sns_topic:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'completed',
+                                'response': result
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ Error processing SQS event: {str(e)}", exc_info=True)
+                    
+                    # Publish failure notification
+                    if completion_sns_topic:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'failed',
+                                'error': str(e)
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    raise
+            except Exception as e:
+                logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({'error': f'Failed to parse SQS message: {str(e)}'})
+                }
+    
+    # Regular API Gateway or direct invocation
+    return process_file_return_request(event, context)

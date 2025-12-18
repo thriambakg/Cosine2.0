@@ -22,6 +22,7 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
+sns_client = boto3.client('sns')
 
 def get_cors_headers() -> Dict[str, str]:
     """Get standard CORS headers"""
@@ -69,16 +70,9 @@ def convert_floats_to_decimal(obj):
     else:
         return obj
 
-def lambda_handler(event, context):
+def process_session_request(event, context):
     """
-    Lambda handler for session management operations
-    
-    Expected event structure:
-    {
-        "httpMethod": "GET|POST|PUT|DELETE",
-        "queryStringParameters": {"user_id": "required", "session_id": "required for specific session operations"},
-        "body": "JSON string for POST/PUT"
-    }
+    Process session request (extracted from lambda_handler for reuse)
     """
     try:
         # Parse request
@@ -556,3 +550,98 @@ def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:
             'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json_dumps_safe({'error': 'Failed to delete session'})
         }
+
+
+def lambda_handler(event, context):
+    """
+    Lambda handler for session management operations
+    
+    Expected event structure:
+    {
+        "httpMethod": "GET|POST|PUT|DELETE",
+        "queryStringParameters": {"user_id": "required", "session_id": "required for specific session operations"},
+        "body": "JSON string for POST/PUT"
+    }
+    
+    Or from SQS:
+    {
+        "Records": [
+            {
+                "body": "{\"request_id\": \"...\", \"api_gateway_event\": {...}}"
+            }
+        ]
+    }
+    """
+    completion_sns_topic = os.environ.get('SESSION_MANAGEMENT_COMPLETION_SNS_TOPIC_ARN')
+    
+    # Handle SQS events (from wrapper Lambda when worker is at concurrency)
+    if 'Records' in event and isinstance(event.get('Records'), list) and len(event.get('Records', [])) > 0:
+        first_record = event['Records'][0]
+        if first_record.get('eventSource') == 'aws:sqs':
+            logger.info("📬 SQS EVENT DETECTED - Processing queued request")
+            try:
+                # Parse SQS message body
+                message_body_str = first_record.get('body', '{}')
+                message_body = json.loads(message_body_str) if isinstance(message_body_str, str) else message_body_str
+                
+                # Extract request_id and API Gateway event
+                request_id = message_body.get('request_id')
+                api_gateway_event = message_body.get('api_gateway_event', {})
+                
+                logger.info(f"📬 Processing SQS message - request_id: {request_id}")
+                
+                # Replace event with API Gateway event for processing
+                event = api_gateway_event
+                
+                # Process the request
+                try:
+                    result = process_session_request(event, context)
+                    
+                    # Publish completion notification
+                    if completion_sns_topic:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'completed',
+                                'response': result
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ Error processing SQS event: {str(e)}", exc_info=True)
+                    
+                    # Publish failure notification
+                    if completion_sns_topic:
+                        sns_client.publish(
+                            TopicArn=completion_sns_topic,
+                            Message=json.dumps({
+                                'request_id': request_id,
+                                'status': 'failed',
+                                'error': str(e)
+                            }),
+                            MessageAttributes={
+                                'request_id': {
+                                    'DataType': 'String',
+                                    'StringValue': request_id
+                                }
+                            }
+                        )
+                    
+                    raise
+            except Exception as e:
+                logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
+                return {
+                    'statusCode': 500,
+                    'body': json_dumps_safe({'error': f'Failed to parse SQS message: {str(e)}'})
+                }
+    
+    # Regular API Gateway or direct invocation
+    return process_session_request(event, context)
