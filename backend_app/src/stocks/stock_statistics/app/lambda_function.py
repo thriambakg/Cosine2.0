@@ -913,16 +913,56 @@ def lambda_handler(event, context):
         
     except Exception as e:
         logger.error(f"Lambda handler error: {e}")
+        
+        error_response = {
+            'error': 'Internal server error',
+            'details': str(e)
+        }
+        
+        # If this was from SQS, publish failure notification
+        if is_sqs_event and job_id and completion_sns_topic:
+            try:
+                sns_client = boto3.client('sns')
+                failure_message = {
+                    'request_id': request_id,
+                    'job_id': job_id,
+                    'statusCode': 500,
+                    'body': error_response,
+                    'status': 'failed'
+                }
+                sns_client.publish(
+                    TopicArn=completion_sns_topic,
+                    Message=json.dumps(failure_message, default=str),
+                    Subject=f'Portfolio Analysis Failure: {job_id}',
+                    MessageAttributes={
+                        'request_id': {
+                            'DataType': 'String',
+                            'StringValue': request_id or ''
+                        },
+                        'job_id': {
+                            'DataType': 'String',
+                            'StringValue': job_id
+                        }
+                    }
+                )
+                logger.info(f"Published failure notification for job {job_id}")
+            except Exception as e2:
+                logger.error(f"Error publishing failure notification: {e2}", exc_info=True)
+        
+        # For SQS events, return simple acknowledgment (error sent via SNS)
+        if is_sqs_event:
+            return {
+                'statusCode': 500,
+                'body': json.dumps({'message': 'Analysis failed', 'job_id': job_id, 'error': str(e)})
+            }
+        
         return {
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            'body': json.dumps({
-                'error': 'Internal server error',
-                'details': str(e)
-            })
+            'body': json.dumps(error_response)
         }
 
 def lambda_function(portfolio_tuples, period="1y"):

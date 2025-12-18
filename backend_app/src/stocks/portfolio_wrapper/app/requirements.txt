@@ -1,3 +1,0 @@
-# Portfolio Wrapper Lambda dependencies
-# Note: boto3 is provided by the core layer
-# No additional dependencies required for this wrapper
