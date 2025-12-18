@@ -247,6 +247,10 @@ locals {
 
   # Wrapper function name
   wrapper_function_name = "${var.function_name}-wrapper"
+
+  # IAM role names max 64 chars: use -wrapper-role suffix (saves 8 chars vs -execution-role)
+  # If still too long, truncate function name
+  wrapper_role_name = length("${local.wrapper_function_name}-wrapper-role") > 64 ? "${substr(local.wrapper_function_name, 0, 64 - 13)}-wr-role" : "${local.wrapper_function_name}-wrapper-role"
 }
 
 # SNS Topic for completion notifications
@@ -284,7 +288,9 @@ data "archive_file" "wrapper_lambda_zip" {
 resource "aws_iam_role" "wrapper_execution_role" {
   count = var.enable_wrapper_lambda ? 1 : 0
 
-  name = "${local.wrapper_function_name}-execution-role"
+  # Use shorter name to stay within 64 character limit
+  # IAM role names max 64 chars: use -wrapper-role suffix (saves 8 chars vs -execution-role)
+  name = local.wrapper_role_name
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
