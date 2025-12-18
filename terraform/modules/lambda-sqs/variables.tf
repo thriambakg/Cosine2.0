@@ -117,6 +117,18 @@ variable "sqs_max_receive_count" {
   default     = null
 }
 
+variable "sqs_dlq_message_retention_seconds" {
+  description = "Message retention period in seconds for the Dead Letter Queue (defaults to main queue retention)"
+  type        = number
+  default     = null
+}
+
+variable "sqs_dlq_visibility_timeout_seconds" {
+  description = "Visibility timeout in seconds for the Dead Letter Queue (defaults to 30 seconds)"
+  type        = number
+  default     = null
+}
+
 variable "sqs_content_based_deduplication" {
   description = "Enable content-based deduplication for FIFO queues"
   type        = bool
@@ -127,6 +139,18 @@ variable "sqs_batch_size" {
   description = "Batch size for SQS event source mapping (defaults to 1)"
   type        = number
   default     = null
+}
+
+variable "sqs_max_batching_window_seconds" {
+  description = "Maximum batching window in seconds for SQS event source mapping (defaults to 0)"
+  type        = number
+  default     = null
+}
+
+variable "sqs_function_response_types" {
+  description = "Function response types for SQS event source mapping (for partial batch failures)"
+  type        = list(string)
+  default     = []
 }
 
 variable "sqs_enable_event_source_mapping" {
