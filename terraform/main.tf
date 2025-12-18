@@ -271,32 +271,36 @@ module "api_gateway" {
       http_method             = "GET"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.user_dashboard_lambda.function_arn
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     dashboard_put = {
       resource_key            = "dashboard"
       http_method             = "PUT"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.user_dashboard_lambda.function_arn
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     dashboard_post = {
       resource_key            = "dashboard"
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.user_dashboard_lambda.function_arn
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     dashboard_delete = {
       resource_key            = "dashboard"
       http_method             = "DELETE"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.user_dashboard_lambda.function_arn
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     # Dashboard Reorder method
     dashboard_reorder_put = {
@@ -304,8 +308,9 @@ module "api_gateway" {
       http_method             = "PUT"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.user_dashboard_lambda.function_arn
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     # Dashboard Tiles methods
     tiles_post = {
@@ -313,24 +318,27 @@ module "api_gateway" {
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.user_dashboard_lambda.function_arn
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     tiles_delete = {
       resource_key            = "dashboard_tiles"
       http_method             = "DELETE"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.user_dashboard_lambda.function_arn
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     tiles_put = {
       resource_key            = "dashboard_tiles"
       http_method             = "PUT"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.user_dashboard_lambda.function_arn
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     # Session Management methods
     sessions_get = {
@@ -527,43 +535,43 @@ module "api_gateway" {
       resource_path = "portfolio"
     }
     dashboard_get = {
-      function_arn  = module.user_dashboard_lambda.function_arn
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "GET"
       resource_path = "dashboard"
     }
     dashboard_post = {
-      function_arn  = module.user_dashboard_lambda.function_arn
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "POST"
       resource_path = "dashboard"
     }
     dashboard_put = {
-      function_arn  = module.user_dashboard_lambda.function_arn
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
       resource_path = "dashboard"
     }
     dashboard_delete = {
-      function_arn  = module.user_dashboard_lambda.function_arn
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "DELETE"
       resource_path = "dashboard"
     }
     dashboard_reorder_put = {
-      function_arn  = module.user_dashboard_lambda.function_arn
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
       resource_path = "dashboard-reorder"
     }
 
     tiles_post = {
-      function_arn  = module.user_dashboard_lambda.function_arn
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "POST"
       resource_path = "dashboard-tiles"
     }
     tiles_delete = {
-      function_arn  = module.user_dashboard_lambda.function_arn
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "DELETE"
       resource_path = "dashboard-tiles"
     }
     tiles_put = {
-      function_arn  = module.user_dashboard_lambda.function_arn
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
       resource_path = "dashboard-tiles"
     }
@@ -1030,14 +1038,15 @@ module "crypto_stats_lambda" {
 }
 
 # User Dashboard Lambda Function
+# User Dashboard Lambda Function (with SQS and wrapper support)
 module "user_dashboard_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-user-dashboard-${var.environment}"
   description   = "Lambda function for user dashboard management"
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.11"
-  timeout       = 30
+  timeout       = 60 # 1 minute for dashboard operations
   memory_size   = 256
 
   # Source directory
@@ -1057,6 +1066,24 @@ module "user_dashboard_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda = true
+  wrapper_timeout       = 60 # 1 minute to match worker timeout
+  sns_topic_name        = "${var.project_name}-user-dashboard-completion-${var.environment}"
+  # Use DynamoDB table for response correlation (optional, can use SNS message attributes instead)
+  response_table_name = null # Not needed for synchronous responses
+  # Environment variable name for completion SNS topic in worker Lambda
+  completion_sns_env_var_name = "USER_DASHBOARD_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # SQS configuration
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 20 # Higher concurrency for dashboard operations
 
   tags = var.common_tags
 }

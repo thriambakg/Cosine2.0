@@ -43,6 +43,10 @@ def lambda_handler(event, context):
     """
     Lambda handler for user dashboard operations with clean data structure
     
+    Handles both:
+    1. API Gateway events (direct invocation)
+    2. SQS events (from wrapper Lambda when worker is at concurrency)
+    
     Supported operations:
     - GET /dashboard: Retrieve user's dashboard configuration
     - PUT /dashboard: Update user's entire dashboard configuration
@@ -52,7 +56,53 @@ def lambda_handler(event, context):
     - POST /dashboard/tiles: Add a new tile to dashboard
     - PUT /dashboard/tiles/{tileId}: Update a specific tile
     - DELETE /dashboard/tiles/{tileId}: Remove a specific tile
+    
+    Expected event structure (API Gateway AWS_PROXY):
+    {
+        "httpMethod": "GET|POST|PUT|DELETE",
+        "path": "/dashboard",
+        "body": "..."
+    }
+    
+    Expected event structure (SQS):
+    {
+        "Records": [{
+            "eventSource": "aws:sqs",
+            "body": "{\"request_id\": \"...\", \"job_id\": \"...\", \"api_gateway_event\": {...}}"
+        }]
+    }
     """
+    # Track if this is from SQS (for completion notification)
+    is_sqs_event = False
+    job_id = None
+    request_id = None
+    completion_sns_topic = os.environ.get('USER_DASHBOARD_COMPLETION_SNS_TOPIC_ARN')
+    
+    # Handle SQS events (from wrapper Lambda when worker is at concurrency)
+    if 'Records' in event and isinstance(event.get('Records'), list) and len(event.get('Records', [])) > 0:
+        first_record = event['Records'][0]
+        if first_record.get('eventSource') == 'aws:sqs':
+            is_sqs_event = True
+            logger.info("📬 SQS EVENT DETECTED - Processing queued request")
+            try:
+                # Parse SQS message body
+                message_body_str = first_record.get('body', '{}')
+                message_body = json.loads(message_body_str) if isinstance(message_body_str, str) else message_body_str
+                
+                # Extract job_id, request_id, and API Gateway event
+                job_id = message_body.get('job_id')
+                request_id = message_body.get('request_id')
+                api_gateway_event = message_body.get('api_gateway_event', {})
+                
+                logger.info(f"📬 Processing SQS message - job_id: {job_id}, request_id: {request_id}")
+                
+                # Replace event with API Gateway event for processing
+                event = api_gateway_event
+                
+            except Exception as e:
+                logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
+                return create_response(500, {'error': f'Failed to parse SQS message: {str(e)}'})
+    
     try:
         # Parse the HTTP method and path
         http_method = event.get('httpMethod', 'GET')
@@ -72,14 +122,88 @@ def lambda_handler(event, context):
         
         # Route to appropriate handler based on path and method
         if path.startswith('/tiles'):
-            return handle_tiles_operations(user_id, http_method, path, event)
+            result = handle_tiles_operations(user_id, http_method, path, event)
         elif path.startswith('/reorder'):
-            return handle_reorder_components(user_id, event)
+            result = handle_reorder_components(user_id, event)
         else:
-            return handle_dashboard_operations(user_id, http_method, path, event)
+            result = handle_dashboard_operations(user_id, http_method, path, event)
+        
+        # If this was from SQS, publish completion notification
+        if is_sqs_event and job_id and completion_sns_topic:
+            try:
+                sns_client = boto3.client('sns')
+                # Extract body from result for SNS message
+                result_body = json.loads(result.get('body', '{}')) if isinstance(result.get('body'), str) else result.get('body', {})
+                completion_message = {
+                    'request_id': request_id,
+                    'job_id': job_id,
+                    'statusCode': result.get('statusCode', 200),
+                    'body': result_body,
+                    'status': 'completed'
+                }
+                sns_client.publish(
+                    TopicArn=completion_sns_topic,
+                    Message=json.dumps(completion_message, default=str),
+                    Subject=f'User Dashboard Completion: {job_id}',
+                    MessageAttributes={
+                        'request_id': {
+                            'DataType': 'String',
+                            'StringValue': request_id
+                        },
+                        'job_id': {
+                            'DataType': 'String',
+                            'StringValue': job_id
+                        }
+                    }
+                )
+                logger.info(f"Published completion notification for job {job_id}")
+            except Exception as e:
+                logger.error(f"Error publishing completion notification: {e}", exc_info=True)
+        
+        # For SQS events, return simple acknowledgment (results sent via SNS)
+        if is_sqs_event:
+            return create_response(200, {'message': 'Processed from SQS', 'job_id': job_id})
+        
+        # For direct API Gateway calls, return full response
+        return result
             
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
+        
+        # If this was from SQS, publish failure notification
+        if is_sqs_event and job_id and completion_sns_topic:
+            try:
+                sns_client = boto3.client('sns')
+                failure_message = {
+                    'request_id': request_id,
+                    'job_id': job_id,
+                    'statusCode': 500,
+                    'body': {'error': 'Internal server error'},
+                    'status': 'failed'
+                }
+                sns_client.publish(
+                    TopicArn=completion_sns_topic,
+                    Message=json.dumps(failure_message, default=str),
+                    Subject=f'User Dashboard Failure: {job_id}',
+                    MessageAttributes={
+                        'request_id': {
+                            'DataType': 'String',
+                            'StringValue': request_id
+                        },
+                        'job_id': {
+                            'DataType': 'String',
+                            'StringValue': job_id
+                        }
+                    }
+                )
+                logger.info(f"Published failure notification for job {job_id}")
+            except Exception as e2:
+                logger.error(f"Error publishing failure notification: {e2}", exc_info=True)
+        
+        # For SQS events, return simple acknowledgment (error sent via SNS)
+        if is_sqs_event:
+            return create_response(500, {'message': 'Request failed', 'job_id': job_id, 'error': str(e)})
+        
         return create_response(500, {"error": "Internal server error"})
 
 def extract_user_id(event: Dict) -> Optional[str]:
