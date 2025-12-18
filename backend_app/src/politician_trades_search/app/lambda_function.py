@@ -1431,10 +1431,22 @@ def lambda_handler(event, context):
     """
     Lambda handler for politician trades search
     
+    Handles both:
+    1. API Gateway events (direct invocation)
+    2. SQS events (from wrapper Lambda when worker is at concurrency)
+    
     Expected event structure (API Gateway AWS_PROXY):
     {
         "httpMethod": "POST",
         "body": "{\"politicianName\": \"...\", \"dateFrom\": \"2024-01-01\", ...}"
+    }
+    
+    Expected event structure (SQS):
+    {
+        "Records": [{
+            "eventSource": "aws:sqs",
+            "body": "{\"request_id\": \"...\", \"job_id\": \"...\", \"api_gateway_event\": {...}}"
+        }]
     }
     """
     # CORS headers
@@ -1445,6 +1457,40 @@ def lambda_handler(event, context):
         'Access-Control-Allow-Methods': 'POST,OPTIONS,GET',
         'Access-Control-Allow-Credentials': 'true'
     }
+    
+    # Track if this is from SQS (for completion notification)
+    is_sqs_event = False
+    job_id = None
+    request_id = None
+    completion_sns_topic = os.environ.get('POLITICIAN_TRADES_COMPLETION_SNS_TOPIC_ARN')
+    
+    # Handle SQS events (from wrapper Lambda when worker is at concurrency)
+    if 'Records' in event and isinstance(event.get('Records'), list) and len(event.get('Records', [])) > 0:
+        first_record = event['Records'][0]
+        if first_record.get('eventSource') == 'aws:sqs':
+            is_sqs_event = True
+            logger.info("📬 SQS EVENT DETECTED - Processing queued request")
+            try:
+                # Parse SQS message body
+                message_body_str = first_record.get('body', '{}')
+                message_body = json.loads(message_body_str) if isinstance(message_body_str, str) else message_body_str
+                
+                # Extract job_id, request_id, and API Gateway event
+                job_id = message_body.get('job_id')
+                request_id = message_body.get('request_id')
+                api_gateway_event = message_body.get('api_gateway_event', {})
+                
+                logger.info(f"📬 Processing SQS message - job_id: {job_id}, request_id: {request_id}")
+                
+                # Replace event with API Gateway event for processing
+                event = api_gateway_event
+                
+            except Exception as e:
+                logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({'error': f'Failed to parse SQS message: {str(e)}'})
+                }
     
     # Handle OPTIONS preflight request
     if event.get('httpMethod') == 'OPTIONS':
@@ -1504,6 +1550,45 @@ def lambda_handler(event, context):
         response_body = json.dumps(result, cls=DecimalEncoder)
         logger.info(f"📤 Returning response with {len(result.get('results', []))} results")
         
+        # If this was from SQS, publish completion notification
+        if is_sqs_event and job_id and completion_sns_topic:
+            try:
+                import boto3
+                sns_client = boto3.client('sns')
+                completion_message = {
+                    'request_id': request_id,
+                    'job_id': job_id,
+                    'statusCode': 200,
+                    'body': result,
+                    'status': 'completed'
+                }
+                sns_client.publish(
+                    TopicArn=completion_sns_topic,
+                    Message=json.dumps(completion_message, cls=DecimalEncoder),
+                    Subject=f'Politician Trades Search Completion: {job_id}',
+                    MessageAttributes={
+                        'request_id': {
+                            'DataType': 'String',
+                            'StringValue': request_id
+                        },
+                        'job_id': {
+                            'DataType': 'String',
+                            'StringValue': job_id
+                        }
+                    }
+                )
+                logger.info(f"Published completion notification for job {job_id}")
+            except Exception as e:
+                logger.error(f"Error publishing completion notification: {e}", exc_info=True)
+        
+        # For SQS events, return simple acknowledgment (results sent via SNS)
+        if is_sqs_event:
+            return {
+                'statusCode': 200,
+                'body': json.dumps({'message': 'Processed from SQS', 'job_id': job_id})
+            }
+        
+        # For direct API Gateway calls, return full response
         return {
             'statusCode': 200,
             'headers': cors_headers,

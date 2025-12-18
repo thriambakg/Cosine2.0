@@ -281,44 +281,143 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         try:
-            # Invoke worker Lambda synchronously
-            # Worker will return 202 with job_id immediately, then process async
-            logger.info(f"Invoking worker Lambda {worker_function_name} synchronously")
-            invoke_response = lambda_client.invoke(
-                FunctionName=worker_function_name,
-                InvocationType='RequestResponse',  # Synchronous - but worker returns immediately
-                Payload=json.dumps(event)
+            # Try to invoke worker Lambda synchronously with a short timeout
+            # If it succeeds quickly, return results immediately
+            # If it's throttled or times out, fall back to SQS queue
+            logger.info(f"Attempting synchronous invoke of worker Lambda {worker_function_name}")
+            
+            try:
+                # Use a shorter timeout to detect throttling quickly
+                invoke_response = lambda_client.invoke(
+                    FunctionName=worker_function_name,
+                    InvocationType='RequestResponse',
+                    Payload=json.dumps(event)
+                )
+                
+                # Check for throttling errors in the response
+                if 'FunctionError' in invoke_response:
+                    error_type = invoke_response.get('FunctionError')
+                    if error_type == 'Throttled' or 'Throttled' in str(invoke_response):
+                        logger.warning(f"Worker Lambda throttled, falling back to SQS queue")
+                        raise Exception("Lambda throttled - using SQS fallback")
+                
+                # Parse response
+                response_payload = json.loads(invoke_response['Payload'].read())
+                status_code = response_payload.get('statusCode', 500)
+                response_body_str = response_payload.get('body', '{}')
+                
+                # Parse body if it's a string
+                if isinstance(response_body_str, str):
+                    try:
+                        response_body = json.loads(response_body_str)
+                    except json.JSONDecodeError:
+                        response_body = {'error': response_body_str}
+                else:
+                    response_body = response_body_str
+                
+                # If worker returned results immediately (200), return them
+                if status_code == 200 and 'results' in response_body:
+                    logger.info(f"Worker Lambda returned results immediately: {len(response_body.get('results', []))} results")
+                    return {
+                        'statusCode': status_code,
+                        'headers': cors_headers,
+                        'body': json.dumps(response_body)
+                    }
+                
+                # If worker returned job_id (202), return it
+                if status_code == 202 and 'job_id' in response_body:
+                    logger.info(f"Worker Lambda returned job_id: {response_body.get('job_id')}")
+                    return {
+                        'statusCode': status_code,
+                        'headers': cors_headers,
+                        'body': json.dumps(response_body)
+                    }
+                
+                # Otherwise return the response as-is
+                logger.info(f"Worker Lambda returned status {status_code}")
+                return {
+                    'statusCode': status_code,
+                    'headers': cors_headers,
+                    'body': json.dumps(response_body)
+                }
+                
+            except Exception as invoke_error:
+                # Check if it's a throttling error
+                error_str = str(invoke_error).lower()
+                is_throttled = (
+                    'throttled' in error_str or
+                    'provisionedconcurrencyexceeded' in error_str or
+                    'reservedconcurrency' in error_str or
+                    'toomanyrequests' in error_str
+                )
+                
+                if is_throttled:
+                    logger.warning(f"Worker Lambda at concurrency limit, queueing request via SQS")
+                    # Fall through to SQS queueing
+                else:
+                    # Re-raise other errors
+                    raise
+            
+            # Fallback: Send to SQS queue and return job_id
+            if not SQS_QUEUE_URL:
+                logger.error("SQS_QUEUE_URL not configured, cannot queue request")
+                return {
+                    'statusCode': 503,  # Service Unavailable
+                    'headers': cors_headers,
+                    'body': json.dumps({
+                        'error': 'Service temporarily unavailable - worker at capacity and queue not configured'
+                    })
+                }
+            
+            # Generate a job_id for tracking
+            job_id = f"JOB#{uuid.uuid4().hex[:16]}"
+            request_id = generate_request_id()
+            
+            logger.info(f"Queueing request {request_id} to SQS with job_id {job_id}")
+            
+            # Send to SQS with job_id
+            message_body = {
+                'request_id': request_id,
+                'job_id': job_id,
+                'api_gateway_event': event,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            
+            sqs_client.send_message(
+                QueueUrl=SQS_QUEUE_URL,
+                MessageBody=json.dumps(message_body),
+                MessageAttributes={
+                    'request_id': {
+                        'DataType': 'String',
+                        'StringValue': request_id
+                    },
+                    'job_id': {
+                        'DataType': 'String',
+                        'StringValue': job_id
+                    }
+                }
             )
             
-            # Parse response
-            response_payload = json.loads(invoke_response['Payload'].read())
-            status_code = response_payload.get('statusCode', 500)
-            response_body_str = response_payload.get('body', '{}')
-            
-            # Parse body if it's a string
-            if isinstance(response_body_str, str):
-                try:
-                    response_body = json.loads(response_body_str)
-                except json.JSONDecodeError:
-                    response_body = {'error': response_body_str}
-            else:
-                response_body = response_body_str
-            
-            # Return worker's response with CORS headers
-            logger.info(f"Worker Lambda returned status {status_code}, job_id: {response_body.get('job_id', 'N/A')}")
+            # Return job_id for polling
+            logger.info(f"Request queued, returning job_id: {job_id}")
             return {
-                'statusCode': status_code,
+                'statusCode': 202,  # Accepted
                 'headers': cors_headers,
-                'body': json.dumps(response_body)
+                'body': json.dumps({
+                    'success': True,
+                    'job_id': job_id,
+                    'status': 'PENDING',
+                    'message': 'Request queued - worker Lambda at capacity'
+                })
             }
                 
         except Exception as e:
-            logger.error(f"Error invoking worker Lambda: {e}", exc_info=True)
+            logger.error(f"Error in wrapper Lambda: {e}", exc_info=True)
             return {
                 'statusCode': 500,
                 'headers': cors_headers,
                 'body': json.dumps({
-                    'error': f'Failed to start search: {str(e)}'
+                    'error': f'Failed to process request: {str(e)}'
                 })
             }
         

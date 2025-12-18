@@ -446,13 +446,13 @@ module "api_gateway" {
       lambda_arn              = module.sec_search_lambda.function_arn
       request_parameters      = {}
     }
-    # POST method for politician trades search
+    # POST method for politician trades search (uses wrapper Lambda for SQS integration)
     politician_trades_search_post = {
       resource_key            = "politician_trades_search"
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.politician_trades_search_lambda.function_arn
+      lambda_arn              = module.politician_trades_search_lambda.wrapper_function_arn != null ? module.politician_trades_search_lambda.wrapper_function_arn : module.politician_trades_search_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
@@ -647,7 +647,7 @@ module "api_gateway" {
       resource_path = "sec-search-results"
     }
     politician_trades_search_post = {
-      function_arn  = module.politician_trades_search_lambda.function_arn
+      function_arn  = module.politician_trades_search_lambda.wrapper_function_arn != null ? module.politician_trades_search_lambda.wrapper_function_arn : module.politician_trades_search_lambda.function_arn
       http_method   = "POST"
       resource_path = "politician-trades-search"
     }
@@ -2074,14 +2074,15 @@ module "sec_search_lambda" {
 }
 
 # Politician Trades Search Lambda Function
+# Politician Trades Search Lambda Function (with SQS and wrapper support)
 module "politician_trades_search_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-politician-trades-search-${var.environment}"
   description   = "Lambda function for searching politician trades in DynamoDB"
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.11"
-  timeout       = 30
+  timeout       = 300 # 5 minutes for long-running queries
   memory_size   = 512
 
   # Source directory
@@ -2106,6 +2107,24 @@ module "politician_trades_search_lambda" {
     aws_iam_policy.politician_trades_search_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda = true
+  wrapper_timeout       = 300 # 5 minutes to match worker timeout
+  sns_topic_name        = "${var.project_name}-politician-trades-completion-${var.environment}"
+  # Use DynamoDB table for response correlation (optional, can use SNS message attributes instead)
+  response_table_name = null # Not needed for synchronous responses
+  # Environment variable name for completion SNS topic in worker Lambda
+  completion_sns_env_var_name = "POLITICIAN_TRADES_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # SQS configuration
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10 # Limit concurrent politician trades searches
 
   tags = var.common_tags
 }
