@@ -379,8 +379,9 @@ module "api_gateway" {
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.news_search_lambda.function_arn
+      lambda_arn              = module.news_search_lambda.wrapper_function_arn != null ? module.news_search_lambda.wrapper_function_arn : module.news_search_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     # POST method for file uploads
     files_upload_post = {
@@ -607,7 +608,7 @@ module "api_gateway" {
       resource_path = "session"
     }
     news_post = {
-      function_arn  = module.news_search_lambda.function_arn
+      function_arn  = module.news_search_lambda.wrapper_function_arn != null ? module.news_search_lambda.wrapper_function_arn : module.news_search_lambda.function_arn
       http_method   = "POST"
       resource_path = "news"
     }
@@ -677,7 +678,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "50" # Updated to fix CORS for file upload endpoint
+  deployment_trigger = "51" # Updated to fix CORS for file upload endpoint
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -1932,15 +1933,15 @@ module "file_return_lambda" {
   # depends_on = [module.websocket_api]
 }
 
-# News Search Lambda Function
+# News Search Lambda Function (with SQS and wrapper support)
 module "news_search_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-news-search-${var.environment}"
   description   = "Lambda function for news search with complex query expressions"
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.11"
-  timeout       = 30
+  timeout       = 300 # 5 minutes for complex queries
   memory_size   = 512
 
   source_dir = "../backend_app/src/news_search/app"
@@ -1958,6 +1959,24 @@ module "news_search_lambda" {
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda = true
+  wrapper_timeout       = 300 # 5 minutes to match worker timeout
+  sns_topic_name        = "${var.project_name}-news-search-completion-${var.environment}"
+  # Use DynamoDB table for response correlation (optional, can use SNS message attributes instead)
+  response_table_name = null # Not needed for synchronous responses
+  # Environment variable name for completion SNS topic in worker Lambda
+  completion_sns_env_var_name = "NEWS_SEARCH_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # SQS configuration
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10 # Limit concurrent news searches
 
   tags = var.common_tags
 }
