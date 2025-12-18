@@ -1062,6 +1062,108 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     return query_configs
 
 
+def get_single_award(award_id: str) -> Dict[str, Any]:
+    """
+    Get a single award by award_id (for direct lookups after enrichment)
+    
+    Args:
+        award_id: The award ID to fetch
+    
+    Returns:
+        Dictionary with success, result, count, and error fields
+    """
+    try:
+        logger.info(f"Fetching single award: {award_id}")
+        
+        # Get award from DynamoDB
+        response = awards_table.get_item(Key={'award_id': award_id})
+        
+        if 'Item' not in response:
+            logger.warning(f"Award {award_id} not found in DynamoDB")
+            return {
+                'success': False,
+                'error': f'Award {award_id} not found',
+                'count': 0,
+                'results': []
+            }
+        
+        award = response['Item']
+        
+        # Check if this is an oversized award (stored in S3)
+        oversize_s3_key = award.get('oversize_s3_key')
+        if oversize_s3_key:
+            logger.info(f"Fetching full award data from S3 for oversized award {award_id}")
+            full_award = fetch_oversized_award_from_s3(oversize_s3_key)
+            if full_award:
+                # Merge S3 data with DynamoDB GSI fields (S3 data takes precedence)
+                full_award.update(award)
+                award = full_award
+            else:
+                logger.warning(f"Failed to fetch from S3 for {award_id}, using DynamoDB data only")
+        
+        # Convert Decimal and bytes to JSON-serializable types
+        award = convert_decimal_to_float(award)
+        
+        # Check if this is an IDV and fetch child awards
+        child_award_ids = award.get('child_awards', [])
+        if isinstance(child_award_ids, list) and len(child_award_ids) > 0:
+            logger.info(f"Fetching details for {len(child_award_ids)} child awards for IDV {award.get('award_id')}")
+            child_awards_details = []
+            
+            for child_id in child_award_ids:
+                try:
+                    child_response = awards_table.get_item(Key={'award_id': str(child_id)})
+                    if 'Item' in child_response:
+                        child_item = child_response['Item']
+                        
+                        # Check if child award is oversized
+                        child_oversize_s3_key = child_item.get('oversize_s3_key')
+                        if child_oversize_s3_key:
+                            full_child = fetch_oversized_award_from_s3(child_oversize_s3_key)
+                            if full_child:
+                                full_child.update(child_item)
+                                child_item = full_child
+                        
+                        # Convert to JSON-serializable
+                        child_item = convert_decimal_to_float(child_item)
+                        
+                        child_awards_details.append({
+                            'award_id': child_item.get('award_id'),
+                            'award_id_piid': child_item.get('award_id_piid'),
+                            'description': child_item.get('description'),
+                            'total_obligated_amount': child_item.get('total_obligated_amount'),
+                            'period_of_performance_start_date': child_item.get('period_of_performance_start_date'),
+                            'period_of_performance_current_end_date': child_item.get('period_of_performance_current_end_date'),
+                            'award_type': child_item.get('award_type'),
+                            'award_type_description': child_item.get('award_type_description'),
+                            'transaction_count': child_item.get('transaction_count', 0),
+                            'subaward_count': child_item.get('subaward_count', 0),
+                        })
+                except Exception as e:
+                    logger.warning(f"Error fetching child award {child_id}: {str(e)}")
+                    continue
+            
+            if child_awards_details:
+                award['child_awards_details'] = child_awards_details
+                logger.info(f"Added {len(child_awards_details)} child award details for IDV {award.get('award_id')}")
+        
+        return {
+            'success': True,
+            'result': award,
+            'count': 1,
+            'results': [award]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching single award {award_id}: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': f'Error fetching award: {str(e)}',
+            'count': 0,
+            'results': []
+        }
+
+
 def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Search awards in DynamoDB using filters with multi-GSI intersection approach
@@ -1959,21 +2061,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Direct Lambda invocation
             body = event
         
-        # Extract parameters
+        # Check if this is a direct award_id lookup (for getAward API)
+        # Only do direct lookup if award_id is provided AND filters is not provided (or is empty)
+        award_id = body.get('award_id')
         filters = body.get('filters', {})
-        limit = int(body.get('limit', 100))
-        last_evaluated_key = body.get('last_evaluated_key')
-        
-        # Validate limit
-        if limit > 1000:
-            limit = 1000  # Cap at 1000
-        if limit < 1:
-            limit = 100
-        
-        logger.info(f"Searching awards with filters: {json.dumps(filters, default=str)}, limit: {limit}")
-        
-        # Search awards
-        result = search_awards(filters, limit=limit, last_evaluated_key=last_evaluated_key)
+        if award_id and (not filters or (isinstance(filters, dict) and len(filters) == 0)):
+            # Direct award lookup - fetch single award
+            logger.info(f"Direct award lookup requested for award_id: {award_id}")
+            result = get_single_award(award_id)
+        else:
+            # Regular search
+            # Extract parameters (filters already extracted above)
+            limit = int(body.get('limit', 100))
+            last_evaluated_key = body.get('last_evaluated_key')
+            
+            # Validate limit
+            if limit > 1000:
+                limit = 1000  # Cap at 1000
+            if limit < 1:
+                limit = 100
+            
+            logger.info(f"Searching awards with filters: {json.dumps(filters, default=str)}, limit: {limit}")
+            
+            # Search awards
+            result = search_awards(filters, limit=limit, last_evaluated_key=last_evaluated_key)
         
         # Log final results
         result_count = result.get('count', 0)

@@ -7,12 +7,16 @@ import json
 import os
 import logging
 import requests
+import boto3
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# AWS clients
+sns_client = boto3.client('sns')
 
 # USAspending API configuration
 USASPENDING_BASE_URL = os.environ.get('USASPENDING_BASE_URL', 'https://api.usaspending.gov')
@@ -674,26 +678,9 @@ def route_autocomplete_request(autocomplete_type: str, request_body: Dict[str, A
         raise ValueError(f"Unhandled autocomplete type: {autocomplete_type}")
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def process_autocomplete_request(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Lambda handler for USAspending autocomplete requests
-    
-    Expected event structure:
-    {
-        "httpMethod": "POST",
-        "path": "/usaspending-autocomplete/{type}",
-        "pathParameters": {
-            "type": "recipient"  // or other autocomplete type
-        },
-        "body": "{\"search_text\": \"Lockheed\", \"limit\": 10}"
-    }
-    
-    Or from API Gateway:
-    {
-        "autocomplete_type": "recipient",
-        "search_text": "Lockheed",
-        "limit": 10
-    }
+    Process autocomplete request (extracted from lambda_handler for reuse)
     """
     cors_headers = get_cors_headers()
     
@@ -843,4 +830,97 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'message': str(e)
             })
         }
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Lambda handler for USAspending autocomplete requests
+    
+    Expected event structure:
+    {
+        "httpMethod": "POST",
+        "path": "/usaspending-autocomplete/{type}",
+        "pathParameters": {
+            "type": "recipient"  // or other autocomplete type
+        },
+        "body": "{\"search_text\": \"Lockheed\", \"limit\": 10}"
+    }
+    
+    Or from API Gateway:
+    {
+        "autocomplete_type": "recipient",
+        "search_text": "Lockheed",
+        "limit": 10
+    }
+    
+    Or from SQS:
+    {
+        "Records": [
+            {
+                "body": "{\"request_id\": \"...\", \"api_gateway_event\": {...}}"
+            }
+        ]
+    }
+    """
+    # Handle SQS events
+    if 'Records' in event and len(event.get('Records', [])) > 0:
+        # This is an SQS event
+        try:
+            record = event['Records'][0]
+            message_body = json.loads(record.get('body', '{}'))
+            request_id = message_body.get('request_id')
+            api_gateway_event = message_body.get('api_gateway_event', {})
+            
+            # Get SNS topic ARN from environment
+            sns_topic_arn = os.environ.get('USASPENDING_AUTOCOMPLETE_COMPLETION_SNS_TOPIC_ARN')
+            
+            # Process the request
+            try:
+                result = process_autocomplete_request(api_gateway_event, context)
+                
+                # Publish completion notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'completed',
+                            'response': result
+                        }),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                return result
+            except Exception as e:
+                logger.error(f"Error processing SQS event: {str(e)}", exc_info=True)
+                
+                # Publish failure notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'failed',
+                            'error': str(e)
+                        }),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                raise
+        except Exception as e:
+            logger.error(f"Error processing SQS event: {str(e)}", exc_info=True)
+            raise
+    
+    # Regular API Gateway or direct invocation
+    return process_autocomplete_request(event, context)
 

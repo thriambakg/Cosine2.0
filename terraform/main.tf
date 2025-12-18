@@ -465,14 +465,15 @@ module "api_gateway" {
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
-    # POST method for USAspending autocomplete
+    # POST method for USAspending autocomplete (uses wrapper Lambda for SQS integration)
     usaspending_autocomplete_post = {
       resource_key            = "usaspending_autocomplete"
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.usaspending_autocomplete_lambda.function_arn
+      lambda_arn              = module.usaspending_autocomplete_lambda.wrapper_function_arn != null ? module.usaspending_autocomplete_lambda.wrapper_function_arn : module.usaspending_autocomplete_lambda.function_arn
       request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     # POST method for USAspending search (uses wrapper Lambda for SQS integration)
     usaspending_search_post = {
@@ -484,13 +485,13 @@ module "api_gateway" {
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
-    # POST method for USAspending enrichment
+    # POST method for USAspending enrichment (uses wrapper Lambda for SQS integration)
     usaspending_enrichment_post = {
       resource_key            = "usaspending_enrichment"
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.usaspending_enrichment_lambda.function_arn
+      lambda_arn              = module.usaspending_enrichment_lambda.wrapper_function_arn != null ? module.usaspending_enrichment_lambda.wrapper_function_arn : module.usaspending_enrichment_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
@@ -661,7 +662,7 @@ module "api_gateway" {
       resource_path = "politician-trades-search"
     }
     usaspending_autocomplete_post = {
-      function_arn  = module.usaspending_autocomplete_lambda.function_arn
+      function_arn  = module.usaspending_autocomplete_lambda.wrapper_function_arn != null ? module.usaspending_autocomplete_lambda.wrapper_function_arn : module.usaspending_autocomplete_lambda.function_arn
       http_method   = "POST"
       resource_path = "usaspending-autocomplete"
     }
@@ -671,7 +672,7 @@ module "api_gateway" {
       resource_path = "usaspending-search"
     }
     usaspending_enrichment_post = {
-      function_arn  = module.usaspending_enrichment_lambda.function_arn
+      function_arn  = module.usaspending_enrichment_lambda.wrapper_function_arn != null ? module.usaspending_enrichment_lambda.wrapper_function_arn : module.usaspending_enrichment_lambda.function_arn
       http_method   = "POST"
       resource_path = "usaspending-enrichment"
     }
@@ -686,7 +687,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "54" # Updated to fix CORS for file upload endpoint
+  deployment_trigger = "57" # Updated for govt_contracts autocomplete and enrichment lambda-sqs migration
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -2180,9 +2181,9 @@ module "politician_trades_search_lambda" {
   tags = var.common_tags
 }
 
-# USAspending Autocomplete Lambda Function
+# USAspending Autocomplete Lambda Function (with SQS and wrapper support)
 module "usaspending_autocomplete_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-usaspending-autocomplete-${var.environment}"
   description   = "Lambda function for USAspending API autocomplete endpoints"
@@ -2212,6 +2213,23 @@ module "usaspending_autocomplete_lambda" {
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn
   ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda = true
+  wrapper_timeout       = 30 # Match worker timeout
+  sns_topic_name        = "${var.project_name}-usaspending-autocomplete-completion-${var.environment}"
+  # Use DynamoDB table for response correlation (optional, can use SNS message attributes instead)
+  response_table_name = null # Not needed for synchronous responses
+  # Environment variable name for completion SNS topic in worker Lambda
+  completion_sns_env_var_name = "USASPENDING_AUTOCOMPLETE_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+  # SQS configuration
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 20 # Autocomplete is fast, allow more concurrency
 
   tags = var.common_tags
 }
@@ -2487,9 +2505,9 @@ resource "aws_iam_policy" "usaspending_enrichment_s3_policy" {
   tags = var.common_tags
 }
 
-# USAspending Enrichment Lambda Function
+# USAspending Enrichment Lambda Function (with SQS and wrapper support)
 module "usaspending_enrichment_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-usaspending-enrichment-${var.environment}"
   description   = "Lambda function for enriching USAspending awards with up-to-date data from API"
@@ -2526,6 +2544,23 @@ module "usaspending_enrichment_lambda" {
     aws_iam_policy.usaspending_enrichment_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda = true
+  wrapper_timeout       = 300 # 5 minutes to match worker timeout
+  sns_topic_name        = "${var.project_name}-usaspending-enrichment-completion-${var.environment}"
+  # Use DynamoDB table for response correlation (optional, can use SNS message attributes instead)
+  response_table_name = null # Not needed for synchronous responses
+  # Environment variable name for completion SNS topic in worker Lambda
+  completion_sns_env_var_name = "USASPENDING_ENRICHMENT_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+  # SQS configuration
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10 # Limit concurrent enrichments
 
   tags = var.common_tags
 }

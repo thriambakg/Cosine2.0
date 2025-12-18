@@ -1076,8 +1076,8 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
         }
 
 
-def lambda_handler(event, context):
-    """Lambda handler for award enrichment"""
+def process_enrichment_request(event, context):
+    """Process enrichment request (extracted from lambda_handler for reuse)"""
     try:
         # Handle CORS preflight
         if event.get('httpMethod') == 'OPTIONS':
@@ -1138,4 +1138,72 @@ def lambda_handler(event, context):
                 'error': f'Internal server error: {str(e)}'
             })
         }
+
+
+def lambda_handler(event, context):
+    """Lambda handler for award enrichment"""
+    # Handle SQS events
+    if 'Records' in event and len(event.get('Records', [])) > 0:
+        # This is an SQS event
+        try:
+            record = event['Records'][0]
+            message_body = json.loads(record.get('body', '{}'))
+            request_id = message_body.get('request_id')
+            api_gateway_event = message_body.get('api_gateway_event', {})
+            
+            # Get SNS topic ARN from environment
+            sns_topic_arn = os.environ.get('USASPENDING_ENRICHMENT_COMPLETION_SNS_TOPIC_ARN')
+            
+            # Initialize SNS client
+            sns_client = boto3.client('sns')
+            
+            # Process the request
+            try:
+                result = process_enrichment_request(api_gateway_event, context)
+                
+                # Publish completion notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'completed',
+                            'response': result
+                        }),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                return result
+            except Exception as e:
+                logger.error(f"Error processing SQS event: {str(e)}", exc_info=True)
+                
+                # Publish failure notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'failed',
+                            'error': str(e)
+                        }),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                raise
+        except Exception as e:
+            logger.error(f"Error processing SQS event: {str(e)}", exc_info=True)
+            raise
+    
+    # Regular API Gateway or direct invocation
+    return process_enrichment_request(event, context)
 
