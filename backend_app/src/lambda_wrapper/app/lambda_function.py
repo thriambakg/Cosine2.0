@@ -18,6 +18,7 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 # AWS clients
 sqs_client = boto3.client('sqs')
 sns_client = boto3.client('sns')
+lambda_client = boto3.client('lambda')
 dynamodb_client = boto3.client('dynamodb') if os.environ.get('RESPONSE_TABLE_NAME') else None
 
 # Configuration from environment variables
@@ -262,43 +263,64 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return handle_sns_notification(event)
         
         # Otherwise, treat as API Gateway event
-        logger.info("Received API Gateway event, processing via SQS")
+        logger.info("Received API Gateway event, forwarding to worker Lambda")
         
-        # Generate unique request ID
-        request_id = generate_request_id()
-        logger.info(f"Generated request_id: {request_id}")
+        # Invoke worker Lambda synchronously to get job_id immediately
+        # The worker handles the request, creates job_id, and returns 202 immediately
+        # The worker then processes asynchronously via its own async invocation
+        worker_function_name = WORKER_FUNCTION_NAME
         
-        # Send to SQS queue
-        if not send_to_sqs(request_id, event):
+        if not worker_function_name:
+            logger.error("WORKER_FUNCTION_NAME not configured")
             return {
                 'statusCode': 500,
                 'headers': cors_headers,
                 'body': json.dumps({
-                    'error': 'Failed to queue request'
+                    'error': 'Worker Lambda not configured'
                 })
             }
         
-        # Wait for completion (with timeout)
-        timeout = int(os.environ.get('WRAPPER_TIMEOUT', 300))
-        result = wait_for_completion(request_id, timeout_seconds=timeout)
-        
-        if result is None:
-            # Timeout
+        try:
+            # Invoke worker Lambda synchronously
+            # Worker will return 202 with job_id immediately, then process async
+            logger.info(f"Invoking worker Lambda {worker_function_name} synchronously")
+            invoke_response = lambda_client.invoke(
+                FunctionName=worker_function_name,
+                InvocationType='RequestResponse',  # Synchronous - but worker returns immediately
+                Payload=json.dumps(event)
+            )
+            
+            # Parse response
+            response_payload = json.loads(invoke_response['Payload'].read())
+            status_code = response_payload.get('statusCode', 500)
+            response_body_str = response_payload.get('body', '{}')
+            
+            # Parse body if it's a string
+            if isinstance(response_body_str, str):
+                try:
+                    response_body = json.loads(response_body_str)
+                except json.JSONDecodeError:
+                    response_body = {'error': response_body_str}
+            else:
+                response_body = response_body_str
+            
+            # Return worker's response with CORS headers
+            logger.info(f"Worker Lambda returned status {status_code}, job_id: {response_body.get('job_id', 'N/A')}")
             return {
-                'statusCode': 504,
+                'statusCode': status_code,
+                'headers': cors_headers,
+                'body': json.dumps(response_body)
+            }
+                
+        except Exception as e:
+            logger.error(f"Error invoking worker Lambda: {e}", exc_info=True)
+            return {
+                'statusCode': 500,
                 'headers': cors_headers,
                 'body': json.dumps({
-                    'error': 'Request timeout - worker did not complete within timeout period',
-                    'request_id': request_id
+                    'error': f'Failed to start search: {str(e)}'
                 })
             }
-        
-        # Return result to API Gateway
-        return {
-            'statusCode': result.get('statusCode', 200),
-            'headers': cors_headers,
-            'body': json.dumps(result.get('body', {}))
-        }
         
     except Exception as e:
         logger.error(f"Error in wrapper Lambda handler: {e}", exc_info=True)

@@ -406,6 +406,31 @@ resource "aws_iam_policy" "wrapper_dynamodb_policy" {
   tags = var.tags
 }
 
+# IAM Policy for Wrapper Lambda to invoke worker Lambda
+resource "aws_iam_policy" "wrapper_lambda_invoke_policy" {
+  count = var.enable_wrapper_lambda ? 1 : 0
+
+  name        = "${local.wrapper_function_name}-lambda-invoke-policy"
+  description = "Policy for ${local.wrapper_function_name} to invoke worker Lambda function"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = [
+          aws_lambda_function.function.arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
 # Attach policies to wrapper execution role
 resource "aws_iam_role_policy_attachment" "wrapper_sqs_send_policy" {
   count = var.enable_wrapper_lambda ? 1 : 0
@@ -426,6 +451,13 @@ resource "aws_iam_role_policy_attachment" "wrapper_dynamodb_policy" {
 
   role       = aws_iam_role.wrapper_execution_role[0].name
   policy_arn = aws_iam_policy.wrapper_dynamodb_policy[0].arn
+}
+
+resource "aws_iam_role_policy_attachment" "wrapper_lambda_invoke_policy" {
+  count = var.enable_wrapper_lambda ? 1 : 0
+
+  role       = aws_iam_role.wrapper_execution_role[0].name
+  policy_arn = aws_iam_policy.wrapper_lambda_invoke_policy[0].arn
 }
 
 # Wrapper Lambda Function
