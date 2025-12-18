@@ -63,6 +63,27 @@ def get_alpha_vantage_api_key():
         logger.error(f"Failed to retrieve Alpha Vantage API key from Secrets Manager: {str(e)}")
         return None
 
+def safe_json_parse(response, context=""):
+    """
+    Safely parse JSON response with error handling
+    
+    Args:
+        response: requests.Response object
+        context: Context string for error messages
+        
+    Returns:
+        dict: Parsed JSON data or None if parsing fails
+    """
+    if not response.text or not response.text.strip():
+        logger.warning(f"Empty response {context}")
+        return None
+    
+    try:
+        return response.json()
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error {context}: {e}, response preview: {response.text[:200]}")
+        return None
+
 def rate_limit_check(ticker):
     """Enhanced rate limiting check to avoid Yahoo Finance blocks"""
     global request_timestamps
@@ -408,7 +429,9 @@ def fetch_current_price_direct(ticker):
         if response.status_code != 200:
             return {"error": f"HTTP request failed: {response.status_code}"}
         
-        data = response.json()
+        data = safe_json_parse(response, f"for {ticker} current price")
+        if data is None:
+            return {"error": f"Invalid or empty response from Yahoo Finance for {ticker}"}
         
         if 'chart' not in data or not data['chart']['result']:
             return {"error": f"No data found for {ticker}"}
@@ -469,7 +492,9 @@ def fetch_historical_data_direct(ticker, period="1y"):
             logger.error(f"Historical data request failed: {response.status_code}")
             return []
         
-        data = response.json()
+        data = safe_json_parse(response, f"for {ticker} historical data")
+        if data is None:
+            return []
         
         if 'chart' not in data or not data['chart']['result']:
             logger.error("No historical data in response")
@@ -590,7 +615,9 @@ def fetch_additional_stats_direct(ticker):
             logger.warning(f"Additional stats request failed: {response.status_code}")
             return {'week_return': 0, 'annual_return': 0, 'volatility': 0}
         
-        data = response.json()
+        data = safe_json_parse(response, f"for {ticker} additional stats")
+        if data is None:
+            return {'week_return': 0, 'annual_return': 0, 'volatility': 0}
         
         if 'quoteSummary' not in data or not data['quoteSummary']['result']:
             logger.warning("No additional stats in response")
@@ -701,7 +728,9 @@ def fetch_stock_data_fallback(ticker, period="1y"):
             logger.error(f"HTTP request failed with status {response.status_code}")
             return {"error": f"HTTP request failed: {response.status_code}"}
         
-        data = response.json()
+        data = safe_json_parse(response, f"for {ticker} fallback")
+        if data is None:
+            return {"error": f"Invalid or empty response from Yahoo Finance for {ticker}"}
         logger.info(f"Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
         
         # Parse Yahoo Finance response
@@ -1702,7 +1731,9 @@ def fetch_stock_data_alpha_vantage(ticker, period="1y", api_key=None):
             logger.error(f"Alpha Vantage API returned status {response.status_code}")
             return {"error": f"Alpha Vantage API error: {response.status_code}"}
         
-        data = response.json()
+        data = safe_json_parse(response, "from Alpha Vantage API")
+        if data is None:
+            return {"error": "Invalid or empty response from Alpha Vantage API"}
         
         # Check for API errors
         if 'Error Message' in data:

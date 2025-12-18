@@ -13,6 +13,8 @@ import volatility_fetcher as fv
 import requests
 import time
 import random
+import boto3
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -581,12 +583,14 @@ def lambda_handler(event, context):
     """
     AWS Lambda handler for portfolio analysis
     
-    Supports two use cases:
-    1. Robinhood Integration: Receives portfolio data from Robinhood lambda
-    2. Standalone Tool: Receives manual portfolio configuration from frontend
+    Supports multiple use cases:
+    1. API Gateway: Direct synchronous requests
+    2. SQS: Asynchronous requests via queue (with wrapper Lambda)
+    3. Robinhood Integration: Receives portfolio data from Robinhood lambda
+    4. Standalone Tool: Receives manual portfolio configuration from frontend
     
     Args:
-        event: API Gateway event containing portfolio data
+        event: API Gateway event, SQS event, or direct invocation
         context: Lambda context object
         
     Returns:
@@ -594,6 +598,28 @@ def lambda_handler(event, context):
     """
     debug_print("=== Portfolio Analysis Lambda Handler Started ===")
     debug_print(f"Event keys: {list(event.keys())}")
+    
+    # Detect if this is an SQS event
+    is_sqs_event = 'Records' in event and len(event.get('Records', [])) > 0
+    request_id = None
+    job_id = None
+    completion_sns_topic = os.environ.get('PORTFOLIO_ANALYSIS_COMPLETION_SNS_TOPIC_ARN')
+    
+    if is_sqs_event:
+        # Extract from SQS message
+        first_record = event['Records'][0]
+        if first_record.get('eventSource') == 'aws:sqs':
+            try:
+                message_body = json.loads(first_record.get('body', '{}'))
+                request_id = message_body.get('request_id')
+                job_id = message_body.get('job_id')
+                # Extract the actual API Gateway event from the message
+                event = message_body.get('api_gateway_event', event)
+                debug_print(f"Processing SQS event - request_id: {request_id}, job_id: {job_id}")
+            except Exception as e:
+                debug_print(f"Error parsing SQS message: {e}")
+                is_sqs_event = False
+    
     debug_print(f"HTTP Method: {event.get('httpMethod', 'Unknown')}")
     
     try:
@@ -830,6 +856,43 @@ def lambda_handler(event, context):
         debug_print(f"Returning response with statusCode: {response['statusCode']}")
         debug_print(f"Response body length: {len(response['body'])} characters")
         debug_print(f"Response data keys: {list(response_data.keys())}")
+        
+        # If this was from SQS, publish completion notification
+        if is_sqs_event and job_id and completion_sns_topic:
+            try:
+                sns_client = boto3.client('sns')
+                completion_message = {
+                    'request_id': request_id,
+                    'job_id': job_id,
+                    'statusCode': 200,
+                    'body': response_data,
+                    'status': 'completed'
+                }
+                sns_client.publish(
+                    TopicArn=completion_sns_topic,
+                    Message=json.dumps(completion_message, default=str),
+                    Subject=f'Portfolio Analysis Completion: {job_id}',
+                    MessageAttributes={
+                        'request_id': {
+                            'DataType': 'String',
+                            'StringValue': request_id or ''
+                        },
+                        'job_id': {
+                            'DataType': 'String',
+                            'StringValue': job_id
+                        }
+                    }
+                )
+                logger.info(f"Published completion notification for job {job_id}")
+            except Exception as e:
+                logger.error(f"Error publishing completion notification: {e}", exc_info=True)
+        
+        # For SQS events, return simple acknowledgment (results sent via SNS)
+        if is_sqs_event:
+            return {
+                'statusCode': 200,
+                'body': json.dumps({'message': 'Processed from SQS', 'job_id': job_id})
+            }
         
         logger.info("=== Portfolio Analysis Lambda Handler Completed Successfully ===")
         return response

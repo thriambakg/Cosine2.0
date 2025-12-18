@@ -235,7 +235,7 @@ module "api_gateway" {
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.portfolio_wrapper_lambda.function_arn
+      lambda_arn              = module.portfolio_analysis_lambda.wrapper_function_arn != null ? module.portfolio_analysis_lambda.wrapper_function_arn : module.portfolio_analysis_lambda.function_arn
       request_parameters      = {}
     }
     # GET method for alerts (fetch user alerts)
@@ -530,7 +530,7 @@ module "api_gateway" {
       resource_path = "stock-screener"
     }
     portfolio = {
-      function_arn  = module.portfolio_wrapper_lambda.function_arn
+      function_arn  = module.portfolio_analysis_lambda.wrapper_function_arn != null ? module.portfolio_analysis_lambda.wrapper_function_arn : module.portfolio_analysis_lambda.function_arn
       http_method   = "POST"
       resource_path = "portfolio"
     }
@@ -1628,9 +1628,9 @@ module "cloudfront" {
   depends_on = [data.aws_s3_bucket.static_hosting]
 }
 
-# Portfolio Analysis Lambda Function (Internal - no API Gateway)
+# Portfolio Analysis Lambda Function (with SQS and wrapper support)
 module "portfolio_analysis_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-portfolio-analysis-${var.environment}"
   description   = "Lambda function for portfolio risk analysis and metrics calculation"
@@ -1659,39 +1659,25 @@ module "portfolio_analysis_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn
   ]
 
-  tags = var.common_tags
-}
-
-# Portfolio Wrapper Lambda Function (Frontend API)
-module "portfolio_wrapper_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-portfolio-wrapper-${var.environment}"
-  description   = "Lambda function wrapper for frontend portfolio analysis requests"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 30
-  memory_size   = 512
-
-  # Source directory
-  source_dir = "../backend_app/src/stocks/portfolio_wrapper/app"
-
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT                      = var.environment
-    LOG_LEVEL                        = var.environment == "development" ? "DEBUG" : "INFO"
-    PORTFOLIO_ANALYSIS_FUNCTION_NAME = module.portfolio_analysis_lambda.function_name
-  }
-
-  # Attach core layer only
-  layers = [
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda = true
+  wrapper_timeout       = 60 # Match worker timeout
+  sns_topic_name        = "${var.project_name}-portfolio-analysis-completion-${var.environment}"
+  # Use DynamoDB table for response correlation (optional, can use SNS message attributes instead)
+  response_table_name = null # Not needed for synchronous responses
+  # Environment variable name for completion SNS topic in worker Lambda
+  completion_sns_env_var_name = "PORTFOLIO_ANALYSIS_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  wrapper_layers = [
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies for Lambda invocation
-  additional_policy_arns = [
-    aws_iam_policy.lambda_invoke_policy.arn
-  ]
+  # SQS configuration
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  sqs_max_receive_count          = 3
+  sqs_visibility_timeout_seconds = 120   # 2x worker timeout
+  sqs_message_retention_seconds  = 86400 # 24 hours
 
   tags = var.common_tags
 }
@@ -1873,9 +1859,10 @@ module "robinhood_integration_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT                      = var.environment
-    LOG_LEVEL                        = var.environment == "development" ? "DEBUG" : "INFO"
-    PORTFOLIO_ANALYSIS_FUNCTION_NAME = module.portfolio_analysis_lambda.function_name
+    ENVIRONMENT                              = var.environment
+    LOG_LEVEL                                = var.environment == "development" ? "DEBUG" : "INFO"
+    PORTFOLIO_ANALYSIS_FUNCTION_NAME         = module.portfolio_analysis_lambda.function_name
+    PORTFOLIO_ANALYSIS_WRAPPER_FUNCTION_NAME = module.portfolio_analysis_lambda.wrapper_function_name != null ? module.portfolio_analysis_lambda.wrapper_function_name : module.portfolio_analysis_lambda.function_name
   }
 
   # Attach core and financial layers

@@ -31,6 +31,7 @@ interface DragState {
   dragTileId: string | null;
   dragStart: { x: number; y: number };
   currentPosition: GridPosition | null;
+  dragOffset?: { x: number; y: number }; // Offset from mouse to tile top-left
   lastUpdateTime?: number;
 }
 
@@ -68,12 +69,14 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const prevTilesRef = useRef<UnifiedTile[]>([]);
   const [containerWidth, setContainerWidth] = useState(1200); // Default width
   const [dragState, setDragState] = useState<DragState>({
     isDragging: false,
     dragTileId: null,
     dragStart: { x: 0, y: 0 },
     currentPosition: null,
+    dragOffset: undefined,
     lastUpdateTime: undefined,
   });
 
@@ -201,6 +204,18 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     return () => window.removeEventListener('resize', updateGridDimensions);
   }, [calculateGridColumns, calculateCellSize]);
 
+  // Track tile changes for debugging (only pin state changes)
+  useEffect(() => {
+    const prevTiles = prevTilesRef.current;
+    prevTiles.forEach(prevTile => {
+      const currentTile = tiles.find(t => t.id === prevTile.id);
+      if (currentTile && prevTile.isPinned !== currentTile.isPinned) {
+        // Pin state changed - position should be preserved
+      }
+    });
+    prevTilesRef.current = tiles;
+  }, [tiles]);
+
   // Memoize grid props for all tiles to prevent unnecessary recalculations
   const tileGridProps = useMemo(() => {
     const propsMap = new Map<string, { position: GridPosition; size: GridSize }>();
@@ -248,31 +263,66 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         }
       });
 
-      // Find first available position
-      // Note: Use a reasonable maximum width for initial placement, will be adjusted by gridDimensions
-      const maxPlacementWidth = Math.max(gridColumns, 50); // Allow up to 50 columns for initial placement
-      let foundPosition = false;
-      for (let y = 0; y < MAX_GRID_ROWS && !foundPosition; y++) {
-        for (let x = 0; x < maxPlacementWidth - gridSize.width + 1 && !foundPosition; x++) {
-          let canPlace = true;
-          for (let dx = 0; dx < gridSize.width; dx++) {
-            for (let dy = 0; dy < gridSize.height; dy++) {
-              if (occupiedCells.has(`${x + dx},${y + dy}`)) {
-                canPlace = false;
-                break;
-              }
+      // Try to preserve current visual position if tile has legacy position
+      let preferredPosition: GridPosition | null = null;
+      let positionFound = false;
+      
+      if (tile.position) {
+        // Convert legacy pixel position to grid position
+        const gridX = Math.round(tile.position.x / (cellSize + GRID_GAP));
+        const gridY = Math.round(tile.position.y / (cellSize + GRID_GAP));
+        preferredPosition = { x: Math.max(0, gridX), y: Math.max(0, gridY) };
+        
+        // Check if preferred position is available
+        let canPlaceAtPreferred = true;
+        for (let dx = 0; dx < gridSize.width; dx++) {
+          for (let dy = 0; dy < gridSize.height; dy++) {
+            if (occupiedCells.has(`${preferredPosition.x + dx},${preferredPosition.y + dy}`)) {
+              canPlaceAtPreferred = false;
+              break;
             }
-            if (!canPlace) break;
           }
-          if (canPlace) {
-            propsMap.set(tile.id, { position: { x, y }, size: gridSize });
-            foundPosition = true;
-          }
+          if (!canPlaceAtPreferred) break;
+        }
+        
+        if (canPlaceAtPreferred) {
+          propsMap.set(tile.id, { position: preferredPosition, size: gridSize });
+          positionFound = true;
         }
       }
 
-      if (!foundPosition) {
-        propsMap.set(tile.id, { position: { x: 0, y: 0 }, size: gridSize });
+      // Find first available position if preferred position wasn't available
+      if (!positionFound) {
+        // Note: Use a reasonable maximum width for initial placement, will be adjusted by gridDimensions
+        const maxPlacementWidth = Math.max(gridColumns, 50); // Allow up to 50 columns for initial placement
+        let foundPosition = false;
+        
+        // Start search from preferred position if available, otherwise start from (0, 0)
+        const startY = preferredPosition ? preferredPosition.y : 0;
+        const startX = preferredPosition ? preferredPosition.x : 0;
+        
+        for (let y = startY; y < MAX_GRID_ROWS && !foundPosition; y++) {
+          for (let x = (y === startY ? startX : 0); x < maxPlacementWidth - gridSize.width + 1 && !foundPosition; x++) {
+            let canPlace = true;
+            for (let dx = 0; dx < gridSize.width; dx++) {
+              for (let dy = 0; dy < gridSize.height; dy++) {
+                if (occupiedCells.has(`${x + dx},${y + dy}`)) {
+                  canPlace = false;
+                  break;
+                }
+              }
+              if (!canPlace) break;
+            }
+            if (canPlace) {
+              propsMap.set(tile.id, { position: { x, y }, size: gridSize });
+              foundPosition = true;
+            }
+          }
+        }
+
+        if (!foundPosition) {
+          propsMap.set(tile.id, { position: { x: 0, y: 0 }, size: gridSize });
+        }
       }
     });
 
@@ -284,10 +334,12 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const tileConfig = getTileConfig(tile.type);
     const defaultSize = tileConfig.sizeConstraints;
     
-    return tileGridProps.get(tile.id) || { 
+    const props = tileGridProps.get(tile.id) || { 
       position: { x: 0, y: 0 }, 
       size: { width: defaultSize.defaultWidth, height: defaultSize.defaultHeight } 
     };
+    
+    return props;
   }, [tileGridProps]);
 
   // Handle drag start
@@ -309,21 +361,44 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       return;
     }
     
-    event.preventDefault();
     const tile = tiles.find(t => t.id === tileId);
     if (!tile) {
       return;
     }
 
+    // Don't start drag if tile is pinned
+    if (tile.isPinned) {
+      return;
+    }
+    
+    event.preventDefault();
+    
+    if (!containerRef.current) return;
+    
     const { position } = getDefaultGridProps(tile);
+    
+    // Calculate the offset between mouse position and tile's grid position
+    // This prevents the tile from jumping when drag starts
+    const rect = containerRef.current.getBoundingClientRect();
+    const relativeX = event.clientX - rect.left - GRID_PADDING;
+    const relativeY = event.clientY - rect.top - GRID_PADDING;
+    
+    // Convert tile's grid position to pixel position
+    const tilePixelX = position.x * (cellSize + GRID_GAP);
+    const tilePixelY = position.y * (cellSize + GRID_GAP);
+    
+    // Calculate offset from mouse to tile top-left corner
+    const offsetX = relativeX - tilePixelX;
+    const offsetY = relativeY - tilePixelY;
     
     setDragState({
       isDragging: true,
       dragTileId: tileId,
       dragStart: { x: event.clientX, y: event.clientY },
       currentPosition: position,
+      dragOffset: { x: offsetX, y: offsetY }, // Store offset to maintain relative position
     });
-  }, [tiles, getDefaultGridProps]);
+  }, [tiles, getDefaultGridProps, cellSize]);
 
   // Calculate grid dimensions based on tile positions (including drag preview)
   const gridDimensions = useMemo(() => {
@@ -391,13 +466,13 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     return true;
   }, [tiles, getDefaultGridProps, gridDimensions]);
 
-  // Handle drag move with time-based throttling for smoother control
+  // Handle drag move with minimal throttling for smooth, responsive dragging
   const handleDragMove = useCallback((event: MouseEvent) => {
-    if (!dragState.isDragging || !containerRef.current) return;
+    if (!dragState.isDragging || !containerRef.current || !dragState.dragOffset) return;
 
-    // Throttle updates to prevent too rapid movement
+    // Minimal throttle for performance (16ms = ~60fps)
     const now = Date.now();
-    if (dragState.lastUpdateTime && now - dragState.lastUpdateTime < 50) { // 50ms throttle
+    if (dragState.lastUpdateTime && now - dragState.lastUpdateTime < 16) {
       return;
     }
 
@@ -406,9 +481,13 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const relativeX = event.clientX - rect.left - GRID_PADDING;
     const relativeY = event.clientY - rect.top - GRID_PADDING;
 
+    // Subtract the offset to get the tile's top-left corner position
+    const tilePixelX = relativeX - dragState.dragOffset.x;
+    const tilePixelY = relativeY - dragState.dragOffset.y;
+
     // Convert to grid coordinates
-    const gridX = Math.round(relativeX / (cellSize + GRID_GAP));
-    const gridY = Math.round(relativeY / (cellSize + GRID_GAP));
+    const gridX = Math.round(tilePixelX / (cellSize + GRID_GAP));
+    const gridY = Math.round(tilePixelY / (cellSize + GRID_GAP));
     
     const tile = tiles.find(t => t.id === dragState.dragTileId);
     if (tile) {
@@ -438,22 +517,28 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
 
   // Handle drag end
   const handleDragEnd = useCallback(() => {
-    if (!dragState.isDragging || !dragState.dragTileId || !dragState.currentPosition) return;
+    if (!dragState.isDragging || !dragState.dragTileId || !dragState.currentPosition) {
+      return;
+    }
 
     const tile = tiles.find(t => t.id === dragState.dragTileId);
     if (tile) {
       const { size } = getDefaultGridProps(tile);
       
       // Check if the new position is available
-      if (isAreaAvailable(dragState.currentPosition, size, dragState.dragTileId)) {
+      const isAvailable = isAreaAvailable(dragState.currentPosition, size, dragState.dragTileId);
+      
+      if (isAvailable) {
         // Update the tile's grid position
+        const newLegacyPosition = {
+          x: dragState.currentPosition.x * (cellSize + GRID_GAP),
+          y: dragState.currentPosition.y * (cellSize + GRID_GAP),
+        };
+        
         onUpdateTile(dragState.dragTileId, {
           gridPosition: dragState.currentPosition,
           // Also update legacy position for backward compatibility
-          position: {
-            x: dragState.currentPosition.x * (cellSize + GRID_GAP),
-            y: dragState.currentPosition.y * (cellSize + GRID_GAP),
-          }
+          position: newLegacyPosition,
         });
       }
     }
@@ -463,6 +548,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       dragTileId: null,
       dragStart: { x: 0, y: 0 },
       currentPosition: null,
+      dragOffset: undefined,
       lastUpdateTime: undefined,
     });
   }, [dragState, tiles, getDefaultGridProps, isAreaAvailable, onUpdateTile, gridDimensions, cellSize]);

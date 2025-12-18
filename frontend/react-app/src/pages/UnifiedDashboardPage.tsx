@@ -1413,6 +1413,7 @@ const UnifiedDashboardPage: React.FC = () => {
       return;
     }
     
+    
     // Use a function-based approach to get CURRENT tiles from state
     // This ensures we always work with the latest data, not stale closures
     // Note: All settings (including paginationState) are persisted to database via updateTabTiles -> debouncedSaveToDatabase
@@ -1435,6 +1436,7 @@ const UnifiedDashboardPage: React.FC = () => {
               mergedSettings[key] = settings[key];
             }
           });
+          
           // Always return a new object reference to ensure React detects changes
           // This is especially important for customization props (customTitle, customColor, customIcon)
           return { ...mergedSettings };
