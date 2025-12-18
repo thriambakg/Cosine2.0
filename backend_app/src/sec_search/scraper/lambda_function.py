@@ -27,6 +27,11 @@ from query_cache import (
     store_cached_query, update_cached_query_results
 )
 
+# DynamoDB configuration for query cache table (for storing request_id)
+QUERY_CACHE_TABLE_NAME = os.environ.get('SEC_SEARCH_QUERY_CACHE_TABLE')
+query_cache_dynamodb = boto3.resource('dynamodb') if QUERY_CACHE_TABLE_NAME else None
+query_cache_table = query_cache_dynamodb.Table(QUERY_CACHE_TABLE_NAME) if query_cache_dynamodb and QUERY_CACHE_TABLE_NAME else None
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -2297,10 +2302,12 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"✅✅✅ Created new job: {job_id} ✅✅✅")
         
         # Store request_id with job if available (from SQS wrapper)
+        # Store request_id separately (not in job_progress) so it doesn't get overwritten by progress updates
         if current_request_id:
             logger.info(f"📝 Storing request_id {current_request_id} with job {job_id}")
-            # Store request_id in job progress for later retrieval
-            job_progress = {'request_id': current_request_id}
+            # Store request_id as a separate field in the cache entry
+            # We'll need to update the cache entry after creation to add request_id
+            job_progress = None  # Will be initialized by store_cached_query
         else:
             job_progress = None
         
@@ -2308,6 +2315,18 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"💾 Storing job in query cache...")
         store_cached_query(query_hash, job_id, search_params, job_status='PENDING', job_progress=job_progress)
         logger.info(f"💾✅ Stored job in query cache")
+        
+        # Store request_id separately if available (after initial creation to avoid overwriting)
+        if current_request_id and query_cache_table:
+            try:
+                query_cache_table.update_item(
+                    Key={'queryHash': query_hash},
+                    UpdateExpression='SET request_id = :request_id',
+                    ExpressionAttributeValues={':request_id': current_request_id}
+                )
+                logger.info(f"💾✅ Stored request_id {current_request_id} separately for job {job_id}")
+            except Exception as e:
+                logger.error(f"❌ Error storing request_id: {e}", exc_info=True)
         
         logger.info(f"🚀🚀🚀 ABOUT TO INVOKE ASYNC SEARCH 🚀🚀🚀")
         logger.info(f"🚀 Invoking async search for job {job_id} with params: {json.dumps(search_params, default=str)}")

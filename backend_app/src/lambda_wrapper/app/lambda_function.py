@@ -245,6 +245,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     }
     
     try:
+        # Handle OPTIONS request for CORS preflight
+        if event.get('httpMethod') == 'OPTIONS':
+            logger.info("Handling OPTIONS request for CORS preflight")
+            return {
+                'statusCode': 200,
+                'headers': cors_headers,
+                'body': ''
+            }
+        
         # Check if this is an SNS notification (from worker Lambda completion)
         if 'Records' in event and len(event.get('Records', [])) > 0:
             first_record = event['Records'][0]

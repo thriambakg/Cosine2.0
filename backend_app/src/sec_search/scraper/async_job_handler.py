@@ -169,12 +169,18 @@ def complete_job(job_id: str, results: Dict[str, Any]):
         # Also publish to completion SNS topic for wrapper Lambda (if configured)
         if COMPLETION_SNS_TOPIC_ARN and completion_sns_client:
             try:
-                # Get request_id from job status (stored in job_progress when job was created)
+                # Get request_id from job status (stored as separate field in DynamoDB)
                 job_status = get_job_status(job_id)
                 request_id = None
                 if job_status:
-                    progress = job_status.get('progress', {})
-                    request_id = progress.get('request_id') if isinstance(progress, dict) else None
+                    # Try to get request_id from the job_status directly (stored as separate field)
+                    request_id = job_status.get('request_id')
+                    # Fallback: try from progress if not found directly
+                    if not request_id:
+                        progress = job_status.get('progress', {})
+                        if isinstance(progress, dict):
+                            request_id = progress.get('request_id')
+                    logger.info(f"📋 Job {job_id} completion - request_id lookup: found={bool(request_id)}, job_status_keys={list(job_status.keys())}")
                 
                 if request_id:
                     # Prepare completion message for wrapper
@@ -250,12 +256,18 @@ def fail_job(job_id: str, error: str):
         # Also publish to completion SNS topic for wrapper Lambda (if configured)
         if COMPLETION_SNS_TOPIC_ARN and completion_sns_client:
             try:
-                # Get request_id from job status (stored in job_progress when job was created)
+                # Get request_id from job status (stored as separate field in DynamoDB)
                 job_status = get_job_status(job_id)
                 request_id = None
                 if job_status:
-                    progress = job_status.get('progress', {})
-                    request_id = progress.get('request_id') if isinstance(progress, dict) else None
+                    # Try to get request_id from the job_status directly (stored as separate field)
+                    request_id = job_status.get('request_id')
+                    # Fallback: try from progress if not found directly
+                    if not request_id:
+                        progress = job_status.get('progress', {})
+                        if isinstance(progress, dict):
+                            request_id = progress.get('request_id')
+                    logger.info(f"📋 Job {job_id} failure - request_id lookup: found={bool(request_id)}")
                 
                 if request_id:
                     # Prepare failure message for wrapper
@@ -428,7 +440,8 @@ def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
                 'error': item.get('error') or item.get('job_error'),
                 'cancelled': item.get('job_cancelled', False) or item.get('job_status') == 'CANCELLED',
                 'created_at': item.get('created_at'),
-                'updated_at': item.get('updated_at')
+                'updated_at': item.get('updated_at'),
+                'request_id': item.get('request_id')  # Add request_id from separate field
             }
             # Convert Decimal types to native Python types for JSON serialization
             return convert_decimals(job_status)
