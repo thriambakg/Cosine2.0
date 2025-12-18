@@ -8,38 +8,19 @@ import yfinance as yf
 import numpy as np
 import pandas as pd
 import logging
+import boto3
 from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def lambda_handler(event, context):
+# AWS clients
+sns_client = boto3.client('sns')
+
+def process_volatility_request(event, context):
     """
-    AWS Lambda handler to fetch volatility (standard deviation of returns) for a stock.
-    
-    Uses a simple HTTP-based approach to avoid heavy dependencies.
-    
-    Expected event format:
-    {
-        "ticker": "AAPL",
-        "period": "1y"  # optional, defaults to "1y"
-    }
-    
-    Returns:
-    {
-        "statusCode": 200,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*"
-        },
-        "body": {
-            "ticker": "AAPL",
-            "period": "1y",
-            "volatility": 0.25,
-            "volatility_percentage": "25.00%"
-        }
-    }
+    Process volatility request (extracted from lambda_handler for reuse)
     """
     try:
         print("Event:", event)
@@ -131,6 +112,90 @@ def lambda_handler(event, context):
                 'ticker': event.get('ticker', 'unknown') if isinstance(event, dict) else 'unknown'
             })
         }
+
+
+def lambda_handler(event, context):
+    """
+    AWS Lambda handler to fetch volatility (standard deviation of returns) for a stock.
+    
+    Uses a simple HTTP-based approach to avoid heavy dependencies.
+    
+    Expected event format:
+    {
+        "ticker": "AAPL",
+        "period": "1y"  # optional, defaults to "1y"
+    }
+    
+    Or from SQS:
+    {
+        "Records": [
+            {
+                "body": "{\"request_id\": \"...\", \"api_gateway_event\": {...}}"
+            }
+        ]
+    }
+    """
+    # Handle SQS events
+    if 'Records' in event and len(event.get('Records', [])) > 0:
+        try:
+            record = event['Records'][0]
+            message_body = json.loads(record.get('body', '{}'))
+            request_id = message_body.get('request_id')
+            api_gateway_event = message_body.get('api_gateway_event', {})
+            
+            # Get SNS topic ARN from environment
+            sns_topic_arn = os.environ.get('STOCK_VOLATILITY_COMPLETION_SNS_TOPIC_ARN')
+            
+            # Process the request
+            try:
+                result = process_volatility_request(api_gateway_event, context)
+                
+                # Publish completion notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'completed',
+                            'response': result
+                        }),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                return result
+            except Exception as e:
+                logger.error(f"Error processing SQS event: {str(e)}", exc_info=True)
+                
+                # Publish failure notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'failed',
+                            'error': str(e)
+                        }),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                raise
+        except Exception as e:
+            logger.error(f"Error processing SQS event: {str(e)}", exc_info=True)
+            raise
+    
+    # Regular API Gateway or direct invocation
+    return process_volatility_request(event, context)
+
 
 def calculate_volatility(ticker, period="1y"):
     """

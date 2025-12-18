@@ -20,6 +20,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3')
 lambda_client = boto3.client('lambda')
+sns_client = boto3.client('sns')
 
 # Environment variables
 CHAT_SESSIONS_TABLE_NAME = os.environ.get('CHAT_SESSIONS_TABLE_NAME')
@@ -38,13 +39,9 @@ def get_chat_agent_function_name():
 
 WEBSOCKET_PROCESSOR_FUNCTION_NAME = get_chat_agent_function_name()
 
-def lambda_handler(event, context):
+def process_agent_files_request(event, context):
     """
-    Process agent files uploaded to S3 and update session_variables.
-    
-    This Lambda is triggered by direct invocation from agent tools.
-    It extracts user_id and session_id, then updates the session_variables
-    to include the new agent file in the agent_files array.
+    Process agent files request (extracted from lambda_handler for reuse)
     """
     try:
         logger.info(f"Processing agent files notification: {json.dumps(event, cls=DecimalEncoder)}")
@@ -70,6 +67,76 @@ def lambda_handler(event, context):
                 'error': str(e)
             }, cls=DecimalEncoder)
         }
+
+
+def lambda_handler(event, context):
+    """
+    Process agent files uploaded to S3 and update session_variables.
+    
+    This Lambda is triggered by direct invocation from agent tools or SQS.
+    It extracts user_id and session_id, then updates the session_variables
+    to include the new agent file in the agent_files array.
+    """
+    # Handle SQS events
+    if 'Records' in event and len(event.get('Records', [])) > 0:
+        try:
+            record = event['Records'][0]
+            message_body = json.loads(record.get('body', '{}'))
+            request_id = message_body.get('request_id')
+            api_gateway_event = message_body.get('api_gateway_event', {})
+            
+            # Get SNS topic ARN from environment
+            sns_topic_arn = os.environ.get('AGENT_FILES_PROCESSOR_COMPLETION_SNS_TOPIC_ARN')
+            
+            # Process the request
+            try:
+                result = process_agent_files_request(api_gateway_event, context)
+                
+                # Publish completion notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'completed',
+                            'response': result
+                        }, cls=DecimalEncoder),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                return result
+            except Exception as e:
+                logger.error(f"Error processing SQS event: {str(e)}", exc_info=True)
+                
+                # Publish failure notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'failed',
+                            'error': str(e)
+                        }, cls=DecimalEncoder),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                raise
+        except Exception as e:
+            logger.error(f"Error processing SQS event: {str(e)}", exc_info=True)
+            raise
+    
+    # Regular direct invocation or API Gateway
+    return process_agent_files_request(event, context)
 
 def process_direct_invocation(event):
     """

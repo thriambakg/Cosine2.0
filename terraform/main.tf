@@ -198,7 +198,7 @@ module "api_gateway" {
       http_method             = "GET"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.stock_volatility_lambda.function_arn
+      lambda_arn              = module.stock_volatility_lambda.wrapper_function_arn != null ? module.stock_volatility_lambda.wrapper_function_arn : module.stock_volatility_lambda.function_arn
       request_parameters      = {}
     }
     # GET method for crypto stats
@@ -207,7 +207,7 @@ module "api_gateway" {
       http_method             = "GET"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.crypto_stats_lambda.function_arn
+      lambda_arn              = module.crypto_stats_lambda.wrapper_function_arn != null ? module.crypto_stats_lambda.wrapper_function_arn : module.crypto_stats_lambda.function_arn
       request_parameters      = {}
     }
     # GET method for stock data (comprehensive stock statistics and chart data)
@@ -216,7 +216,7 @@ module "api_gateway" {
       http_method             = "GET"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.stock_data_lambda.function_arn
+      lambda_arn              = module.stock_data_lambda.wrapper_function_arn != null ? module.stock_data_lambda.wrapper_function_arn : module.stock_data_lambda.function_arn
       request_parameters      = {}
     }
     # POST method for stock screener
@@ -244,7 +244,7 @@ module "api_gateway" {
       http_method             = "GET"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.stock_alerts_lambda.function_arn
+      lambda_arn              = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
       request_parameters      = {}
     }
     # POST method for alerts (create new alert)
@@ -253,7 +253,7 @@ module "api_gateway" {
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.stock_alerts_lambda.function_arn
+      lambda_arn              = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
       request_parameters      = {}
     }
     # DELETE method for alerts (delete specific alert)
@@ -262,7 +262,7 @@ module "api_gateway" {
       http_method             = "DELETE"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.stock_alerts_lambda.function_arn
+      lambda_arn              = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
       request_parameters      = {}
     }
     # User Dashboard methods
@@ -346,7 +346,7 @@ module "api_gateway" {
       http_method             = "GET"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.session_management_lambda.function_arn
+      lambda_arn              = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       request_parameters      = {}
     }
     sessions_post = {
@@ -354,7 +354,7 @@ module "api_gateway" {
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.session_management_lambda.function_arn
+      lambda_arn              = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       request_parameters      = {}
     }
     sessions_get_specific = {
@@ -362,7 +362,7 @@ module "api_gateway" {
       http_method             = "GET"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.session_management_lambda.function_arn
+      lambda_arn              = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       request_parameters      = {}
     }
     sessions_put = {
@@ -370,7 +370,7 @@ module "api_gateway" {
       http_method             = "PUT"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.session_management_lambda.function_arn
+      lambda_arn              = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       request_parameters      = {}
     }
     sessions_delete = {
@@ -378,7 +378,7 @@ module "api_gateway" {
       http_method             = "DELETE"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.session_management_lambda.function_arn
+      lambda_arn              = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       request_parameters      = {}
     }
     # POST method for news search
@@ -406,7 +406,7 @@ module "api_gateway" {
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.file_return_lambda.function_arn
+      lambda_arn              = module.file_return_lambda.wrapper_function_arn != null ? module.file_return_lambda.wrapper_function_arn : module.file_return_lambda.function_arn
       request_parameters      = {}
     }
     # POST method for SEC search (uses wrapper Lambda for SQS integration)
@@ -511,17 +511,17 @@ module "api_gateway" {
   # Lambda permissions configuration
   lambda_permissions = {
     stock_volatility = {
-      function_arn  = module.stock_volatility_lambda.function_arn
+      function_arn  = module.stock_volatility_lambda.wrapper_function_arn != null ? module.stock_volatility_lambda.wrapper_function_arn : module.stock_volatility_lambda.function_arn
       http_method   = "GET"
       resource_path = "volatility"
     }
     crypto_stats = {
-      function_arn  = module.crypto_stats_lambda.function_arn
+      function_arn  = module.crypto_stats_lambda.wrapper_function_arn != null ? module.crypto_stats_lambda.wrapper_function_arn : module.crypto_stats_lambda.function_arn
       http_method   = "GET"
       resource_path = "crypto"
     }
     stock_data = {
-      function_arn  = module.stock_data_lambda.function_arn
+      function_arn  = module.stock_data_lambda.wrapper_function_arn != null ? module.stock_data_lambda.wrapper_function_arn : module.stock_data_lambda.function_arn
       http_method   = "GET"
       resource_path = "stock-data"
     }
@@ -577,42 +577,42 @@ module "api_gateway" {
       resource_path = "dashboard-tiles"
     }
     alerts_get = {
-      function_arn  = module.stock_alerts_lambda.function_arn
+      function_arn  = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
       http_method   = "GET"
       resource_path = "alerts"
     }
     alerts_post = {
-      function_arn  = module.stock_alerts_lambda.function_arn
+      function_arn  = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
       http_method   = "POST"
       resource_path = "alerts"
     }
     alerts_delete = {
-      function_arn  = module.stock_alerts_lambda.function_arn
+      function_arn  = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
       http_method   = "DELETE"
       resource_path = "alerts"
     }
     sessions_get = {
-      function_arn  = module.session_management_lambda.function_arn
+      function_arn  = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       http_method   = "GET"
       resource_path = "sessions"
     }
     sessions_post = {
-      function_arn  = module.session_management_lambda.function_arn
+      function_arn  = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       http_method   = "POST"
       resource_path = "sessions"
     }
     sessions_get_specific = {
-      function_arn  = module.session_management_lambda.function_arn
+      function_arn  = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       http_method   = "GET"
       resource_path = "session"
     }
     sessions_put = {
-      function_arn  = module.session_management_lambda.function_arn
+      function_arn  = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       http_method   = "PUT"
       resource_path = "session"
     }
     sessions_delete = {
-      function_arn  = module.session_management_lambda.function_arn
+      function_arn  = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       http_method   = "DELETE"
       resource_path = "session"
     }
@@ -627,7 +627,7 @@ module "api_gateway" {
       resource_path = "files"
     }
     file_download_post = {
-      function_arn  = module.file_return_lambda.function_arn
+      function_arn  = module.file_return_lambda.wrapper_function_arn != null ? module.file_return_lambda.wrapper_function_arn : module.file_return_lambda.function_arn
       http_method   = "POST"
       resource_path = "file-download"
     }
@@ -687,7 +687,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "57" # Updated for govt_contracts autocomplete and enrichment lambda-sqs migration
+  deployment_trigger = "58" # Updated for remaining lambda-sqs migrations (all Lambdas)
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -970,9 +970,9 @@ module "ses" {
   common_tags  = var.common_tags
 }
 
-# Stock Volatility Lambda Function
+# Stock Volatility Lambda Function (with SQS and wrapper support)
 module "stock_volatility_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-stock-volatility-${var.environment}"
   description   = "Lambda function for stock volatility calculation using yfinance"
@@ -1001,12 +1001,26 @@ module "stock_volatility_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn
   ]
 
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda       = true
+  wrapper_timeout             = 60
+  sns_topic_name              = "${var.project_name}-stock-volatility-completion-${var.environment}"
+  response_table_name         = null
+  completion_sns_env_var_name = "STOCK_VOLATILITY_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10
+
   tags = var.common_tags
 }
 
-# Crypto Stats Lambda Function
+# Crypto Stats Lambda Function (with SQS and wrapper support)
 module "crypto_stats_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-crypto-stats-${var.environment}"
   description   = "Lambda function for cryptocurrency statistics using CoinGecko API"
@@ -1034,6 +1048,20 @@ module "crypto_stats_lambda" {
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn
   ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda       = true
+  wrapper_timeout             = 60
+  sns_topic_name              = "${var.project_name}-crypto-stats-completion-${var.environment}"
+  response_table_name         = null
+  completion_sns_env_var_name = "CRYPTO_STATS_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.crypto_layer_arn
+  ]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10
 
   tags = var.common_tags
 }
@@ -1089,9 +1117,9 @@ module "user_dashboard_lambda" {
   tags = var.common_tags
 }
 
-# Stock Alerts Lambda Function
+# Stock Alerts Lambda Function (with SQS and wrapper support)
 module "stock_alerts_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-stock-alerts-${var.environment}"
   description   = "Lambda function for stock alert management (create, read, delete alerts)"
@@ -1123,12 +1151,24 @@ module "stock_alerts_lambda" {
     module.ses.lambda_ses_policy_arn
   ]
 
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 30
+  sns_topic_name                 = "${var.project_name}-stock-alerts-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "STOCK_ALERTS_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 20
+
   tags = var.common_tags
 }
 
-# Stock Alert Trigger Lambda Function (for processing alerts via scheduled events)
+# Stock Alert Trigger Lambda Function (with SQS and wrapper support)
+# Note: This is triggered by scheduled events, but wrapper enables async processing if needed
 module "stock_alert_trigger_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-stock-alert-trigger-${var.environment}"
   description   = "Lambda function to check and trigger stock alerts (scheduled execution)"
@@ -1158,6 +1198,17 @@ module "stock_alert_trigger_lambda" {
     aws_iam_policy.lambda_kms_policy.arn,
     module.ses.lambda_ses_policy_arn
   ]
+
+  # Enable wrapper Lambda (though this is primarily scheduled, wrapper enables async if needed)
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 300
+  sns_topic_name                 = "${var.project_name}-stock-alert-trigger-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "STOCK_ALERT_TRIGGER_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 5
 
   tags = var.common_tags
 }
@@ -1476,9 +1527,9 @@ resource "aws_lambda_function" "chat_agent" {
 # Note: Provisioned concurrency removed for now due to complexity with $LATEST
 # Can be added later using AWS CLI or console after Lambda is deployed
 
-# WebSocket Connection Manager Lambda Function
+# WebSocket Connection Manager Lambda Function (with SQS and wrapper support)
 module "websocket_connection_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-websocket-connection-${var.environment}"
   description   = "Lambda function for WebSocket connection management"
@@ -1510,6 +1561,17 @@ module "websocket_connection_lambda" {
     aws_iam_policy.lambda_websocket_policy.arn
   ]
 
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 30
+  sns_topic_name                 = "${var.project_name}-websocket-connection-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "WEBSOCKET_CONNECTION_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 20
+
   tags = var.common_tags
 }
 
@@ -1527,7 +1589,7 @@ module "websocket_api" {
   api_description = "WebSocket API for real-time chat functionality"
   stage_name      = var.environment
 
-  connection_lambda_arn  = module.websocket_connection_lambda.function_arn
+  connection_lambda_arn  = module.websocket_connection_lambda.wrapper_function_arn != null ? module.websocket_connection_lambda.wrapper_function_arn : module.websocket_connection_lambda.function_arn
   connection_lambda_name = module.websocket_connection_lambda.function_name
   message_lambda_arn     = aws_lambda_function.chat_agent.arn
   message_lambda_name    = aws_lambda_function.chat_agent.function_name
@@ -1738,9 +1800,9 @@ module "stock_screener_lambda" {
   tags = var.common_tags
 }
 
-# Stock Data Lambda Function
+# Stock Data Lambda Function (with SQS and wrapper support)
 module "stock_data_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-stock-data-${var.environment}"
   description   = "Lambda function for comprehensive stock data retrieval using yfinance"
@@ -1771,12 +1833,26 @@ module "stock_data_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn
   ]
 
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda       = true
+  wrapper_timeout             = 60
+  sns_topic_name              = "${var.project_name}-stock-data-completion-${var.environment}"
+  response_table_name         = null
+  completion_sns_env_var_name = "STOCK_DATA_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10
+
   tags = var.common_tags
 }
 
-# Stock Statistics Lambda Function (Updated to use financial layer)
+# Stock Statistics Lambda Function (with SQS and wrapper support)
 module "stock_statistics_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-stock-statistics-${var.environment}"
   description   = "Lambda function for portfolio analysis and stock statistics using yfinance"
@@ -1806,12 +1882,26 @@ module "stock_statistics_lambda" {
     aws_iam_policy.lambda_kms_policy.arn
   ]
 
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda       = true
+  wrapper_timeout             = 60
+  sns_topic_name              = "${var.project_name}-stock-statistics-completion-${var.environment}"
+  response_table_name         = null
+  completion_sns_env_var_name = "STOCK_STATISTICS_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10
+
   tags = var.common_tags
 }
 
-# Volatility Fetch Lambda Function (Updated to use financial layer)
+# Volatility Fetch Lambda Function (with SQS and wrapper support)
 module "volatility_fetch_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-volatility-fetch-${var.environment}"
   description   = "Lambda function for stock volatility calculation using yfinance"
@@ -1841,12 +1931,26 @@ module "volatility_fetch_lambda" {
     aws_iam_policy.lambda_kms_policy.arn
   ]
 
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda       = true
+  wrapper_timeout             = 30
+  sns_topic_name              = "${var.project_name}-volatility-fetch-completion-${var.environment}"
+  response_table_name         = null
+  completion_sns_env_var_name = "VOLATILITY_FETCH_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10
+
   tags = var.common_tags
 }
 
-# Robinhood Integration Lambda Function
+# Robinhood Integration Lambda Function (with SQS and wrapper support)
 module "robinhood_integration_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-robinhood-integration-${var.environment}"
   description   = "Lambda function for Robinhood API integration and portfolio analysis"
@@ -1879,12 +1983,26 @@ module "robinhood_integration_lambda" {
     aws_iam_policy.lambda_invoke_policy.arn
   ]
 
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda       = true
+  wrapper_timeout             = 60
+  sns_topic_name              = "${var.project_name}-robinhood-integration-completion-${var.environment}"
+  response_table_name         = null
+  completion_sns_env_var_name = "ROBINHOOD_INTEGRATION_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
+  ]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10
+
   tags = var.common_tags
 }
 
-# Session Management Lambda Function
+# Session Management Lambda Function (with SQS and wrapper support)
 module "session_management_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-session-management-${var.environment}"
   description   = "Lambda function for managing chat sessions and message persistence"
@@ -1906,12 +2024,23 @@ module "session_management_lambda" {
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
 
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 30
+  sns_topic_name                 = "${var.project_name}-session-management-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "SESSION_MANAGEMENT_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 20
+
   tags = var.common_tags
 }
 
-# File Return Lambda Function
+# File Return Lambda Function (with SQS and wrapper support)
 module "file_return_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-file-return-${var.environment}"
   description   = "Lambda function for secure file returns with user validation"
@@ -1941,6 +2070,17 @@ module "file_return_lambda" {
     aws_iam_policy.sec_search_s3_policy.arn,       # Add SEC filings bucket access
     aws_iam_policy.politician_trades_s3_policy.arn # Add politician trades bucket access
   ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 30
+  sns_topic_name                 = "${var.project_name}-file-return-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "FILE_RETURN_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 20
 
   tags = var.common_tags
 
@@ -1999,9 +2139,9 @@ module "news_search_lambda" {
 # File Upload Lambda Function - REMOVED
 # Functionality consolidated into chat_agent container
 
-# Agent Files Processor Lambda Function
+# Agent Files Processor Lambda Function (with SQS and wrapper support)
 module "agent_files_processor_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-agent-files-processor-${var.environment}"
   description   = "Lambda function for processing agent files and updating session_variables"
@@ -2037,6 +2177,17 @@ module "agent_files_processor_lambda" {
     aws_iam_policy.lambda_invoke_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 30
+  sns_topic_name                 = "${var.project_name}-agent-files-processor-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "AGENT_FILES_PROCESSOR_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10
 
   tags = var.common_tags
 }
@@ -2565,9 +2716,10 @@ module "usaspending_enrichment_lambda" {
   tags = var.common_tags
 }
 
-# SEC Search Progress Subscriber Lambda Function
+# SEC Search Progress Subscriber Lambda Function (with SQS and wrapper support)
+# Note: This is primarily triggered by SNS, but wrapper enables async processing if needed
 module "sec_search_progress_subscriber_lambda" {
-  source = "./modules/lambda"
+  source = "./modules/lambda-sqs"
 
   function_name = "${var.project_name}-sec-search-progress-subscriber-${var.environment}"
   description   = "Lambda function that subscribes to SNS progress events and updates DynamoDB"
@@ -2597,6 +2749,17 @@ module "sec_search_progress_subscriber_lambda" {
     data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_policy_arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
+
+  # Enable wrapper Lambda (though this is primarily SNS-triggered, wrapper enables async if needed)
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 60
+  sns_topic_name                 = "${var.project_name}-sec-search-progress-subscriber-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "SEC_SEARCH_PROGRESS_SUBSCRIBER_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10
 
   tags = var.common_tags
 }

@@ -1,11 +1,16 @@
 import json
 import math
+import os
+import boto3
 from datetime import datetime
 from typing import List, Dict, Any
 import ccxt
 import cryptocompare
 
-def lambda_handler(event, context):
+# AWS clients
+sns_client = boto3.client('sns')
+
+def process_crypto_stats_request(event, context):
     """
     Lambda function to fetch cryptocurrency statistics using crypto libraries.
     Uses cryptocompare library with fallback to direct API calls.
@@ -76,6 +81,83 @@ def lambda_handler(event, context):
                 'message': str(e)
             })
         }
+
+
+def lambda_handler(event, context):
+    """
+    Lambda function to fetch cryptocurrency statistics using crypto libraries.
+    Uses cryptocompare library with fallback to direct API calls.
+    
+    Or from SQS:
+    {
+        "Records": [
+            {
+                "body": "{\"request_id\": \"...\", \"api_gateway_event\": {...}}"
+            }
+        ]
+    }
+    """
+    # Handle SQS events
+    if 'Records' in event and len(event.get('Records', [])) > 0:
+        try:
+            record = event['Records'][0]
+            message_body = json.loads(record.get('body', '{}'))
+            request_id = message_body.get('request_id')
+            api_gateway_event = message_body.get('api_gateway_event', {})
+            
+            # Get SNS topic ARN from environment
+            sns_topic_arn = os.environ.get('CRYPTO_STATS_COMPLETION_SNS_TOPIC_ARN')
+            
+            # Process the request
+            try:
+                result = process_crypto_stats_request(api_gateway_event, context)
+                
+                # Publish completion notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'completed',
+                            'response': result
+                        }),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                return result
+            except Exception as e:
+                print(f"Error processing SQS event: {str(e)}")
+                
+                # Publish failure notification
+                if sns_topic_arn:
+                    sns_client.publish(
+                        TopicArn=sns_topic_arn,
+                        Message=json.dumps({
+                            'request_id': request_id,
+                            'status': 'failed',
+                            'error': str(e)
+                        }),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            }
+                        }
+                    )
+                
+                raise
+        except Exception as e:
+            print(f"Error processing SQS event: {str(e)}")
+            raise
+    
+    # Regular API Gateway or direct invocation
+    return process_crypto_stats_request(event, context)
+
 
 def fetch_crypto_stats(selected_crypto_symbol: str, timeframe: str = '1d') -> Dict[str, Any]:
     """
