@@ -1386,6 +1386,10 @@ export interface LDAAutocompleteResponse {
   success: boolean;
   results?: Array<{ value: string; type: string; label: string }>;
   count?: number;
+  total_count?: number;
+  has_more?: boolean;
+  offset?: number;
+  limit?: number;
   query?: string;
   field_types?: string[];
   metadata?: {
@@ -1394,12 +1398,19 @@ export interface LDAAutocompleteResponse {
   };
 }
 
+export interface LDAAutocompleteItem {
+  value: string;
+  type: string;
+  label: string;
+}
+
 export const ldaAutocompleteAPI = {
   search: async (params: {
     query: string;
     field_types?: string[];
     limit?: number;
-  }): Promise<string[]> => {
+    offset?: number;
+  }): Promise<LDAAutocompleteResponse> => {
     console.log('📋 API - LDA autocomplete:', params);
     const response = await apiRequest<LDAAutocompleteResponse>('/lda-autocomplete', {
       method: 'POST',
@@ -1407,10 +1418,11 @@ export const ldaAutocompleteAPI = {
         query: params.query,
         field_types: params.field_types || ['registrant', 'client', 'lobbyist', 'pac'],
         limit: params.limit || 20,
+        offset: params.offset || 0,
       }),
     });
-    // Return just the values for the MultiSelectField component
-    return response.results?.map(r => r.value) || [];
+    // Return the full response including pagination info
+    return response;
   },
 };
 

@@ -39,7 +39,7 @@ import {
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
 } from '@mui/icons-material';
-import { ldaSearchAPI, ldaAutocompleteAPI, LDASearchFilters, LDAFiling } from '../services/api';
+import { ldaSearchAPI, ldaAutocompleteAPI, LDASearchFilters, LDAFiling, LDAAutocompleteItem } from '../services/api';
 import MultiSelectField from '../components/MultiSelectField';
 
 // Custom styled components
@@ -97,8 +97,6 @@ const LDASearchPage: React.FC = () => {
   // Initialize state from sessionStorage immediately
   const savedState = loadStateFromStorage();
 
-  // Autocomplete debounce timer
-  const autocompleteTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
   // Search state
   const [searchParams, setSearchParams] = useState<LDASearchFilters>(
@@ -470,36 +468,67 @@ const LDASearchPage: React.FC = () => {
                     <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
                       General Search
                     </Typography>
-                    <MultiSelectField<string>
+                    <MultiSelectField<LDAAutocompleteItem>
                       label="Search"
-                      selectedItems={searchParams.general_text_search || []}
+                      selectedItems={(searchParams.general_text_search || []).map(value => ({ value, type: 'unknown', label: value }))}
                       onItemsChange={(items) => {
-                        setSearchParams(prev => ({ ...prev, general_text_search: items }));
+                        // Extract just the values (strings) for the search params
+                        const values = items.map(item => typeof item === 'string' ? item : item.value);
+                        setSearchParams(prev => ({ ...prev, general_text_search: values }));
                       }}
                       suggestions={[]}
-                      onSearch={async (query: string) => {
-                        // Debounce autocomplete requests (250ms as requested)
-                        return new Promise<string[]>((resolve) => {
-                          if (autocompleteTimerRef.current) {
-                            clearTimeout(autocompleteTimerRef.current);
-                          }
-                          
-                          autocompleteTimerRef.current = setTimeout(async () => {
-                            try {
-                              const results = await ldaAutocompleteAPI.search({
-                                query,
-                                field_types: ['registrant', 'client', 'lobbyist', 'pac'],
-                                limit: 20,
-                              });
-                              resolve(results);
-                            } catch (error) {
-                              console.error('Autocomplete error:', error);
-                              resolve([]);
-                            }
-                          }, 250);
-                        });
+                      onSearch={async (query: string, offset?: number) => {
+                        try {
+                          const response = await ldaAutocompleteAPI.search({
+                            query,
+                            field_types: ['registrant', 'client', 'lobbyist', 'pac'],
+                            limit: 20,
+                            offset: offset || 0,
+                          });
+                          return {
+                            results: response.results || [],
+                            has_more: response.has_more || false,
+                          };
+                        } catch (error) {
+                          console.error('Autocomplete error:', error);
+                          return { results: [], has_more: false };
+                        }
                       }}
-                      renderItem={(item) => item}
+                      renderItem={(item) => typeof item === 'string' ? item : item.value}
+                      renderOptionCustom={(item) => {
+                        if (typeof item === 'string') {
+                          return <Typography>{item}</Typography>;
+                        }
+                        const typeColors: Record<string, { bg: string; text: string; border: string }> = {
+                          registrant: { bg: 'rgba(59, 130, 246, 0.15)', text: '#60a5fa', border: '#3b82f6' },
+                          client: { bg: 'rgba(16, 185, 129, 0.15)', text: '#34d399', border: '#10b981' },
+                          lobbyist: { bg: 'rgba(168, 85, 247, 0.15)', text: '#a78bfa', border: '#a855f7' },
+                          pac: { bg: 'rgba(245, 158, 11, 0.15)', text: '#fbbf24', border: '#f59e0b' },
+                          foreign: { bg: 'rgba(239, 68, 68, 0.15)', text: '#f87171', border: '#ef4444' },
+                          general_issue: { bg: 'rgba(236, 72, 153, 0.15)', text: '#f472b6', border: '#ec4899' },
+                        };
+                        const typeColor = typeColors[item.type] || { bg: 'rgba(107, 114, 128, 0.15)', text: '#9ca3af', border: '#6b7280' };
+                        const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1).replace('_', ' ');
+                        return (
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                            <Typography sx={{ color: '#ffffff', flex: 1 }}>{item.value}</Typography>
+                            <Chip
+                              label={typeLabel}
+                              size="small"
+                              sx={{
+                                backgroundColor: typeColor.bg,
+                                color: typeColor.text,
+                                border: `1px solid ${typeColor.border}`,
+                                fontSize: '0.7rem',
+                                height: '20px',
+                                fontWeight: 500,
+                                ml: 1,
+                              }}
+                            />
+                          </Box>
+                        );
+                      }}
+                      getItemKey={(item) => typeof item === 'string' ? item : `${item.type}:${item.value}`}
                       placeholder="Type to search..."
                       allowCustomInput={false}
                     />
@@ -619,133 +648,221 @@ const LDASearchPage: React.FC = () => {
                     <Collapse in={advancedSearchExpanded}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
                         {/* Registrant Name */}
-                        <MultiSelectField<string>
+                        <MultiSelectField<LDAAutocompleteItem>
                           label="Registrant Name"
-                          selectedItems={searchParams.registrant_name || []}
-                          onItemsChange={(names) => {
-                            setSearchParams(prev => ({ ...prev, registrant_name: names }));
+                          selectedItems={(searchParams.registrant_name || []).map(value => ({ value, type: 'registrant', label: value }))}
+                          onItemsChange={(items) => {
+                            const values = items.map(item => typeof item === 'string' ? item : item.value);
+                            setSearchParams(prev => ({ ...prev, registrant_name: values }));
                           }}
                           suggestions={[]}
-                          onSearch={async (query: string) => {
-                            return new Promise<string[]>((resolve) => {
-                              if (autocompleteTimerRef.current) {
-                                clearTimeout(autocompleteTimerRef.current);
-                              }
-                              autocompleteTimerRef.current = setTimeout(async () => {
-                                try {
-                                  const results = await ldaAutocompleteAPI.search({
-                                    query,
-                                    field_types: ['registrant'],
-                                    limit: 20,
-                                  });
-                                  resolve(results);
-                                } catch (error) {
-                                  console.error('Autocomplete error:', error);
-                                  resolve([]);
-                                }
-                              }, 250);
-                            });
+                          onSearch={async (query: string, offset?: number) => {
+                            try {
+                              const response = await ldaAutocompleteAPI.search({
+                                query,
+                                field_types: ['registrant'],
+                                limit: 20,
+                                offset: offset || 0,
+                              });
+                              return {
+                                results: response.results || [],
+                                has_more: response.has_more || false,
+                              };
+                            } catch (error) {
+                              console.error('Autocomplete error:', error);
+                              return { results: [], has_more: false };
+                            }
                           }}
-                          renderItem={(name) => name}
+                          renderItem={(item) => typeof item === 'string' ? item : item.value}
+                          renderOptionCustom={(item) => {
+                            if (typeof item === 'string') {
+                              return <Typography>{item}</Typography>;
+                            }
+                            return (
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                                <Typography sx={{ color: '#ffffff', flex: 1 }}>{item.value}</Typography>
+                                <Chip
+                                  label="Registrant"
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                    color: '#60a5fa',
+                                    border: '1px solid #3b82f6',
+                                    fontSize: '0.7rem',
+                                    height: '20px',
+                                    fontWeight: 500,
+                                    ml: 1,
+                                  }}
+                                />
+                              </Box>
+                            );
+                          }}
+                          getItemKey={(item) => typeof item === 'string' ? item : `${item.type}:${item.value}`}
                           placeholder="Search registrants..."
                           allowCustomInput={false}
                         />
 
                         {/* Client Name */}
-                        <MultiSelectField<string>
+                        <MultiSelectField<LDAAutocompleteItem>
                           label="Client Name"
-                          selectedItems={searchParams.client_name || []}
-                          onItemsChange={(names) => {
-                            setSearchParams(prev => ({ ...prev, client_name: names }));
+                          selectedItems={(searchParams.client_name || []).map(value => ({ value, type: 'client', label: value }))}
+                          onItemsChange={(items) => {
+                            const values = items.map(item => typeof item === 'string' ? item : item.value);
+                            setSearchParams(prev => ({ ...prev, client_name: values }));
                           }}
                           suggestions={[]}
-                          onSearch={async (query: string) => {
-                            return new Promise<string[]>((resolve) => {
-                              if (autocompleteTimerRef.current) {
-                                clearTimeout(autocompleteTimerRef.current);
-                              }
-                              autocompleteTimerRef.current = setTimeout(async () => {
-                                try {
-                                  const results = await ldaAutocompleteAPI.search({
-                                    query,
-                                    field_types: ['client'],
-                                    limit: 20,
-                                  });
-                                  resolve(results);
-                                } catch (error) {
-                                  console.error('Autocomplete error:', error);
-                                  resolve([]);
-                                }
-                              }, 250);
-                            });
+                          onSearch={async (query: string, offset?: number) => {
+                            try {
+                              const response = await ldaAutocompleteAPI.search({
+                                query,
+                                field_types: ['client'],
+                                limit: 20,
+                                offset: offset || 0,
+                              });
+                              return {
+                                results: response.results || [],
+                                has_more: response.has_more || false,
+                              };
+                            } catch (error) {
+                              console.error('Autocomplete error:', error);
+                              return { results: [], has_more: false };
+                            }
                           }}
-                          renderItem={(name) => name}
+                          renderItem={(item) => typeof item === 'string' ? item : item.value}
+                          renderOptionCustom={(item) => {
+                            if (typeof item === 'string') {
+                              return <Typography>{item}</Typography>;
+                            }
+                            return (
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                                <Typography sx={{ color: '#ffffff', flex: 1 }}>{item.value}</Typography>
+                                <Chip
+                                  label="Client"
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                    color: '#34d399',
+                                    border: '1px solid #10b981',
+                                    fontSize: '0.7rem',
+                                    height: '20px',
+                                    fontWeight: 500,
+                                    ml: 1,
+                                  }}
+                                />
+                              </Box>
+                            );
+                          }}
+                          getItemKey={(item) => typeof item === 'string' ? item : `${item.type}:${item.value}`}
                           placeholder="Search clients..."
                           allowCustomInput={false}
                         />
 
                         {/* Lobbyist Name */}
-                        <MultiSelectField<string>
+                        <MultiSelectField<LDAAutocompleteItem>
                           label="Lobbyist Name"
-                          selectedItems={searchParams.lobbyist_name || []}
-                          onItemsChange={(names) => {
-                            setSearchParams(prev => ({ ...prev, lobbyist_name: names }));
+                          selectedItems={(searchParams.lobbyist_name || []).map(value => ({ value, type: 'lobbyist', label: value }))}
+                          onItemsChange={(items) => {
+                            const values = items.map(item => typeof item === 'string' ? item : item.value);
+                            setSearchParams(prev => ({ ...prev, lobbyist_name: values }));
                           }}
                           suggestions={[]}
-                          onSearch={async (query: string) => {
-                            return new Promise<string[]>((resolve) => {
-                              if (autocompleteTimerRef.current) {
-                                clearTimeout(autocompleteTimerRef.current);
-                              }
-                              autocompleteTimerRef.current = setTimeout(async () => {
-                                try {
-                                  const results = await ldaAutocompleteAPI.search({
-                                    query,
-                                    field_types: ['lobbyist'],
-                                    limit: 20,
-                                  });
-                                  resolve(results);
-                                } catch (error) {
-                                  console.error('Autocomplete error:', error);
-                                  resolve([]);
-                                }
-                              }, 250);
-                            });
+                          onSearch={async (query: string, offset?: number) => {
+                            try {
+                              const response = await ldaAutocompleteAPI.search({
+                                query,
+                                field_types: ['lobbyist'],
+                                limit: 20,
+                                offset: offset || 0,
+                              });
+                              return {
+                                results: response.results || [],
+                                has_more: response.has_more || false,
+                              };
+                            } catch (error) {
+                              console.error('Autocomplete error:', error);
+                              return { results: [], has_more: false };
+                            }
                           }}
-                          renderItem={(name) => name}
+                          renderItem={(item) => typeof item === 'string' ? item : item.value}
+                          renderOptionCustom={(item) => {
+                            if (typeof item === 'string') {
+                              return <Typography>{item}</Typography>;
+                            }
+                            return (
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                                <Typography sx={{ color: '#ffffff', flex: 1 }}>{item.value}</Typography>
+                                <Chip
+                                  label="Lobbyist"
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+                                    color: '#a78bfa',
+                                    border: '1px solid #a855f7',
+                                    fontSize: '0.7rem',
+                                    height: '20px',
+                                    fontWeight: 500,
+                                    ml: 1,
+                                  }}
+                                />
+                              </Box>
+                            );
+                          }}
+                          getItemKey={(item) => typeof item === 'string' ? item : `${item.type}:${item.value}`}
                           placeholder="Search lobbyists..."
                           allowCustomInput={false}
                         />
 
                         {/* Foreign Entity Name */}
-                        <MultiSelectField<string>
+                        <MultiSelectField<LDAAutocompleteItem>
                           label="Foreign Entity Name"
-                          selectedItems={searchParams.foreign_entity_name || []}
-                          onItemsChange={(names) => {
-                            setSearchParams(prev => ({ ...prev, foreign_entity_name: names }));
+                          selectedItems={(searchParams.foreign_entity_name || []).map(value => ({ value, type: 'foreign', label: value }))}
+                          onItemsChange={(items) => {
+                            const values = items.map(item => typeof item === 'string' ? item : item.value);
+                            setSearchParams(prev => ({ ...prev, foreign_entity_name: values }));
                           }}
                           suggestions={[]}
-                          onSearch={async (query: string) => {
-                            return new Promise<string[]>((resolve) => {
-                              if (autocompleteTimerRef.current) {
-                                clearTimeout(autocompleteTimerRef.current);
-                              }
-                              autocompleteTimerRef.current = setTimeout(async () => {
-                                try {
-                                  const results = await ldaAutocompleteAPI.search({
-                                    query,
-                                    field_types: ['foreign'],
-                                    limit: 20,
-                                  });
-                                  resolve(results);
-                                } catch (error) {
-                                  console.error('Autocomplete error:', error);
-                                  resolve([]);
-                                }
-                              }, 250);
-                            });
+                          onSearch={async (query: string, offset?: number) => {
+                            try {
+                              const response = await ldaAutocompleteAPI.search({
+                                query,
+                                field_types: ['foreign'],
+                                limit: 20,
+                                offset: offset || 0,
+                              });
+                              return {
+                                results: response.results || [],
+                                has_more: response.has_more || false,
+                              };
+                            } catch (error) {
+                              console.error('Autocomplete error:', error);
+                              return { results: [], has_more: false };
+                            }
                           }}
-                          renderItem={(name) => name}
+                          renderItem={(item) => typeof item === 'string' ? item : item.value}
+                          renderOptionCustom={(item) => {
+                            if (typeof item === 'string') {
+                              return <Typography>{item}</Typography>;
+                            }
+                            return (
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                                <Typography sx={{ color: '#ffffff', flex: 1 }}>{item.value}</Typography>
+                                <Chip
+                                  label="Foreign"
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                                    color: '#f87171',
+                                    border: '1px solid #ef4444',
+                                    fontSize: '0.7rem',
+                                    height: '20px',
+                                    fontWeight: 500,
+                                    ml: 1,
+                                  }}
+                                />
+                              </Box>
+                            );
+                          }}
+                          getItemKey={(item) => typeof item === 'string' ? item : `${item.type}:${item.value}`}
                           placeholder="Search foreign entities..."
                           allowCustomInput={false}
                         />

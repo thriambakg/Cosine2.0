@@ -128,19 +128,24 @@ def search_csv_values(values: List[str], query: str, limit: int = 20) -> List[st
     return matches
 
 
-def handle_autocomplete_request(field_types: List[str], query: str, limit: int = 20) -> Dict[str, Any]:
+def handle_autocomplete_request(field_types: List[str], query: str, limit: int = 20, offset: int = 0) -> Dict[str, Any]:
     """
-    Handle autocomplete request for multiple field types
+    Handle autocomplete request for multiple field types with pagination
     
     Args:
         field_types: List of field types to search (e.g., ['registrant', 'client'])
         query: Search query
-        limit: Maximum number of results per field type
+        limit: Maximum number of results to return
+        offset: Number of results to skip (for pagination)
     
     Returns:
         Dictionary with autocomplete results
     """
     all_results = []
+    
+    # Get more matches than needed to allow for pagination
+    # We'll search for limit * 10 to ensure we have enough results across all field types
+    search_limit = max(limit * 10, 100)  # At least 100 per field type
     
     for field_type in field_types:
         # Load CSV for this field type
@@ -149,8 +154,8 @@ def handle_autocomplete_request(field_types: List[str], query: str, limit: int =
         if not values:
             continue
         
-        # Search for matches
-        matches = search_csv_values(values, query, limit)
+        # Search for matches (get more than needed for pagination)
+        matches = search_csv_values(values, query, search_limit)
         
         # Add field type indicator to results
         for match in matches:
@@ -163,13 +168,19 @@ def handle_autocomplete_request(field_types: List[str], query: str, limit: int =
     # Sort by value (alphabetically)
     all_results.sort(key=lambda x: x['value'].lower())
     
-    # Limit total results
-    all_results = all_results[:limit]
+    # Apply pagination
+    total_count = len(all_results)
+    paginated_results = all_results[offset:offset + limit]
+    has_more = (offset + limit) < total_count
     
     return {
         'success': True,
-        'results': all_results,
-        'count': len(all_results),
+        'results': paginated_results,
+        'count': len(paginated_results),
+        'total_count': total_count,
+        'has_more': has_more,
+        'offset': offset,
+        'limit': limit,
         'query': query,
         'field_types': field_types
     }
@@ -211,6 +222,7 @@ def process_autocomplete_request(event: Dict[str, Any], context: Any) -> Dict[st
         query = request_body.get('query', '').strip()
         field_types = request_body.get('field_types', ['registrant', 'client', 'lobbyist', 'pac'])
         limit = min(request_body.get('limit', 20), 50)  # Cap at 50
+        offset = max(request_body.get('offset', 0), 0)  # Offset for pagination
         
         # Validate field types
         if not isinstance(field_types, list):
@@ -222,7 +234,7 @@ def process_autocomplete_request(event: Dict[str, Any], context: Any) -> Dict[st
             valid_field_types = ['registrant', 'client', 'lobbyist', 'pac']  # Default
         
         # Handle autocomplete request
-        result = handle_autocomplete_request(valid_field_types, query, limit)
+        result = handle_autocomplete_request(valid_field_types, query, limit, offset)
         
         # Return success response
         return {
@@ -232,6 +244,10 @@ def process_autocomplete_request(event: Dict[str, Any], context: Any) -> Dict[st
                 'success': True,
                 'results': result['results'],
                 'count': result['count'],
+                'total_count': result.get('total_count', result['count']),
+                'has_more': result.get('has_more', False),
+                'offset': offset,
+                'limit': limit,
                 'query': query,
                 'field_types': valid_field_types,
                 'metadata': {

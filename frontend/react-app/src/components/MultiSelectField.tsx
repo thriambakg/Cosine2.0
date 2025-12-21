@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -27,7 +27,7 @@ interface MultiSelectFieldProps<T> {
   maxChipsShown?: number;
   allowCustomInput?: boolean;
   isLoading?: boolean;
-  onSearch?: (query: string) => T[] | Promise<T[]>; // Callback for dynamic search that returns results (sync or async)
+  onSearch?: (query: string, offset?: number) => T[] | Promise<T[]> | { results: T[]; has_more?: boolean } | Promise<{ results: T[]; has_more?: boolean }>; // Callback for dynamic search that returns results (sync or async) or paginated response
 }
 
 function MultiSelectField<T = string>({
@@ -48,14 +48,63 @@ function MultiSelectField<T = string>({
   const [inputValue, setInputValue] = useState('');
   const [dynamicSuggestions, setDynamicSuggestions] = useState<T[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [currentQuery, setCurrentQuery] = useState<string>('');
 
   // Track last search query to prevent duplicate calls
   const lastSearchQueryRef = useRef<string>('');
-  
+  const listboxRef = useRef<HTMLUListElement | null>(null);
+
+  // Helper function to extract results from search response
+  const extractResults = (response: any): { results: T[]; hasMore: boolean } => {
+    if (Array.isArray(response)) {
+      return { results: response, hasMore: false };
+    }
+    if (response && typeof response === 'object' && 'results' in response) {
+      return {
+        results: response.results || [],
+        hasMore: response.has_more || false
+      };
+    }
+    return { results: [], hasMore: false };
+  };
+
+  // Load more results for current query
+  const loadMore = useCallback(async () => {
+    if (!onSearch || !currentQuery || isLoadingMore || !hasMore) {
+      return;
+    }
+    
+    setIsLoadingMore(true);
+    try {
+      const offset = dynamicSuggestions.length;
+      const searchResults = onSearch(currentQuery, offset);
+      
+      let response: any;
+      if (searchResults instanceof Promise) {
+        response = await searchResults;
+      } else {
+        response = searchResults;
+      }
+      
+      const { results, hasMore: moreAvailable } = extractResults(response);
+      setDynamicSuggestions(prev => [...prev, ...results]);
+      setHasMore(moreAvailable);
+    } catch (error) {
+      console.error('Error loading more results:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [onSearch, currentQuery, isLoadingMore, hasMore, dynamicSuggestions.length]);
+
+
   // Debounced search effect - prevent excessive API calls
   useEffect(() => {
     if (!onSearch) {
       setDynamicSuggestions([]);
+      setHasMore(false);
+      setCurrentQuery('');
       return;
     }
 
@@ -64,6 +113,8 @@ function MultiSelectField<T = string>({
       if (lastSearchQueryRef.current !== '') {
         lastSearchQueryRef.current = '';
         setDynamicSuggestions([]);
+        setHasMore(false);
+        setCurrentQuery('');
       }
       return;
     }
@@ -72,6 +123,8 @@ function MultiSelectField<T = string>({
       if (lastSearchQueryRef.current !== '') {
         lastSearchQueryRef.current = '';
         setDynamicSuggestions([]);
+        setHasMore(false);
+        setCurrentQuery('');
       }
       return;
     }
@@ -82,6 +135,7 @@ function MultiSelectField<T = string>({
         !inputValue.startsWith(lastSearchQueryRef.current) && 
         !lastSearchQueryRef.current.startsWith(inputValue)) {
       setDynamicSuggestions([]);
+      setHasMore(false);
     }
 
     // Skip if we're already searching for this exact query
@@ -94,13 +148,28 @@ function MultiSelectField<T = string>({
       // Only search if query hasn't changed during debounce
       if (lastSearchQueryRef.current !== inputValue) {
         lastSearchQueryRef.current = inputValue;
-        const searchResults = onSearch(inputValue);
-        // Handle both sync and async results
-        if (searchResults instanceof Promise) {
-          const results = await searchResults;
+        setCurrentQuery(inputValue);
+        setIsLoadingMore(true);
+        
+        try {
+          const searchResults = onSearch(inputValue, 0);
+          // Handle both sync and async results
+          let response: any;
+          if (searchResults instanceof Promise) {
+            response = await searchResults;
+          } else {
+            response = searchResults;
+          }
+          
+          const { results, hasMore: moreAvailable } = extractResults(response);
           setDynamicSuggestions(results);
-        } else {
-          setDynamicSuggestions(searchResults);
+          setHasMore(moreAvailable);
+        } catch (error) {
+          console.error('Search error:', error);
+          setDynamicSuggestions([]);
+          setHasMore(false);
+        } finally {
+          setIsLoadingMore(false);
         }
       }
     }, 300); // 300ms debounce
@@ -163,9 +232,9 @@ function MultiSelectField<T = string>({
           return options;
         }}
         freeSolo={false}
-        loading={isLoading}
+        loading={isLoading || isLoadingMore}
         clearOnBlur={false}
-        open={isDropdownOpen && (availableOptions.length > 0 || isLoading)}
+        open={isDropdownOpen && (availableOptions.length > 0 || isLoading || isLoadingMore)}
         onOpen={() => setIsDropdownOpen(true)}
         onClose={() => setIsDropdownOpen(false)}
         PaperComponent={(props) => (
@@ -178,11 +247,11 @@ function MultiSelectField<T = string>({
               color: '#ffffff',
               backdropFilter: 'blur(16px)',
               boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
-              maxHeight: '320px',
+              maxHeight: '600px', // Increased to show 9 items comfortably
               // Blue scrollbar styling
               '& .MuiAutocomplete-listbox': {
                 padding: 0,
-                maxHeight: '280px',
+                maxHeight: '560px', // Show approximately 9 items (each ~60px tall)
                 '&::-webkit-scrollbar': {
                   width: '8px',
                 },
@@ -310,6 +379,65 @@ function MultiSelectField<T = string>({
             </Box>
           );
         }}
+        ListboxComponent={forwardRef<HTMLUListElement, any>((props, ref) => {
+          const { children, ...other } = props;
+          return (
+            <ul 
+              {...other} 
+              ref={(node) => {
+                // Forward ref to MUI
+                if (typeof ref === 'function') {
+                  ref(node);
+                } else if (ref) {
+                  (ref as React.MutableRefObject<HTMLUListElement | null>).current = node;
+                }
+                listboxRef.current = node;
+              }}
+            >
+              {children}
+              {hasMore && (
+                <Box
+                  component="li"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!isLoadingMore) {
+                      loadMore();
+                    }
+                  }}
+                  sx={{
+                    backgroundColor: 'transparent',
+                    color: '#ffffff',
+                    py: 1.5,
+                    px: 2,
+                    borderTop: '1px solid rgba(55, 65, 81, 0.3)',
+                    borderBottom: 'none',
+                    cursor: isLoadingMore ? 'wait' : 'pointer',
+                    listStyle: 'none',
+                    '&:hover': {
+                      backgroundColor: isLoadingMore ? 'transparent' : 'rgba(59, 130, 246, 0.1)',
+                      borderColor: 'rgba(59, 130, 246, 0.3)'
+                    },
+                    '&:active': {
+                      backgroundColor: isLoadingMore ? 'transparent' : 'rgba(59, 130, 246, 0.2)',
+                    }
+                  }}
+                >
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      color: isLoadingMore ? '#9ca3af' : '#60a5fa',
+                      textAlign: 'center',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {isLoadingMore ? 'Loading...' : 'Load More'}
+                  </Typography>
+                </Box>
+              )}
+            </ul>
+          );
+        })}
       />
       
       {/* Selected items chips */}
