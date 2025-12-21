@@ -29,9 +29,9 @@ FIELD_TYPE_TO_S3_KEY = {
     'client': f'{S3_PREFIX}client_names.csv',
     'lobbyist': f'{S3_PREFIX}lobbyist_names.csv',
     'pac': f'{S3_PREFIX}pacs.csv',
-    'foreign': f'{S3_PREFIX}countries.csv',  # Foreign entities use countries CSV
-    'general_issue': f'{S3_PREFIX}general_issues.csv',
-    'country': f'{S3_PREFIX}countries.csv',
+    'foreign': f'{S3_PREFIX}lda_countries.csv',  # Foreign entities use countries CSV
+    'general_issue': f'{S3_PREFIX}lda_general_issues.csv',
+    'country': f'{S3_PREFIX}lda_countries.csv',
 }
 
 # Cache for CSV data (in-memory, per Lambda instance)
