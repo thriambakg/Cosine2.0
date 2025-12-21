@@ -137,10 +137,28 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         
         logger.info(f"🔍 handle_file_download called with: user_id={user_id}, session_id={session_id}, bucket={bucket_name}, s3_key={s3_key}, filename={filename}")
         
-        # Determine file type based on bucket name or S3 key pattern
-        is_sec_filing = bucket_name == 'SEC_FILINGS' or (s3_key and s3_key.startswith('filings/'))
-        is_politician_trade = bucket_name == 'POLITICIAN_TRADES' or (s3_key and s3_key.startswith('trades/'))
-        is_lda_disclosure = bucket_name == 'LDA_DISCLOSURES' or (s3_key and s3_key.startswith('filings/') and not is_sec_filing)
+        # Determine file type based on bucket name first, then S3 key pattern as fallback
+        # Check bucket name first to avoid misclassification (LDA and SEC both use 'filings/' prefix)
+        if bucket_name == 'SEC_FILINGS':
+            is_sec_filing = True
+            is_lda_disclosure = False
+            is_politician_trade = False
+        elif bucket_name == 'LDA_DISCLOSURES':
+            is_sec_filing = False
+            is_lda_disclosure = True
+            is_politician_trade = False
+        elif bucket_name == 'POLITICIAN_TRADES':
+            is_sec_filing = False
+            is_lda_disclosure = False
+            is_politician_trade = True
+        else:
+            # Fallback to S3 key pattern when bucket is not specified
+            # LDA disclosures use 'filings/RR/' or 'filings/LDA/' prefix
+            is_lda_disclosure = s3_key and (s3_key.startswith('filings/RR/') or s3_key.startswith('filings/LDA/'))
+            is_politician_trade = s3_key and s3_key.startswith('trades/')
+            # SEC filings use 'filings/' but not the LDA-specific prefixes
+            is_sec_filing = s3_key and s3_key.startswith('filings/') and not is_lda_disclosure
+        
         is_public_filing = is_sec_filing or is_lda_disclosure or is_politician_trade
         
         logger.info(f"🔍 File type detection: bucket={bucket_name}, s3_key={s3_key}, is_sec_filing={is_sec_filing}, is_lda_disclosure={is_lda_disclosure}, is_politician_trade={is_politician_trade}, is_public_filing={is_public_filing}")

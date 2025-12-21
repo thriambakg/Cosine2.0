@@ -219,3 +219,4 @@ All autocomplete endpoints were tested and confirmed to support partial matching
 See `Cosine-Base-Infra/scripts/test_lda_name_search.py` for test implementation.
 
 
+
