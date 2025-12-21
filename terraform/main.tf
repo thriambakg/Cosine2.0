@@ -2760,7 +2760,8 @@ resource "aws_iam_policy" "lda_search_dynamodb_policy" {
         Action = [
           "dynamodb:GetItem",
           "dynamodb:Query",
-          "dynamodb:BatchGetItem"
+          "dynamodb:BatchGetItem",
+          "dynamodb:Scan"
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn,
