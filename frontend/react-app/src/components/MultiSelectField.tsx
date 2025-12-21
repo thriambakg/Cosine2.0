@@ -27,7 +27,7 @@ interface MultiSelectFieldProps<T> {
   maxChipsShown?: number;
   allowCustomInput?: boolean;
   isLoading?: boolean;
-  onSearch?: (query: string) => T[]; // Callback for dynamic search that returns results
+  onSearch?: (query: string) => T[] | Promise<T[]>; // Callback for dynamic search that returns results (sync or async)
 }
 
 function MultiSelectField<T = string>({
@@ -90,12 +90,18 @@ function MultiSelectField<T = string>({
     }
 
     // Debounce the search to avoid excessive API calls
-    const timeoutId = setTimeout(() => {
+    const timeoutId = setTimeout(async () => {
       // Only search if query hasn't changed during debounce
       if (lastSearchQueryRef.current !== inputValue) {
         lastSearchQueryRef.current = inputValue;
         const searchResults = onSearch(inputValue);
-        setDynamicSuggestions(searchResults);
+        // Handle both sync and async results
+        if (searchResults instanceof Promise) {
+          const results = await searchResults;
+          setDynamicSuggestions(results);
+        } else {
+          setDynamicSuggestions(searchResults);
+        }
       }
     }, 300); // 300ms debounce
 

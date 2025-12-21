@@ -1316,6 +1316,104 @@ export const congressBillsAutocompleteAPI = {
   },
 };
 
+// ============================================================================
+// LDA SEARCH API
+// ============================================================================
+
+export interface LDASearchFilters {
+  general_text_search?: string[];
+  date_from?: string;
+  date_to?: string;
+  report_type?: string[];
+  amount_min?: number;
+  amount_max?: number;
+  registrant_name?: string[];
+  client_name?: string[];
+  lobbyist_name?: string[];
+  foreign_entity_name?: string[];
+  general_issue_code?: string[];
+  state?: string[];
+  government_entity_id?: number[];
+  filing_period?: string[];
+  contribution_item_type?: string[];
+  is_foreign?: boolean;
+  pac?: boolean;
+  filer_type?: string[];
+  [key: string]: any;
+}
+
+export interface LDAFiling {
+  id?: string;
+  filing_uuid?: string;
+  report_type?: string;
+  registrant_name?: string;
+  client_name?: string;
+  lobbyist_name?: string;
+  amount_reported?: number;
+  dt_posted?: string;
+  state?: string;
+  general_issue_code?: string;
+  filing_period?: string;
+  filing_year?: number;
+  [key: string]: any;
+}
+
+export interface LDASearchResponse {
+  success: boolean;
+  results?: LDAFiling[];
+  has_more?: boolean;
+  last_evaluated_key?: any;
+  count?: number;
+  method?: string;
+  index_used?: string;
+}
+
+export const ldaSearchAPI = {
+  search: async (params: {
+    filters: LDASearchFilters;
+    limit?: number;
+    last_evaluated_key?: any;
+  }): Promise<LDASearchResponse> => {
+    console.log('📋 API - Searching LDA filings:', params);
+    return apiRequest<LDASearchResponse>('/lda-search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+};
+
+export interface LDAAutocompleteResponse {
+  success: boolean;
+  results?: Array<{ value: string; type: string; label: string }>;
+  count?: number;
+  query?: string;
+  field_types?: string[];
+  metadata?: {
+    timestamp?: string;
+    bucket?: string;
+  };
+}
+
+export const ldaAutocompleteAPI = {
+  search: async (params: {
+    query: string;
+    field_types?: string[];
+    limit?: number;
+  }): Promise<string[]> => {
+    console.log('📋 API - LDA autocomplete:', params);
+    const response = await apiRequest<LDAAutocompleteResponse>('/lda-autocomplete', {
+      method: 'POST',
+      body: JSON.stringify({
+        query: params.query,
+        field_types: params.field_types || ['registrant', 'client', 'lobbyist', 'pac'],
+        limit: params.limit || 20,
+      }),
+    });
+    // Return just the values for the MultiSelectField component
+    return response.results?.map(r => r.value) || [];
+  },
+};
+
 export const api = {
   stockVolatility: stockVolatilityAPI,
   stockData: stockDataAPI,
@@ -1336,6 +1434,8 @@ export const api = {
   govtContractsEnrichment: govtContractsEnrichmentAPI,
   congressBillsSearch: congressBillsSearchAPI,
   congressBillsAutocomplete: congressBillsAutocompleteAPI,
+  ldaSearch: ldaSearchAPI,
+  ldaAutocomplete: ldaAutocompleteAPI,
 };
 
 export default api;

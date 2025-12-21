@@ -188,6 +188,12 @@ module "api_gateway" {
     congress_bills_search = {
       path_part = "congress-bills-search"
     }
+    lda_search = {
+      path_part = "lda-search"
+    }
+    lda_autocomplete = {
+      path_part = "lda-autocomplete"
+    }
   }
 
   # Methods configuration
@@ -681,13 +687,23 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "congress-bills-search"
     }
+    lda_search_post = {
+      function_arn  = module.lda_search_lambda.wrapper_function_arn != null ? module.lda_search_lambda.wrapper_function_arn : module.lda_search_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "lda-search"
+    }
+    lda_autocomplete_post = {
+      function_arn  = module.lda_autocomplete_lambda.wrapper_function_arn != null ? module.lda_autocomplete_lambda.wrapper_function_arn : module.lda_autocomplete_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "lda-autocomplete"
+    }
   }
 
 
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "58" # Updated for remaining lambda-sqs migrations (all Lambdas)
+  deployment_trigger = "59" # Updated for remaining lambda-sqs migrations (all Lambdas)
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -2598,6 +2614,167 @@ module "congress_bills_search_lambda" {
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
   reserved_concurrent_executions = 10 # Limit concurrent congress bills searches
+
+  tags = var.common_tags
+}
+
+# LDA Search Lambda Function (with SQS and wrapper support)
+module "lda_search_lambda" {
+  source = "./modules/lambda-sqs"
+
+  function_name = "${var.project_name}-lda-search-${var.environment}"
+  description   = "Lambda function for searching LDA filings in DynamoDB"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 300 # 5 minutes for complex queries
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/lda_search/search"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT        = var.environment
+    LOG_LEVEL          = var.environment == "development" ? "DEBUG" : "INFO"
+    FILINGS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.lda_filings_table_name
+  }
+
+  # Attach core layer
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies - Read-only access to DynamoDB filings table
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.lda_search_dynamodb_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda = true
+  wrapper_timeout       = 300 # 5 minutes to match worker timeout
+  sns_topic_name        = "${var.project_name}-lda-search-completion-${var.environment}"
+  # Use DynamoDB table for response correlation (optional, can use SNS message attributes instead)
+  response_table_name = null # Not needed for synchronous responses
+  # Environment variable name for completion SNS topic in worker Lambda
+  completion_sns_env_var_name = "LDA_SEARCH_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # SQS configuration
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 10 # Limit concurrent LDA searches
+
+  tags = var.common_tags
+}
+
+# LDA Autocomplete Lambda Function (with SQS and wrapper support)
+module "lda_autocomplete_lambda" {
+  source = "./modules/lambda-sqs"
+
+  function_name = "${var.project_name}-lda-autocomplete-${var.environment}"
+  description   = "Lambda function for LDA autocomplete from S3 CSV files"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  # Source directory
+  source_dir = "../backend_app/src/lda_search/autocomplete"
+
+  # Environment variables
+  environment_variables = {
+    ENVIRONMENT    = var.environment
+    LOG_LEVEL      = var.environment == "development" ? "DEBUG" : "INFO"
+    S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_name
+    S3_PREFIX      = "lists/"
+  }
+
+  # Attach core layer
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # Additional IAM policies - Read-only access to S3 bucket for CSV files
+  additional_policy_arns = [
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.lda_autocomplete_s3_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  # Enable wrapper Lambda for synchronous API Gateway responses
+  enable_wrapper_lambda = true
+  wrapper_timeout       = 30 # Match worker timeout
+  sns_topic_name        = "${var.project_name}-lda-autocomplete-completion-${var.environment}"
+  # Use DynamoDB table for response correlation (optional, can use SNS message attributes instead)
+  response_table_name = null # Not needed for synchronous responses
+  # Environment variable name for completion SNS topic in worker Lambda
+  completion_sns_env_var_name = "LDA_AUTOCOMPLETE_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  # SQS configuration
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = 20 # Autocomplete is fast, allow more concurrency
+
+  tags = var.common_tags
+}
+
+# IAM Policy for LDA Search Lambda to access DynamoDB filings table (read-only)
+resource "aws_iam_policy" "lda_search_dynamodb_policy" {
+  name        = "${var.project_name}-lda-search-dynamodb-policy-${var.environment}"
+  description = "Policy for LDA Search Lambda to read DynamoDB filings table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for LDA Autocomplete Lambda to access S3 bucket (read-only for CSV files)
+resource "aws_iam_policy" "lda_autocomplete_s3_policy" {
+  name        = "${var.project_name}-lda-autocomplete-s3-policy-${var.environment}"
+  description = "Policy for LDA Autocomplete Lambda to read CSV files from S3"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "${data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn}/lists/*",
+          data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn
+        ]
+      }
+    ]
+  })
 
   tags = var.common_tags
 }

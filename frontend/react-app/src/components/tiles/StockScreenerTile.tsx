@@ -1136,7 +1136,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const currentResults = filteredResults.slice(startIndex, endIndex);
 
   const tileColor = customColor || '#3b82f6';
-  
+
   return (
     <Box
       sx={{
@@ -1207,9 +1207,9 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
             return (
               <>
                 <TileIcon sx={{ color: iconColor, fontSize: '1.5rem', mr: 1 }} />
-                <Typography variant="h6" color="white" fontWeight={600}>
+          <Typography variant="h6" color="white" fontWeight={600}>
                   {displayTitle}
-                </Typography>
+          </Typography>
               </>
             );
           })()}
@@ -1289,27 +1289,27 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
               {/* Refresh Button - shown when expanded */}
               <Tooltip title="Refresh" arrow>
                 <span>
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      runScreener();
-                    }}
-                    disabled={isLoading}
-                    onMouseDown={(e) => e.stopPropagation()}
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runScreener();
+                  }}
+                  disabled={isLoading}
+                  onMouseDown={(e) => e.stopPropagation()}
                     sx={{
                       color: isLoading ? '#6b7280' : '#9ca3af',
                       '&:hover': { color: isLoading ? '#6b7280' : '#3b82f6' },
                       '&.Mui-disabled': { color: '#6b7280' },
                       padding: '6px',
                     }}
-                  >
-                    {isLoading ? (
-                      <CircularProgress size={18} sx={{ color: '#3b82f6' }} />
-                    ) : (
-                      <RefreshIcon sx={{ fontSize: 18 }} />
-                    )}
-                  </IconButton>
+                >
+                  {isLoading ? (
+                    <CircularProgress size={18} sx={{ color: '#3b82f6' }} />
+                  ) : (
+                    <RefreshIcon sx={{ fontSize: 18 }} />
+                  )}
+                </IconButton>
                 </span>
               </Tooltip>
 

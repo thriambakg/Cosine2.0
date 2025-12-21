@@ -111,6 +111,13 @@ const defaultNavigationItems: NavigationItem[] = [
     category: 'government_data'
   },
   {
+    id: 'lda-search',
+    label: 'LDA Disclosures',
+    path: '/lda-search',
+    icon: 'DescriptionIcon',
+    category: 'government_data'
+  },
+  {
     id: 'news-search',
     label: 'News Search',
     path: '/news-search',
