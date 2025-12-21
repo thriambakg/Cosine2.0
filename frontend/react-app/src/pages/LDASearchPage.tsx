@@ -110,6 +110,9 @@ const LDASearchPage: React.FC = () => {
     }
   );
   
+  // Store selected general search items with their types
+  const [generalSearchItems, setGeneralSearchItems] = useState<LDAAutocompleteItem[]>([]);
+  
   const [allSearchResults, setAllSearchResults] = useState<LDAFiling[]>(
     savedState?.allSearchResults || []
   );
@@ -305,8 +308,58 @@ const LDASearchPage: React.FC = () => {
     setHasMore(false);
     
     try {
+      // Transform searchParams to new format with general_text_search_fields
+      const filters: LDASearchFilters = { ...searchParams };
+      
+      // Build general_text_search_fields from selected items with types
+      const generalTextSearchFields: {
+        registrant?: string[] | false;
+        client?: string[] | false;
+        lobbyist?: string[] | false;
+        pac?: string[] | false;
+        foreign?: string[] | false;
+      } = {
+        registrant: false,
+        client: false,
+        lobbyist: false,
+        pac: false,
+        foreign: false,
+      };
+      
+      // Group selected items by type
+      if (generalSearchItems.length > 0) {
+        const itemsByType: Record<string, string[]> = {};
+        generalSearchItems.forEach(item => {
+          const type = item.type || 'unknown';
+          if (!itemsByType[type]) {
+            itemsByType[type] = [];
+          }
+          itemsByType[type].push(item.value);
+        });
+        
+        // Set arrays for types that have items, false for others
+        if (itemsByType['registrant']) {
+          generalTextSearchFields.registrant = itemsByType['registrant'];
+        }
+        if (itemsByType['client']) {
+          generalTextSearchFields.client = itemsByType['client'];
+        }
+        if (itemsByType['lobbyist']) {
+          generalTextSearchFields.lobbyist = itemsByType['lobbyist'];
+        }
+        if (itemsByType['pac']) {
+          generalTextSearchFields.pac = itemsByType['pac'];
+        }
+        if (itemsByType['foreign']) {
+          generalTextSearchFields.foreign = itemsByType['foreign'];
+        }
+      }
+      
+      filters.general_text_search_fields = generalTextSearchFields;
+      delete filters.general_text_search; // Remove old format
+      
       const response = await ldaSearchAPI.search({
-        filters: searchParams as LDASearchFilters,
+        filters: filters,
         limit: pageSize,
       });
       
@@ -341,8 +394,55 @@ const LDASearchPage: React.FC = () => {
     setSearchError(null);
     
     try {
+      // Transform searchParams to new format with general_text_search_fields (same as handleSearch)
+      const filters: LDASearchFilters = { ...searchParams };
+      
+      const generalTextSearchFields: {
+        registrant?: string[] | false;
+        client?: string[] | false;
+        lobbyist?: string[] | false;
+        pac?: string[] | false;
+        foreign?: string[] | false;
+      } = {
+        registrant: false,
+        client: false,
+        lobbyist: false,
+        pac: false,
+        foreign: false,
+      };
+      
+      if (generalSearchItems.length > 0) {
+        const itemsByType: Record<string, string[]> = {};
+        generalSearchItems.forEach(item => {
+          const type = item.type || 'unknown';
+          if (!itemsByType[type]) {
+            itemsByType[type] = [];
+          }
+          itemsByType[type].push(item.value);
+        });
+        
+        if (itemsByType['registrant']) {
+          generalTextSearchFields.registrant = itemsByType['registrant'];
+        }
+        if (itemsByType['client']) {
+          generalTextSearchFields.client = itemsByType['client'];
+        }
+        if (itemsByType['lobbyist']) {
+          generalTextSearchFields.lobbyist = itemsByType['lobbyist'];
+        }
+        if (itemsByType['pac']) {
+          generalTextSearchFields.pac = itemsByType['pac'];
+        }
+        if (itemsByType['foreign']) {
+          generalTextSearchFields.foreign = itemsByType['foreign'];
+        }
+      }
+      
+      filters.general_text_search_fields = generalTextSearchFields;
+      delete filters.general_text_search;
+      
       const response = await ldaSearchAPI.search({
-        filters: searchParams as LDASearchFilters,
+        filters: filters,
         limit: pageSize,
         last_evaluated_key: lastEvaluatedKey,
       });
@@ -470,10 +570,17 @@ const LDASearchPage: React.FC = () => {
                     </Typography>
                     <MultiSelectField<LDAAutocompleteItem>
                       label="Search"
-                      selectedItems={(searchParams.general_text_search || []).map(value => ({ value, type: 'unknown', label: value }))}
+                      selectedItems={generalSearchItems}
                       onItemsChange={(items) => {
-                        // Extract just the values (strings) for the search params
-                        const values = items.map(item => typeof item === 'string' ? item : item.value);
+                        // Store full autocomplete items with types
+                        const autocompleteItems = items.map(item => 
+                          typeof item === 'string' 
+                            ? { value: item, type: 'unknown', label: item }
+                            : item
+                        );
+                        setGeneralSearchItems(autocompleteItems);
+                        // Also update searchParams for backward compatibility
+                        const values = autocompleteItems.map(item => item.value);
                         setSearchParams(prev => ({ ...prev, general_text_search: values }));
                       }}
                       suggestions={[]}
@@ -953,6 +1060,7 @@ const LDASearchPage: React.FC = () => {
                           amount_min: undefined,
                           amount_max: undefined,
                         });
+                        setGeneralSearchItems([]);
                         setSelectedFilters({
                           registrants: [],
                           clients: [],

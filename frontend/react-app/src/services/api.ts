@@ -1321,7 +1321,14 @@ export const congressBillsAutocompleteAPI = {
 // ============================================================================
 
 export interface LDASearchFilters {
-  general_text_search?: string[];
+  general_text_search?: string[]; // Legacy format
+  general_text_search_fields?: {
+    registrant?: string[] | false;
+    client?: string[] | false;
+    lobbyist?: string[] | false;
+    pac?: string[] | false;
+    foreign?: string[] | false;
+  };
   date_from?: string;
   date_to?: string;
   report_type?: string[];

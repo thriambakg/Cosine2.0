@@ -59,7 +59,58 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     Returns:
         True if item matches all filters, False otherwise
     """
-    # General text search (searches across multiple fields)
+    # General text search fields (new format - arrays in general_text_search_fields)
+    general_text_search_fields = filters.get('general_text_search_fields', {})
+    if general_text_search_fields:
+        # Check registrant field
+        if general_text_search_fields.get('registrant'):
+            registrant_terms = general_text_search_fields['registrant']
+            if isinstance(registrant_terms, list) and registrant_terms:
+                registrant_terms = [t for t in registrant_terms if t and str(t).strip()]
+                if registrant_terms:
+                    item_name = str(item.get('registrant_name') or '').lower()
+                    matches = False
+                    for term in registrant_terms:
+                        term_lower = str(term).strip().lower()
+                        if term_lower in item_name:
+                            matches = True
+                            break
+                    if not matches:
+                        return False
+        
+        # Check client field
+        if general_text_search_fields.get('client'):
+            client_terms = general_text_search_fields['client']
+            if isinstance(client_terms, list) and client_terms:
+                client_terms = [t for t in client_terms if t and str(t).strip()]
+                if client_terms:
+                    item_name = str(item.get('client_name') or '').lower()
+                    matches = False
+                    for term in client_terms:
+                        term_lower = str(term).strip().lower()
+                        if term_lower in item_name:
+                            matches = True
+                            break
+                    if not matches:
+                        return False
+        
+        # Check lobbyist field
+        if general_text_search_fields.get('lobbyist'):
+            lobbyist_terms = general_text_search_fields['lobbyist']
+            if isinstance(lobbyist_terms, list) and lobbyist_terms:
+                lobbyist_terms = [t for t in lobbyist_terms if t and str(t).strip()]
+                if lobbyist_terms:
+                    item_name = str(item.get('lobbyist_name') or '').lower()
+                    matches = False
+                    for term in lobbyist_terms:
+                        term_lower = str(term).strip().lower()
+                        if term_lower in item_name:
+                            matches = True
+                            break
+                    if not matches:
+                        return False
+    
+    # General text search (legacy format - searches across multiple fields)
     if filters.get('general_text_search'):
         search_terms = filters['general_text_search'] if isinstance(filters['general_text_search'], list) else [filters['general_text_search']]
         search_terms = [t for t in search_terms if t and str(t).strip()]
@@ -229,6 +280,52 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
             except (ValueError, IndexError):
                 pass
     
+    # Check for general_text_search_fields structure (new format)
+    general_text_search_fields = filters.get('general_text_search_fields', {})
+    if general_text_search_fields:
+        # Registrant name from general_text_search_fields
+        if general_text_search_fields.get('registrant'):
+            registrant_terms = general_text_search_fields['registrant']
+            if isinstance(registrant_terms, list) and registrant_terms:
+                # Use first term for GSI query
+                query_configs.append({
+                    'filter_key': 'registrant_name',
+                    'index_name': 'RegistrantPostedDateIndex',
+                    'hash_key': 'registrant_name',
+                    'hash_value': registrant_terms[0],
+                    'range_key': 'dt_posted',
+                    'range_value': date_from if date_from else None,
+                    'range_condition': 'gte' if date_from else None
+                })
+        
+        # Client name from general_text_search_fields
+        if general_text_search_fields.get('client'):
+            client_terms = general_text_search_fields['client']
+            if isinstance(client_terms, list) and client_terms:
+                query_configs.append({
+                    'filter_key': 'client_name',
+                    'index_name': 'ClientPostedDateIndex',
+                    'hash_key': 'client_name',
+                    'hash_value': client_terms[0],
+                    'range_key': 'dt_posted',
+                    'range_value': date_from if date_from else None,
+                    'range_condition': 'gte' if date_from else None
+                })
+        
+        # Lobbyist name from general_text_search_fields
+        if general_text_search_fields.get('lobbyist'):
+            lobbyist_terms = general_text_search_fields['lobbyist']
+            if isinstance(lobbyist_terms, list) and lobbyist_terms:
+                query_configs.append({
+                    'filter_key': 'lobbyist_name',
+                    'index_name': 'LobbyistPostedDateIndex',
+                    'hash_key': 'lobbyist_name',
+                    'hash_value': lobbyist_terms[0],
+                    'range_key': 'dt_posted',
+                    'range_value': date_from if date_from else None,
+                    'range_condition': 'gte' if date_from else None
+                })
+    
     # Report type filter - use ReportTypePostedDateIndex
     if filters.get('report_type'):
         report_types = filters['report_type'] if isinstance(filters['report_type'], list) else [filters['report_type']]
@@ -244,7 +341,7 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_condition': 'gte' if date_from else None
             })
     
-    # Registrant name filter - use RegistrantPostedDateIndex
+    # Registrant name filter - use RegistrantPostedDateIndex (legacy format)
     if filters.get('registrant_name'):
         registrant_names = filters['registrant_name'] if isinstance(filters['registrant_name'], list) else [filters['registrant_name']]
         if registrant_names:
@@ -258,7 +355,7 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_condition': 'gte' if date_from else None
             })
     
-    # Client name filter - use ClientPostedDateIndex
+    # Client name filter - use ClientPostedDateIndex (legacy format)
     if filters.get('client_name'):
         client_names = filters['client_name'] if isinstance(filters['client_name'], list) else [filters['client_name']]
         if client_names:
@@ -272,7 +369,7 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_condition': 'gte' if date_from else None
             })
     
-    # Lobbyist name filter - use LobbyistPostedDateIndex
+    # Lobbyist name filter - use LobbyistPostedDateIndex (legacy format)
     if filters.get('lobbyist_name'):
         lobbyist_names = filters['lobbyist_name'] if isinstance(filters['lobbyist_name'], list) else [filters['lobbyist_name']]
         if lobbyist_names:
