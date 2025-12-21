@@ -2760,7 +2760,6 @@ resource "aws_iam_policy" "lda_search_dynamodb_policy" {
         Action = [
           "dynamodb:GetItem",
           "dynamodb:Query",
-          "dynamodb:Scan",
           "dynamodb:BatchGetItem"
         ]
         Resource = [

@@ -662,23 +662,55 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         }
     
     else:
-        # No GSI-queryable filters - use scan (not recommended for large tables)
-        logger.warning("No GSI-queryable filters found, using scan (inefficient)")
+        # No GSI-queryable filters - use default GSI query for recent years
+        # This avoids scan operations by querying YearPostedDateIndex for recent years
+        logger.info("No GSI-queryable filters found, using default YearPostedDateIndex query for recent years")
         
-        # For general_text_search, increase scan limit significantly to find matches
-        # Since we're doing substring matching, we need to scan more items
-        scan_limit_multiplier = 10 if filters.get('general_text_search') else 2
-        scan_params = {
-            'Limit': limit * scan_limit_multiplier  # Get more to account for filtering
-        }
+        # Use current year and previous year as default to get recent filings
+        from datetime import datetime
+        current_year = datetime.now().year
+        years_to_query = [current_year, current_year - 1]
         
-        if last_evaluated_key:
-            scan_params['ExclusiveStartKey'] = last_evaluated_key
+        all_filing_ids = []
+        all_last_eval_keys = {}
         
-        logger.info(f"Scanning with limit {scan_params['Limit']} (requested limit: {limit})")
-        response = filings_table.scan(**scan_params)
-        items = response.get('Items', [])
-        logger.info(f"Scanned {len(items)} items from DynamoDB")
+        # Query each year's GSI to get filing IDs
+        for year in years_to_query:
+            filing_ids, last_eval_key = query_gsi_for_filing_ids(
+                index_name='YearPostedDateIndex',
+                hash_key_name='filing_year',
+                hash_key_value=year,
+                limit=limit * 10,  # Get more IDs to account for filtering
+                exclusive_start_key=last_evaluated_key if year == years_to_query[0] else None,
+                get_all=False
+            )
+            all_filing_ids.extend(filing_ids)
+            if last_eval_key:
+                all_last_eval_keys[year] = last_eval_key
+        
+        logger.info(f"Found {len(all_filing_ids)} filing IDs from recent years")
+        
+        # Fetch full items using batch get
+        items = []
+        if all_filing_ids:
+            batch_size = 100
+            dynamodb_client = boto3.client('dynamodb')
+            for i in range(0, len(all_filing_ids), batch_size):
+                batch_ids = all_filing_ids[i:i + batch_size]
+                request_items = {
+                    FILINGS_TABLE_NAME: {
+                        'Keys': [
+                            {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
+                            for fid in batch_ids
+                        ]
+                    }
+                }
+                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
+                deserializer = TypeDeserializer()
+                for item in batch_items:
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    items.append(converted_item)
         
         # Apply all filters in Python
         filtered_items = [item for item in items if apply_python_filter(item, filters)]
@@ -687,10 +719,12 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         
         results = [convert_decimal_to_float(item) for item in filtered_items]
         
+        # Use the last evaluated key from the most recent year queried
         serializable_last_key = None
-        if response.get('LastEvaluatedKey'):
+        if all_last_eval_keys:
             try:
-                serializable_last_key = convert_decimal_to_float(response['LastEvaluatedKey'])
+                # Use the last evaluated key from the first year (most recent)
+                serializable_last_key = convert_decimal_to_float(all_last_eval_keys.get(years_to_query[0]))
             except Exception as e:
                 logger.warning(f"Error converting last_evaluated_key: {e}")
         
@@ -698,10 +732,10 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             'success': True,
             'results': results,
             'count': len(results),
-            'has_more': response.get('LastEvaluatedKey') is not None,
+            'has_more': serializable_last_key is not None,
             'last_evaluated_key': serializable_last_key,
-            'method': 'scan',
-            'index_used': None
+            'method': 'default_gsi_query',
+            'index_used': 'YearPostedDateIndex'
         }
 
 
