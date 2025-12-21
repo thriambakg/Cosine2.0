@@ -129,11 +129,13 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
     """
     try:
         # Extract request parameters
-        session_id = body.get('session_id')
+        session_id = body.get('session_id') or None  # Normalize empty string to None
         user_id = body.get('user_id')
         filename = body.get('filename')
         s3_key = body.get('s3_key')
         bucket_name = body.get('bucket')  # Optional: specify bucket (for SEC filings or politician trades)
+        
+        logger.info(f"🔍 handle_file_download called with: user_id={user_id}, session_id={session_id}, bucket={bucket_name}, s3_key={s3_key}, filename={filename}")
         
         # Determine file type based on bucket name or S3 key pattern
         is_sec_filing = bucket_name == 'SEC_FILINGS' or (s3_key and s3_key.startswith('filings/'))
@@ -141,8 +143,11 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         is_lda_disclosure = bucket_name == 'LDA_DISCLOSURES' or (s3_key and s3_key.startswith('filings/') and not is_sec_filing)
         is_public_filing = is_sec_filing or is_lda_disclosure or is_politician_trade
         
+        logger.info(f"🔍 File type detection: bucket={bucket_name}, s3_key={s3_key}, is_sec_filing={is_sec_filing}, is_lda_disclosure={is_lda_disclosure}, is_politician_trade={is_politician_trade}, is_public_filing={is_public_filing}")
+        
         # Validate user_id (required for all downloads)
         if not user_id:
+            logger.error("❌ Missing user_id")
             return {
                 'statusCode': 400,
                 'headers': get_cors_headers(),
@@ -151,6 +156,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         
         # session_id is required for chat files, but optional for public filings (SEC, LDA, politician trades)
         if not is_public_filing and not session_id:
+            logger.error(f"❌ Missing session_id for non-public filing: is_public_filing={is_public_filing}, session_id={session_id}")
             return {
                 'statusCode': 400,
                 'headers': get_cors_headers(),
@@ -169,6 +175,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         if is_sec_filing:
             # SEC filing download - validate user but skip session access check (SEC filings aren't session-specific)
             if not s3_key or not filename:
+                logger.error(f"❌ Missing s3_key or filename for SEC filing: s3_key={s3_key}, filename={filename}")
                 return {
                     'statusCode': 400,
                     'headers': get_cors_headers(),
