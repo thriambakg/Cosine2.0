@@ -3606,8 +3606,9 @@ const SECSearchPage: React.FC = () => {
                                     try {
                                       console.log('📥 Downloading SEC filing document:', filename);
                                       
-                                      if (!user?.id || !activeSessionId) {
-                                        console.error('Missing user ID or session ID for file download');
+                                      if (!user?.id) {
+                                        console.error('Missing user ID for file download');
+                                        alert('Please log in to download files');
                                         return;
                                       }
                                       
@@ -3617,7 +3618,7 @@ const SECSearchPage: React.FC = () => {
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({
                                           user_id: user.id,
-                                          session_id: activeSessionId,
+                                          session_id: activeSessionId || '', // Optional for SEC filings
                                           bucket: 'SEC_FILINGS',
                                           s3_key: s3Key,
                                           filename: filename

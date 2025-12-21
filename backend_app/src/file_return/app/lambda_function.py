@@ -139,13 +139,22 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         is_sec_filing = bucket_name == 'SEC_FILINGS' or (s3_key and s3_key.startswith('filings/'))
         is_politician_trade = bucket_name == 'POLITICIAN_TRADES' or (s3_key and s3_key.startswith('trades/'))
         is_lda_disclosure = bucket_name == 'LDA_DISCLOSURES' or (s3_key and s3_key.startswith('filings/') and not is_sec_filing)
+        is_public_filing = is_sec_filing or is_lda_disclosure or is_politician_trade
         
-        # Validate user_id and session_id are provided (required for all downloads)
-        if not user_id or not session_id:
+        # Validate user_id (required for all downloads)
+        if not user_id:
             return {
                 'statusCode': 400,
                 'headers': get_cors_headers(),
-                'body': json.dumps({'error': 'Missing required parameters: user_id, session_id'})
+                'body': json.dumps({'error': 'Missing required parameter: user_id'})
+            }
+        
+        # session_id is required for chat files, but optional for public filings (SEC, LDA, politician trades)
+        if not is_public_filing and not session_id:
+            return {
+                'statusCode': 400,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Missing required parameter: session_id (required for chat files)'})
             }
         
         # Validate that the authenticated user matches the requested user (for all downloads)

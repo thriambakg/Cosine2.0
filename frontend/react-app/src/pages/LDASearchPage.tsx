@@ -141,7 +141,6 @@ const LDASearchPage: React.FC = () => {
   // Dialog state for filing details
   const [selectedFilingForDetails, setSelectedFilingForDetails] = useState<LDAFiling | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   
   // Selection state
   const [selectedFilings, setSelectedFilings] = useState<Set<string>>(new Set());
@@ -203,43 +202,6 @@ const LDASearchPage: React.FC = () => {
     }
   }, []);
 
-  // Fetch preview URL when dialog opens with a filing that has an s3_key
-  useEffect(() => {
-    if (detailsDialogOpen && selectedFilingForDetails?.s3_key && user?.id && activeSessionId) {
-      const fetchPreviewUrl = async () => {
-        try {
-          setPreviewUrl(null); // Reset preview URL
-          const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-          const response = await fetch(`${apiUrl}/file-download`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              user_id: user.id,
-              session_id: activeSessionId,
-              s3_key: selectedFilingForDetails.s3_key,
-              filename: selectedFilingForDetails.s3_key.split('/').pop() || 'filing',
-              bucket: 'LDA_DISCLOSURES',
-              preview: true,
-            }),
-          });
-          
-          if (!response.ok) {
-            throw new Error(`Preview request failed: ${response.status}`);
-          }
-          
-          const { download_url } = await response.json();
-          setPreviewUrl(download_url);
-        } catch (error) {
-          console.error('❌ Failed to fetch preview URL:', error);
-          setPreviewUrl(null);
-        }
-      };
-      
-      fetchPreviewUrl();
-    } else {
-      setPreviewUrl(null);
-    }
-  }, [detailsDialogOpen, selectedFilingForDetails?.s3_key, user?.id, activeSessionId]);
 
   // Save state to sessionStorage whenever relevant state changes
   useEffect(() => {
@@ -828,9 +790,9 @@ const LDASearchPage: React.FC = () => {
                       <Typography variant="h6" sx={{ color: '#e2e8f0', fontSize: '1rem' }}>
                         Advanced Search
                       </Typography>
-                      {advancedSearchExpanded ? <KeyboardArrowLeftIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowRightIcon sx={{ color: '#9ca3af' }} />}
+                      {advancedSearchExpanded ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
                     </Box>
-                    <Slide direction="left" in={advancedSearchExpanded}>
+                    <Collapse in={advancedSearchExpanded}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
                         {/* Registrant Name */}
                         <MultiSelectField<LDAAutocompleteItem>
@@ -1100,7 +1062,7 @@ const LDASearchPage: React.FC = () => {
                           allowCustomInput={false}
                         />
                       </Box>
-                    </Slide>
+                    </Collapse>
                   </Box>
 
                   {/* Search and Clear Buttons */}
@@ -1724,11 +1686,8 @@ const LDASearchPage: React.FC = () => {
       {/* Filing Details Dialog */}
       <Dialog
         open={detailsDialogOpen}
-        onClose={() => {
-          setDetailsDialogOpen(false);
-          setPreviewUrl(null);
-        }}
-        maxWidth="md"
+        onClose={() => setDetailsDialogOpen(false)}
+        maxWidth="sm"
         fullWidth
         PaperProps={{
           sx: {
@@ -1745,133 +1704,94 @@ const LDASearchPage: React.FC = () => {
               Filing Details
             </DialogTitle>
             <DialogContent sx={{ pt: 3 }}>
-              <Box sx={{ display: 'flex', gap: 3 }}>
-                {/* Left side: Filing details */}
-                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    <strong>Filing UUID:</strong> {selectedFilingForDetails.filing_uuid}
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    <strong>Filing Type:</strong> {selectedFilingForDetails.report_type || 'N/A'}
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    <strong>Registrant:</strong> {selectedFilingForDetails.registrant_name || 'N/A'}
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    <strong>Client:</strong> {selectedFilingForDetails.client_name || 'N/A'}
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    <strong>Lobbyist:</strong> {selectedFilingForDetails.lobbyist_name || 'N/A'}
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    <strong>Amount:</strong> {formatCurrency(selectedFilingForDetails.amount_reported)}
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    <strong>Date Posted:</strong> {formatDate(selectedFilingForDetails.dt_posted)}
-                  </Typography>
-                  
-                  {/* File download section */}
-                  {selectedFilingForDetails.s3_key && (
-                    <Box sx={{ mt: 2, p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.5)' }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                        {selectedFilingForDetails.s3_key.endsWith('.pdf') ? (
-                          <PdfIcon sx={{ fontSize: 20, color: '#ef4444' }} />
-                        ) : (
-                          <DocumentIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
-                        )}
-                        <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1 }}>
-                          {selectedFilingForDetails.s3_key.split('/').pop() || 'Document'}
-                        </Typography>
-                        <IconButton
-                          size="small"
-                          onClick={async () => {
-                            if (!selectedFilingForDetails.s3_key) return;
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Filing UUID:</strong> {selectedFilingForDetails.filing_uuid}
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Filing Type:</strong> {selectedFilingForDetails.report_type || 'N/A'}
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Registrant:</strong> {selectedFilingForDetails.registrant_name || 'N/A'}
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Client:</strong> {selectedFilingForDetails.client_name || 'N/A'}
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Lobbyist:</strong> {selectedFilingForDetails.lobbyist_name || 'N/A'}
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Amount:</strong> {formatCurrency(selectedFilingForDetails.amount_reported)}
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Date Posted:</strong> {formatDate(selectedFilingForDetails.dt_posted)}
+                </Typography>
+                
+                {/* File download section */}
+                {selectedFilingForDetails.s3_key && (
+                  <Box sx={{ mt: 2, p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.5)' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {selectedFilingForDetails.s3_key.endsWith('.pdf') ? (
+                        <PdfIcon sx={{ fontSize: 20, color: '#ef4444' }} />
+                      ) : (
+                        <DocumentIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
+                      )}
+                      <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1 }}>
+                        {selectedFilingForDetails.s3_key.split('/').pop() || 'Document'}
+                      </Typography>
+                      <IconButton
+                        size="small"
+                        onClick={async () => {
+                          try {
+                            console.log('📥 Downloading LDA filing:', selectedFilingForDetails.s3_key);
                             
-                            if (!user?.id || !activeSessionId) {
-                              console.error('Missing user ID or session ID for file download');
+                            if (!user?.id) {
+                              console.error('Missing user ID for file download');
+                              alert('Please log in to download files');
                               return;
                             }
                             
-                            try {
-                              console.log('📥 Downloading LDA filing:', selectedFilingForDetails.s3_key);
-                              
-                              const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                              const response = await fetch(`${apiUrl}/file-download`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  user_id: user.id,
-                                  session_id: activeSessionId,
-                                  s3_key: selectedFilingForDetails.s3_key,
-                                  filename: selectedFilingForDetails.s3_key.split('/').pop() || 'filing',
-                                  bucket: 'LDA_DISCLOSURES',
-                                }),
-                              });
-                              
-                              if (!response.ok) {
-                                throw new Error(`Download request failed: ${response.status}`);
-                              }
-                              
-                              const { download_url } = await response.json();
-                              
-                              // Create download link and trigger download
-                              const link = document.createElement('a');
-                              link.href = download_url;
-                              link.download = selectedFilingForDetails.s3_key.split('/').pop() || 'filing';
-                              link.target = '_blank';
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                              
-                              console.log('✅ File download started');
-                            } catch (error) {
-                              console.error('❌ Download failed:', error);
+                            const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                            const response = await fetch(`${apiUrl}/file-download`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                user_id: user.id,
+                                session_id: activeSessionId || '', // Optional for LDA filings
+                                s3_key: selectedFilingForDetails.s3_key,
+                                filename: selectedFilingForDetails.s3_key.split('/').pop() || 'filing',
+                                bucket: 'LDA_DISCLOSURES',
+                              }),
+                            });
+                            
+                            if (!response.ok) {
+                              throw new Error(`Download request failed: ${response.status}`);
                             }
-                          }}
-                          sx={{
-                            color: '#3b82f6',
-                            '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
-                          }}
-                        >
-                          <DownloadIcon fontSize="small" />
-                        </IconButton>
-                      </Box>
-                    </Box>
-                  )}
-                </Box>
-                
-                {/* Right side: File preview */}
-                {selectedFilingForDetails.s3_key && (
-                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
-                      File Preview
-                    </Typography>
-                    <Box
-                      sx={{
-                        border: '1px solid #374151',
-                        borderRadius: '4px',
-                        backgroundColor: 'rgba(31, 41, 55, 0.5)',
-                        minHeight: '400px',
-                        position: 'relative',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {previewUrl ? (
-                        <iframe
-                          src={previewUrl}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            minHeight: '400px',
-                            border: 'none',
-                          }}
-                          title="File Preview"
-                        />
-                      ) : (
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '400px', color: '#9ca3af' }}>
-                          <CircularProgress size={24} />
-                        </Box>
-                      )}
+                            
+                            const { download_url } = await response.json();
+                            
+                            // Create download link and trigger download
+                            const link = document.createElement('a');
+                            link.href = download_url;
+                            link.download = selectedFilingForDetails.s3_key.split('/').pop() || 'filing';
+                            link.target = '_blank';
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            
+                            console.log('✅ File download started');
+                          } catch (error) {
+                            console.error('❌ Download failed:', error);
+                          }
+                        }}
+                        sx={{
+                          color: '#3b82f6',
+                          ml: 'auto',
+                          '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                        }}
+                      >
+                        <DownloadIcon fontSize="small" />
+                      </IconButton>
                     </Box>
                   </Box>
                 )}
