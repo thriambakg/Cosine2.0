@@ -665,18 +665,24 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         # No GSI-queryable filters - use scan (not recommended for large tables)
         logger.warning("No GSI-queryable filters found, using scan (inefficient)")
         
+        # For general_text_search, increase scan limit significantly to find matches
+        # Since we're doing substring matching, we need to scan more items
+        scan_limit_multiplier = 10 if filters.get('general_text_search') else 2
         scan_params = {
-            'Limit': limit * 2  # Get more to account for filtering
+            'Limit': limit * scan_limit_multiplier  # Get more to account for filtering
         }
         
         if last_evaluated_key:
             scan_params['ExclusiveStartKey'] = last_evaluated_key
         
+        logger.info(f"Scanning with limit {scan_params['Limit']} (requested limit: {limit})")
         response = filings_table.scan(**scan_params)
         items = response.get('Items', [])
+        logger.info(f"Scanned {len(items)} items from DynamoDB")
         
         # Apply all filters in Python
         filtered_items = [item for item in items if apply_python_filter(item, filters)]
+        logger.info(f"After filtering: {len(filtered_items)} items match filters")
         filtered_items = filtered_items[:limit]
         
         results = [convert_decimal_to_float(item) for item in filtered_items]
@@ -770,6 +776,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         limit = request_body.get('limit', 100)
         last_evaluated_key = request_body.get('last_evaluated_key')
         
+        # Log filters for debugging
+        logger.info(f"Search request - filters: {json.dumps(filters)}, limit: {limit}, last_evaluated_key: {last_evaluated_key is not None}")
+        
         # Validate limit
         if limit > 1000:
             limit = 1000
@@ -778,6 +787,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # Perform search
         result = search_filings(filters, limit, last_evaluated_key)
+        logger.info(f"Search complete - found {result.get('count', 0)} results, has_more: {result.get('has_more', False)}")
         
         # If this is from SQS, publish completion notification
         if is_sqs_event and completion_sns_topic:

@@ -62,9 +62,17 @@ function MultiSelectField<T = string>({
       return { results: response, hasMore: false };
     }
     if (response && typeof response === 'object' && 'results' in response) {
+      const hasMore = response.has_more === true || response.hasMore === true;
+      console.log('🔍 MultiSelectField extractResults:', {
+        has_more: response.has_more,
+        hasMore: response.hasMore,
+        extractedHasMore: hasMore,
+        resultsCount: (response.results || []).length,
+        totalCount: response.total_count
+      });
       return {
         results: response.results || [],
-        hasMore: response.has_more || false
+        hasMore: hasMore
       };
     }
     return { results: [], hasMore: false };

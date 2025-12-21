@@ -485,6 +485,13 @@ const LDASearchPage: React.FC = () => {
                             limit: 20,
                             offset: offset || 0,
                           });
+                          console.log('🔍 General search autocomplete response:', {
+                            query,
+                            offset,
+                            resultsCount: (response.results || []).length,
+                            has_more: response.has_more,
+                            total_count: response.total_count
+                          });
                           return {
                             results: response.results || [],
                             has_more: response.has_more || false,
