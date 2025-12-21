@@ -134,7 +134,7 @@ const LDASearchPage: React.FC = () => {
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   
   // Filter state (client-side filtering)
-  const [availableFilters, setAvailableFilters] = useState<{
+  const [availableFilters] = useState<{
     registrant_filters?: Array<{ registrant: string; count: number }>;
     client_filters?: Array<{ client: string; count: number }>;
     lobbyist_filters?: Array<{ lobbyist: string; count: number }>;
@@ -231,56 +231,8 @@ const LDASearchPage: React.FC = () => {
   ]);
 
   // Compute filters from search results (will be used when API is integrated)
-  const computeFiltersFromResults = (results: LDAFiling[]) => {
-    const registrantMap = new Map<string, number>();
-    const clientMap = new Map<string, number>();
-    const lobbyistMap = new Map<string, number>();
-    const filingTypeMap = new Map<string, number>();
-    const issueCodeMap = new Map<string, number>();
-    const stateMap = new Map<string, number>();
-    
-    results.forEach(filing => {
-      if (filing.registrant_name) {
-        registrantMap.set(filing.registrant_name, (registrantMap.get(filing.registrant_name) || 0) + 1);
-      }
-      if (filing.client_name) {
-        clientMap.set(filing.client_name, (clientMap.get(filing.client_name) || 0) + 1);
-      }
-      if (filing.lobbyist_name) {
-        lobbyistMap.set(filing.lobbyist_name, (lobbyistMap.get(filing.lobbyist_name) || 0) + 1);
-      }
-      if (filing.report_type) {
-        filingTypeMap.set(filing.report_type, (filingTypeMap.get(filing.report_type) || 0) + 1);
-      }
-      if (filing.general_issue_code) {
-        issueCodeMap.set(filing.general_issue_code, (issueCodeMap.get(filing.general_issue_code) || 0) + 1);
-      }
-      if (filing.state) {
-        stateMap.set(filing.state, (stateMap.get(filing.state) || 0) + 1);
-      }
-    });
-    
-    return {
-      registrant_filters: Array.from(registrantMap.entries())
-        .map(([registrant, count]) => ({ registrant, count }))
-        .sort((a, b) => b.count - a.count),
-      client_filters: Array.from(clientMap.entries())
-        .map(([client, count]) => ({ client, count }))
-        .sort((a, b) => b.count - a.count),
-      lobbyist_filters: Array.from(lobbyistMap.entries())
-        .map(([lobbyist, count]) => ({ lobbyist, count }))
-        .sort((a, b) => b.count - a.count),
-      filing_type_filters: Array.from(filingTypeMap.entries())
-        .map(([filingType, count]) => ({ filingType, count }))
-        .sort((a, b) => b.count - a.count),
-      issue_code_filters: Array.from(issueCodeMap.entries())
-        .map(([issueCode, count]) => ({ issueCode, count }))
-        .sort((a, b) => b.count - a.count),
-      state_filters: Array.from(stateMap.entries())
-        .map(([state, count]) => ({ state, count }))
-        .sort((a, b) => b.count - a.count),
-    };
-  };
+  // TODO: Implement filter computation from results when needed
+  // const computeFiltersFromResults = (results: LDAFiling[]) => { ... }
 
   // Client-side filtering function
   const applyFilters = useCallback(() => {
