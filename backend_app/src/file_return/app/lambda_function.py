@@ -270,13 +270,11 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                 raise e
         
         # Generate fresh presigned URL with download headers (S3 client already configured for Signature Version 4)
-        # For preview, don't set ContentDisposition to allow inline viewing
         params = {
             'Bucket': target_bucket,
             'Key': s3_key,
+            'ResponseContentDisposition': f'attachment; filename="{filename}"'
         }
-        if not is_preview:
-            params['ResponseContentDisposition'] = f'attachment; filename="{filename}"'
         
         presigned_url = s3_client.generate_presigned_url(
             'get_object',
