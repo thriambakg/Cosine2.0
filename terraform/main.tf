@@ -511,6 +511,26 @@ module "api_gateway" {
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
+    # POST method for LDA search (uses wrapper Lambda for SQS integration)
+    lda_search_post = {
+      resource_key            = "lda_search"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.lda_search_lambda.wrapper_function_arn != null ? module.lda_search_lambda.wrapper_function_arn : module.lda_search_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
+    # POST method for LDA autocomplete (uses wrapper Lambda for SQS integration)
+    lda_autocomplete_post = {
+      resource_key            = "lda_autocomplete"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.lda_autocomplete_lambda.wrapper_function_arn != null ? module.lda_autocomplete_lambda.wrapper_function_arn : module.lda_autocomplete_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
