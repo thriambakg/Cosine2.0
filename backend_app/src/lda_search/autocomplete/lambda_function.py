@@ -101,7 +101,8 @@ def load_csv_from_s3(field_type: str) -> List[str]:
 
 def search_csv_values(values: List[str], query: str, limit: int = 20) -> List[str]:
     """
-    Search CSV values for matches (case-insensitive prefix match)
+    Search CSV values for matches using tiered approach (exact -> starts with -> contains)
+    Similar to securities autocomplete logic
     
     Args:
         values: List of values to search
@@ -109,7 +110,7 @@ def search_csv_values(values: List[str], query: str, limit: int = 20) -> List[st
         limit: Maximum number of results
     
     Returns:
-        List of matching values
+        List of matching values in priority order
     """
     if not query:
         return values[:limit]
@@ -118,14 +119,28 @@ def search_csv_values(values: List[str], query: str, limit: int = 20) -> List[st
     if not query_lower:
         return values[:limit]
     
-    matches = []
-    for value in values:
-        if value.lower().startswith(query_lower):
-            matches.append(value)
-            if len(matches) >= limit:
-                break
+    # Tiered search results
+    exact_matches = []
+    starts_with_matches = []
+    contains_matches = []
     
-    return matches
+    for value in values:
+        value_lower = value.lower()
+        
+        # Exact match (highest priority)
+        if value_lower == query_lower:
+            exact_matches.append(value)
+        # Starts with (second priority)
+        elif value_lower.startswith(query_lower):
+            starts_with_matches.append(value)
+        # Contains (fallback)
+        elif query_lower in value_lower:
+            contains_matches.append(value)
+    
+    # Combine results in priority order
+    all_matches = exact_matches + starts_with_matches + contains_matches
+    
+    return all_matches[:limit]
 
 
 def handle_autocomplete_request(field_types: List[str], query: str, limit: int = 20, offset: int = 0) -> Dict[str, Any]:
