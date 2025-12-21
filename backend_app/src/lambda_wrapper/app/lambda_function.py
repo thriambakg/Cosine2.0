@@ -281,13 +281,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         try:
-            # Try to invoke worker Lambda synchronously with a short timeout
-            # If it succeeds quickly, return results immediately
-            # If it's throttled or times out, fall back to SQS queue
+            # Try to invoke worker Lambda synchronously
+            # If it succeeds, return results immediately
+            # If it's throttled, send to SQS queue
             logger.info(f"Attempting synchronous invoke of worker Lambda {worker_function_name}")
             
             try:
-                # Use a shorter timeout to detect throttling quickly
+                # Invoke worker Lambda synchronously
+                # This will either succeed (if concurrency available) or throw throttling error
                 invoke_response = lambda_client.invoke(
                     FunctionName=worker_function_name,
                     InvocationType='RequestResponse',
@@ -297,9 +298,41 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 # Check for throttling errors in the response
                 if 'FunctionError' in invoke_response:
                     error_type = invoke_response.get('FunctionError')
-                    if error_type == 'Throttled' or 'Throttled' in str(invoke_response):
-                        logger.warning(f"Worker Lambda throttled, falling back to SQS queue")
+                    error_payload = invoke_response.get('Payload')
+                    error_message = ''
+                    error_data = {}
+                    
+                    if error_payload:
+                        try:
+                            payload_content = error_payload.read()
+                            error_data = json.loads(payload_content)
+                            error_message = error_data.get('errorMessage', '')
+                        except:
+                            pass
+                    
+                    # Check if it's a throttling error
+                    is_throttled = (
+                        error_type == 'Throttled' or
+                        'throttled' in error_message.lower() or
+                        'throttled' in str(invoke_response).lower()
+                    )
+                    
+                    if is_throttled:
+                        logger.warning(f"Worker Lambda throttled, queueing request via SQS")
                         raise Exception("Lambda throttled - using SQS fallback")
+                    else:
+                        # For non-throttling errors, pass through the error response
+                        logger.warning(f"Worker Lambda returned error: {error_type} - {error_message[:200]}")
+                        error_response = {
+                            'error': error_data.get('errorMessage', f'Worker Lambda error: {error_type}'),
+                            'errorType': error_type,
+                            'errorDetails': error_data.get('stackTrace', [])[:5] if error_data.get('stackTrace') else None
+                        }
+                        return {
+                            'statusCode': 500,
+                            'headers': cors_headers,
+                            'body': json.dumps(error_response)
+                        }
                 
                 # Parse response
                 response_payload = json.loads(invoke_response['Payload'].read())
@@ -316,8 +349,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     response_body = response_body_str
                 
                 # If worker returned results immediately (200), return them
-                if status_code == 200 and 'results' in response_body:
-                    logger.info(f"Worker Lambda returned results immediately: {len(response_body.get('results', []))} results")
+                if status_code == 200:
+                    logger.info(f"Worker Lambda returned results immediately: status {status_code}")
                     return {
                         'statusCode': status_code,
                         'headers': cors_headers,
@@ -344,18 +377,23 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             except Exception as invoke_error:
                 # Check if it's a throttling error
                 error_str = str(invoke_error).lower()
+                error_message = getattr(invoke_error, 'message', str(invoke_error))
                 is_throttled = (
                     'throttled' in error_str or
+                    'throttled' in error_message.lower() or
                     'provisionedconcurrencyexceeded' in error_str or
                     'reservedconcurrency' in error_str or
-                    'toomanyrequests' in error_str
+                    'toomanyrequests' in error_str or
+                    'serviceerror' in error_str  # AWS service errors often indicate throttling
                 )
                 
                 if is_throttled:
                     logger.warning(f"Worker Lambda at concurrency limit, queueing request via SQS")
                     # Fall through to SQS queueing
                 else:
-                    # Re-raise other errors
+                    # For other errors, still try to pass through the error
+                    logger.error(f"Error invoking worker Lambda: {str(invoke_error)[:500]}")
+                    # Re-raise to be handled by outer try/except
                     raise
             
             # Fallback: Send to SQS queue and return job_id
@@ -412,6 +450,67 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
                 
         except Exception as e:
+            # Check if it's a throttling error - if so, send to SQS
+            error_str = str(e).lower()
+            error_message = getattr(e, 'message', str(e))
+            is_throttled = (
+                'throttled' in error_str or
+                'throttled' in error_message.lower() or
+                'provisionedconcurrencyexceeded' in error_str or
+                'reservedconcurrency' in error_str or
+                'toomanyrequests' in error_str or
+                'lambda throttled' in error_str
+            )
+            
+            if is_throttled and SQS_QUEUE_URL:
+                logger.warning(f"Worker Lambda throttled, queueing request via SQS")
+                # Generate a job_id for tracking
+                job_id = f"JOB#{uuid.uuid4().hex[:16]}"
+                request_id = generate_request_id()
+                
+                logger.info(f"Queueing request {request_id} to SQS with job_id {job_id}")
+                
+                # Send to SQS with job_id
+                message_body = {
+                    'request_id': request_id,
+                    'job_id': job_id,
+                    'api_gateway_event': event,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+                
+                try:
+                    sqs_client.send_message(
+                        QueueUrl=SQS_QUEUE_URL,
+                        MessageBody=json.dumps(message_body),
+                        MessageAttributes={
+                            'request_id': {
+                                'DataType': 'String',
+                                'StringValue': request_id
+                            },
+                            'job_id': {
+                                'DataType': 'String',
+                                'StringValue': job_id
+                            }
+                        }
+                    )
+                    
+                    # Return job_id for polling
+                    logger.info(f"Request queued, returning job_id: {job_id}")
+                    return {
+                        'statusCode': 202,  # Accepted
+                        'headers': cors_headers,
+                        'body': json.dumps({
+                            'success': True,
+                            'job_id': job_id,
+                            'status': 'PENDING',
+                            'message': 'Request queued - worker Lambda at capacity'
+                        })
+                    }
+                except Exception as sqs_error:
+                    logger.error(f"Failed to queue request to SQS: {sqs_error}")
+                    # Fall through to return error
+            
+            # For non-throttling errors, pass through the error from worker
             logger.error(f"Error in wrapper Lambda: {e}", exc_info=True)
             return {
                 'statusCode': 500,
