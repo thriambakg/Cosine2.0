@@ -24,6 +24,7 @@ sns_client = boto3.client('sns')
 S3_BUCKET = os.environ.get('S3_BUCKET')
 SEC_FILINGS_BUCKET = os.environ.get('SEC_FILINGS_BUCKET')
 POLITICIAN_TRADES_BUCKET = os.environ.get('POLITICIAN_TRADES_BUCKET')
+LDA_DISCLOSURES_BUCKET = os.environ.get('LDA_DISCLOSURES_BUCKET')
 SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE')
 
 def get_cors_headers():
@@ -137,6 +138,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         # Determine file type based on bucket name or S3 key pattern
         is_sec_filing = bucket_name == 'SEC_FILINGS' or (s3_key and s3_key.startswith('filings/'))
         is_politician_trade = bucket_name == 'POLITICIAN_TRADES' or (s3_key and s3_key.startswith('trades/'))
+        is_lda_disclosure = bucket_name == 'LDA_DISCLOSURES' or (s3_key and s3_key.startswith('filings/') and not is_sec_filing)
         
         # Validate user_id and session_id are provided (required for all downloads)
         if not user_id or not session_id:
@@ -168,6 +170,19 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             # Always derive filename from the requested S3 key so SEC downloads match the actual object (e.g., ZIP)
             filename = s3_key.split('/')[-1]
             logger.info(f"📄 SEC filing download request: {s3_key} from bucket {target_bucket} for user {user_id}")
+        elif is_lda_disclosure:
+            # LDA disclosure download - validate user but skip session access check (LDA disclosures aren't session-specific)
+            if not s3_key or not filename:
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Missing required parameters: s3_key, filename'})
+                }
+            
+            target_bucket = LDA_DISCLOSURES_BUCKET or S3_BUCKET
+            # Always derive filename from the requested S3 key
+            filename = s3_key.split('/')[-1]
+            logger.info(f"📄 LDA disclosure download request: {s3_key} from bucket {target_bucket} for user {user_id}")
         elif is_politician_trade:
             # Politician trade filing download - validate user but skip session access check (politician trades aren't session-specific)
             if not s3_key or not filename:
@@ -221,13 +236,17 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                 raise e
         
         # Generate fresh presigned URL with download headers (S3 client already configured for Signature Version 4)
+        # For preview, don't set ContentDisposition to allow inline viewing
+        params = {
+            'Bucket': target_bucket,
+            'Key': s3_key,
+        }
+        if not is_preview:
+            params['ResponseContentDisposition'] = f'attachment; filename="{filename}"'
+        
         presigned_url = s3_client.generate_presigned_url(
             'get_object',
-            Params={
-                'Bucket': target_bucket,
-                'Key': s3_key,
-                'ResponseContentDisposition': f'attachment; filename="{filename}"'
-            },
+            Params=params,
             ExpiresIn=3600  # 1 hour expiration
         )
         

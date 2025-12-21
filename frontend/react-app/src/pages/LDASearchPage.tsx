@@ -23,6 +23,7 @@ import {
   IconButton,
   Menu,
   Collapse,
+  Slide,
   Chip,
   Tooltip,
   Pagination,
@@ -35,12 +36,19 @@ import {
   Search as SearchIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
+  KeyboardArrowLeft as KeyboardArrowLeftIcon,
+  KeyboardArrowRight as KeyboardArrowRightIcon,
   Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
+  Download as DownloadIcon,
+  PictureAsPdf as PdfIcon,
+  Description as DocumentIcon,
 } from '@mui/icons-material';
 import { ldaSearchAPI, ldaAutocompleteAPI, LDASearchFilters, LDAFiling, LDAAutocompleteItem } from '../services/api';
 import MultiSelectField from '../components/MultiSelectField';
+import { useAuth } from '../contexts/AuthContext';
+import { useGlobalChat } from '../contexts/GlobalChatContext';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -94,6 +102,10 @@ const LDASearchPage: React.FC = () => {
     return null;
   };
 
+  // Get user and session info for authenticated downloads
+  const { user } = useAuth();
+  const { activeSessionId } = useGlobalChat();
+
   // Initialize state from sessionStorage immediately
   const savedState = loadStateFromStorage();
 
@@ -129,6 +141,7 @@ const LDASearchPage: React.FC = () => {
   // Dialog state for filing details
   const [selectedFilingForDetails, setSelectedFilingForDetails] = useState<LDAFiling | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   
   // Selection state
   const [selectedFilings, setSelectedFilings] = useState<Set<string>>(new Set());
@@ -189,6 +202,44 @@ const LDASearchPage: React.FC = () => {
       console.log('🆕 Starting fresh LDA search page session');
     }
   }, []);
+
+  // Fetch preview URL when dialog opens with a filing that has an s3_key
+  useEffect(() => {
+    if (detailsDialogOpen && selectedFilingForDetails?.s3_key && user?.id && activeSessionId) {
+      const fetchPreviewUrl = async () => {
+        try {
+          setPreviewUrl(null); // Reset preview URL
+          const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+          const response = await fetch(`${apiUrl}/file-download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: user.id,
+              session_id: activeSessionId,
+              s3_key: selectedFilingForDetails.s3_key,
+              filename: selectedFilingForDetails.s3_key.split('/').pop() || 'filing',
+              bucket: 'LDA_DISCLOSURES',
+              preview: true,
+            }),
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Preview request failed: ${response.status}`);
+          }
+          
+          const { download_url } = await response.json();
+          setPreviewUrl(download_url);
+        } catch (error) {
+          console.error('❌ Failed to fetch preview URL:', error);
+          setPreviewUrl(null);
+        }
+      };
+      
+      fetchPreviewUrl();
+    } else {
+      setPreviewUrl(null);
+    }
+  }, [detailsDialogOpen, selectedFilingForDetails?.s3_key, user?.id, activeSessionId]);
 
   // Save state to sessionStorage whenever relevant state changes
   useEffect(() => {
@@ -541,27 +592,47 @@ const LDASearchPage: React.FC = () => {
         <Box sx={{ display: 'flex', gap: 3 }}>
           {/* Left Sidebar - Search Filters (Always visible) */}
           <GlassCard sx={{ 
-            minWidth: 320, 
-            maxWidth: 380,
+            minWidth: searchFormExpanded ? 320 : 60,
+            maxWidth: searchFormExpanded ? 380 : 60,
+            width: searchFormExpanded ? 'auto' : 60,
+            minHeight: 'fit-content',
             height: 'fit-content',
             position: 'sticky',
             top: 20,
             alignSelf: 'flex-start',
+            transition: 'min-width 0.3s ease, max-width 0.3s ease, width 0.3s ease',
+            overflow: 'hidden',
           }}>
-            <Box sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                  Search Filters
-                </Typography>
+            <Box sx={{ p: 3, position: 'relative' }}>
+              <Box sx={{ 
+                display: 'flex', 
+                justifyContent: searchFormExpanded ? 'space-between' : 'center', 
+                alignItems: 'center', 
+                mb: 2 
+              }}>
+                {searchFormExpanded && (
+                  <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    Search Filters
+                  </Typography>
+                )}
                 <IconButton
                   onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-                  sx={{ color: '#94a3b8' }}
+                  sx={{ 
+                    color: '#94a3b8', 
+                    ml: searchFormExpanded ? 'auto' : 0, 
+                    flexShrink: 0,
+                    transform: searchFormExpanded ? 'none' : 'translateX(-2px)', // Move slightly left when collapsed
+                  }}
                   size="small"
                 >
-                  {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                  {searchFormExpanded ? <KeyboardArrowLeftIcon /> : <KeyboardArrowRightIcon />}
                 </IconButton>
               </Box>
-              <Collapse in={searchFormExpanded}>
+              <Box sx={{ 
+                overflow: 'hidden',
+                position: 'relative',
+              }}>
+                <Slide direction="left" in={searchFormExpanded}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* General Text Search */}
                   <Box>
@@ -757,9 +828,9 @@ const LDASearchPage: React.FC = () => {
                       <Typography variant="h6" sx={{ color: '#e2e8f0', fontSize: '1rem' }}>
                         Advanced Search
                       </Typography>
-                      {advancedSearchExpanded ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                      {advancedSearchExpanded ? <KeyboardArrowLeftIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowRightIcon sx={{ color: '#9ca3af' }} />}
                     </Box>
-                    <Collapse in={advancedSearchExpanded}>
+                    <Slide direction="left" in={advancedSearchExpanded}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
                         {/* Registrant Name */}
                         <MultiSelectField<LDAAutocompleteItem>
@@ -1029,7 +1100,7 @@ const LDASearchPage: React.FC = () => {
                           allowCustomInput={false}
                         />
                       </Box>
-                    </Collapse>
+                    </Slide>
                   </Box>
 
                   {/* Search and Clear Buttons */}
@@ -1085,7 +1156,8 @@ const LDASearchPage: React.FC = () => {
                     </Button>
                   </Box>
                 </Box>
-              </Collapse>
+                </Slide>
+              </Box>
             </Box>
           </GlassCard>
 
@@ -1652,7 +1724,10 @@ const LDASearchPage: React.FC = () => {
       {/* Filing Details Dialog */}
       <Dialog
         open={detailsDialogOpen}
-        onClose={() => setDetailsDialogOpen(false)}
+        onClose={() => {
+          setDetailsDialogOpen(false);
+          setPreviewUrl(null);
+        }}
         maxWidth="md"
         fullWidth
         PaperProps={{
@@ -1666,34 +1741,140 @@ const LDASearchPage: React.FC = () => {
       >
         {selectedFilingForDetails && (
           <>
-            <DialogTitle sx={{ borderBottom: '1px solid #374151', pb: 2 }}>
-              <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                Filing Details
-              </Typography>
+            <DialogTitle sx={{ borderBottom: '1px solid #374151', pb: 2, color: '#ffffff', fontWeight: 600 }}>
+              Filing Details
             </DialogTitle>
             <DialogContent sx={{ pt: 3 }}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Filing UUID:</strong> {selectedFilingForDetails.filing_uuid}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Filing Type:</strong> {selectedFilingForDetails.report_type || 'N/A'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Registrant:</strong> {selectedFilingForDetails.registrant_name || 'N/A'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Client:</strong> {selectedFilingForDetails.client_name || 'N/A'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Lobbyist:</strong> {selectedFilingForDetails.lobbyist_name || 'N/A'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Amount:</strong> {formatCurrency(selectedFilingForDetails.amount_reported)}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Date Posted:</strong> {formatDate(selectedFilingForDetails.dt_posted)}
-                </Typography>
+              <Box sx={{ display: 'flex', gap: 3 }}>
+                {/* Left side: Filing details */}
+                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    <strong>Filing UUID:</strong> {selectedFilingForDetails.filing_uuid}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    <strong>Filing Type:</strong> {selectedFilingForDetails.report_type || 'N/A'}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    <strong>Registrant:</strong> {selectedFilingForDetails.registrant_name || 'N/A'}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    <strong>Client:</strong> {selectedFilingForDetails.client_name || 'N/A'}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    <strong>Lobbyist:</strong> {selectedFilingForDetails.lobbyist_name || 'N/A'}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    <strong>Amount:</strong> {formatCurrency(selectedFilingForDetails.amount_reported)}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    <strong>Date Posted:</strong> {formatDate(selectedFilingForDetails.dt_posted)}
+                  </Typography>
+                  
+                  {/* File download section */}
+                  {selectedFilingForDetails.s3_key && (
+                    <Box sx={{ mt: 2, p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.5)' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        {selectedFilingForDetails.s3_key.endsWith('.pdf') ? (
+                          <PdfIcon sx={{ fontSize: 20, color: '#ef4444' }} />
+                        ) : (
+                          <DocumentIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
+                        )}
+                        <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1 }}>
+                          {selectedFilingForDetails.s3_key.split('/').pop() || 'Document'}
+                        </Typography>
+                        <IconButton
+                          size="small"
+                          onClick={async () => {
+                            if (!selectedFilingForDetails.s3_key) return;
+                            
+                            if (!user?.id || !activeSessionId) {
+                              console.error('Missing user ID or session ID for file download');
+                              return;
+                            }
+                            
+                            try {
+                              console.log('📥 Downloading LDA filing:', selectedFilingForDetails.s3_key);
+                              
+                              const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                              const response = await fetch(`${apiUrl}/file-download`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  user_id: user.id,
+                                  session_id: activeSessionId,
+                                  s3_key: selectedFilingForDetails.s3_key,
+                                  filename: selectedFilingForDetails.s3_key.split('/').pop() || 'filing',
+                                  bucket: 'LDA_DISCLOSURES',
+                                }),
+                              });
+                              
+                              if (!response.ok) {
+                                throw new Error(`Download request failed: ${response.status}`);
+                              }
+                              
+                              const { download_url } = await response.json();
+                              
+                              // Create download link and trigger download
+                              const link = document.createElement('a');
+                              link.href = download_url;
+                              link.download = selectedFilingForDetails.s3_key.split('/').pop() || 'filing';
+                              link.target = '_blank';
+                              document.body.appendChild(link);
+                              link.click();
+                              document.body.removeChild(link);
+                              
+                              console.log('✅ File download started');
+                            } catch (error) {
+                              console.error('❌ Download failed:', error);
+                            }
+                          }}
+                          sx={{
+                            color: '#3b82f6',
+                            '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                          }}
+                        >
+                          <DownloadIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  )}
+                </Box>
+                
+                {/* Right side: File preview */}
+                {selectedFilingForDetails.s3_key && (
+                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
+                      File Preview
+                    </Typography>
+                    <Box
+                      sx={{
+                        border: '1px solid #374151',
+                        borderRadius: '4px',
+                        backgroundColor: 'rgba(31, 41, 55, 0.5)',
+                        minHeight: '400px',
+                        position: 'relative',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {previewUrl ? (
+                        <iframe
+                          src={previewUrl}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            minHeight: '400px',
+                            border: 'none',
+                          }}
+                          title="File Preview"
+                        />
+                      ) : (
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '400px', color: '#9ca3af' }}>
+                          <CircularProgress size={24} />
+                        </Box>
+                      )}
+                    </Box>
+                  </Box>
+                )}
               </Box>
             </DialogContent>
             <DialogActions sx={{ borderTop: '1px solid #374151', pt: 2, pb: 2, px: 3 }}>
