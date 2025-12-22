@@ -815,112 +815,110 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         
         # Find the shortest list (most restrictive filter) - this is our source of truth
         shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['filing_ids']))
-        source_filing_ids = list(gsi_results[shortest_key]['filing_ids'])
+        source_filing_ids_set = gsi_results[shortest_key]['filing_ids']
         source_config = gsi_results[shortest_key]['config']
         
-        logger.info(f"Using {shortest_key} as source of truth ({len(source_filing_ids)} filing IDs)")
+        # Intersect with all other query results to ensure we only get items matching ALL filters
+        for key, result in gsi_results.items():
+            if key != shortest_key:
+                source_filing_ids_set = source_filing_ids_set & result['filing_ids']
         
-        # Remove the source filter from filters (we've already applied it via GSI)
+        source_filing_ids = list(source_filing_ids_set)
+        logger.info(f"After intersection: {len(source_filing_ids)} filing IDs match all {len(query_configs)} filters")
+        logger.info(f"Using {shortest_key} as source of truth ({len(source_filing_ids)} filing IDs after intersection)")
+        
+        # Remove all queryable filters from filters (we've already applied them via intersection)
         remaining_filters = filters.copy()
-        if shortest_key in remaining_filters:
-            if isinstance(remaining_filters[shortest_key], list):
-                remaining_filters[shortest_key] = remaining_filters[shortest_key][1:]
-                if not remaining_filters[shortest_key]:
-                    del remaining_filters[shortest_key]
-            else:
-                del remaining_filters[shortest_key]
+        for config in query_configs:
+            filter_key = config['filter_key']
+            if filter_key in remaining_filters:
+                if isinstance(remaining_filters[filter_key], list):
+                    remaining_filters[filter_key] = remaining_filters[filter_key][1:]
+                    if not remaining_filters[filter_key]:
+                        del remaining_filters[filter_key]
+                else:
+                    del remaining_filters[filter_key]
+            
+            # Also remove from general_text_search_fields if present
+            if 'general_text_search_fields' in remaining_filters:
+                gtsf = remaining_filters['general_text_search_fields']
+                if filter_key in gtsf:
+                    if isinstance(gtsf[filter_key], list):
+                        gtsf[filter_key] = gtsf[filter_key][1:]
+                        if not gtsf[filter_key]:
+                            del gtsf[filter_key]
+                    else:
+                        del gtsf[filter_key]
+                if not gtsf:
+                    del remaining_filters['general_text_search_fields']
         
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
-        # Paginate through source GSI until we have enough results or it runs out
+        # Fetch items directly from the intersected filing IDs (no need to paginate through source query)
+        # Since we've already intersected all query results, we can fetch items directly
         all_matching_items = []
-        source_last_eval_key = None
-        max_pagination_rounds = 50
-        pagination_round = 0
         
-        while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
-            pagination_round += 1
-            
-            # Query source GSI with pagination
-            source_filing_ids_batch, new_last_eval_key = query_gsi_for_filing_ids(
-                index_name=source_config['index_name'],
-                hash_key_name=source_config['hash_key'],
-                hash_key_value=source_config['hash_value'],
-                range_key_name=source_config.get('range_key'),
-                range_key_value=source_config.get('range_value'),
-                range_key_condition=source_config.get('range_condition'),
-                limit=1000,
-                exclusive_start_key=source_last_eval_key,
-                get_all=False
-            )
-            source_last_eval_key = new_last_eval_key
-            
-            if not source_filing_ids_batch:
-                logger.info(f"Source GSI {source_config['index_name']} ran out of items")
-                break
-            
-            logger.info(f"Pagination round {pagination_round}: Got {len(source_filing_ids_batch)} filing IDs from source GSI")
-            
-            # Fetch full items for this batch
-            items_batch = []
-            if source_filing_ids_batch:
-                batch_size = 100
-                dynamodb_client = boto3.client('dynamodb')
-                for i in range(0, len(source_filing_ids_batch), batch_size):
-                    batch_ids = source_filing_ids_batch[i:i + batch_size]
-                    request_items = {
-                        FILINGS_TABLE_NAME: {
-                            'Keys': [
-                                {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
-                                for fid in batch_ids
-                            ]
-                            # No ProjectionExpression - returns ALL attributes (complete row including PII)
-                        }
+        if source_filing_ids:
+            # Fetch full items in batches
+            batch_size = 100
+            dynamodb_client = boto3.client('dynamodb')
+            for i in range(0, len(source_filing_ids), batch_size):
+                batch_ids = source_filing_ids[i:i + batch_size]
+                request_items = {
+                    FILINGS_TABLE_NAME: {
+                        'Keys': [
+                            {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
+                            for fid in batch_ids
+                        ]
+                        # No ProjectionExpression - returns ALL attributes (complete row including PII)
                     }
-                    batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-                    batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
-                    deserializer = TypeDeserializer()
-                    for item in batch_items:
-                        # Deserialize all fields - no filtering, returns complete row
-                        converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                        items_batch.append(converted_item)
+                }
+                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
+                deserializer = TypeDeserializer()
+                for item in batch_items:
+                    # Deserialize all fields - no filtering, returns complete row
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    all_matching_items.append(converted_item)
+                
+                # Stop if we have enough results
+                if len(all_matching_items) >= limit:
+                    break
+            
+            logger.info(f"Fetched {len(all_matching_items)} items from intersected filing IDs")
             
             # Apply remaining filters in Python
-            for item in items_batch:
+            filtered_items = []
+            for item in all_matching_items:
                 if apply_python_filter(item, remaining_filters):
-                    all_matching_items.append(item)
+                    filtered_items.append(item)
+                    if len(filtered_items) >= limit:
+                        break
             
-            logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
-            
-            # Stop if source GSI ran out or we have enough results
-            if not source_last_eval_key or len(all_matching_items) >= limit:
-                break
+            all_matching_items = filtered_items
+            logger.info(f"After applying remaining filters: {len(all_matching_items)} items match all filters")
         
         # Use the collected items directly
         items = all_matching_items[:limit]
         
         logger.info(f"Multi-GSI intersection complete: {len(items)} items matching all filters")
         method = 'multi_gsi_intersection'
-        index_name = f"{len(query_configs)}_GSIs"
+        index_name = f"{len(query_configs)}_queries"
         
         # Convert Decimal to float for JSON serialization
         results = [convert_decimal_to_float(item) for item in items]
         
-        # Convert last_evaluated_key to JSON-serializable format
-        serializable_last_key = None
-        if source_last_eval_key:
-            try:
-                serializable_last_key = convert_decimal_to_float(source_last_eval_key)
-            except Exception as e:
-                logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
-                serializable_last_key = None
+        # For multi-query intersection, we don't have a single pagination key
+        # Since we've already intersected all results, pagination would require re-querying
+        # For now, we'll indicate there are more results if we fetched the full limit
+        has_more = len(source_filing_ids) > len(items)
         
         return {
             'success': True,
             'results': results,
             'count': len(results),
-            'has_more': source_last_eval_key is not None,
-            'last_evaluated_key': serializable_last_key,
+            'has_more': has_more,
+            'last_evaluated_key': None,  # Multi-query intersection doesn't support pagination yet
             'method': method,
             'index_used': index_name
         }
