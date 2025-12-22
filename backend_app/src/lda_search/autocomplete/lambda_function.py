@@ -69,17 +69,18 @@ def load_csv_from_s3(field_type: str) -> List[str]:
         return []
     
     try:
+        logger.info(f"Loading CSV from s3://{S3_BUCKET_NAME}/{s3_key} for field_type={field_type}")
         response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
         content = response['Body'].read().decode('utf-8')
         
-        # Handle CSV files (all constants are now single-column CSV format with just values)
+        # Handle CSV files (all constants are now single-column CSV format with names for autocomplete)
         reader = csv.reader(StringIO(content))
         values = []
         
         # Skip header row
         next(reader, None)
         
-        # Read all values (single column)
+        # Read all values (single column) - these should be names, not codes/IDs
         for row in reader:
             if row and row[0]:
                 value = row[0].strip()
@@ -90,6 +91,8 @@ def load_csv_from_s3(field_type: str) -> List[str]:
         _csv_cache[field_type] = values
         
         logger.info(f"Loaded {len(values)} values from s3://{S3_BUCKET_NAME}/{s3_key}")
+        if values:
+            logger.info(f"Sample values (first 5): {values[:5]}")
         return values
         
     except s3_client.exceptions.NoSuchKey:
@@ -168,10 +171,15 @@ def handle_autocomplete_request(field_types: List[str], query: str, limit: int =
         values = load_csv_from_s3(field_type)
         
         if not values:
+            logger.warning(f"No values loaded for field_type={field_type}")
             continue
+        
+        logger.info(f"Searching {len(values)} values for field_type={field_type} with query='{query}'")
         
         # Search for matches (get more than needed for pagination)
         matches = search_csv_values(values, query, search_limit)
+        
+        logger.info(f"Found {len(matches)} matches for field_type={field_type}")
         
         # Add field type indicator to results
         for match in matches:
