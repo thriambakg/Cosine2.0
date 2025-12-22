@@ -428,43 +428,69 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'from_general_text_search': True  # Mark as coming from general_text_search_fields
                 })
     
-    # Registrant name filter - use RegistrantPostedDateIndex (legacy format)
+    # Registrant name filter - use RegistrantPostedDateIndex (advanced search - AND across categories, OR within)
     if filters.get('registrant_name'):
         registrant_names = filters['registrant_name'] if isinstance(filters['registrant_name'], list) else [filters['registrant_name']]
         if registrant_names:
-            query_configs.append({
-                'filter_key': 'registrant_name',
-                'index_name': 'RegistrantPostedDateIndex',
-                'hash_key': 'registrant_name',
-                'hash_value': registrant_names[0],
-                'range_key': 'dt_posted',
-                'range_value': date_from if date_from else None,
-                'range_condition': 'gte' if date_from else None
-            })
+            # Create a query config for each registrant name (OR within category)
+            # They will be unioned together, then intersected with other advanced search fields
+            for registrant_name in registrant_names:
+                query_configs.append({
+                    'filter_key': 'registrant_name',
+                    'index_name': 'RegistrantPostedDateIndex',
+                    'hash_key': 'registrant_name',
+                    'hash_value': registrant_name,
+                    'range_key': 'dt_posted',
+                    'range_value': date_from if date_from else None,
+                    'range_condition': 'gte' if date_from else None,
+                    'is_advanced_search': True,  # Mark as advanced search field
+                    'category': 'registrant_name'  # Group by category for OR logic
+                })
     
-    # Client name filter - use ClientPostedDateIndex (legacy format)
+    # Client name filter - use ClientPostedDateIndex (advanced search - AND across categories, OR within)
     if filters.get('client_name'):
         client_names = filters['client_name'] if isinstance(filters['client_name'], list) else [filters['client_name']]
         if client_names:
-            query_configs.append({
-                'filter_key': 'client_name',
-                'index_name': 'ClientPostedDateIndex',
-                'hash_key': 'client_name',
-                'hash_value': client_names[0],
-                'range_key': 'dt_posted',
-                'range_value': date_from if date_from else None,
-                'range_condition': 'gte' if date_from else None
-            })
+            # Create a query config for each client name (OR within category)
+            for client_name in client_names:
+                query_configs.append({
+                    'filter_key': 'client_name',
+                    'index_name': 'ClientPostedDateIndex',
+                    'hash_key': 'client_name',
+                    'hash_value': client_name,
+                    'range_key': 'dt_posted',
+                    'range_value': date_from if date_from else None,
+                    'range_condition': 'gte' if date_from else None,
+                    'is_advanced_search': True,  # Mark as advanced search field
+                    'category': 'client_name'  # Group by category for OR logic
+                })
     
-    # Lobbyist name filter - use parameter-filing mappings (legacy format)
+    # Lobbyist name filter - use parameter-filing mappings (advanced search - AND across categories, OR within)
     if filters.get('lobbyist_name'):
         lobbyist_names = filters['lobbyist_name'] if isinstance(filters['lobbyist_name'], list) else [filters['lobbyist_name']]
         if lobbyist_names:
+            # Parameter-filing mappings handle multiple values internally (OR within category)
             query_configs.append({
                 'filter_key': 'lobbyist_name',
                 'query_type': 'parameter_filing_mapping',
                 'parameter_type': 'LOBBYIST',
-                'parameter_values': lobbyist_names
+                'parameter_values': lobbyist_names,
+                'is_advanced_search': True,  # Mark as advanced search field
+                'category': 'lobbyist_name'  # Group by category for OR logic
+            })
+    
+    # Foreign entity name filter - use parameter-filing mappings (advanced search - AND across categories, OR within)
+    if filters.get('foreign_entity_name'):
+        foreign_names = filters['foreign_entity_name'] if isinstance(filters['foreign_entity_name'], list) else [filters['foreign_entity_name']]
+        if foreign_names:
+            # Parameter-filing mappings handle multiple values internally (OR within category)
+            query_configs.append({
+                'filter_key': 'foreign_entity_name',
+                'query_type': 'parameter_filing_mapping',
+                'parameter_type': 'FOREIGN_ENTITY',
+                'parameter_values': foreign_names,
+                'is_advanced_search': True,  # Mark as advanced search field
+                'category': 'foreign_entity_name'  # Group by category for OR logic
             })
     
     # State filter - use StatePostedDateIndex
@@ -811,8 +837,15 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} GSIs")
         
         # Query each filter to get initial batch of filing IDs (GSI or parameter-filing mapping)
+        # Use a unique key for each query config to handle multiple values in the same category
         gsi_results = {}
-        for config in query_configs:
+        for idx, config in enumerate(query_configs):
+            # Create unique key: use category if available, otherwise use filter_key + hash_value
+            if config.get('category'):
+                unique_key = f"{config['category']}_{idx}"
+            else:
+                unique_key = f"{config['filter_key']}_{config.get('hash_value', idx)}"
+            
             if config.get('query_type') == 'parameter_filing_mapping':
                 # Use parameter-filing mapping query
                 logger.info(f"Querying parameter-filing mappings for {config['parameter_type']} with values: {config['parameter_values']}")
@@ -821,7 +854,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     parameter_values=config['parameter_values'],
                     limit=1000
                 )
-                gsi_results[config['filter_key']] = {
+                gsi_results[unique_key] = {
                     'filing_ids': set(filing_ids),
                     'config': config,
                     'total_count': len(filing_ids),
@@ -842,7 +875,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     limit=1000,
                     get_all=False
                 )
-                gsi_results[config['filter_key']] = {
+                gsi_results[unique_key] = {
                     'filing_ids': set(filing_ids),
                     'config': config,
                     'total_count': len(filing_ids),
@@ -851,60 +884,143 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 }
                 logger.info(f"Found {len(filing_ids)} filing IDs from {config['index_name']} (first batch)")
         
-        # Separate filters from general_text_search_fields (OR logic) from other filters (AND logic)
+        # Separate filters into three groups:
+        # 1. general_text_search_fields (OR logic - union all)
+        # 2. advanced_search_fields (AND across categories, OR within each category)
+        # 3. other_filters (AND logic - intersection)
         general_text_search_results = {}
+        advanced_search_results = {}  # Grouped by category
         other_filters_results = {}
         
         for key, result in gsi_results.items():
             config = result['config']
             if config.get('from_general_text_search', False):
                 general_text_search_results[key] = result
+            elif config.get('is_advanced_search', False):
+                category = config.get('category', key)
+                if category not in advanced_search_results:
+                    advanced_search_results[category] = []
+                advanced_search_results[category].append(result)
             else:
                 other_filters_results[key] = result
         
-        # Union all general_text_search_fields filters (OR logic)
+        # Step 1: Union all general_text_search_fields filters (OR logic)
+        general_text_search_union = None
         if general_text_search_results:
             general_text_search_union = set()
             for key, result in general_text_search_results.items():
                 general_text_search_union = general_text_search_union | result['filing_ids']
             logger.info(f"Union of general_text_search_fields filters: {len(general_text_search_union)} filing IDs (OR logic)")
+        
+        # Step 2: For advanced search fields, union within each category (OR), then intersect across categories (AND)
+        advanced_search_intersection = None
+        if advanced_search_results:
+            # Union within each category (OR logic within category)
+            category_unions = {}
+            for category, results in advanced_search_results.items():
+                category_union = set()
+                for result in results:
+                    category_union = category_union | result['filing_ids']
+                category_unions[category] = category_union
+                logger.info(f"Union of {category} filters: {len(category_union)} filing IDs (OR within category)")
             
-            # If we have other filters, intersect the union with them (AND logic)
-            if other_filters_results:
-                source_filing_ids_set = general_text_search_union
-                for key, result in other_filters_results.items():
-                    source_filing_ids_set = source_filing_ids_set & result['filing_ids']
-                logger.info(f"After intersecting general_text_search union with {len(other_filters_results)} other filters: {len(source_filing_ids_set)} filing IDs")
-            else:
-                # Only general_text_search_fields filters - use union directly
-                source_filing_ids_set = general_text_search_union
-                logger.info(f"Only general_text_search_fields filters - using union: {len(source_filing_ids_set)} filing IDs")
+            # Intersect across categories (AND logic across categories)
+            category_list = list(category_unions.keys())
+            if category_list:
+                advanced_search_intersection = category_unions[category_list[0]]
+                for category in category_list[1:]:
+                    advanced_search_intersection = advanced_search_intersection & category_unions[category]
+                logger.info(f"Intersection of advanced search categories: {len(advanced_search_intersection)} filing IDs (AND across categories)")
+        
+        # Step 3: Combine all three groups
+        # Start with the most restrictive set
+        if advanced_search_intersection is not None:
+            source_filing_ids_set = advanced_search_intersection
+            logger.info(f"Starting with advanced search intersection: {len(source_filing_ids_set)} filing IDs")
+        elif general_text_search_union is not None:
+            source_filing_ids_set = general_text_search_union
+            logger.info(f"Starting with general_text_search union: {len(source_filing_ids_set)} filing IDs")
+        elif other_filters_results:
+            shortest_key = min(other_filters_results.keys(), key=lambda k: len(other_filters_results[k]['filing_ids']))
+            source_filing_ids_set = other_filters_results[shortest_key]['filing_ids']
+            logger.info(f"Starting with shortest other filter: {len(source_filing_ids_set)} filing IDs")
         else:
-            # No general_text_search_fields filters - use intersection for all filters (AND logic)
-            shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['filing_ids']))
-            source_filing_ids_set = gsi_results[shortest_key]['filing_ids']
-            source_config = gsi_results[shortest_key]['config']
-            
-            # Intersect with all other query results to ensure we only get items matching ALL filters
-            for key, result in gsi_results.items():
-                if key != shortest_key:
-                    source_filing_ids_set = source_filing_ids_set & result['filing_ids']
-            
-            logger.info(f"After intersection (no general_text_search_fields): {len(source_filing_ids_set)} filing IDs match all {len(query_configs)} filters")
+            source_filing_ids_set = set()
+            logger.warning("No queryable filters found - empty result set")
+        
+        # Intersect with general_text_search_fields union (if present)
+        if general_text_search_union is not None and advanced_search_intersection is not None:
+            source_filing_ids_set = source_filing_ids_set & general_text_search_union
+            logger.info(f"After intersecting with general_text_search union: {len(source_filing_ids_set)} filing IDs")
+        elif general_text_search_union is not None and advanced_search_intersection is None:
+            # Only general_text_search_fields - use union directly
+            source_filing_ids_set = general_text_search_union
+            logger.info(f"Only general_text_search_fields - using union: {len(source_filing_ids_set)} filing IDs")
+        
+        # Intersect with other filters (date, item_type, etc.)
+        if other_filters_results:
+            for key, result in other_filters_results.items():
+                source_filing_ids_set = source_filing_ids_set & result['filing_ids']
+            logger.info(f"After intersecting with {len(other_filters_results)} other filters: {len(source_filing_ids_set)} filing IDs")
         
         source_filing_ids = list(source_filing_ids_set)
-        logger.info(f"Final result: {len(source_filing_ids)} filing IDs after applying OR logic for general_text_search_fields and AND logic for other filters")
+        logger.info(f"Final result: {len(source_filing_ids)} filing IDs after applying OR logic for general_text_search_fields, OR within/AND across for advanced search, and AND for other filters")
         
         # Remove all queryable filters from filters
-        # For general_text_search_fields, we keep them in remaining_filters so Python can do exact name matching
-        # (GSI queries might have used only the first term, but we need to match all terms)
+        # For general_text_search_fields and advanced search fields, we keep them in remaining_filters 
+        # so Python can do exact name matching (GSI queries might have used only the first term, but we need to match all terms)
         remaining_filters = filters.copy()
+        
+        # Track which advanced search categories we've processed
+        processed_advanced_categories = set()
+        
         for config in query_configs:
             filter_key = config['filter_key']
             is_from_general_text_search = config.get('from_general_text_search', False)
+            is_advanced_search = config.get('is_advanced_search', False)
+            category = config.get('category')
             
-            # For non-general_text_search_fields filters, remove them since they're fully applied
-            if not is_from_general_text_search:
+            # For general_text_search_fields filters, keep them for Python filtering
+            if is_from_general_text_search:
+                # Keep general_text_search_fields in remaining_filters for Python filtering
+                # (GSI queries used the first term, but we need to check all terms in Python)
+                if 'general_text_search_fields' in remaining_filters:
+                    gtsf = remaining_filters['general_text_search_fields']
+                    # Map filter_key to general_text_search_fields key
+                    gtsf_key = None
+                    if filter_key == 'registrant_name':
+                        gtsf_key = 'registrant'
+                    elif filter_key == 'client_name':
+                        gtsf_key = 'client'
+                    elif filter_key in ['lobbyist', 'pac']:
+                        gtsf_key = filter_key
+                    
+                    # For parameter-filing mappings (lobbyist), we can remove since mapping already has exact matches
+                    # For GSI queries (registrant, client, pac), keep for Python filtering to match all terms
+                    if gtsf_key and config.get('query_type') == 'parameter_filing_mapping':
+                        # Parameter-filing mapping already has exact matches, can remove
+                        if gtsf_key in gtsf:
+                            del gtsf[gtsf_key]
+                        if not gtsf:
+                            del remaining_filters['general_text_search_fields']
+                    # For GSI queries, keep the filter so Python can match all terms
+                    # (The GSI query used the first term, but we need to check all terms in Python)
+            
+            # For advanced search fields, handle based on query type
+            elif is_advanced_search and category:
+                # Only process each category once (even if we have multiple query configs for the same category)
+                if category not in processed_advanced_categories:
+                    processed_advanced_categories.add(category)
+                    # For parameter-filing mappings (lobbyist_name, foreign_entity_name), remove since they already have exact matches
+                    if config.get('query_type') == 'parameter_filing_mapping':
+                        if filter_key in remaining_filters:
+                            del remaining_filters[filter_key]
+                    # For GSI queries (registrant_name, client_name), keep for Python filtering to ensure exact matching
+                    # (We queried all values via separate GSI queries and unioned them, but keep for exact name matching)
+                    # The filter will remain in remaining_filters for Python filtering
+            
+            # For other filters (date, item_type, state, etc.), remove them since they're fully applied
+            elif not is_from_general_text_search and not is_advanced_search:
                 if filter_key in remaining_filters:
                     if isinstance(remaining_filters[filter_key], list):
                         remaining_filters[filter_key] = remaining_filters[filter_key][1:]
@@ -912,35 +1028,6 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                             del remaining_filters[filter_key]
                     else:
                         del remaining_filters[filter_key]
-            
-            # For general_text_search_fields filters, map filter_key to the correct key in general_text_search_fields
-            # and keep them for Python filtering (to match all terms, not just the first one used in GSI query)
-            if 'general_text_search_fields' in remaining_filters:
-                gtsf = remaining_filters['general_text_search_fields']
-                # Map filter_key to general_text_search_fields key
-                gtsf_key = None
-                if filter_key == 'registrant_name':
-                    gtsf_key = 'registrant'
-                elif filter_key == 'client_name':
-                    gtsf_key = 'client'
-                elif filter_key in ['lobbyist', 'pac']:
-                    gtsf_key = filter_key
-                
-                # For parameter-filing mappings (lobbyist), we can remove since mapping already has exact matches
-                # For GSI queries (registrant, client, pac), keep for Python filtering to match all terms
-                if gtsf_key and config.get('query_type') == 'parameter_filing_mapping':
-                    # Parameter-filing mapping already has exact matches, can remove
-                    if gtsf_key in gtsf:
-                        if isinstance(gtsf[gtsf_key], list):
-                            gtsf[gtsf_key] = gtsf[gtsf_key][1:]
-                            if not gtsf[gtsf_key]:
-                                del gtsf[gtsf_key]
-                        else:
-                            del gtsf[gtsf_key]
-                    if not gtsf:
-                        del remaining_filters['general_text_search_fields']
-                # For GSI queries, keep the filter so Python can match all terms
-                # (The GSI query used the first term, but we need to check all terms in Python)
         
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
