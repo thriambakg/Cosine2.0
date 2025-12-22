@@ -369,59 +369,70 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     general_text_search_fields = filters.get('general_text_search_fields', {})
     if general_text_search_fields:
         # Registrant name from general_text_search_fields
+        # Create a query config for each registrant name (OR logic - union all)
         if general_text_search_fields.get('registrant'):
             registrant_terms = general_text_search_fields['registrant']
             if isinstance(registrant_terms, list) and registrant_terms:
-                # Use first term for GSI query
-                query_configs.append({
-                    'filter_key': 'registrant_name',
-                    'index_name': 'RegistrantPostedDateIndex',
-                    'hash_key': 'registrant_name',
-                    'hash_value': registrant_terms[0],
-                    'range_key': 'dt_posted',
-                    'range_value': date_from if date_from else None,
-                    'range_condition': 'gte' if date_from else None,
-                    'from_general_text_search': True  # Mark as coming from general_text_search_fields
-                })
+                for registrant_term in registrant_terms:
+                    query_configs.append({
+                        'filter_key': 'registrant_name',
+                        'index_name': 'RegistrantPostedDateIndex',
+                        'hash_key': 'registrant_name',
+                        'hash_value': registrant_term,
+                        'range_key': 'dt_posted',
+                        'range_value': date_from if date_from else None,
+                        'range_condition': 'gte' if date_from else None,
+                        'from_general_text_search': True,  # Mark as coming from general_text_search_fields
+                        'category': 'registrant'  # Group by category for union
+                    })
         
         # Client name from general_text_search_fields
+        # Create a query config for each client name (OR logic - union all)
         if general_text_search_fields.get('client'):
             client_terms = general_text_search_fields['client']
             if isinstance(client_terms, list) and client_terms:
-                query_configs.append({
-                    'filter_key': 'client_name',
-                    'index_name': 'ClientPostedDateIndex',
-                    'hash_key': 'client_name',
-                    'hash_value': client_terms[0],
-                    'range_key': 'dt_posted',
-                    'range_value': date_from if date_from else None,
-                    'range_condition': 'gte' if date_from else None,
-                    'from_general_text_search': True  # Mark as coming from general_text_search_fields
-                })
+                for client_term in client_terms:
+                    query_configs.append({
+                        'filter_key': 'client_name',
+                        'index_name': 'ClientPostedDateIndex',
+                        'hash_key': 'client_name',
+                        'hash_value': client_term,
+                        'range_key': 'dt_posted',
+                        'range_value': date_from if date_from else None,
+                        'range_condition': 'gte' if date_from else None,
+                        'from_general_text_search': True,  # Mark as coming from general_text_search_fields
+                        'category': 'client'  # Group by category for union
+                    })
         
         # Lobbyist name from general_text_search_fields - use search index
+        # Create a query config for each lobbyist name (OR logic - union all)
         if general_text_search_fields.get('lobbyist'):
             lobbyist_terms = general_text_search_fields['lobbyist']
             if isinstance(lobbyist_terms, list) and lobbyist_terms:
-                query_configs.append({
-                    'filter_key': 'lobbyist',
-                    'query_type': 'search_index',
-                    'search_type': 'LOBBYIST',
-                    'search_values': lobbyist_terms,
-                    'from_general_text_search': True  # Mark as coming from general_text_search_fields
-                })
+                for lobbyist_term in lobbyist_terms:
+                    query_configs.append({
+                        'filter_key': 'lobbyist',
+                        'query_type': 'search_index',
+                        'search_type': 'LOBBYIST',
+                        'search_values': [lobbyist_term],  # Single value per query config
+                        'from_general_text_search': True,  # Mark as coming from general_text_search_fields
+                        'category': 'lobbyist'  # Group by category for union
+                    })
         
         # PAC names from general_text_search_fields - use search index
+        # Create a query config for each PAC name (OR logic - union all)
         if general_text_search_fields.get('pac'):
             pac_terms = general_text_search_fields['pac']
             if isinstance(pac_terms, list) and pac_terms:
-                query_configs.append({
-                    'filter_key': 'pac',
-                    'query_type': 'search_index',
-                    'search_type': 'PAC',
-                    'search_values': pac_terms,
-                    'from_general_text_search': True  # Mark as coming from general_text_search_fields
-                })
+                for pac_term in pac_terms:
+                    query_configs.append({
+                        'filter_key': 'pac',
+                        'query_type': 'search_index',
+                        'search_type': 'PAC',
+                        'search_values': [pac_term],  # Single value per query config
+                        'from_general_text_search': True,  # Mark as coming from general_text_search_fields
+                        'category': 'pac'  # Group by category for union
+                    })
     
     # Registrant name filter - use RegistrantPostedDateIndex (advanced search - AND across categories, OR within)
     if filters.get('registrant_name'):
