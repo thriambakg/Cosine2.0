@@ -24,7 +24,8 @@ S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-lda-disclosures-produc
 S3_PREFIX = os.environ.get('S3_PREFIX', 'lists/')
 
 # Field type to S3 key mapping
-# Note: Constants files (general_issues, government_entities, countries) contain names only (not codes/IDs)
+# Note: general_issue and government_entity are now handled locally in the frontend via CSV files
+# They are removed from this mapping since they don't need backend autocomplete
 FIELD_TYPE_TO_S3_KEY = {
     'registrant': f'{S3_PREFIX}registrant_names.csv',
     'client': f'{S3_PREFIX}client_names.csv',
@@ -32,8 +33,6 @@ FIELD_TYPE_TO_S3_KEY = {
     'pac': f'{S3_PREFIX}pacs.csv',
     'foreign': f'{S3_PREFIX}countries.csv',  # Foreign entities use countries CSV
     'country': f'{S3_PREFIX}countries.csv',  # Countries CSV contains country names (not codes)
-    'government_entity': f'{S3_PREFIX}government_entities.csv',  # Government entities CSV contains entity names (not IDs)
-    'general_issue': f'{S3_PREFIX}general_issues.csv',  # General issues CSV contains issue names (not codes)
 }
 
 # Cache for CSV data (in-memory, per Lambda instance)
@@ -260,9 +259,9 @@ def process_autocomplete_request(event: Dict[str, Any], context: Any) -> Dict[st
         query = request_body.get('query', '').strip()
         field_types = request_body.get('field_types', ['registrant', 'client', 'lobbyist', 'pac'])
         
-        # For constants files (general_issue, government_entity, countries), allow higher limits
-        # These are used for full list loading in the frontend
-        is_constants_request = any(ft in ['general_issue', 'government_entity', 'country', 'foreign'] for ft in field_types)
+        # For constants files (countries), allow higher limits
+        # Note: general_issue and government_entity are now handled locally in the frontend
+        is_constants_request = any(ft in ['country', 'foreign'] for ft in field_types)
         if is_constants_request:
             # Allow up to 5000 for constants (to get full lists)
             limit = min(request_body.get('limit', 1000), 5000)

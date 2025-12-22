@@ -165,7 +165,7 @@ const LDASearchPage: React.FC = () => {
     }
   );
 
-  // General issues loaded from API and cached in session
+  // General issues and government entities loaded from local CSV files
   const [generalIssues, setGeneralIssues] = useState<string[]>([]);
   const [governmentEntities, setGovernmentEntities] = useState<string[]>([]);
   
@@ -189,56 +189,42 @@ const LDASearchPage: React.FC = () => {
   const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== undefined ? savedState.searchFormExpanded : true);
   const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== undefined ? savedState.advancedSearchExpanded : false);
 
-  // Load general issues and government entities from autocomplete API on page load
+  // Load general issues and government entities from local CSV files
   useEffect(() => {
-    const loadAutocompleteData = async () => {
+    const loadCSVData = async () => {
       try {
-        // Check session cache first
-        const cachedGeneralIssues = sessionStorage.getItem('lda_general_issues');
-        const cachedGovernmentEntities = sessionStorage.getItem('lda_government_entities');
-        
-        if (cachedGeneralIssues) {
-          setGeneralIssues(JSON.parse(cachedGeneralIssues));
+        // Load general issues CSV
+        const generalIssuesResponse = await fetch('/data/general_issues.csv');
+        if (generalIssuesResponse.ok) {
+          const text = await generalIssuesResponse.text();
+          const lines = text.split('\n')
+            .filter(line => line.trim() && !line.startsWith('value'))
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+          setGeneralIssues(lines);
+          console.log(`✅ Loaded ${lines.length} general issues from CSV`);
         } else {
-          // Fetch from API - request full list with high limit
-          const generalIssuesResponse = await ldaAutocompleteAPI.search({
-            query: '',
-            field_types: ['general_issue'],
-            limit: 5000  // Request high limit to get all general issues
-          });
-          if (generalIssuesResponse?.results && Array.isArray(generalIssuesResponse.results)) {
-            const issues = generalIssuesResponse.results.map(item => typeof item === 'string' ? item : item.value || '');
-            console.log(`✅ Loaded ${issues.length} general issues from API`);
-            setGeneralIssues(issues);
-            sessionStorage.setItem('lda_general_issues', JSON.stringify(issues));
-          } else {
-            console.warn('⚠️ No general issues returned from API');
-          }
+          console.error('❌ Failed to load general_issues.csv');
         }
-        
-        if (cachedGovernmentEntities) {
-          setGovernmentEntities(JSON.parse(cachedGovernmentEntities));
+
+        // Load government entities CSV
+        const governmentEntitiesResponse = await fetch('/data/government_entities.csv');
+        if (governmentEntitiesResponse.ok) {
+          const text = await governmentEntitiesResponse.text();
+          const lines = text.split('\n')
+            .filter(line => line.trim() && !line.startsWith('value'))
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+          setGovernmentEntities(lines);
+          console.log(`✅ Loaded ${lines.length} government entities from CSV`);
         } else {
-          // Fetch from API - request full list with high limit
-          const governmentEntitiesResponse = await ldaAutocompleteAPI.search({
-            query: '',
-            field_types: ['government_entity'],
-            limit: 5000  // Request high limit to get all government entities
-          });
-          if (governmentEntitiesResponse?.results && Array.isArray(governmentEntitiesResponse.results)) {
-            const entities = governmentEntitiesResponse.results.map(item => typeof item === 'string' ? item : item.value || '');
-            console.log(`✅ Loaded ${entities.length} government entities from API`);
-            setGovernmentEntities(entities);
-            sessionStorage.setItem('lda_government_entities', JSON.stringify(entities));
-          } else {
-            console.warn('⚠️ No government entities returned from API');
-          }
+          console.error('❌ Failed to load government_entities.csv');
         }
       } catch (error) {
-        console.error('❌ Error loading autocomplete data:', error);
+        console.error('❌ Error loading CSV data:', error);
       }
     };
-    loadAutocompleteData();
+    loadCSVData();
   }, []);
 
   // Log state restoration
@@ -1189,11 +1175,12 @@ const LDASearchPage: React.FC = () => {
                           }}
                           suggestions={governmentEntities}
                           onSearch={(query: string) => {
+                            // Show all results when dropdown is opened (empty query)
                             if (!query || query.trim() === '') {
                               return governmentEntities;
                             }
                             const queryLower = query.toLowerCase().trim();
-                            // Filter: starts with query, then contains query
+                            // Filter with priority: starts with query, then contains query
                             const startsWith = governmentEntities.filter(entity => 
                               entity.toLowerCase().startsWith(queryLower)
                             );
@@ -1201,10 +1188,11 @@ const LDASearchPage: React.FC = () => {
                               !entity.toLowerCase().startsWith(queryLower) && 
                               entity.toLowerCase().includes(queryLower)
                             );
+                            // Return starts with matches first, then contains matches
                             return [...startsWith, ...contains];
                           }}
                           renderItem={(entity) => entity}
-                          placeholder="Search government entities..."
+                          placeholder="Search or select government entities..."
                           allowCustomInput={false}
                         />
 
