@@ -8,3 +8,4 @@ export { default as StockTile } from './StockTile';
 export { default as SECSearchTile } from './SECSearchTile';
 export { default as GovtContractsSearchTile } from './GovtContractsSearchTile';
 export { default as CongressBillsSearchTile } from './CongressBillsSearchTile';
+export { default as LDASearchTile } from './LDASearchTile';

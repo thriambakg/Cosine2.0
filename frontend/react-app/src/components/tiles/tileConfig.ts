@@ -240,6 +240,31 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
     supportsResize: true,
     supportsDrag: true,
   },
+  lda_disclosures: {
+    sizeConstraints: {
+      minWidth: 4,
+      maxWidth: 10,
+      minHeight: 4,
+      maxHeight: 10,
+      defaultWidth: 6,
+      defaultHeight: 6,
+    },
+    defaultDisplayOptions: {
+      showFilingType: true,
+      showFilingPeriod: true,
+      showFilingYear: true,
+      showRegistrant: true,
+      showClient: true,
+      showAmount: true,
+      showDatePosted: true,
+      showState: true,
+      showResultsTable: true,
+      maxResults: 50,
+      compactView: false,
+    },
+    supportsResize: true,
+    supportsDrag: true,
+  },
 };
 
 // Get tile configuration for a specific tile type

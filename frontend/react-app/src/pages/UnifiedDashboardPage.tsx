@@ -330,6 +330,17 @@ const tileCategories: TileCategory[] = [
             color: '#7c3aed',
             isAvailable: true,
             placeholder: false
+          },
+          {
+            id: 'lda_disclosures',
+            name: 'LDA Disclosures',
+            description: 'Search and analyze Lobbying Disclosure Act filings with registrant, client, and lobbyist filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <GavelIcon />,
+            color: '#dc2626',
+            isAvailable: true,
+            placeholder: false
           }
         ]
       }
@@ -857,6 +868,9 @@ const UnifiedDashboardPage: React.FC = () => {
     } else if (tileType.id === 'congress_bills') {
       // Handle congress bills tile creation
       handleCreateCongressBillsTile();
+    } else if (tileType.id === 'lda_disclosures') {
+      // Handle LDA disclosures tile creation
+      handleCreateLDASearchTile();
     } else if (tileType.placeholder) {
       // For placeholder tiles, show a message
       alert(`${tileType.name} tiles are coming soon!`);
@@ -1176,6 +1190,63 @@ const UnifiedDashboardPage: React.FC = () => {
         latest_action_date_to: '',
         bipartisan: undefined,
         bill_number: undefined,
+      },
+      results: [],
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
+  };
+
+  // LDA disclosures tile creation handler
+  const handleCreateLDASearchTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `lda_disclosures_${Date.now()}`,
+      type: 'lda_disclosures',
+      title: 'LDA Disclosures',
+      displayOptions: {
+        showFilingType: true,
+        showFilingPeriod: true,
+        showFilingYear: true,
+        showRegistrant: true,
+        showClient: true,
+        showAmount: true,
+        showDatePosted: true,
+        showState: true,
+        showResultsTable: true,
+        maxResults: 50,
+        compactView: false,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 600, height: 600 },
+      gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
+      gridSize: { width: 6, height: 6 },
+      dashboard_id: currentDashboardId,
+      searchParams: {
+        general_text_search_fields: {
+          registrant: false,
+          client: false,
+          lobbyist: false,
+          pac: false,
+          foreign: false,
+        },
+        date_from: '',
+        date_to: '',
+        amount_min: undefined,
+        amount_max: undefined,
+        registrant_name: [],
+        client_name: [],
+        lobbyist_name: [],
+        foreign_entity_name: [],
+        general_issue_code: [],
+        government_entity: [],
+        state: [],
+        filing_period: [],
+        item_type: [],
       },
       results: [],
     };

@@ -279,39 +279,42 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
             if item_type not in filer_types:
                 return False
     
-    # Item type filter (FILING or CONTRIBUTION) - filters by PK prefix
+    # Item type filter (FILING or CONTRIBUTION) - filters by item_type field or PK prefix
     if filters.get('item_type'):
         item_types = filters['item_type'] if isinstance(filters['item_type'], list) else [filters['item_type']]
         item_types = [t.upper() for t in item_types if t and str(t).strip()]
         if item_types:
-            # Get PK from item to check prefix
-            item_pk = str(item.get('PK') or '').strip()
-            if not item_pk:
-                # If no PK, try to determine from other fields
-                # FILING items typically have filing_uuid, CONTRIBUTION items have contribution_uuid
-                if item.get('filing_uuid') and not item.get('contribution_uuid'):
-                    item_pk = f'FILING#{item.get("filing_uuid")}'
-                elif item.get('contribution_uuid'):
-                    item_pk = f'CONTRIBUTION#{item.get("contribution_uuid")}'
-                else:
-                    # Fallback: check if it looks like a filing or contribution based on structure
-                    # FILING items have report_type, CONTRIBUTION items have contribution-specific fields
-                    if item.get('report_type') or item.get('filing_type'):
-                        item_pk = 'FILING#'
-                    elif item.get('pacs') or item.get('contribution_items'):
-                        item_pk = 'CONTRIBUTION#'
+            # First check item_type field (preferred, set by indexer)
+            item_type_value = str(item.get('item_type') or '').strip().upper()
+            if item_type_value:
+                if item_type_value not in item_types:
+                    return False
+            else:
+                # Fallback: check PK prefix if item_type field is not available
+                item_pk = str(item.get('PK') or '').strip()
+                if not item_pk:
+                    # If no PK, try to determine from other fields
+                    if item.get('filing_uuid') and not item.get('contribution_uuid'):
+                        item_pk = f'FILING#{item.get("filing_uuid")}'
+                    elif item.get('contribution_uuid'):
+                        item_pk = f'CONTRIBUTION#{item.get("contribution_uuid")}'
                     else:
-                        # Default to FILING if we can't determine
-                        item_pk = 'FILING#'
-            
-            # Check if PK starts with any of the requested prefixes
-            matches = False
-            for item_type in item_types:
-                if item_pk.startswith(f'{item_type}#'):
-                    matches = True
-                    break
-            if not matches:
-                return False
+                        # Fallback: check if it looks like a filing or contribution based on structure
+                        if item.get('report_type') or item.get('filing_type'):
+                            item_pk = 'FILING#'
+                        elif item.get('pacs') or item.get('contribution_items'):
+                            item_pk = 'CONTRIBUTION#'
+                        else:
+                            item_pk = 'FILING#'
+                
+                # Check if PK starts with any of the requested prefixes
+                matches = False
+                for item_type in item_types:
+                    if item_pk.startswith(f'{item_type}#'):
+                        matches = True
+                        break
+                if not matches:
+                    return False
     
     return True
 
@@ -328,6 +331,22 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Date range filter - use YearPostedDateIndex or PeriodPostedDateIndex
     date_from = filters.get('date_from')
     date_to = filters.get('date_to')
+    
+    # Item type filter - use ItemTypePostedDateIndex
+    if filters.get('item_type'):
+        item_types = filters['item_type'] if isinstance(filters['item_type'], list) else [filters['item_type']]
+        item_types = [t.upper() for t in item_types if t and str(t).strip()]
+        if item_types:
+            # Use first item type for GSI query (if multiple, we'll filter in Python)
+            query_configs.append({
+                'filter_key': 'item_type',
+                'index_name': 'ItemTypePostedDateIndex',
+                'hash_key': 'item_type',
+                'hash_value': item_types[0],
+                'range_key': 'dt_posted',
+                'range_value': date_from if date_from else None,
+                'range_condition': 'gte' if date_from else None
+            })
     if date_from or date_to:
         # Extract year from date_from or date_to
         date_str = date_from or date_to
@@ -361,7 +380,8 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'hash_value': registrant_terms[0],
                     'range_key': 'dt_posted',
                     'range_value': date_from if date_from else None,
-                    'range_condition': 'gte' if date_from else None
+                    'range_condition': 'gte' if date_from else None,
+                    'from_general_text_search': True  # Mark as coming from general_text_search_fields
                 })
         
         # Client name from general_text_search_fields
@@ -375,7 +395,8 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'hash_value': client_terms[0],
                     'range_key': 'dt_posted',
                     'range_value': date_from if date_from else None,
-                    'range_condition': 'gte' if date_from else None
+                    'range_condition': 'gte' if date_from else None,
+                    'from_general_text_search': True  # Mark as coming from general_text_search_fields
                 })
         
         # Lobbyist name from general_text_search_fields - use parameter-filing mappings
@@ -386,7 +407,8 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'filter_key': 'lobbyist',
                     'query_type': 'parameter_filing_mapping',
                     'parameter_type': 'LOBBYIST',
-                    'parameter_values': lobbyist_terms
+                    'parameter_values': lobbyist_terms,
+                    'from_general_text_search': True  # Mark as coming from general_text_search_fields
                 })
         
         # PAC names from general_text_search_fields - use PACPostedDateIndex with pac=true
@@ -402,7 +424,8 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'hash_value': 1,  # All PAC filings
                     'range_key': 'dt_posted',
                     'range_value': date_from if date_from else None,
-                    'range_condition': 'gte' if date_from else None
+                    'range_condition': 'gte' if date_from else None,
+                    'from_general_text_search': True  # Mark as coming from general_text_search_fields
                 })
     
     # Registrant name filter - use RegistrantPostedDateIndex (legacy format)
@@ -828,44 +851,96 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 }
                 logger.info(f"Found {len(filing_ids)} filing IDs from {config['index_name']} (first batch)")
         
-        # Find the shortest list (most restrictive filter) - this is our source of truth
-        shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['filing_ids']))
-        source_filing_ids_set = gsi_results[shortest_key]['filing_ids']
-        source_config = gsi_results[shortest_key]['config']
+        # Separate filters from general_text_search_fields (OR logic) from other filters (AND logic)
+        general_text_search_results = {}
+        other_filters_results = {}
         
-        # Intersect with all other query results to ensure we only get items matching ALL filters
         for key, result in gsi_results.items():
-            if key != shortest_key:
-                source_filing_ids_set = source_filing_ids_set & result['filing_ids']
+            config = result['config']
+            if config.get('from_general_text_search', False):
+                general_text_search_results[key] = result
+            else:
+                other_filters_results[key] = result
+        
+        # Union all general_text_search_fields filters (OR logic)
+        if general_text_search_results:
+            general_text_search_union = set()
+            for key, result in general_text_search_results.items():
+                general_text_search_union = general_text_search_union | result['filing_ids']
+            logger.info(f"Union of general_text_search_fields filters: {len(general_text_search_union)} filing IDs (OR logic)")
+            
+            # If we have other filters, intersect the union with them (AND logic)
+            if other_filters_results:
+                source_filing_ids_set = general_text_search_union
+                for key, result in other_filters_results.items():
+                    source_filing_ids_set = source_filing_ids_set & result['filing_ids']
+                logger.info(f"After intersecting general_text_search union with {len(other_filters_results)} other filters: {len(source_filing_ids_set)} filing IDs")
+            else:
+                # Only general_text_search_fields filters - use union directly
+                source_filing_ids_set = general_text_search_union
+                logger.info(f"Only general_text_search_fields filters - using union: {len(source_filing_ids_set)} filing IDs")
+        else:
+            # No general_text_search_fields filters - use intersection for all filters (AND logic)
+            shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['filing_ids']))
+            source_filing_ids_set = gsi_results[shortest_key]['filing_ids']
+            source_config = gsi_results[shortest_key]['config']
+            
+            # Intersect with all other query results to ensure we only get items matching ALL filters
+            for key, result in gsi_results.items():
+                if key != shortest_key:
+                    source_filing_ids_set = source_filing_ids_set & result['filing_ids']
+            
+            logger.info(f"After intersection (no general_text_search_fields): {len(source_filing_ids_set)} filing IDs match all {len(query_configs)} filters")
         
         source_filing_ids = list(source_filing_ids_set)
-        logger.info(f"After intersection: {len(source_filing_ids)} filing IDs match all {len(query_configs)} filters")
-        logger.info(f"Using {shortest_key} as source of truth ({len(source_filing_ids)} filing IDs after intersection)")
+        logger.info(f"Final result: {len(source_filing_ids)} filing IDs after applying OR logic for general_text_search_fields and AND logic for other filters")
         
-        # Remove all queryable filters from filters (we've already applied them via intersection)
+        # Remove all queryable filters from filters
+        # For general_text_search_fields, we keep them in remaining_filters so Python can do exact name matching
+        # (GSI queries might have used only the first term, but we need to match all terms)
         remaining_filters = filters.copy()
         for config in query_configs:
             filter_key = config['filter_key']
-            if filter_key in remaining_filters:
-                if isinstance(remaining_filters[filter_key], list):
-                    remaining_filters[filter_key] = remaining_filters[filter_key][1:]
-                    if not remaining_filters[filter_key]:
-                        del remaining_filters[filter_key]
-                else:
-                    del remaining_filters[filter_key]
+            is_from_general_text_search = config.get('from_general_text_search', False)
             
-            # Also remove from general_text_search_fields if present
+            # For non-general_text_search_fields filters, remove them since they're fully applied
+            if not is_from_general_text_search:
+                if filter_key in remaining_filters:
+                    if isinstance(remaining_filters[filter_key], list):
+                        remaining_filters[filter_key] = remaining_filters[filter_key][1:]
+                        if not remaining_filters[filter_key]:
+                            del remaining_filters[filter_key]
+                    else:
+                        del remaining_filters[filter_key]
+            
+            # For general_text_search_fields filters, map filter_key to the correct key in general_text_search_fields
+            # and keep them for Python filtering (to match all terms, not just the first one used in GSI query)
             if 'general_text_search_fields' in remaining_filters:
                 gtsf = remaining_filters['general_text_search_fields']
-                if filter_key in gtsf:
-                    if isinstance(gtsf[filter_key], list):
-                        gtsf[filter_key] = gtsf[filter_key][1:]
-                        if not gtsf[filter_key]:
-                            del gtsf[filter_key]
-                    else:
-                        del gtsf[filter_key]
-                if not gtsf:
-                    del remaining_filters['general_text_search_fields']
+                # Map filter_key to general_text_search_fields key
+                gtsf_key = None
+                if filter_key == 'registrant_name':
+                    gtsf_key = 'registrant'
+                elif filter_key == 'client_name':
+                    gtsf_key = 'client'
+                elif filter_key in ['lobbyist', 'pac']:
+                    gtsf_key = filter_key
+                
+                # For parameter-filing mappings (lobbyist), we can remove since mapping already has exact matches
+                # For GSI queries (registrant, client, pac), keep for Python filtering to match all terms
+                if gtsf_key and config.get('query_type') == 'parameter_filing_mapping':
+                    # Parameter-filing mapping already has exact matches, can remove
+                    if gtsf_key in gtsf:
+                        if isinstance(gtsf[gtsf_key], list):
+                            gtsf[gtsf_key] = gtsf[gtsf_key][1:]
+                            if not gtsf[gtsf_key]:
+                                del gtsf[gtsf_key]
+                        else:
+                            del gtsf[gtsf_key]
+                    if not gtsf:
+                        del remaining_filters['general_text_search_fields']
+                # For GSI queries, keep the filter so Python can match all terms
+                # (The GSI query used the first term, but we need to check all terms in Python)
         
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
@@ -1304,24 +1379,15 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         # This avoids scan operations by querying YearPostedDateIndex for recent years
         logger.info("No GSI-queryable filters found, using default YearPostedDateIndex query for recent years")
         
-        # Check if item_type filter is specified
-        item_type_filter = filters.get('item_type', [])
-        if isinstance(item_type_filter, str):
-            item_type_filter = [item_type_filter]
-        item_type_filter = [t.upper() for t in item_type_filter if t]
-        
-        # Use current year and previous years as default to get recent filings
-        # Query more years to ensure we get results (data might not be available for current year)
+        # Use current year and previous year as default to get recent filings
         from datetime import datetime
         current_year = datetime.now().year
-        years_to_query = [current_year, current_year - 1, current_year - 2, current_year - 3]
+        years_to_query = [current_year, current_year - 1]
         
         all_filing_ids = []
         all_last_eval_keys = {}
         
         # Query each year's GSI to get filing IDs
-        # Note: YearPostedDateIndex should index both FILING and CONTRIBUTION items if they have filing_year
-        # The query_gsi_for_filing_ids function extracts both FILING# and CONTRIBUTION# IDs from results
         for year in years_to_query:
             filing_ids, last_eval_key = query_gsi_for_filing_ids(
                 index_name='YearPostedDateIndex',
@@ -1335,38 +1401,21 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             if last_eval_key:
                 all_last_eval_keys[year] = last_eval_key
         
-        logger.info(f"Found {len(all_filing_ids)} filing IDs from recent years (includes both FILING and CONTRIBUTION items)")
-        
-        # If we got no IDs and item_type is specified, log a warning
-        if len(all_filing_ids) == 0 and item_type_filter:
-            logger.warning(f"No items found in YearPostedDateIndex for years {years_to_query} with item_type filter: {item_type_filter}. This might indicate no data exists for these years, or the items might not be indexed in this GSI.")
+        logger.info(f"Found {len(all_filing_ids)} filing IDs from recent years")
         
         # Fetch full items using batch get
         items = []
         if all_filing_ids:
-            batch_size = 50  # Reduced since we may try both formats
+            batch_size = 100
             dynamodb_client = boto3.client('dynamodb')
             for i in range(0, len(all_filing_ids), batch_size):
                 batch_ids = all_filing_ids[i:i + batch_size]
-                # If item_type is specified, only try the relevant key format
-                # Otherwise, try both FILING and CONTRIBUTION formats
-                keys = []
-                if item_type_filter:
-                    # Only try the specified type(s)
-                    for fid in batch_ids:
-                        if 'FILING' in item_type_filter:
-                            keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
-                        if 'CONTRIBUTION' in item_type_filter:
-                            keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
-                else:
-                    # No item_type filter - try both formats
-                    for fid in batch_ids:
-                        keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
-                        keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
-                
                 request_items = {
                     FILINGS_TABLE_NAME: {
-                        'Keys': keys
+                        'Keys': [
+                            {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
+                            for fid in batch_ids
+                        ]
                         # No ProjectionExpression - returns ALL attributes (complete row including PII)
                     }
                 }

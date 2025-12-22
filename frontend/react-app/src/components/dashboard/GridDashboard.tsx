@@ -10,6 +10,7 @@ import PoliticianTradesSearchTile from '../tiles/PoliticianTradesSearchTile';
 import SECSearchTile from '../tiles/SECSearchTile';
 import GovtContractsSearchTile from '../tiles/GovtContractsSearchTile';
 import CongressBillsSearchTile from '../tiles/CongressBillsSearchTile';
+import LDASearchTile from '../tiles/LDASearchTile';
 import PlaceholderTile from '../tiles/PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../tiles/tileConfig';
@@ -1123,6 +1124,48 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
+    // Restore paginationState from sessionStorage if available (for session persistence)
+    let sessionPaginationStateLDA = tile.paginationState;
+    try {
+      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        if (parsed.paginationState) {
+          sessionPaginationStateLDA = parsed.paginationState;
+        }
+      }
+    } catch (error) {
+      // Ignore sessionStorage errors
+    }
+
+    const ldaSearchProps = {
+      ...commonProps,
+      onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
+      searchParams: tile.searchParams,
+      filterSettings: tile.filterSettings,
+      results: tile.results as any,
+      paginationState: sessionPaginationStateLDA,
+      displayOptions: {
+        showFilingType: true,
+        showFilingPeriod: true,
+        showFilingYear: true,
+        showRegistrant: true,
+        showClient: true,
+        showAmount: true,
+        showDatePosted: true,
+        showState: true,
+        showResultsTable: true,
+        maxResults: 50,
+        compactView: false,
+        ...((tile.displayOptions as any) || {}),
+      },
+      autoRefresh: tile.autoRefresh,
+      isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
+    };
+
 
     return (
       <Box
@@ -1154,6 +1197,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           <GovtContractsSearchTile key={tile.id} {...govtContractsProps} />
         ) : tile.type === 'congress_bills' ? (
           <CongressBillsSearchTile key={tile.id} {...congressBillsProps} />
+        ) : tile.type === 'lda_disclosures' ? (
+          <LDASearchTile key={tile.id} {...ldaSearchProps} />
         ) : (
           <PlaceholderTile
             key={tile.id}

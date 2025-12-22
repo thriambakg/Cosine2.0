@@ -7,7 +7,7 @@
 
 export interface ContextItem {
   id: string;
-  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'congress_bill' | 'custom';
+  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'congress_bill' | 'lda_filing' | 'custom';
   title: string;
   subtitle?: string;
   data: any;
@@ -1132,6 +1132,176 @@ export const addCustomToContext = (
 };
 
 /**
+ * Add an LDA filing to the context window
+ * Used for adding individual filings from the LDA search page
+ */
+export const addLDAFilingToContext = (
+  filing: any,
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  // Use filing_uuid as the primary unique identifier, fallback to other fields
+  const filingId = filing.filing_uuid || filing.PK?.replace('FILING#', '').replace('CONTRIBUTION#', '') || 
+                   `${filing.registrant_name || 'unknown'}_${filing.client_name || 'filing'}_${filing.dt_posted || Date.now()}`;
+  
+  // Format date
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return '';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  // Format currency
+  const formatCurrency = (amount?: string | number): string => {
+    if (amount === undefined || amount === null) return '';
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(numAmount)) return '';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(numAmount);
+  };
+
+  const title = `${filing.filing_type_display || filing.filing_type || filing.report_type_display || filing.report_type || 'LDA Filing'} - ${filing.registrant_name || filing.client_name || 'Unknown'}`;
+  const subtitleParts: string[] = [];
+  if (filing.dt_posted) subtitleParts.push(`Posted: ${formatDate(filing.dt_posted)}`);
+  if (filing.filing_period_display || filing.filing_period) subtitleParts.push(filing.filing_period_display || filing.filing_period);
+  if (filing.filing_year) subtitleParts.push(`Year: ${filing.filing_year}`);
+  if (filing.income || filing.expenses) {
+    const amount = filing.income || filing.expenses;
+    subtitleParts.push(`Amount: ${formatCurrency(amount)}`);
+  }
+  
+  const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'LDA Filing';
+  
+  const contextItem: ContextItem = {
+    id: `lda_filing_${filingId}_${Date.now()}`,
+    type: 'lda_filing',
+    title,
+    subtitle,
+    data: filing, // Include all filing data
+    timestamp: Date.now(),
+  };
+  
+  if (target === 'sidebar') {
+    // Add to current sidebar session's context
+    const event = new CustomEvent('add-to-sidebar-context', {
+      detail: contextItem
+    });
+    window.dispatchEvent(event);
+    
+    // Listen for potential error response (if sidebar can't handle it)
+    const handleSidebarError = () => {
+      // Fallback to new chat if sidebar fails
+      addToContext(contextItem);
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+  } else {
+    // Add to new chat (existing behavior)
+    addToContext(contextItem);
+  }
+};
+
+/**
+ * Add multiple LDA filings to the context window
+ * Used for adding multiple selected filings from the LDA search page
+ */
+export const addMultipleLDAFilingsToContext = (
+  filings: any[],
+  target: 'new' | 'sidebar' = 'new'
+): void => {
+  // Format date
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return '';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  // Format currency
+  const formatCurrency = (amount?: string | number): string => {
+    if (amount === undefined || amount === null) return '';
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(numAmount)) return '';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(numAmount);
+  };
+
+  const contextItems: ContextItem[] = filings.map(filing => {
+    // Use filing_uuid as the primary unique identifier, fallback to other fields
+    const filingId = filing.filing_uuid || filing.PK?.replace('FILING#', '').replace('CONTRIBUTION#', '') || 
+                     `${filing.registrant_name || 'unknown'}_${filing.client_name || 'filing'}_${filing.dt_posted || Date.now()}`;
+    
+    const title = `${filing.filing_type_display || filing.filing_type || filing.report_type_display || filing.report_type || 'LDA Filing'} - ${filing.registrant_name || filing.client_name || 'Unknown'}`;
+    const subtitleParts: string[] = [];
+    if (filing.dt_posted) subtitleParts.push(`Posted: ${formatDate(filing.dt_posted)}`);
+    if (filing.filing_period_display || filing.filing_period) subtitleParts.push(filing.filing_period_display || filing.filing_period);
+    if (filing.filing_year) subtitleParts.push(`Year: ${filing.filing_year}`);
+    if (filing.income || filing.expenses) {
+      const amount = filing.income || filing.expenses;
+      subtitleParts.push(`Amount: ${formatCurrency(amount)}`);
+    }
+    
+    const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'LDA Filing';
+    
+    return {
+      id: `lda_filing_${filingId}_${Date.now()}_${Math.random()}`,
+      type: 'lda_filing' as const,
+      title,
+      subtitle,
+      data: filing, // Include all filing data
+      timestamp: Date.now(),
+    };
+  });
+  
+  if (target === 'sidebar') {
+    // Add multiple items to current sidebar session's context
+    const event = new CustomEvent('add-multiple-to-sidebar-context', {
+      detail: contextItems
+    });
+    window.dispatchEvent(event);
+    
+    // Listen for potential error response
+    const handleSidebarError = () => {
+      // Fallback to new chat if sidebar fails - dispatch each item separately
+      contextItems.forEach(item => addToContext(item));
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    };
+    
+    window.addEventListener('sidebar-context-error', handleSidebarError);
+    setTimeout(() => {
+      window.removeEventListener('sidebar-context-error', handleSidebarError);
+    }, 1000);
+  } else {
+    // Add to new chat (existing behavior) - dispatch each item separately
+    contextItems.forEach(item => addToContext(item));
+  }
+};
+
+/**
  * Extract tile data for context
  * This function prepares tile data for context INCLUDING backend data
  * Note: This only extracts frontend properties. For actual API data,
@@ -1161,14 +1331,14 @@ export const extractTileData = (tile: any): TileContextData => {
     };
   }
 
-  // Add search params and filter settings for politician trades, SEC, government contracts, and congress bills tiles
-  if (tile.type === 'politician_trades' || tile.type === 'sec_search' || tile.type === 'govt_contracts' || tile.type === 'congress_bills') {
+  // Add search params and filter settings for politician trades, SEC, government contracts, congress bills, and LDA disclosures tiles
+  if (tile.type === 'politician_trades' || tile.type === 'sec_search' || tile.type === 'govt_contracts' || tile.type === 'congress_bills' || tile.type === 'lda_disclosures') {
     return {
       ...baseData,
       searchParams: tile.searchParams, // Search parameters (politicians, securities, dates, etc.)
       filterSettings: tile.filterSettings, // Client-side filter settings (entities, forms, etc.)
       filers: tile.filers, // Full filer objects for SEC tile (includes CIK and ticker)
-      results: tile.results || tile.trades, // Results data for session persistence
+      results: tile.results || tile.trades || tile.filings, // Results data for session persistence
     };
   }
 
